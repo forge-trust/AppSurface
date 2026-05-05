@@ -43,7 +43,7 @@
 </head>
 <body class="h-full flex flex-col text-slate-200 overflow-hidden">
 <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-0 focus:left-0 focus:z-50 focus:p-4 focus:bg-slate-900 focus:text-white">Skip to content</a>
-<div class="flex h-full">
+<div class="flex h-full min-h-0 overflow-hidden">
     <button id="docs-sidebar-overlay"
             class="fixed inset-0 z-30 bg-slate-950/70 backdrop-blur-sm hidden md:hidden"
             type="button"
@@ -98,7 +98,7 @@
     </aside>
 
     <!-- Main Content -->
-    <main id="main-content" role="main" class="flex-grow min-w-0 overflow-y-auto bg-slate-900">
+    <main id="main-content" role="main" class="h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-slate-900">
         <header class="md:hidden sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 backdrop-blur px-4 py-3 flex items-center gap-3">
             <button id="docs-sidebar-open"
                     type="button"

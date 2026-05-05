@@ -194,6 +194,15 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public void Layout_ShouldClampDocumentShellAroundMainScroller_ForWebKit()
+    {
+        var layout = ReadLayoutMarkup();
+
+        Assert.Contains("<div class=\"flex h-full min-h-0 overflow-hidden\">", layout);
+        Assert.Contains("id=\"main-content\" role=\"main\" class=\"h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-slate-900\"", layout);
+    }
+
+    [Fact]
     public void Layout_ShouldContain_MobileSidebarAccessibilityBehaviorMarkers()
     {
         var layout = ReadLayoutMarkup();
