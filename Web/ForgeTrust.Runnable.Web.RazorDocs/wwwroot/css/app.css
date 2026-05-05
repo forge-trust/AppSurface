@@ -450,11 +450,20 @@ body {
         margin-bottom: 0;
         overflow-y: auto;
         border: 0;
-        border-left: 1px solid rgba(51, 65, 85, 0.88);
         border-radius: 0;
         background: transparent;
         padding-left: 1.15rem;
         scrollbar-width: thin;
+    }
+
+    .docs-outline-shell::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 1px;
+        background: rgba(51, 65, 85, 0.88);
     }
 
     .docs-outline-toggle {
@@ -484,9 +493,32 @@ body {
         font-size: 0.86rem;
     }
 
+    .docs-outline-link[aria-current="location"],
+    .docs-outline-link--active {
+        background: transparent;
+    }
+
+    .docs-outline-link[aria-current="location"]:hover,
+    .docs-outline-link--active:hover {
+        background: rgba(15, 23, 42, 0.3);
+    }
+
+    .docs-outline-link[aria-current="location"]::before,
+    .docs-outline-link--active::before {
+        top: 0.28rem;
+        bottom: 0.28rem;
+        left: calc(-1.15rem - 0.5px);
+        width: 2px;
+    }
+
     .docs-outline-link--level-3 {
         margin-left: 0.7rem;
         font-size: 0.8rem;
+    }
+
+    .docs-outline-link--level-3[aria-current="location"]::before,
+    .docs-outline-link--level-3.docs-outline-link--active::before {
+        left: calc(-1.85rem - 0.5px);
     }
 }
 
