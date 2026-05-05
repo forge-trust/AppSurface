@@ -288,7 +288,7 @@ public class ExportEngine
         try
         {
             using var response = await client.GetAsync(
-                $"{context.BaseUrl}{ConventionalNotFoundPageDefaults.ReservedNotFoundRoute}",
+                $"{context.BaseUrl}{BrowserStatusPageDefaults.ReservedNotFoundRoute}",
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
 
@@ -296,7 +296,7 @@ public class ExportEngine
             {
                 _logger.LogDebug(
                     "Skipping 404.html export because {Route} returned {StatusCode}.",
-                    ConventionalNotFoundPageDefaults.ReservedNotFoundRoute,
+                    BrowserStatusPageDefaults.ReservedNotFoundRoute,
                     response.StatusCode);
                 return;
             }
@@ -306,7 +306,7 @@ public class ExportEngine
             {
                 _logger.LogDebug(
                     "Skipping 404.html export because {Route} returned non-HTML content type {ContentType}.",
-                    ConventionalNotFoundPageDefaults.ReservedNotFoundRoute,
+                    BrowserStatusPageDefaults.ReservedNotFoundRoute,
                     contentType ?? "(none)");
                 return;
             }
@@ -330,7 +330,7 @@ public class ExportEngine
             _logger.LogWarning(
                 ex,
                 "Failed to export conventional 404 page from {Route}.",
-                ConventionalNotFoundPageDefaults.ReservedNotFoundRoute);
+                BrowserStatusPageDefaults.ReservedNotFoundRoute);
         }
     }
 

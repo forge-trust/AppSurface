@@ -38,6 +38,7 @@ This changelog is the compact release ledger for Runnable. The monorepo ships in
 - RazorDocs landing curation now renders reader-intent `featured_page_groups` instead of one flat featured list.
 - The PackageIndex generator now has a successful `--help`/`-h` path with command and option guidance instead of a bare usage failure.
 - The conventional browser 404 page now favors user recovery, including documentation search for missing docs routes and a home link for other missing pages.
+- Runnable Web now generalizes conventional browser status pages to empty HTML `401`, `403`, and `404` responses with `BrowserStatusPageMode`, `BrowserStatusPageModel`, preview routes, and status-specific Razor override paths. Static export still writes only `404.html`; conventional production `500` exception pages are tracked separately in issue #224.
 - `StartupContext.ApplicationName` is now treated as a display label while `IHostEnvironment.ApplicationName` stays assembly-backed for static web asset manifest discovery.
 
 ### Migration
@@ -47,6 +48,7 @@ This changelog is the compact release ledger for Runnable. The monorepo ships in
 - Existing `rw-active` forms opt into failed-form request markers and automatic fallback UI by default. Set `options.Forms.EnableFailureUx = false`, `options.Forms.FailureMode = RazorWireFormFailureMode.Manual`, or per-form `data-rw-form-failure="off"` if an app already owns all failure rendering.
 - RazorDocs authors using `featured_pages` should migrate to `featured_page_groups`; the old flat field now logs a warning and no longer renders.
 - Code that expected custom Runnable labels from `IHostEnvironment.ApplicationName` should use `StartupContext.ApplicationName`; host environment application names now remain tied to assembly identity so ASP.NET static web assets continue to resolve.
+- Web apps with custom conventional 404 overrides should replace `NotFoundPageModel` with `BrowserStatusPageModel`. The old `ConventionalNotFoundPageMode`, `NotFoundPageMode`, `UseConventionalNotFoundPage()`, and `DisableNotFoundPage()` API names have moved to the `BrowserStatusPage*` naming surface before the first public tag.
 
 ## No tagged releases yet
 

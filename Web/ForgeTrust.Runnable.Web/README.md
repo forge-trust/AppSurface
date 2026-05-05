@@ -51,14 +51,71 @@ Built-in support for CORS configuration:
 
 Modules can define their own endpoints, making it easy to slice features vertically ("Vertical Slice Architecture").
 
-### Conventional 404 Pages
+### Browser Status Pages
 
-Runnable Web includes a conventional browser-facing 404 page when MVC views are available through `WebOptions.Mvc.MvcSupportLevel` values such as `MvcSupport.ControllersWithViews` or `MvcSupport.Full`, or when `WebOptions.Errors.NotFoundPageMode` explicitly enables the conventional page. The page keeps the HTTP status code at `404` and gives users recovery actions instead of exposing only framework or maintainer details.
+Runnable Web includes conventional browser-facing pages for empty `401`, `403`, and `404` status responses. The feature is designed for human browser requests: it keeps the original HTTP status code, shows recovery-oriented HTML, and leaves JSON/API responses alone.
 
-- Missing `/docs/...` routes include a documentation search recovery link because stale docs links are the most common browser miss.
-- Other browser requests include a home recovery link and plain-language copy that explains the route may have moved or may not exist.
-- JSON and API-oriented requests do not get the HTML fallback; they keep API-friendly 404 behavior.
-- Applications can override the page with `~/Views/Shared/404.cshtml`. Keep a clear recovery path and preserve the `404` response code when replacing the default view.
+#### Browser status pages in 2 minutes
+
+If your app already uses MVC views, keep the default `Auto` mode:
+
+```csharp
+public void ConfigureWebOptions(StartupContext context, WebOptions options)
+{
+    options.Mvc = options.Mvc with { MvcSupportLevel = MvcSupport.ControllersWithViews };
+}
+```
+
+If your app starts with controllers only but still wants the browser pages, opt in explicitly:
+
+```csharp
+public void ConfigureWebOptions(StartupContext context, WebOptions options)
+{
+    options.Mvc = options.Mvc with { MvcSupportLevel = MvcSupport.Controllers };
+    options.Errors.UseConventionalBrowserStatusPages();
+}
+```
+
+Preview the built-in pages while the app is running:
+
+| Status | Preview URL |
+|--------|-------------|
+| `401` | `/_runnable/errors/401` |
+| `403` | `/_runnable/errors/403` |
+| `404` | `/_runnable/errors/404` |
+
+Override any page with the conventional app or shared Razor Class Library path:
+
+| Status | Override path |
+|--------|---------------|
+| `401` | `~/Views/Shared/401.cshtml` |
+| `403` | `~/Views/Shared/403.cshtml` |
+| `404` | `~/Views/Shared/404.cshtml` |
+
+Use `BrowserStatusPageModel` in overrides:
+
+```cshtml
+@model ForgeTrust.Runnable.Web.BrowserStatusPageModel
+
+<h1>HTTP @Model.StatusCode</h1>
+<p>@Model.OriginalPath</p>
+```
+
+Mode behavior:
+
+| Mode | Behavior |
+|------|----------|
+| `BrowserStatusPageMode.Auto` | Enables browser status pages only when MVC support already includes views. |
+| `BrowserStatusPageMode.Enabled` | Always enables browser status pages and upgrades MVC support to controllers with views when needed. |
+| `BrowserStatusPageMode.Disabled` | Leaves status-code handling fully to the app or other middleware. |
+
+Important behavior:
+
+- Only empty `401`, `403`, and `404` responses from `GET` or `HEAD` requests that accept `text/html` or `application/xhtml+xml` are re-executed.
+- JSON, non-HTML, non-empty, and non-GET/HEAD responses keep their original API-friendly behavior.
+- Missing `/docs/...` `404` routes include a documentation search recovery link because stale docs links are the most common browser miss.
+- Static export remains conservative: RazorWire CLI probes `/_runnable/errors/404` and writes only `404.html`; it does not emit `401.html` or `403.html`.
+- Production exception-page support for conventional `500` pages is intentionally separate and tracked in [issue #224](https://github.com/forge-trust/Runnable/issues/224). This feature uses ASP.NET Core status-code pages, not exception-handler middleware.
 
 ### Configuration and Port Overrides
 

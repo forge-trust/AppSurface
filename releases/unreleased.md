@@ -68,6 +68,9 @@ Runnable is putting the release contract in place before `v0.1.0`. This slice is
 - Scalar's optional web package now has dedicated test coverage for OpenAPI dependency wiring, Scalar endpoint mapping, no-op lifecycle hooks, and minimal Runnable web host composition.
 - Tailwind development watch mode now treats a missing standalone CLI as a recoverable local-tooling gap: the app keeps serving existing CSS and logs a warning that points to the runtime package or `TailwindCliPath` override.
 - Runnable's conventional browser 404 page now prioritizes user recovery paths, including documentation search for missing `/docs/...` routes and a home link for other misses, while still documenting how app owners can override the default page.
+- Runnable Web now ships conventional browser status pages for empty HTML `401`, `403`, and `404` responses. The public surface is now `BrowserStatusPageMode`, `BrowserStatusPageModel`, `UseConventionalBrowserStatusPages()`, and `DisableBrowserStatusPages()`, with preview routes at `/_runnable/errors/401`, `/_runnable/errors/403`, and `/_runnable/errors/404`.
+- Browser status page overrides are status-specific: use `~/Views/Shared/401.cshtml`, `~/Views/Shared/403.cshtml`, or `~/Views/Shared/404.cshtml`. JSON/API responses, non-empty responses, and non-GET/HEAD requests keep their original behavior.
+- Static export remains deliberately 404-only. RazorWire CLI probes `/_runnable/errors/404` and writes `404.html`; it does not emit `401.html` or `403.html`.
 - Runnable now assigns explicit numeric values to public Web and RazorWire enums, preserving existing ordinals for consumers that persist, serialize, bind, or compare those values.
 - Runnable startup now keeps custom `StartupContext.ApplicationName` values as display labels while preserving assembly-backed host identity for ASP.NET static web asset manifests, so custom-labeled web hosts can still serve package styles and scripts.
 
@@ -116,6 +119,7 @@ There is no tagged migration guide yet because Runnable has not cut `v0.1.0`. Un
 - existing `rw-active` forms opt into failed-form request markers and default fallback UI; applications with custom failure rendering can use `RazorWireOptions.Forms.FailureMode = Manual`, `RazorWireOptions.Forms.EnableFailureUx = false`, or per-form `data-rw-form-failure="off"`
 - RazorDocs authors should migrate flat `featured_pages` metadata to `featured_page_groups`. The old field is ignored and logs a warning; each group needs at least `label` or `intent`, plus a `pages` list containing the existing `question`, `path`, `supporting_copy`, and `order` entries.
 - Code that previously read `IHostEnvironment.ApplicationName` to recover a custom Runnable display label should read `StartupContext.ApplicationName` instead. `IHostEnvironment.ApplicationName` now stays aligned with the host entry-assembly identity used for static web asset discovery unless `StartupContext.OverrideEntryPointAssembly` explicitly selects a different manifest identity. `StartupContext.EntryPointAssembly` still defaults to the root module assembly for command/controller/component discovery, so existing cross-assembly scanning behavior remains stable.
+- Web apps with custom conventional 404 views should change `@model ForgeTrust.Runnable.Web.NotFoundPageModel` to `@model ForgeTrust.Runnable.Web.BrowserStatusPageModel`. The old 404-only options API names have moved to `BrowserStatusPage*` names before `v0.1.0`, while conventional production `500` exception pages remain deferred to issue #224.
 
 ## Proof artifacts
 
