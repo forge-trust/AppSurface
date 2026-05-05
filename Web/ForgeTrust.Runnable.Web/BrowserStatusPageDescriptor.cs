@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Http;
 
 namespace ForgeTrust.Runnable.Web;
@@ -115,14 +116,14 @@ internal sealed record BrowserStatusPageDescriptor(
     /// Unknown status codes are intentionally rejected so production exception pages and future status families can
     /// be designed separately instead of accidentally using the 401/403/404 browser-page contract.
     /// </remarks>
-    public static bool TryGet(int statusCode, out BrowserStatusPageDescriptor descriptor)
+    public static bool TryGet(int statusCode, [NotNullWhen(true)] out BrowserStatusPageDescriptor? descriptor)
     {
         descriptor = statusCode switch
         {
             StatusCodes.Status401Unauthorized => Unauthorized,
             StatusCodes.Status403Forbidden => Forbidden,
             StatusCodes.Status404NotFound => NotFound,
-            _ => null!
+            _ => null
         };
 
         return descriptor is not null;
