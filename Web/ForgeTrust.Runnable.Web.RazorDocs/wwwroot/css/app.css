@@ -461,6 +461,10 @@ body {
         display: none;
     }
 
+    .docs-outline-shell[data-outline-enhanced="true"] .docs-outline-toggle {
+        display: none;
+    }
+
     .docs-outline-panel {
         display: block !important;
         padding: 0;
