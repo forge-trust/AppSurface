@@ -12,7 +12,17 @@ This project is the thin executable wrapper around the reusable [ForgeTrust.Runn
 
 ## Entry Point
 
-The app boots through [`Program.cs`](./Program.cs) and delegates the actual docs wiring to `RazorDocsWebModule` from the package project.
+The app boots through [`Program.cs`](./Program.cs), which delegates to `RazorDocsStandaloneHost`.
+`RazorDocsStandaloneHost` is the reusable host entry point for this executable:
+
+- `RunAsync(string[] args)` starts the standalone app and is what `Program.cs` uses.
+- `CreateBuilder(string[] args, IEnvironmentProvider? environmentProvider = null)` returns an `IHostBuilder` without starting it.
+
+Use `CreateBuilder` when a test or tool needs the real standalone host in-process. It keeps the same `RazorDocsWebModule`, MVC routes, static web assets, and `RazorDocs` configuration binding as the executable path while avoiding a shell-out to `dotnet run`.
+
+Do not duplicate standalone setup in test fixtures. If a scenario needs different URLs, repository roots, contributor templates, or environment behavior, pass those through command-line configuration or the optional environment provider so the normal host builder still owns the app shape.
+`CreateBuilder` is lower level than `RunAsync`: callers that build and start the host themselves should pass `--urls`, `--port`, or configure the web host before `Build()` instead of relying on the executable startup path's development-port fallback.
+The builder pins this standalone assembly as the host entry point identity so in-process callers, including xUnit, resolve the same static web asset manifest as the executable.
 
 ## Local URL Behavior
 
@@ -47,7 +57,7 @@ If you want the live standalone host to exercise the full `Source of truth` stri
 - For local forks or branch previews, do not reuse upstream `main` unless that is truly the page's source of truth.
 - Set `LastUpdatedMode` to `Git` when you want the standalone host to exercise relative freshness too. The package default is `None`, so git-backed timestamps stay opt-in.
 - If you cannot provide a trustworthy source or edit destination, leave the templates unset. RazorDocs will still omit unsafe links instead of guessing, and it will omit git-backed `Last updated` unless you explicitly opt into git freshness. Page-level `last_updated_override` metadata can still supply an explicit timestamp.
-- The Playwright integration suite launches the standalone host with explicit contributor settings so this runtime configuration seam stays covered.
+- The Playwright integration suite starts this standalone host in-process with explicit contributor settings so this runtime configuration seam stays covered. It intentionally does not run `dotnet run` from the fixture; focused test runs should build and host the current project source directly instead of reusing stale standalone `bin` output.
 
 ## Related Projects
 
