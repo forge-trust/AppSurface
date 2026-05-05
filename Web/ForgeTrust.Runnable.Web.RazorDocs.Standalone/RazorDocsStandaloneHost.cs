@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using ForgeTrust.Runnable.Core;
 using ForgeTrust.Runnable.Web;
 using Microsoft.Extensions.Hosting;
@@ -21,6 +22,8 @@ public static class RazorDocsStandaloneHost
     /// </summary>
     /// <param name="args">Command-line arguments forwarded to the Runnable Web startup pipeline.</param>
     /// <returns>A task that completes when the host exits.</returns>
+    [ExcludeFromCodeCoverage(
+        Justification = "Process lifetime wrapper delegates to the covered host-builder seam and runs until host shutdown.")]
     public static Task RunAsync(string[] args)
     {
         return new RazorDocsStandaloneStartup()
