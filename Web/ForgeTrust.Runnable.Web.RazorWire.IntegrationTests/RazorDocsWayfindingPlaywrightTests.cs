@@ -198,20 +198,29 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        var trailingGap = await page.EvaluateAsync<int>(
+        await page.EvaluateAsync("() => document.getElementById('main-content')?.scrollTo(0, 100000)");
+        var scrollState = await page.EvaluateAsync<DetailsScrollState>(
             """
             () => {
               const main = document.getElementById('main-content');
-              const layout = document.querySelector('.docs-detail-layout');
-              if (!main || !layout) {
-                return Number.MAX_SAFE_INTEGER;
+              if (!main) {
+                return {
+                  scrollTop: Number.MAX_SAFE_INTEGER,
+                  maxScrollTop: 0,
+                  documentScrollTop: Number.MAX_SAFE_INTEGER
+                };
               }
 
-              return Math.round(main.getBoundingClientRect().bottom - layout.getBoundingClientRect().bottom);
+              return {
+                scrollTop: Math.round(main.scrollTop),
+                maxScrollTop: Math.round(Math.max(0, main.scrollHeight - main.clientHeight)),
+                documentScrollTop: Math.round(document.scrollingElement?.scrollTop ?? window.scrollY)
+              };
             }
             """);
 
-        Assert.InRange(trailingGap, 0, 8);
+        Assert.InRange(scrollState.MaxScrollTop - scrollState.ScrollTop, 0, 8);
+        Assert.InRange(scrollState.DocumentScrollTop, 0, 1);
     }
 
     [Fact]
@@ -277,20 +286,29 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        var trailingGap = await page.EvaluateAsync<int>(
+        await page.EvaluateAsync("() => document.getElementById('main-content')?.scrollTo(0, 100000)");
+        var scrollState = await page.EvaluateAsync<DetailsScrollState>(
             """
             () => {
               const main = document.getElementById('main-content');
-              const layout = document.querySelector('.docs-detail-layout');
-              if (!main || !layout) {
-                return Number.MAX_SAFE_INTEGER;
+              if (!main) {
+                return {
+                  scrollTop: Number.MAX_SAFE_INTEGER,
+                  maxScrollTop: 0,
+                  documentScrollTop: Number.MAX_SAFE_INTEGER
+                };
               }
 
-              return Math.round(main.getBoundingClientRect().bottom - layout.getBoundingClientRect().bottom);
+              return {
+                scrollTop: Math.round(main.scrollTop),
+                maxScrollTop: Math.round(Math.max(0, main.scrollHeight - main.clientHeight)),
+                documentScrollTop: Math.round(document.scrollingElement?.scrollTop ?? window.scrollY)
+              };
             }
             """);
 
-        Assert.InRange(trailingGap, 0, 8);
+        Assert.InRange(scrollState.MaxScrollTop - scrollState.ScrollTop, 0, 8);
+        Assert.InRange(scrollState.DocumentScrollTop, 0, 1);
     }
 
     [Fact]
@@ -483,5 +501,14 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             "() => document.activeElement?.id === 'docs-sidebar-open'",
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    private sealed class DetailsScrollState
+    {
+        public int ScrollTop { get; init; }
+
+        public int MaxScrollTop { get; init; }
+
+        public int DocumentScrollTop { get; init; }
     }
 }
