@@ -64,7 +64,21 @@ internal sealed class RazorDocsInProcessHost : IAsyncDisposable
             webHost.UseUrls(requestedBaseUrl);
         });
 
-        var host = builder.Build();
+        return await StartAsync(builder.Build());
+    }
+
+    /// <summary>
+    /// Starts an already-built host and wraps the published RazorDocs listener address.
+    /// </summary>
+    /// <param name="host">The built host to start. Ownership transfers to the returned wrapper or to this method on failure.</param>
+    /// <returns>A started host wrapper whose <see cref="BaseUrl"/> contains the resolved listener address.</returns>
+    /// <remarks>
+    /// This seam keeps startup-failure cleanup testable without forcing the public fixture path to create a broken
+    /// Kestrel configuration. If startup or address resolution fails, the built host is disposed before the original
+    /// exception is rethrown.
+    /// </remarks>
+    internal static async Task<RazorDocsInProcessHost> StartAsync(IHost host)
+    {
         try
         {
             await host.StartAsync();

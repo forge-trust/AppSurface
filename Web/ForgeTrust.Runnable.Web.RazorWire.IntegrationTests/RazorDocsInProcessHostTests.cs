@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.Runnable.Web.RazorWire.IntegrationTests;
 
@@ -33,6 +34,19 @@ public sealed class RazorDocsInProcessHostTests
         Assert.Equal("RazorDocs standalone host has stopped.", host.Diagnostics);
 
         await host.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task StartAsync_DisposesBuiltHost_WhenStartupFails()
+    {
+        var expected = new InvalidOperationException("startup failed");
+        var host = new ThrowingHost(expected);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RazorDocsInProcessHost.StartAsync(host));
+
+        Assert.Same(expected, exception);
+        Assert.True(host.IsDisposed);
     }
 
     [Fact]
@@ -93,5 +107,34 @@ public sealed class RazorDocsInProcessHostTests
         Assert.Equal(
             "RazorDocs standalone host did not publish a valid listening URL. Value: 'not-a-url'.",
             exception.Message);
+    }
+
+    private sealed class ThrowingHost : IHost
+    {
+        private readonly Exception _exception;
+
+        public ThrowingHost(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        public IServiceProvider Services => throw new InvalidOperationException("Services should not be accessed after startup fails.");
+
+        public bool IsDisposed { get; private set; }
+
+        public Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            throw _exception;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("StopAsync should not be called when startup fails.");
+        }
+
+        public void Dispose()
+        {
+            IsDisposed = true;
+        }
     }
 }
