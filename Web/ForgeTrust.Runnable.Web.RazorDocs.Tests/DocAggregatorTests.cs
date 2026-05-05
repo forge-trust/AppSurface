@@ -1171,6 +1171,38 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDocDetailsAsync_ShouldResolveRelatedPagesWithDocsRootPrefixedCanonicalPaths()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Current",
+                "guides/current.md",
+                "<p>Current</p>",
+                Metadata: new DocMetadata
+                {
+                    RelatedPages = ["/docs/guides/related.md.html"]
+                }),
+            new(
+                "Related",
+                "guides/related.md",
+                "<p>Related</p>",
+                Metadata: new DocMetadata
+                {
+                    Summary = "Follow the next step."
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var details = await _aggregator.GetDocDetailsAsync("guides/current.md");
+
+        var relatedPage = Assert.Single(details!.RelatedPages);
+        Assert.Equal("Related", relatedPage.Title);
+        Assert.Equal("/docs/guides/related.md.html", relatedPage.Href);
+        Assert.Equal("Follow the next step.", relatedPage.Summary);
+    }
+
+    [Fact]
     public async Task GetDocDetailsAsync_ShouldResolveRelatedPagesWithMissingMetadata()
     {
         var harvestedDocs = new List<DocNode>

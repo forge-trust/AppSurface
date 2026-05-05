@@ -136,17 +136,10 @@ public class DocAggregator
 
     private sealed record CachedDocsSnapshot(
         Dictionary<string, DocNode> DocsByPath,
-        Dictionary<string, DocLookupBucket> Lookup,
+        DocPathResolver PathResolver,
         IReadOnlyList<DocSectionSnapshot> PublicSections,
         DocsSearchIndexPayload SearchIndexPayload,
         Dictionary<string, DocContributorProvenanceViewModel> ContributorProvenanceByPath);
-
-    private sealed class DocLookupBucket
-    {
-        public List<DocNode> OrderedDocs { get; } = [];
-
-        public HashSet<DocNode> SeenDocs { get; } = [];
-    }
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocAggregator"/> with the provided dependencies and determines the repository root.
@@ -363,17 +356,22 @@ public class DocAggregator
     }
 
     /// <summary>
-    /// Retrieves a specific documentation node for the specified repository path.
+    /// Retrieves a documentation node for a source path or canonical docs path.
     /// </summary>
-    /// <param name="path">The documentation path to look up.</param>
-    /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
-    /// <returns>The <see cref="DocNode"/> if found, or <c>null</c> if no node exists for the given path.</returns>
+    /// <remarks>
+    /// The lookup awaits the cached docs snapshot, then delegates to the snapshot's <see cref="DocPathResolver"/> so
+    /// legacy source paths, generated canonical <c>.html</c> paths, fragments, separators, and casing follow the same
+    /// matching rules used by details pages and curated links.
+    /// </remarks>
+    /// <param name="path">The source or canonical documentation path to look up.</param>
+    /// <param name="cancellationToken">An optional token to observe while waiting for the cached snapshot.</param>
+    /// <returns>The matching <see cref="DocNode"/>, or <c>null</c> if no node exists for the given path.</returns>
     public async Task<DocNode?> GetDocByPathAsync(string path, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(path);
 
         var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
-        return ResolveDocByPath(path, snapshot.Lookup, snapshot.DocsByPath);
+        return snapshot.PathResolver.Resolve(path);
     }
 
     /// <summary>
@@ -390,7 +388,7 @@ public class DocAggregator
         ArgumentNullException.ThrowIfNull(path);
 
         var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
-        var doc = ResolveDocByPath(path, snapshot.Lookup, snapshot.DocsByPath);
+        var doc = snapshot.PathResolver.Resolve(path);
         if (doc is null)
         {
             return null;
@@ -401,7 +399,7 @@ public class DocAggregator
             .ToList();
         var previousPage = ResolveSequenceNeighbor(doc, orderedDocs, direction: -1);
         var nextPage = ResolveSequenceNeighbor(doc, orderedDocs, direction: 1);
-        var relatedPages = ResolveRelatedPages(doc, orderedDocs, snapshot.Lookup, snapshot.DocsByPath, previousPage, nextPage);
+        var relatedPages = ResolveRelatedPages(doc, orderedDocs, snapshot.PathResolver, previousPage, nextPage);
         snapshot.ContributorProvenanceByPath.TryGetValue(doc.Path, out var contributorProvenance);
 
         return new DocDetailsViewModel
@@ -605,7 +603,7 @@ public class DocAggregator
                                return first;
                            })
                            .ToDictionary(n => n.Path, n => n);
-                       var lookup = BuildDocLookup(docsByPath.Values);
+                       var pathResolver = DocPathResolver.Create(docsByPath.Values);
 
                        var publicSections = BuildPublicSections(docsByPath.Values, logger);
                        var contributorProvenanceByPath = await BuildContributorProvenanceByPathAsync(
@@ -623,7 +621,7 @@ public class DocAggregator
 
                        return new CachedDocsSnapshot(
                            docsByPath,
-                           lookup,
+                           pathResolver,
                            publicSections,
                            searchIndexPayload,
                            contributorProvenanceByPath);
@@ -1397,73 +1395,6 @@ public class DocAggregator
         return text[..boundary].TrimEnd() + "...";
     }
 
-    private static Dictionary<string, DocLookupBucket> BuildDocLookup(IEnumerable<DocNode> docs)
-    {
-        var lookup = new Dictionary<string, DocLookupBucket>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var doc in docs)
-        {
-            AddLookupEntry(lookup, NormalizeLookupPath(doc.Path), doc);
-            AddLookupEntry(lookup, NormalizeLookupPath(GetSnapshotCanonicalPath(doc)), doc);
-        }
-
-        return lookup;
-    }
-
-    private static void AddLookupEntry(Dictionary<string, DocLookupBucket> lookup, string key, DocNode doc)
-    {
-        if (!lookup.TryGetValue(key, out var bucket))
-        {
-            bucket = new DocLookupBucket();
-            lookup[key] = bucket;
-        }
-
-        if (bucket.SeenDocs.Add(doc))
-        {
-            bucket.OrderedDocs.Add(doc);
-        }
-    }
-
-    private static DocNode? ResolveDocByPath(
-        string path,
-        IReadOnlyDictionary<string, DocLookupBucket> lookup,
-        IReadOnlyDictionary<string, DocNode> docsByPath)
-    {
-        var lookupPath = NormalizeLookupPath(path);
-        var lookupCanonicalPath = NormalizeCanonicalPath(path);
-
-        if (!lookup.TryGetValue(lookupPath, out var bucket) || bucket.OrderedDocs.Count == 0)
-        {
-            return null;
-        }
-
-        var candidates = bucket.OrderedDocs;
-        var exactCanonicalMatch = candidates.FirstOrDefault(
-            doc => string.Equals(
-                       NormalizeCanonicalPath(GetSnapshotCanonicalPath(doc)),
-                       lookupCanonicalPath,
-                       StringComparison.OrdinalIgnoreCase)
-                   || string.Equals(
-                       NormalizeCanonicalPath(doc.Path),
-                       lookupCanonicalPath,
-                       StringComparison.OrdinalIgnoreCase));
-        if (exactCanonicalMatch is not null)
-        {
-            return exactCanonicalMatch;
-        }
-
-        if (docsByPath.TryGetValue(lookupPath, out var directMatch))
-        {
-            return directMatch;
-        }
-
-        return candidates
-            .OrderBy(doc => string.IsNullOrWhiteSpace(GetFragment(GetSnapshotCanonicalPath(doc))) ? 0 : 1)
-            .ThenBy(doc => string.IsNullOrWhiteSpace(doc.Content) ? 1 : 0)
-            .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
-    }
-
     private DocPageLinkViewModel? ResolveSequenceNeighbor(
         DocNode currentDoc,
         IReadOnlyList<DocNode> docs,
@@ -1550,8 +1481,7 @@ public class DocAggregator
     private IReadOnlyList<DocPageLinkViewModel> ResolveRelatedPages(
         DocNode currentDoc,
         IReadOnlyList<DocNode> docs,
-        IReadOnlyDictionary<string, DocLookupBucket> lookup,
-        IReadOnlyDictionary<string, DocNode> docsByPath,
+        DocPathResolver pathResolver,
         DocPageLinkViewModel? previousPage,
         DocPageLinkViewModel? nextPage)
     {
@@ -1584,7 +1514,10 @@ public class DocAggregator
                 continue;
             }
 
-            var relatedDoc = ResolveDocByPath(normalizedEntry, lookup, docsByPath)
+            var relatedDoc = pathResolver.Resolve(
+                                 normalizedEntry,
+                                 _docsUrlBuilder.CurrentDocsRootPath,
+                                 DocsUrlBuilder.DocsEntryPath)
                              ?? ResolveDocByTitle(normalizedEntry, docs);
             if (relatedDoc is null || relatedDoc.Metadata?.HideFromPublicNav == true)
             {
@@ -1975,24 +1908,7 @@ public class DocAggregator
     /// <returns>The normalized lookup path.</returns>
     private static string NormalizeLookupPath(string path)
     {
-        var sanitized = path.Trim().Replace('\\', '/').Trim('/');
-        var hashIndex = sanitized.IndexOf('#');
-        if (hashIndex >= 0)
-        {
-            sanitized = sanitized[..hashIndex];
-        }
-
-        return sanitized;
-    }
-
-    /// <summary>
-    /// Normalizes a documentation path for canonicalization by trimming slashes and normalizing separators.
-    /// </summary>
-    /// <param name="path">The path to normalize.</param>
-    /// <returns>The normalized canonical path.</returns>
-    private static string NormalizeCanonicalPath(string path)
-    {
-        return path.Trim().Replace('\\', '/').Trim('/');
+        return DocPathResolver.NormalizeLookupPath(path);
     }
 
     private static string GetSnapshotCanonicalPath(DocNode doc) => doc.CanonicalPath!;
@@ -2004,14 +1920,7 @@ public class DocAggregator
     /// <returns>The fragment string, or <c>null</c> if no fragment is present.</returns>
     private static string? GetFragment(string path)
     {
-        var canonical = NormalizeCanonicalPath(path);
-        var hashIndex = canonical.IndexOf('#');
-        if (hashIndex < 0 || hashIndex == canonical.Length - 1)
-        {
-            return null;
-        }
-
-        return canonical[(hashIndex + 1)..];
+        return DocPathResolver.GetFragment(path);
     }
 
 }

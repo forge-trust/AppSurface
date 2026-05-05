@@ -76,7 +76,7 @@ public sealed class DocFeaturedPageResolver
             return [];
         }
 
-        var lookup = BuildDocLookup(docs);
+        var pathResolver = DocPathResolver.Create(docs);
         var resolvedGroups = new List<DocLandingFeaturedPageGroupViewModel>();
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -133,7 +133,7 @@ public sealed class DocFeaturedPageResolver
                          .ThenBy(item => item.Index))
             {
                 var fieldPath = definition.SourceFieldPath ?? $"{groupPath}.pages[{pageIndex}]";
-                var resolvedPage = ResolvePage(landingDoc, definition, fieldPath, lookup, seenPaths);
+                var resolvedPage = ResolvePage(landingDoc, definition, fieldPath, pathResolver, seenPaths);
                 if (resolvedPage is not null)
                 {
                     resolvedPages.Add(resolvedPage);
@@ -171,7 +171,7 @@ public sealed class DocFeaturedPageResolver
         DocNode landingDoc,
         DocFeaturedPageDefinition definition,
         string fieldPath,
-        IReadOnlyDictionary<string, DocLookupBucket> lookup,
+        DocPathResolver pathResolver,
         HashSet<string> seenPaths)
     {
         if (string.IsNullOrWhiteSpace(definition.Path))
@@ -183,7 +183,10 @@ public sealed class DocFeaturedPageResolver
             return null;
         }
 
-        var destination = ResolveDocByPath(definition.Path!, lookup);
+        var destination = pathResolver.Resolve(
+            definition.Path!,
+            _docsUrlBuilder.CurrentDocsRootPath,
+            DocsUrlBuilder.DocsEntryPath);
         if (destination is null)
         {
             _logger.LogWarning(
@@ -231,180 +234,11 @@ public sealed class DocFeaturedPageResolver
         };
     }
 
-    private sealed class DocLookupBucket
-    {
-        public List<DocNode> OrderedDocs { get; } = [];
-
-        public HashSet<DocNode> SeenDocs { get; } = new(ReferenceEqualityComparer.Instance);
-    }
-
-    private static Dictionary<string, DocLookupBucket> BuildDocLookup(IEnumerable<DocNode> docs)
-    {
-        var lookup = new Dictionary<string, DocLookupBucket>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var doc in docs)
-        {
-            AddLookupEntry(lookup, NormalizeLookupPath(doc.Path), doc);
-            if (!string.IsNullOrWhiteSpace(doc.CanonicalPath))
-            {
-                AddLookupEntry(lookup, NormalizeLookupPath(doc.CanonicalPath), doc);
-            }
-        }
-
-        return lookup;
-    }
-
-    private static void AddLookupEntry(Dictionary<string, DocLookupBucket> lookup, string key, DocNode doc)
-    {
-        if (!lookup.TryGetValue(key, out var bucket))
-        {
-            bucket = new DocLookupBucket();
-            lookup[key] = bucket;
-        }
-
-        if (bucket.SeenDocs.Add(doc))
-        {
-            bucket.OrderedDocs.Add(doc);
-        }
-    }
-
-    private DocNode? ResolveDocByPath(
-        string path,
-        IReadOnlyDictionary<string, DocLookupBucket> lookup)
-    {
-        var resolved = ResolveDocByNormalizedPath(path, lookup);
-        if (resolved is not null)
-        {
-            return resolved;
-        }
-
-        foreach (var routeRelativePath in GetRouteRelativePaths(path))
-        {
-            resolved = ResolveDocByNormalizedPath(routeRelativePath, lookup);
-            if (resolved is not null)
-            {
-                return resolved;
-            }
-        }
-
-        return null;
-    }
-
-    private static DocNode? ResolveDocByNormalizedPath(
-        string path,
-        IReadOnlyDictionary<string, DocLookupBucket> lookup)
-    {
-        var lookupPath = NormalizeLookupPath(path);
-        var lookupCanonicalPath = NormalizeCanonicalPath(path);
-
-        if (!lookup.TryGetValue(lookupPath, out var bucket) || bucket.OrderedDocs.Count == 0)
-        {
-            return null;
-        }
-
-        var candidates = bucket.OrderedDocs;
-        var exactCanonicalMatch = candidates.FirstOrDefault(
-            doc => (!string.IsNullOrWhiteSpace(doc.CanonicalPath)
-                    && string.Equals(
-                        NormalizeCanonicalPath(doc.CanonicalPath),
-                        lookupCanonicalPath,
-                        StringComparison.OrdinalIgnoreCase))
-                   || string.Equals(
-                       NormalizeCanonicalPath(doc.Path),
-                       lookupCanonicalPath,
-                       StringComparison.OrdinalIgnoreCase));
-        if (exactCanonicalMatch is not null)
-        {
-            return exactCanonicalMatch;
-        }
-
-        return candidates
-            .OrderBy(doc => string.IsNullOrWhiteSpace(GetFragment(doc.CanonicalPath ?? doc.Path)) ? 0 : 1)
-            .ThenBy(doc => string.IsNullOrWhiteSpace(doc.Content) ? 1 : 0)
-            .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
-    }
-
-    private IEnumerable<string> GetRouteRelativePaths(string path)
-    {
-        if (TryStripRouteRoot(path, _docsUrlBuilder.CurrentDocsRootPath, out var currentRootRelativePath))
-        {
-            yield return currentRootRelativePath;
-        }
-
-        if (TryStripRouteRoot(path, DocsUrlBuilder.DocsEntryPath, out var stableRootRelativePath)
-            && !string.Equals(currentRootRelativePath, stableRootRelativePath, StringComparison.OrdinalIgnoreCase))
-        {
-            yield return stableRootRelativePath;
-        }
-    }
-
-    private static bool TryStripRouteRoot(string path, string routeRootPath, out string routeRelativePath)
-    {
-        routeRelativePath = path;
-
-        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(routeRootPath))
-        {
-            return false;
-        }
-
-        var normalizedPath = path.Trim().Replace('\\', '/').TrimStart('/');
-        var normalizedRouteRoot = routeRootPath.Trim().Replace('\\', '/').Trim('/');
-        if (normalizedRouteRoot.Length == 0)
-        {
-            return false;
-        }
-
-        if (string.Equals(normalizedPath, normalizedRouteRoot, StringComparison.OrdinalIgnoreCase))
-        {
-            routeRelativePath = string.Empty;
-            return true;
-        }
-
-        var routePrefix = normalizedRouteRoot + "/";
-        if (normalizedPath.StartsWith(routePrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            routeRelativePath = normalizedPath[routePrefix.Length..];
-            return true;
-        }
-
-        return false;
-    }
-
-    private static string NormalizeLookupPath(string path)
-    {
-        var sanitized = path.Trim().Replace('\\', '/').Trim('/');
-        var hashIndex = sanitized.IndexOf('#');
-        if (hashIndex >= 0)
-        {
-            sanitized = sanitized[..hashIndex];
-        }
-
-        return sanitized;
-    }
-
-    private static string NormalizeCanonicalPath(string path)
-    {
-        return path.Trim().Replace('\\', '/').Trim('/');
-    }
-
     private static string GetSnapshotCanonicalPath(DocNode doc)
     {
         return doc.CanonicalPath
                ?? throw new InvalidOperationException(
                    $"DocFeaturedPageResolver requires snapshot canonical paths. Doc '{doc.Path}' was missing CanonicalPath.");
-    }
-
-    private static string? GetFragment(string path)
-    {
-        var canonical = NormalizeCanonicalPath(path);
-        var hashIndex = canonical.IndexOf('#');
-        if (hashIndex < 0 || hashIndex == canonical.Length - 1)
-        {
-            return null;
-        }
-
-        return canonical[(hashIndex + 1)..];
     }
 
     private static string? GetSupportingText(DocFeaturedPageDefinition definition, DocNode destination)
