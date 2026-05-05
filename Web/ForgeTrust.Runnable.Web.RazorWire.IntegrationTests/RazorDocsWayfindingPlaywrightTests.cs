@@ -188,7 +188,15 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             State = WaitForSelectorState.Visible
         });
 
-        await page.EvaluateAsync("() => document.getElementById('main-content')?.scrollTo(0, 100000)");
+        await page.ClickAsync("#docs-page-outline a[href='#ForgeTrust-Runnable-Aspire-AspireProfile-string-PassThroughArgs-get']");
+        await page.WaitForFunctionAsync(
+            """
+            () => document
+              .querySelector("#docs-page-outline a[href='#ForgeTrust-Runnable-Aspire-AspireProfile-string-PassThroughArgs-get']")
+              ?.getAttribute("aria-current") === "location"
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
 
         var trailingGap = await page.EvaluateAsync<int>(
             """

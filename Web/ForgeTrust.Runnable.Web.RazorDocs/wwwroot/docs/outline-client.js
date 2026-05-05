@@ -84,6 +84,14 @@
         return entries.find(entry => entry.link === link) ?? null;
     }
 
+    function getLinkHash(link) {
+        try {
+            return new URL(link.href, window.location.href).hash;
+        } catch {
+            return link.hash ?? "";
+        }
+    }
+
     function getInitialActiveLink(entries) {
         if (decodeHash(window.location.hash)) {
             return getActiveEntryFromHash(entries)?.link ?? null;
@@ -116,6 +124,23 @@
         }
 
         return activeEntry;
+    }
+
+    function scrollEntryIntoView(entry, root) {
+        if (!entry || !root) {
+            return;
+        }
+
+        const rootRect = root.getBoundingClientRect();
+        const targetRect = entry.target.getBoundingClientRect();
+        const desiredTop = root.scrollTop + targetRect.top - rootRect.top - 64;
+        const maxScrollTop = Math.max(0, root.scrollHeight - root.clientHeight);
+        const top = Math.min(Math.max(0, desiredTop), maxScrollTop);
+
+        root.scrollTo({
+            top,
+            behavior: "auto"
+        });
     }
 
     function disconnectActiveObserver() {
@@ -220,12 +245,21 @@
         });
 
         for (const link of links) {
-            addLifecycleEventListener(link, "click", () => {
-                if (!getEntryForLink(entries, link)) {
+            addLifecycleEventListener(link, "click", event => {
+                const entry = getEntryForLink(entries, link);
+                if (!entry) {
                     return;
                 }
 
+                event.preventDefault();
                 setActiveLink(links, link, currentLabel);
+                scrollEntryIntoView(entry, mainContent);
+
+                const hash = getLinkHash(link);
+                if (hash && window.location.hash !== hash) {
+                    window.history.pushState(null, "", hash);
+                }
+
                 if (compactMedia?.matches) {
                     setExpanded(shell, toggle, false);
                 }
