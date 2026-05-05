@@ -95,6 +95,45 @@ public sealed class RazorWireReadmeContractTests
         Assert.Contains("kept--heading", anchors);
     }
 
+    [Fact]
+    public void RazorWireReadme_LinkContainment_RejectsSymlinkEscapes()
+    {
+        var repoRoot = Path.Combine(Path.GetTempPath(), "RazorWireReadmeContract", Guid.NewGuid().ToString("N"));
+        var outsideRoot = Path.Combine(Path.GetTempPath(), "RazorWireReadmeOutside", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(repoRoot, "docs"));
+        Directory.CreateDirectory(outsideRoot);
+        File.WriteAllText(Path.Combine(outsideRoot, "outside.md"), "# Outside", Encoding.UTF8);
+        Directory.CreateSymbolicLink(Path.Combine(repoRoot, "docs", "linked"), outsideRoot);
+
+        try
+        {
+            var linkedPath = Path.Combine(repoRoot, "docs", "linked", "outside.md");
+
+            Assert.False(IsUnderRepositoryRoot(repoRoot, linkedPath));
+        }
+        finally
+        {
+            Directory.Delete(repoRoot, recursive: true);
+            Directory.Delete(outsideRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RazorWireReadme_HeadingAnchors_IncludeGitHubDuplicateSuffixes()
+    {
+        const string markdown = """
+            # Examples
+            # Examples
+            # Examples
+            """;
+
+        var anchors = ExtractMarkdownHeadingAnchors(markdown);
+
+        Assert.Contains("examples", anchors);
+        Assert.Contains("examples-1", anchors);
+        Assert.Contains("examples-2", anchors);
+    }
+
     private static string GetRepositoryRoot()
     {
         return PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
@@ -146,23 +185,72 @@ public sealed class RazorWireReadmeContractTests
 
     private static bool IsUnderRepositoryRoot(string repoRoot, string path)
     {
-        var relativePath = Path.GetRelativePath(Path.GetFullPath(repoRoot), Path.GetFullPath(path));
-        return !string.Equals(relativePath, "..", StringComparison.Ordinal)
+        var fullRoot = Path.GetFullPath(repoRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var relativePath = Path.GetRelativePath(fullRoot, Path.GetFullPath(path));
+        var isLexicallyContained = !string.Equals(relativePath, "..", StringComparison.Ordinal)
             && !relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
             && !relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal)
             && !Path.IsPathRooted(relativePath);
+
+        return isLexicallyContained
+            && !ContainsReparsePointSegment(fullRoot, relativePath.Replace('\\', '/'));
+    }
+
+    private static bool ContainsReparsePointSegment(string fullRoot, string relativePath)
+    {
+        var currentPath = fullRoot;
+        foreach (var segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            currentPath = Path.Combine(currentPath, segment);
+            try
+            {
+                if ((File.GetAttributes(currentPath) & FileAttributes.ReparsePoint) != 0)
+                {
+                    return true;
+                }
+            }
+            catch (FileNotFoundException)
+            {
+                return false;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return false;
+            }
+            catch (IOException)
+            {
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static HashSet<string> ExtractMarkdownHeadingAnchors(string markdown)
     {
         var anchors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var anchorCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var line in EnumerateNonFencedMarkdownLines(markdown))
         {
             var match = Regex.Match(line, @"^#{1,6}\s+(?<heading>.+?)\s*$");
             if (match.Success)
             {
-                anchors.Add(ToGitHubHeadingAnchor(match.Groups["heading"].Value));
+                var anchor = ToGitHubHeadingAnchor(match.Groups["heading"].Value);
+                if (anchorCounts.TryGetValue(anchor, out var count))
+                {
+                    count++;
+                    anchorCounts[anchor] = count;
+                    anchors.Add($"{anchor}-{count}");
+                    continue;
+                }
+
+                anchorCounts.Add(anchor, 0);
+                anchors.Add(anchor);
             }
         }
 

@@ -1031,16 +1031,64 @@ internal static class MarkdownSnippetPath
     /// <param name="repositoryRoot">Repository root directory.</param>
     /// <param name="path">Candidate full or relative path.</param>
     /// <param name="relativePath">Repository-relative path with forward slashes when successful.</param>
-    /// <returns><c>true</c> when <paramref name="path"/> is inside <paramref name="repositoryRoot"/> and is not the root itself.</returns>
+    /// <returns><c>true</c> when <paramref name="path"/> is inside <paramref name="repositoryRoot"/>, is not the root itself, and does not cross a reparse-point segment.</returns>
+    /// <remarks>
+    /// The containment check starts with lexical path normalization, then walks
+    /// the repository-relative path segments and rejects symlinks or other
+    /// reparse points before file IO can follow them outside the repository.
+    /// </remarks>
     internal static bool TryGetRepositoryRelativePath(string repositoryRoot, string path, out string relativePath)
     {
         var fullRoot = Path.GetFullPath(repositoryRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var fullPath = Path.GetFullPath(path);
         relativePath = Path.GetRelativePath(fullRoot, fullPath).Replace('\\', '/');
-        return relativePath != "."
+        var isLexicallyContained = relativePath != "."
             && !relativePath.StartsWith("../", StringComparison.Ordinal)
             && !string.Equals(relativePath, "..", StringComparison.Ordinal)
             && !Path.IsPathRooted(relativePath);
+
+        return isLexicallyContained
+            && !ContainsReparsePointSegment(fullRoot, relativePath);
+    }
+
+    /// <summary>
+    /// Determines whether any existing path segment below the repository root is a reparse point.
+    /// </summary>
+    /// <param name="fullRoot">Canonical repository root path.</param>
+    /// <param name="relativePath">Repository-relative candidate path with forward slashes.</param>
+    /// <returns><c>true</c> when an inspected segment is a symlink or other reparse point.</returns>
+    private static bool ContainsReparsePointSegment(string fullRoot, string relativePath)
+    {
+        var currentPath = fullRoot;
+        foreach (var segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            currentPath = Path.Combine(currentPath, segment);
+            try
+            {
+                if ((File.GetAttributes(currentPath) & FileAttributes.ReparsePoint) != 0)
+                {
+                    return true;
+                }
+            }
+            catch (FileNotFoundException)
+            {
+                return false;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return false;
+            }
+            catch (IOException)
+            {
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

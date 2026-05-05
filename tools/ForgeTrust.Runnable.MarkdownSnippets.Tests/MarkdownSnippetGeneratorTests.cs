@@ -430,6 +430,45 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
         Assert.Contains(expectedMessage, error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task GenerateAsync_RejectsSourcePathThroughRepositorySymlink()
+    {
+        var outsideRoot = Path.Combine(Path.GetTempPath(), "MarkdownSnippetOutside", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outsideRoot);
+        await File.WriteAllTextAsync(
+            Path.Combine(outsideRoot, "sample.cs"),
+            """
+            // docs:snippet sample:start
+            Console.WriteLine("outside");
+            // docs:snippet sample:end
+            """,
+            Encoding.UTF8);
+
+        var linkPath = Path.Combine(_repositoryRoot, "linked");
+        Directory.CreateSymbolicLink(linkPath, outsideRoot);
+        await WriteBasicDocumentAsync("old");
+        await WriteDocumentAsync(
+            """
+            <!-- runnable:snippet id="sample" file="linked/sample.cs" marker="sample" lang="csharp" -->
+            ```csharp
+            old
+            ```
+            <!-- /runnable:snippet -->
+            """);
+
+        try
+        {
+            var error = await Assert.ThrowsAsync<MarkdownSnippetException>(
+                () => new MarkdownSnippetGenerator().GenerateAsync(CreateRequest()));
+
+            Assert.Contains("must stay under repository root", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(outsideRoot, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("missing-start", "start")]
     [InlineData("missing-end", "end")]
