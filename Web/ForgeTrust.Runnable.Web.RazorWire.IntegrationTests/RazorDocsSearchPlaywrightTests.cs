@@ -1,9 +1,6 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using ForgeTrust.Runnable.Core;
 using Microsoft.Playwright;
 
 namespace ForgeTrust.Runnable.Web.RazorWire.IntegrationTests;
@@ -565,17 +562,11 @@ public sealed class RazorDocsPlaywrightFixture : IAsyncLifetime
 {
     private static readonly SemaphoreSlim PlaywrightInstallLock = new(1, 1);
     private static bool _playwrightInstalled;
-    private static readonly Regex ListeningUrlRegex = new(
-        @"Now listening on:\s*(https?://\S+)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex SearchTokenRegex = new(
         "[A-Za-z0-9]{4,}",
         RegexOptions.Compiled);
 
-    private readonly ConcurrentQueue<string> _appLogs = new();
-    private readonly TaskCompletionSource<string> _boundBaseUrlSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    private Process? _appProcess;
+    private RazorDocsInProcessHost? _appHost;
     private IPlaywright? _playwright;
 
     public IBrowser Browser { get; private set; } = null!;
@@ -587,40 +578,53 @@ public sealed class RazorDocsPlaywrightFixture : IAsyncLifetime
     {
         await EnsurePlaywrightInstalledAsync();
 
-        _playwright = await Playwright.CreateAsync();
-        Browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        try
         {
-            Headless = true
-        });
+            _playwright = await Playwright.CreateAsync();
+            Browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
 
-        _appProcess = StartRazorDocsApp("http://127.0.0.1:0");
-        var baseUrl = await WaitForBoundBaseUrlAsync(TimeSpan.FromSeconds(60));
-        DocsUrl = $"{baseUrl}/docs";
+            _appHost = await RazorDocsInProcessHost.StartAsync("http://127.0.0.1:0");
+            var baseUrl = _appHost.BaseUrl;
+            DocsUrl = $"{baseUrl}/docs";
 
-        await WaitForAppReadyAsync(DocsUrl, TimeSpan.FromSeconds(60));
-        SearchQuery = await WarmSearchIndexAndResolveQueryAsync(baseUrl, TimeSpan.FromSeconds(90));
+            await WaitForAppReadyAsync(DocsUrl, TimeSpan.FromSeconds(60));
+            SearchQuery = await WarmSearchIndexAndResolveQueryAsync(baseUrl, TimeSpan.FromSeconds(90));
+        }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
     }
 
     public async Task DisposeAsync()
     {
         try
         {
-            if (Browser is not null)
+            var browser = Browser;
+            Browser = null!;
+
+            if (browser is not null)
             {
-                await Browser.DisposeAsync();
+                await browser.DisposeAsync();
             }
 
-            _playwright?.Dispose();
+            var playwright = _playwright;
+            _playwright = null;
+            playwright?.Dispose();
         }
         finally
         {
-            if (_appProcess is not null && !_appProcess.HasExited)
-            {
-                _appProcess.Kill(entireProcessTree: true);
-                await _appProcess.WaitForExitAsync();
-            }
+            var appHost = _appHost;
+            _appHost = null;
 
-            _appProcess?.Dispose();
+            if (appHost is not null)
+            {
+                await appHost.DisposeAsync();
+            }
         }
     }
 
@@ -651,72 +655,6 @@ public sealed class RazorDocsPlaywrightFixture : IAsyncLifetime
         {
             PlaywrightInstallLock.Release();
         }
-    }
-
-    private Process StartRazorDocsApp(string baseUrl)
-    {
-        var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var projectPath = Path.Combine(
-            repoRoot,
-            "Web",
-            "ForgeTrust.Runnable.Web.RazorDocs.Standalone",
-            "ForgeTrust.Runnable.Web.RazorDocs.Standalone.csproj");
-
-        if (!File.Exists(projectPath))
-        {
-            throw new FileNotFoundException("Could not find RazorDocs standalone host project.", projectPath);
-        }
-
-        var buildConfiguration = DotnetLaunchResolver.TryGetCurrentBuildConfiguration(AppContext.BaseDirectory);
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            Arguments = DotnetLaunchResolver.ResolveProjectLaunchArguments(
-                projectPath,
-                assemblyName: "ForgeTrust.Runnable.Web.RazorDocs.Standalone",
-                preferredConfiguration: buildConfiguration),
-            WorkingDirectory = repoRoot,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-
-        startInfo.Environment["ASPNETCORE_URLS"] = baseUrl;
-        startInfo.Environment["DOTNET_ENVIRONMENT"] = "Development";
-        startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
-        startInfo.Environment["RazorDocs__Mode"] = "Source";
-        startInfo.Environment["RazorDocs__Source__RepositoryRoot"] = repoRoot;
-        startInfo.Environment["RazorDocs__Contributor__Enabled"] = "true";
-        startInfo.Environment["RazorDocs__Contributor__DefaultBranch"] = "main";
-        startInfo.Environment["RazorDocs__Contributor__SourceUrlTemplate"] = "https://github.com/forge-trust/Runnable/blob/{branch}/{path}";
-        startInfo.Environment["RazorDocs__Contributor__EditUrlTemplate"] = "https://github.com/forge-trust/Runnable/edit/{branch}/{path}";
-        startInfo.Environment["RazorDocs__Contributor__LastUpdatedMode"] = "Git";
-
-        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, args) => CaptureAppLog(args.Data);
-        process.ErrorDataReceived += (_, args) => CaptureAppLog(args.Data);
-        process.Exited += (_, _) =>
-        {
-            _boundBaseUrlSource.TrySetException(
-                new InvalidOperationException($"RazorDocs app exited before publishing a listening URL.{Environment.NewLine}{GetRecentLogs()}"));
-        };
-
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        return process;
-    }
-
-    private async Task<string> WaitForBoundBaseUrlAsync(TimeSpan timeout)
-    {
-        using var timeoutCts = new CancellationTokenSource(timeout);
-        using var registration = timeoutCts.Token.Register(
-            () => _boundBaseUrlSource.TrySetException(
-                new TimeoutException($"RazorDocs app did not publish a listening URL within {timeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs()}")));
-
-        return await _boundBaseUrlSource.Task;
     }
 
     private async Task WaitForAppReadyAsync(string docsUrl, TimeSpan timeout)
@@ -772,7 +710,7 @@ public sealed class RazorDocsPlaywrightFixture : IAsyncLifetime
 
         while (!timeoutCts.Token.IsCancellationRequested)
         {
-            EnsureAppProcessIsRunning(appExitedMessage);
+            EnsureAppHostIsRunning(appExitedMessage);
 
             try
             {
@@ -807,9 +745,9 @@ public sealed class RazorDocsPlaywrightFixture : IAsyncLifetime
         throw new TimeoutException($"{timeoutMessage} within {timeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs()}");
     }
 
-    private void EnsureAppProcessIsRunning(string appExitedMessage)
+    private void EnsureAppHostIsRunning(string appExitedMessage)
     {
-        if (_appProcess is null || _appProcess.HasExited)
+        if (_appHost is not { IsStarted: true })
         {
             throw new InvalidOperationException($"{appExitedMessage}.{Environment.NewLine}{GetRecentLogs()}");
         }
@@ -919,114 +857,8 @@ public sealed class RazorDocsPlaywrightFixture : IAsyncLifetime
         return match.Success ? match.Value : null;
     }
 
-    private void CaptureAppLog(string? message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return;
-        }
-
-        var match = ListeningUrlRegex.Match(message);
-        if (match.Success && Uri.TryCreate(match.Groups[1].Value, UriKind.Absolute, out var uri))
-        {
-            var normalizedBaseUrl = $"{uri.Scheme}://{uri.Host}:{uri.Port}";
-            _boundBaseUrlSource.TrySetResult(normalizedBaseUrl);
-        }
-
-        _appLogs.Enqueue(message);
-        while (_appLogs.Count > 200)
-        {
-            _appLogs.TryDequeue(out _);
-        }
-    }
-
     private string GetRecentLogs()
     {
-        return string.Join(Environment.NewLine, _appLogs);
-    }
-}
-
-internal static class DotnetLaunchResolver
-{
-    public static string ResolveProjectLaunchArguments(
-        string projectPath,
-        string assemblyName,
-        string? preferredConfiguration)
-    {
-        var builtAssemblyPath = FindBuiltAssemblyPath(projectPath, assemblyName, preferredConfiguration);
-        if (builtAssemblyPath is not null)
-        {
-            return $"\"{builtAssemblyPath}\"";
-        }
-
-        var configurationArgument = string.IsNullOrWhiteSpace(preferredConfiguration)
-            ? string.Empty
-            : $" --configuration {preferredConfiguration}";
-        return $"run --project \"{projectPath}\" --no-launch-profile{configurationArgument}";
-    }
-
-    public static string? TryGetCurrentBuildConfiguration(string appBaseDirectory)
-    {
-        var normalized = appBaseDirectory.Replace('\\', '/');
-        if (normalized.Contains("/Debug/", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Debug";
-        }
-
-        if (normalized.Contains("/Release/", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Release";
-        }
-
-        return null;
-    }
-
-    private static string? FindBuiltAssemblyPath(
-        string projectPath,
-        string assemblyName,
-        string? preferredConfiguration)
-    {
-        var projectDirectory = Path.GetDirectoryName(projectPath);
-        if (string.IsNullOrWhiteSpace(projectDirectory))
-        {
-            return null;
-        }
-
-        foreach (var configuration in GetCandidateConfigurations(preferredConfiguration))
-        {
-            var configurationDirectory = Path.Combine(projectDirectory, "bin", configuration);
-            if (!Directory.Exists(configurationDirectory))
-            {
-                continue;
-            }
-
-            var builtAssemblyPath = Directory
-                .EnumerateFiles(configurationDirectory, assemblyName + ".dll", SearchOption.AllDirectories)
-                .FirstOrDefault();
-            if (builtAssemblyPath is not null)
-            {
-                return builtAssemblyPath;
-            }
-        }
-
-        return null;
-    }
-
-    private static IEnumerable<string> GetCandidateConfigurations(string? preferredConfiguration)
-    {
-        if (!string.IsNullOrWhiteSpace(preferredConfiguration))
-        {
-            yield return preferredConfiguration;
-        }
-
-        if (!string.Equals(preferredConfiguration, "Release", StringComparison.OrdinalIgnoreCase))
-        {
-            yield return "Release";
-        }
-
-        if (!string.Equals(preferredConfiguration, "Debug", StringComparison.OrdinalIgnoreCase))
-        {
-            yield return "Debug";
-        }
+        return _appHost?.Diagnostics ?? string.Empty;
     }
 }

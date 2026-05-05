@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../ForgeTrust.Runnable.Core/ForgeTrust.Runnable.Core.csproj" />
+    <ProjectReference Include="../ForgeTrust.Runnable.Web.RazorDocs.Standalone/ForgeTrust.Runnable.Web.RazorDocs.Standalone.csproj" />
   </ItemGroup>
 
 </Project>

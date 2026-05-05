@@ -1,4 +1,3 @@
-using ForgeTrust.Runnable.Web;
-using ForgeTrust.Runnable.Web.RazorDocs;
+using ForgeTrust.Runnable.Web.RazorDocs.Standalone;
 
-await WebApp<RazorDocsWebModule>.RunAsync(args);
+await RazorDocsStandaloneHost.RunAsync(args);
