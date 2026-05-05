@@ -39,6 +39,10 @@ public sealed class RazorWireReadmeContractTests
                 : Path.GetFullPath(Path.Combine(readmeDirectory, pathPart));
 
             Assert.True(
+                IsUnderRepositoryRoot(repoRoot, linkedPath),
+                $"README link '{target}' resolves outside repository root: '{linkedPath}'.");
+
+            Assert.True(
                 File.Exists(linkedPath) || Directory.Exists(linkedPath),
                 $"README link '{target}' points to missing path '{linkedPath}'.");
 
@@ -114,6 +118,15 @@ public sealed class RazorWireReadmeContractTests
         return string.Equals(Path.GetExtension(path), ".md", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsUnderRepositoryRoot(string repoRoot, string path)
+    {
+        var relativePath = Path.GetRelativePath(Path.GetFullPath(repoRoot), Path.GetFullPath(path));
+        return !string.Equals(relativePath, "..", StringComparison.Ordinal)
+            && !relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            && !relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal)
+            && !Path.IsPathRooted(relativePath);
+    }
+
     private static HashSet<string> ExtractMarkdownHeadingAnchors(string markdown)
     {
         var anchors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -133,22 +146,16 @@ public sealed class RazorWireReadmeContractTests
     private static string ToGitHubHeadingAnchor(string heading)
     {
         var builder = new StringBuilder();
-        var previousWasSeparator = false;
 
         foreach (var rune in heading.EnumerateRunes())
         {
             if (Rune.IsLetterOrDigit(rune))
             {
                 builder.Append(rune.ToString().ToLowerInvariant());
-                previousWasSeparator = false;
             }
             else if (Rune.IsWhiteSpace(rune) || rune.Value == '-')
             {
-                if (!previousWasSeparator && builder.Length > 0)
-                {
-                    builder.Append('-');
-                    previousWasSeparator = true;
-                }
+                builder.Append('-');
             }
         }
 

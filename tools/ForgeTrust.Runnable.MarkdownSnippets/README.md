@@ -7,12 +7,14 @@
 Generate the default RazorWire README snippets:
 
 ```bash
+# From the repository root:
 dotnet run --project tools/ForgeTrust.Runnable.MarkdownSnippets/ForgeTrust.Runnable.MarkdownSnippets.csproj -- generate
 ```
 
 Verify that generated snippets are current:
 
 ```bash
+# From the repository root:
 dotnet run --project tools/ForgeTrust.Runnable.MarkdownSnippets/ForgeTrust.Runnable.MarkdownSnippets.csproj -- verify
 ```
 
@@ -20,6 +22,12 @@ Both commands accept:
 
 - `--repo-root <path>`: repository root. Defaults to the current directory.
 - `--document <path>`: Markdown file to generate or verify. Defaults to `Web/ForgeTrust.Runnable.Web.RazorWire/README.md`.
+
+The documented `dotnet run --project tools/...` commands are intentionally
+repository-root commands because the project path and default `--repo-root`
+are both resolved from the current directory. From another directory, pass
+rooted paths for both `--project` and `--repo-root`, or `cd` to the repository
+root before running them.
 
 ## Managed Blocks
 

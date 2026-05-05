@@ -26,11 +26,42 @@ internal static class Program
           -h, --help            Show this help.
         """;
 
+    /// <summary>
+    /// Process entry point that runs the CLI against the current working directory.
+    /// </summary>
+    /// <param name="args">Command-line arguments passed by the host process.</param>
+    /// <returns>The process exit code.</returns>
     internal static async Task<int> Main(string[] args)
     {
         return await RunAsync(args, Console.Out, Console.Error, Directory.GetCurrentDirectory());
     }
 
+    /// <summary>
+    /// Runs the Markdown snippet CLI command contract.
+    /// </summary>
+    /// <param name="args">
+    /// Command-line arguments. The first argument must be <c>generate</c>,
+    /// <c>verify</c>, <c>--help</c>, or <c>-h</c>. Command options after
+    /// <c>generate</c> or <c>verify</c> are parsed by
+    /// <see cref="MarkdownSnippetCommandOptions.Parse"/>.
+    /// </param>
+    /// <param name="standardOut">Destination for help and successful command output.</param>
+    /// <param name="standardError">Destination for validation and command failure output.</param>
+    /// <param name="currentDirectory">
+    /// Working directory used for option defaults. When <c>--repo-root</c> is
+    /// omitted, this becomes the repository root; when <c>--document</c> is
+    /// omitted, the default document is
+    /// <c>Web/ForgeTrust.Runnable.Web.RazorWire/README.md</c> under that root.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token for file IO.</param>
+    /// <returns><c>0</c> for success or help, <c>1</c> for invalid input or stale snippets.</returns>
+    /// <remarks>
+    /// Relative <c>--repo-root</c> values resolve from <paramref name="currentDirectory"/>;
+    /// relative <c>--document</c> values resolve from the resolved repository root.
+    /// Unknown commands, unknown options, missing option values, invalid snippet
+    /// directives, unsafe paths, and stale generated blocks are reported as
+    /// <c>1</c> with actionable error text rather than escaping as unhandled exceptions.
+    /// </remarks>
     internal static async Task<int> RunAsync(
         string[] args,
         TextWriter standardOut,
@@ -93,6 +124,11 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// Determines whether an argument requests command help.
+    /// </summary>
+    /// <param name="argument">Argument to inspect.</param>
+    /// <returns><c>true</c> for <c>--help</c> or <c>-h</c>.</returns>
     private static bool IsHelp(string argument)
     {
         return string.Equals(argument, "--help", StringComparison.Ordinal)
@@ -102,6 +138,22 @@ internal static class Program
 
 internal sealed record MarkdownSnippetCommandOptions(MarkdownSnippetRequest Request)
 {
+    /// <summary>
+    /// Parses command options into a repository/document request.
+    /// </summary>
+    /// <param name="args">Only <c>--repo-root &lt;path&gt;</c> and <c>--document &lt;path&gt;</c> are supported.</param>
+    /// <param name="currentDirectory">Current working directory used by omitted or relative <c>--repo-root</c>.</param>
+    /// <returns>Parsed options with full repository and document paths.</returns>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown when an option is unknown or a required option value is missing.
+    /// </exception>
+    /// <remarks>
+    /// The default repository root is <paramref name="currentDirectory"/>. The
+    /// default document is
+    /// <c>Web/ForgeTrust.Runnable.Web.RazorWire/README.md</c> under the resolved
+    /// repository root. A rooted <c>--document</c> is allowed at parse time but
+    /// later rejected by generation/verification when it is outside the repository.
+    /// </remarks>
     internal static MarkdownSnippetCommandOptions Parse(string[] args, string currentDirectory)
     {
         string? repositoryRoot = null;
@@ -134,6 +186,14 @@ internal sealed record MarkdownSnippetCommandOptions(MarkdownSnippetRequest Requ
         return new MarkdownSnippetCommandOptions(new MarkdownSnippetRequest(repoRoot, resolvedDocumentPath));
     }
 
+    /// <summary>
+    /// Reads the required value immediately following an option name.
+    /// </summary>
+    /// <param name="args">Complete option argument array.</param>
+    /// <param name="index">Current option index, advanced to the value index on success.</param>
+    /// <param name="argument">Option name for diagnostics.</param>
+    /// <returns>The raw option value.</returns>
+    /// <exception cref="MarkdownSnippetException">Thrown when the option has no following non-blank value.</exception>
     private static string ReadRequiredValue(string[] args, ref int index, string argument)
     {
         if (index + 1 >= args.Length || string.IsNullOrWhiteSpace(args[index + 1]))
@@ -145,6 +205,13 @@ internal sealed record MarkdownSnippetCommandOptions(MarkdownSnippetRequest Requ
         return args[index];
     }
 
+    /// <summary>
+    /// Resolves a rooted, relative, or omitted path to a full path.
+    /// </summary>
+    /// <param name="value">Optional user-provided path.</param>
+    /// <param name="baseDirectory">Directory used for relative values.</param>
+    /// <param name="defaultPath">Path used when <paramref name="value"/> is omitted.</param>
+    /// <returns>A canonical full path.</returns>
     private static string ResolvePath(string? value, string baseDirectory, string defaultPath)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -160,6 +227,15 @@ internal sealed record MarkdownSnippetCommandOptions(MarkdownSnippetRequest Requ
 
 internal sealed record MarkdownSnippetRequest(string RepositoryRoot, string DocumentPath)
 {
+    /// <summary>
+    /// Gets the document path relative to <see cref="RepositoryRoot"/> with
+    /// forward slashes for stable diagnostics and CLI output.
+    /// </summary>
+    /// <returns>The repository-relative document path.</returns>
+    /// <remarks>
+    /// Request validation ensures the document stays under the repository root
+    /// before generation or verification uses this value for user-facing messages.
+    /// </remarks>
     internal string GetRepositoryRelativeDocumentPath()
     {
         return Path.GetRelativePath(RepositoryRoot, DocumentPath).Replace('\\', '/');
@@ -168,12 +244,36 @@ internal sealed record MarkdownSnippetRequest(string RepositoryRoot, string Docu
 
 internal sealed class MarkdownSnippetGenerator
 {
+    /// <summary>
+    /// Generates the canonical Markdown document and writes it back to disk.
+    /// </summary>
+    /// <param name="request">Repository root and Markdown document to update.</param>
+    /// <param name="cancellationToken">Cancellation token for file IO.</param>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown when the repository/document path is invalid or snippet extraction fails.
+    /// </exception>
     internal async Task GenerateToFileAsync(MarkdownSnippetRequest request, CancellationToken cancellationToken = default)
     {
         var markdown = await GenerateAsync(request, cancellationToken);
         await File.WriteAllTextAsync(request.DocumentPath, markdown, cancellationToken);
     }
 
+    /// <summary>
+    /// Generates the canonical Markdown text for all managed snippet blocks.
+    /// </summary>
+    /// <param name="request">Repository root and Markdown document to read.</param>
+    /// <param name="cancellationToken">Cancellation token for file IO.</param>
+    /// <returns>The rewritten Markdown document with <c>\n</c> line endings.</returns>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown when the document has no managed blocks, a block is malformed, a
+    /// source path escapes the repository, markers are missing or duplicated, or
+    /// extracted snippet content is empty.
+    /// </exception>
+    /// <remarks>
+    /// Generation is the mutating workflow used by maintainers after source
+    /// sample changes. It normalizes document line endings and replaces only
+    /// managed blocks outside existing Markdown code fences.
+    /// </remarks>
     internal async Task<string> GenerateAsync(MarkdownSnippetRequest request, CancellationToken cancellationToken = default)
     {
         ValidateRequest(request);
@@ -181,10 +281,24 @@ internal sealed class MarkdownSnippetGenerator
         return MarkdownSnippetRewriter.Rewrite(request, markdown);
     }
 
+    /// <summary>
+    /// Verifies that the checked-in Markdown already matches generated output.
+    /// </summary>
+    /// <param name="request">Repository root and Markdown document to verify.</param>
+    /// <param name="cancellationToken">Cancellation token for file IO.</param>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown when validation fails or the checked-in Markdown is stale.
+    /// </exception>
+    /// <remarks>
+    /// Verification is the CI workflow. It compares canonical generated text to
+    /// the current document after normalizing line endings, so CRLF checkouts do
+    /// not fail solely because of platform line-ending conversion.
+    /// </remarks>
     internal async Task VerifyAsync(MarkdownSnippetRequest request, CancellationToken cancellationToken = default)
     {
         var expected = await GenerateAsync(request, cancellationToken);
-        var current = await File.ReadAllTextAsync(request.DocumentPath, cancellationToken);
+        var current = (await File.ReadAllTextAsync(request.DocumentPath, cancellationToken))
+            .ReplaceLineEndings("\n");
         if (!string.Equals(current, expected, StringComparison.Ordinal))
         {
             throw new MarkdownSnippetException(
@@ -192,11 +306,20 @@ internal sealed class MarkdownSnippetGenerator
         }
     }
 
+    /// <summary>
+    /// Validates repository/document existence and document containment.
+    /// </summary>
+    /// <param name="request">Request to validate before source files are read.</param>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown when the repository root is missing, the document is missing, or
+    /// the document is outside the repository root.
+    /// </exception>
     private static void ValidateRequest(MarkdownSnippetRequest request)
     {
         if (!Directory.Exists(request.RepositoryRoot))
         {
-            throw new MarkdownSnippetException($"Repository root '{request.RepositoryRoot}' does not exist.");
+            throw new MarkdownSnippetException(
+                $"Repository root '{request.RepositoryRoot}' does not exist for Markdown document '{request.DocumentPath}'.");
         }
 
         if (!File.Exists(request.DocumentPath))
@@ -216,6 +339,22 @@ internal sealed class MarkdownSnippetGenerator
     }
 }
 
+/// <summary>
+/// Rewrites managed <c>&lt;!-- runnable:snippet ... --&gt;</c> blocks in Markdown.
+/// </summary>
+/// <remarks>
+/// A managed block must contain an opening directive, a generated fenced code
+/// block, and the exact closing directive <c>&lt;!-- /runnable:snippet --&gt;</c>.
+/// Directives are ignored inside existing Markdown code fences, and the managed
+/// closing directive is only recognized outside the generated block's code fence.
+///
+/// Supported attributes are <c>id</c>, <c>file</c>, <c>marker</c>, <c>lang</c>,
+/// and optional <c>dedent</c>. Attributes must use quoted
+/// <c>name="value"</c> syntax. <c>file</c> is repository-relative; rooted paths
+/// and <c>..</c> escapes fail before source files are read. <c>dedent</c>
+/// defaults to <c>true</c>, which removes common indentation from extracted
+/// non-blank source lines.
+/// </remarks>
 internal static partial class MarkdownSnippetRewriter
 {
     private const string OpeningPrefix = "<!-- runnable:snippet ";
@@ -224,6 +363,16 @@ internal static partial class MarkdownSnippetRewriter
     [GeneratedRegex("(?<name>[A-Za-z][A-Za-z0-9_-]*)=\"(?<value>[^\"]*)\"", RegexOptions.NonBacktracking)]
     private static partial Regex AttributeRegex();
 
+    /// <summary>
+    /// Rewrites managed snippet blocks and returns canonical Markdown.
+    /// </summary>
+    /// <param name="request">Repository root and document path used for path resolution and diagnostics.</param>
+    /// <param name="markdown">Original Markdown text.</param>
+    /// <returns>Markdown with generated blocks rendered using <c>\n</c> line endings.</returns>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown when no managed blocks are present, a directive is malformed, a
+    /// source file is unsafe or missing, markers are invalid, or a block is not closed.
+    /// </exception>
     internal static string Rewrite(MarkdownSnippetRequest request, string markdown)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -270,6 +419,17 @@ internal static partial class MarkdownSnippetRewriter
         return builder.ToString();
     }
 
+    /// <summary>
+    /// Parses one managed snippet block and extracts its replacement content.
+    /// </summary>
+    /// <param name="request">Repository/document request for path resolution and diagnostics.</param>
+    /// <param name="lines">Normalized Markdown lines.</param>
+    /// <param name="index">Current opening-line index, advanced to the managed closing line.</param>
+    /// <returns>The parsed block with source-backed content.</returns>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown when attributes are invalid, the source file path is unsafe, source
+    /// markers are invalid, or the managed block is missing its closing directive.
+    /// </exception>
     private static MarkdownSnippetBlock ParseBlock(MarkdownSnippetRequest request, string[] lines, ref int index)
     {
         var openingLine = lines[index].Trim();
@@ -297,6 +457,13 @@ internal static partial class MarkdownSnippetRewriter
         return new MarkdownSnippetBlock(openingLine, language, content);
     }
 
+    /// <summary>
+    /// Parses and validates quoted directive attributes from an opening line.
+    /// </summary>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown for missing <c>--&gt;</c>, duplicate attributes, unsupported
+    /// attribute syntax, empty attribute sets, or unknown attribute names.
+    /// </exception>
     private static Dictionary<string, string> ParseAttributes(string openingLine, string documentPath, int lineNumber)
     {
         var endIndex = openingLine.IndexOf("-->", StringComparison.Ordinal);
@@ -338,6 +505,13 @@ internal static partial class MarkdownSnippetRewriter
         return attributes;
     }
 
+    /// <summary>
+    /// Ensures all directive attribute names are supported by the snippet contract.
+    /// </summary>
+    /// <param name="attributes">Parsed directive attributes.</param>
+    /// <param name="documentPath">Repository-relative document path for diagnostics.</param>
+    /// <param name="lineNumber">One-based directive line number.</param>
+    /// <exception cref="MarkdownSnippetException">Thrown when any attribute name is unknown.</exception>
     private static void ValidateAttributeNames(
         IReadOnlyDictionary<string, string> attributes,
         string documentPath,
@@ -353,6 +527,10 @@ internal static partial class MarkdownSnippetRewriter
         }
     }
 
+    /// <summary>
+    /// Reads a required directive attribute and trims its value.
+    /// </summary>
+    /// <exception cref="MarkdownSnippetException">Thrown when the attribute is missing or blank.</exception>
     private static string ReadRequiredAttribute(
         IReadOnlyDictionary<string, string> attributes,
         string name,
@@ -368,6 +546,14 @@ internal static partial class MarkdownSnippetRewriter
         return value.Trim();
     }
 
+    /// <summary>
+    /// Reads an optional boolean directive attribute.
+    /// </summary>
+    /// <remarks>
+    /// <c>dedent</c> uses this helper with a default of <c>true</c>. Only
+    /// <c>true</c> and <c>false</c> values accepted by the platform boolean parser are valid.
+    /// </remarks>
+    /// <exception cref="MarkdownSnippetException">Thrown when the value is not a valid boolean.</exception>
     private static bool ReadBooleanAttribute(
         IReadOnlyDictionary<string, string> attributes,
         string name,
@@ -389,6 +575,14 @@ internal static partial class MarkdownSnippetRewriter
             $"Snippet block in '{request.GetRepositoryRelativeDocumentPath()}' at line {lineNumber} has invalid boolean '{name}' value '{value}'.");
     }
 
+    /// <summary>
+    /// Validates a snippet id or source marker id.
+    /// </summary>
+    /// <param name="value">Candidate id.</param>
+    /// <param name="description">Diagnostic description of the id role.</param>
+    /// <param name="request">Request used to name the document in diagnostics.</param>
+    /// <param name="lineNumber">One-based directive line number.</param>
+    /// <exception cref="MarkdownSnippetException">Thrown when the id uses unsupported characters.</exception>
     private static void ValidateId(string value, string description, MarkdownSnippetRequest request, int lineNumber)
     {
         if (!MarkdownSnippetMarker.IsValidId(value))
@@ -398,6 +592,13 @@ internal static partial class MarkdownSnippetRewriter
         }
     }
 
+    /// <summary>
+    /// Validates the Markdown code fence language token.
+    /// </summary>
+    /// <param name="language">Candidate language token.</param>
+    /// <param name="request">Request used to name the document in diagnostics.</param>
+    /// <param name="lineNumber">One-based directive line number.</param>
+    /// <exception cref="MarkdownSnippetException">Thrown when the language token contains unsupported characters.</exception>
     private static void ValidateLanguage(string language, MarkdownSnippetRequest request, int lineNumber)
     {
         if (!Regex.IsMatch(language, "^[A-Za-z0-9_+.#-]+$", RegexOptions.NonBacktracking))
@@ -407,6 +608,15 @@ internal static partial class MarkdownSnippetRewriter
         }
     }
 
+    /// <summary>
+    /// Finds the managed block closing directive while ignoring text inside Markdown fences.
+    /// </summary>
+    /// <param name="lines">Normalized Markdown lines.</param>
+    /// <param name="startIndex">Line index immediately after the opening directive.</param>
+    /// <param name="request">Request used to name the document in diagnostics.</param>
+    /// <param name="id">Snippet id for diagnostics.</param>
+    /// <returns>The line index containing <c>&lt;!-- /runnable:snippet --&gt;</c>.</returns>
+    /// <exception cref="MarkdownSnippetException">Thrown when no compatible closing directive is found.</exception>
     private static int FindClosingLine(
         string[] lines,
         int startIndex,
@@ -438,6 +648,13 @@ internal static partial class MarkdownSnippetRewriter
             $"Snippet block '{id}' in '{request.GetRepositoryRelativeDocumentPath()}' is missing closing marker '{ClosingLine}'.");
     }
 
+    /// <summary>
+    /// Appends one original Markdown line while preserving the canonical final newline shape.
+    /// </summary>
+    /// <param name="builder">Destination builder.</param>
+    /// <param name="line">Line text without its newline.</param>
+    /// <param name="index">Current line index.</param>
+    /// <param name="lineCount">Total line count.</param>
     private static void AppendLine(StringBuilder builder, string line, int index, int lineCount)
     {
         builder.Append(line);
@@ -450,6 +667,11 @@ internal static partial class MarkdownSnippetRewriter
 
 internal readonly record struct MarkdownCodeFence(char Character, int Length)
 {
+    /// <summary>
+    /// Parses a Markdown code fence opener or closer.
+    /// </summary>
+    /// <param name="trimmedLine">Line trimmed of surrounding whitespace.</param>
+    /// <returns>A fence when the line begins with at least three backticks or tildes; otherwise <c>null</c>.</returns>
     internal static MarkdownCodeFence? TryParse(string trimmedLine)
     {
         if (trimmedLine.Length < 3 || trimmedLine[0] is not ('`' or '~'))
@@ -472,6 +694,14 @@ internal readonly record struct MarkdownCodeFence(char Character, int Length)
         return length >= 3 ? new MarkdownCodeFence(character, length) : null;
     }
 
+    /// <summary>
+    /// Determines whether a trimmed line closes this fence.
+    /// </summary>
+    /// <param name="trimmedLine">Line trimmed of surrounding whitespace.</param>
+    /// <returns>
+    /// <c>true</c> when the line uses the same fence character, has length at
+    /// least as long as the opener, and contains only that fence character.
+    /// </returns>
     internal bool IsClosedBy(string trimmedLine)
     {
         var closingFence = TryParse(trimmedLine);
@@ -485,23 +715,60 @@ internal readonly record struct MarkdownCodeFence(char Character, int Length)
 
 internal sealed record MarkdownSnippetBlock(string OpeningLine, string Language, string Content)
 {
+    /// <summary>
+    /// Renders a managed block using an automatically sized backtick fence.
+    /// </summary>
+    /// <returns>The complete managed block with <c>\n</c> line endings.</returns>
+    /// <remarks>
+    /// The fence is one backtick longer than the longest backtick run in the
+    /// content, with a minimum length of three, so nested Markdown examples stay
+    /// literal inside the generated block.
+    /// </remarks>
     internal string Render()
     {
         var fence = MarkdownFence.Create(Content);
         var builder = new StringBuilder();
-        builder.AppendLine(OpeningLine);
+        builder.Append(OpeningLine);
+        builder.Append('\n');
         builder.Append(fence);
         builder.Append(Language);
-        builder.AppendLine();
-        builder.AppendLine(Content);
-        builder.AppendLine(fence);
-        builder.AppendLine("<!-- /runnable:snippet -->");
+        builder.Append('\n');
+        builder.Append(Content);
+        builder.Append('\n');
+        builder.Append(fence);
+        builder.Append('\n');
+        builder.Append("<!-- /runnable:snippet -->");
+        builder.Append('\n');
         return builder.ToString();
     }
 }
 
+/// <summary>
+/// Extracts source snippets between exact documentation marker lines.
+/// </summary>
+/// <remarks>
+/// Supported marker forms are delegated to <see cref="MarkdownSnippetMarker"/>:
+/// C# line comments, Razor comments, and HTML comments. A marker pair must be
+/// unique, ordered as <c>:start</c> then <c>:end</c>, and contain at least one
+/// non-blank line. Marker-like text in strings or inline comments is ignored
+/// because markers must occupy the whole trimmed line. When <c>dedent</c> is
+/// enabled, common leading spaces or tabs across non-blank snippet lines are
+/// removed and surrounding blank lines are trimmed.
+/// </remarks>
 internal static class MarkdownSnippetSourceExtractor
 {
+    /// <summary>
+    /// Extracts and optionally dedents the snippet for a marker id.
+    /// </summary>
+    /// <param name="source">Source file text.</param>
+    /// <param name="markerId">Marker id without <c>:start</c> or <c>:end</c>.</param>
+    /// <param name="sourcePath">Repository-relative source path for diagnostics.</param>
+    /// <param name="dedent">Whether to remove common indentation from extracted lines.</param>
+    /// <returns>Extracted snippet content with <c>\n</c> line endings.</returns>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown when start/end markers are missing, duplicated, reversed, or enclose
+    /// only blank content.
+    /// </exception>
     internal static string Extract(string source, string markerId, string sourcePath, bool dedent)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -567,6 +834,16 @@ internal static class MarkdownSnippetSourceExtractor
         return dedent ? Dedent(snippetLines) : string.Join("\n", snippetLines).TrimEnd('\n');
     }
 
+    /// <summary>
+    /// Removes common indentation from snippet lines.
+    /// </summary>
+    /// <param name="lines">Snippet lines between markers.</param>
+    /// <returns>Dedented snippet text with surrounding blank lines trimmed.</returns>
+    /// <remarks>
+    /// Only non-blank lines contribute to the minimum indent. Indentation counts
+    /// both spaces and tabs as one character because snippets preserve source text
+    /// rather than reformatting it.
+    /// </remarks>
     private static string Dedent(string[] lines)
     {
         var minimumIndent = lines
@@ -581,6 +858,11 @@ internal static class MarkdownSnippetSourceExtractor
         return string.Join("\n", dedented).Trim('\n');
     }
 
+    /// <summary>
+    /// Counts leading spaces and tabs on a source line.
+    /// </summary>
+    /// <param name="line">Line to inspect.</param>
+    /// <returns>The number of leading indentation characters.</returns>
     private static int CountIndent(string line)
     {
         var count = 0;
@@ -610,11 +892,29 @@ internal static class MarkdownSnippetMarker
 {
     private static readonly Regex IdRegex = new("^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.NonBacktracking);
 
+    /// <summary>
+    /// Determines whether a snippet id is safe for marker and directive use.
+    /// </summary>
+    /// <param name="value">Candidate id.</param>
+    /// <returns><c>true</c> when the id starts with an ASCII letter or digit and then uses only letters, digits, <c>_</c>, <c>-</c>, or <c>.</c>.</returns>
     internal static bool IsValidId(string value)
     {
         return IdRegex.IsMatch(value);
     }
 
+    /// <summary>
+    /// Parses a whole-line source snippet marker.
+    /// </summary>
+    /// <param name="line">Source line to inspect. A UTF-8 BOM on the first line is ignored.</param>
+    /// <param name="markerId">Expected marker id.</param>
+    /// <returns>The marker kind, or <see cref="MarkdownSnippetMarkerKind.None"/>.</returns>
+    /// <remarks>
+    /// Valid marker forms are exactly <c>// docs:snippet id:start</c>,
+    /// <c>@* docs:snippet id:start *@</c>, and
+    /// <c>&lt;!-- docs:snippet id:start --&gt;</c>, with matching <c>:end</c>
+    /// variants. Whitespace may surround the whole line but not the inner marker
+    /// text.
+    /// </remarks>
     internal static MarkdownSnippetMarkerKind TryParse(string line, string markerId)
     {
         var trimmed = line.Trim().TrimStart('\uFEFF');
@@ -631,6 +931,13 @@ internal static class MarkdownSnippetMarker
         return MarkdownSnippetMarkerKind.None;
     }
 
+    /// <summary>
+    /// Matches one exact marker form for a marker id and kind.
+    /// </summary>
+    /// <param name="trimmed">Source line trimmed of surrounding whitespace and any leading BOM.</param>
+    /// <param name="markerId">Expected marker id.</param>
+    /// <param name="markerKind">Expected marker kind, usually <c>start</c> or <c>end</c>.</param>
+    /// <returns><c>true</c> when the line is an exact supported comment marker.</returns>
     private static bool IsMarker(string trimmed, string markerId, string markerKind)
     {
         var marker = $"docs:snippet {markerId}:{markerKind}";
@@ -642,6 +949,11 @@ internal static class MarkdownSnippetMarker
 
 internal static class MarkdownFence
 {
+    /// <summary>
+    /// Creates a Markdown backtick fence that safely contains the supplied content.
+    /// </summary>
+    /// <param name="content">Snippet content to wrap.</param>
+    /// <returns>At least three backticks, or one more than the longest run in <paramref name="content"/>.</returns>
     internal static string Create(string content)
     {
         var maxRun = 0;
@@ -666,6 +978,21 @@ internal static class MarkdownFence
 
 internal static class MarkdownSnippetPath
 {
+    /// <summary>
+    /// Resolves a repository-relative source file path and enforces repository containment.
+    /// </summary>
+    /// <param name="repositoryRoot">Repository root directory.</param>
+    /// <param name="repositoryRelativePath">Source path from a snippet directive.</param>
+    /// <param name="description">Human-readable path description for diagnostics.</param>
+    /// <returns>The full source file path.</returns>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown when the path is rooted, escapes the repository root, or points to
+    /// a missing file.
+    /// </exception>
+    /// <remarks>
+    /// Snippet <c>file</c> attributes must be repository-relative so generated
+    /// documentation is portable across machines and CI checkouts.
+    /// </remarks>
     internal static string ResolveRepositoryFilePath(string repositoryRoot, string repositoryRelativePath, string description)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
@@ -691,6 +1018,13 @@ internal static class MarkdownSnippetPath
         return fullPath;
     }
 
+    /// <summary>
+    /// Converts a path to a repository-relative path when it is safely contained in the repository.
+    /// </summary>
+    /// <param name="repositoryRoot">Repository root directory.</param>
+    /// <param name="path">Candidate full or relative path.</param>
+    /// <param name="relativePath">Repository-relative path with forward slashes when successful.</param>
+    /// <returns><c>true</c> when <paramref name="path"/> is inside <paramref name="repositoryRoot"/> and is not the root itself.</returns>
     internal static bool TryGetRepositoryRelativePath(string repositoryRoot, string path, out string relativePath)
     {
         var fullRoot = Path.GetFullPath(repositoryRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -705,6 +1039,10 @@ internal static class MarkdownSnippetPath
 
 internal sealed class MarkdownSnippetException : Exception
 {
+    /// <summary>
+    /// Creates a snippet validation or verification exception with an actionable message.
+    /// </summary>
+    /// <param name="message">Human-readable failure message.</param>
     internal MarkdownSnippetException(string message)
         : base(message)
     {

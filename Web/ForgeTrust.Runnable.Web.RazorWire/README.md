@@ -93,6 +93,7 @@ Read the [focused proof path](../../examples/razorwire-mvc/README.md#start-here-
 The source-backed snippets in this README are generated from `docs:snippet` markers in the sample app. After changing marked sample code, run:
 
 ```bash
+# From the repository root:
 dotnet run --project tools/ForgeTrust.Runnable.MarkdownSnippets/ForgeTrust.Runnable.MarkdownSnippets.csproj -- generate
 ```
 

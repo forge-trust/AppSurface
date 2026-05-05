@@ -2,6 +2,13 @@ using System.Text;
 
 namespace ForgeTrust.Runnable.MarkdownSnippets.Tests;
 
+[CollectionDefinition(MarkdownSnippetGeneratorCollection.Name, DisableParallelization = true)]
+public sealed class MarkdownSnippetGeneratorCollection
+{
+    public const string Name = "MarkdownSnippetGenerator";
+}
+
+[Collection(MarkdownSnippetGeneratorCollection.Name)]
 public sealed class MarkdownSnippetGeneratorTests : IDisposable
 {
     private readonly string _repositoryRoot;
@@ -61,6 +68,19 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
         await WriteBasicSourceAsync();
         await WriteBasicDocumentAsync("old");
         await new MarkdownSnippetGenerator().GenerateToFileAsync(CreateRequest());
+
+        await new MarkdownSnippetGenerator().VerifyAsync(CreateRequest());
+    }
+
+    [Fact]
+    public async Task VerifyAsync_NormalizesCurrentDocumentLineEndings()
+    {
+        await WriteBasicSourceAsync();
+        await WriteBasicDocumentAsync("old");
+        await new MarkdownSnippetGenerator().GenerateToFileAsync(CreateRequest());
+        var documentPath = GetDocumentPath();
+        var generated = await File.ReadAllTextAsync(documentPath);
+        await File.WriteAllTextAsync(documentPath, generated.ReplaceLineEndings("\r\n"), Encoding.UTF8);
 
         await new MarkdownSnippetGenerator().VerifyAsync(CreateRequest());
     }
@@ -223,8 +243,9 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
         var missingDocumentError = await Assert.ThrowsAsync<MarkdownSnippetException>(
             () => new MarkdownSnippetGenerator().GenerateAsync(CreateRequest()));
 
-        Assert.Contains("does not exist", missingRootError.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Markdown document", missingDocumentError.Message, StringComparison.Ordinal);
+        Assert.Contains("missing", missingRootError.Message, StringComparison.Ordinal);
+        Assert.Contains("README.md", missingRootError.Message, StringComparison.Ordinal);
+        Assert.Contains("docs/README.md", missingDocumentError.Message.Replace('\\', '/'), StringComparison.Ordinal);
     }
 
     [Fact]
