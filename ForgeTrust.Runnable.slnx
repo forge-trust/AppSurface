@@ -27,6 +27,7 @@
     <Project Path="Dependency/ForgeTrust.Runnable.Dependency.Autofac/ForgeTrust.Runnable.Dependency.Autofac.csproj" />
   </Folder>
   <Folder Name="/Examples/">
+    <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
     <Project Path="examples/web-app/WebAppExample.csproj" />
   </Folder>

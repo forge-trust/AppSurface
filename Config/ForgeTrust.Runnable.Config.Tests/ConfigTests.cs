@@ -340,6 +340,227 @@ public class ConfigTests
     {
     }
 
+    [ConfigKeyRequired]
+    private sealed class RequiredStringConfig : Config<string>
+    {
+    }
+
+    [ConfigKeyRequired]
+    private sealed class DefaultRequiredStringConfig : Config<string>
+    {
+        public override string DefaultValue => "fallback";
+    }
+
+    [ConfigKeyRequired]
+    private sealed class RequiredIntConfig : ConfigStruct<int>
+    {
+    }
+
+    [ConfigKeyRequired]
+    private sealed class DefaultRequiredIntConfig : ConfigStruct<int>
+    {
+        public override int? DefaultValue => 42;
+    }
+
+    [ConfigKeyRequired]
+    private sealed class RequiredAnnotatedOptionsConfig : Config<AnnotatedOptions>
+    {
+    }
+
+    [ConfigKey("Base.Required", root: true)]
+    [ConfigKeyRequired]
+    private class BaseRequiredStringConfig : Config<string>
+    {
+    }
+
+    private sealed class DerivedRequiredStringConfig : BaseRequiredStringConfig
+    {
+    }
+
+    [ConfigValueNotEmpty]
+    private sealed class NotEmptyStringConfig : Config<string>
+    {
+    }
+
+    [ConfigKeyRequired]
+    [ConfigValueNotEmpty]
+    private sealed class RequiredNotEmptyStringConfig : Config<string>
+    {
+    }
+
+    [ConfigValueNotEmpty]
+    private sealed class DefaultInvalidNotEmptyStringConfig : Config<string>
+    {
+        public override string DefaultValue => string.Empty;
+    }
+
+    [ConfigValueMinLength(3)]
+    private sealed class MinLengthStringConfig : Config<string>
+    {
+    }
+
+    [ConfigValueRange(1, 5)]
+    private sealed class RangedIntConfig : ConfigStruct<int>
+    {
+    }
+
+    [ConfigValueRange(1, 5)]
+    private sealed class DefaultInvalidRangedIntConfig : ConfigStruct<int>
+    {
+        public override int? DefaultValue => 6;
+    }
+
+    [ConfigValueRange(1.5, 5.5)]
+    private sealed class RangedDoubleConfig : ConfigStruct<double>
+    {
+    }
+
+    [ConfigValueRange(1, 5)]
+    private sealed class RangedDoubleWithIntegerBoundsConfig : ConfigStruct<double>
+    {
+    }
+
+    [ConfigValueNotEmpty]
+    private sealed class NotEmptyGuidConfig : ConfigStruct<Guid>
+    {
+    }
+
+    [ConfigValueMinLength(3)]
+    private sealed class UnsupportedMinLengthIntConfig : ConfigStruct<int>
+    {
+    }
+
+    [RejectUnlessAllowed]
+    private class BaseInheritedScalarConfig : Config<string>
+    {
+    }
+
+    private sealed class DerivedInheritedScalarConfig : BaseInheritedScalarConfig
+    {
+    }
+
+    [RejectUnlessAllowed]
+    private sealed class CustomScalarAttributeConfig : Config<string>
+    {
+    }
+
+    [CaptureContext]
+    private sealed class ContextAwareScalarConfig : Config<string>
+    {
+    }
+
+    private sealed class HookFailureConfig : Config<string>
+    {
+        protected override IEnumerable<ValidationResult> ValidateValue(
+            string value,
+            ValidationContext validationContext)
+        {
+            yield return new ValidationResult("Hook failure.", ["HookMember"]);
+        }
+    }
+
+    private sealed class HookDefaultFailureConfig : Config<string>
+    {
+        public override string DefaultValue => "fallback";
+
+        protected override IEnumerable<ValidationResult> ValidateValue(
+            string value,
+            ValidationContext validationContext)
+        {
+            if (value == DefaultValue)
+            {
+                yield return new ValidationResult("Default hook failure.");
+            }
+        }
+    }
+
+    private sealed class HookSuccessNoiseConfig : Config<string>
+    {
+        protected override IEnumerable<ValidationResult>? ValidateValue(
+            string value,
+            ValidationContext validationContext) =>
+            [null!, ValidationResult.Success!];
+    }
+
+    private sealed class HookNullEnumerableConfig : Config<string>
+    {
+        protected override IEnumerable<ValidationResult>? ValidateValue(
+            string value,
+            ValidationContext validationContext) =>
+            null;
+    }
+
+    private sealed class HookThrowsConfig : Config<string>
+    {
+        protected override IEnumerable<ValidationResult> ValidateValue(
+            string value,
+            ValidationContext validationContext) =>
+            throw new InvalidOperationException("Hook broke.");
+    }
+
+    [ConfigValueMinLength(5)]
+    private sealed class AttributeAndHookFailureConfig : Config<string>
+    {
+        protected override IEnumerable<ValidationResult> ValidateValue(
+            string value,
+            ValidationContext validationContext)
+        {
+            yield return new ValidationResult("Hook failure.");
+        }
+    }
+
+    [ConfigValueNotEmpty]
+    private sealed class ObjectConfigWithScalarValidation : Config<AnnotatedOptions>
+    {
+        public static bool HookRan { get; set; }
+
+        protected override IEnumerable<ValidationResult> ValidateValue(
+            AnnotatedOptions value,
+            ValidationContext validationContext)
+        {
+            HookRan = true;
+            yield return new ValidationResult("Object hook should not run.");
+        }
+    }
+
+    private sealed class HookStructConfig : ConfigStruct<int>
+    {
+        protected override IEnumerable<ValidationResult> ValidateValue(
+            int value,
+            ValidationContext validationContext)
+        {
+            yield return new ValidationResult("Struct hook failure.");
+        }
+    }
+
+    private sealed class RejectUnlessAllowedAttribute : ConfigValueValidationAttribute
+    {
+        protected override ValidationResult? IsValid(
+            object? value,
+            ValidationContext validationContext) =>
+            value as string == "allowed"
+                ? ValidationResult.Success
+                : new ValidationResult("Only 'allowed' is accepted.");
+    }
+
+    private sealed class CaptureContextAttribute : ConfigValueValidationAttribute
+    {
+        protected override ValidationResult? IsValid(
+            object? value,
+            ValidationContext validationContext)
+        {
+            var valid = validationContext.ObjectInstance is ContextAwareScalarConfig
+                        && validationContext.ObjectType == typeof(ContextAwareScalarConfig)
+                        && validationContext.DisplayName == "App.Settings"
+                        && validationContext.MemberName == null
+                        && validationContext.GetService(typeof(object)) == null;
+
+            return valid
+                ? ValidationResult.Success
+                : new ValidationResult("Unexpected validation context.");
+        }
+    }
+
     [Fact]
     public void Base_DefaultValue_ReturnsNull()
     {
@@ -777,14 +998,448 @@ public class ConfigTests
         Assert.Equal(string.Empty, config.Value);
     }
 
+    [Fact]
+    public void Init_WithConfigValueNotEmptyString_RejectsEmptyAndWhitespace()
+    {
+        var emptyException = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new NotEmptyStringConfig(), string.Empty));
+        var whitespaceException = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new NotEmptyStringConfig(), "   "));
+
+        Assert.Empty(Assert.Single(emptyException.Failures).MemberNames);
+        Assert.Contains("- <value>: The configuration value must not be empty.", emptyException.Message, StringComparison.Ordinal);
+        Assert.Contains("- <value>: The configuration value must not be empty.", whitespaceException.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("   ", whitespaceException.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithConfigValueNotEmptyString_AcceptsNonEmptyValue()
+    {
+        var config = new NotEmptyStringConfig();
+
+        Init(config, "token");
+
+        Assert.True(config.HasValue);
+        Assert.Equal("token", config.Value);
+    }
+
+    [Fact]
+    public void Init_WithConfigValueNotEmptyAndMissingValue_DoesNotRequirePresence()
+    {
+        var config = new NotEmptyStringConfig();
+        var configManager = A.Fake<IConfigManager>();
+        var environmentProvider = A.Fake<IEnvironmentProvider>();
+
+        A.CallTo(() => environmentProvider.Environment).Returns("Production");
+        A.CallTo(() => configManager.GetValue<string>("Production", "App.Settings"))
+            .Returns(null);
+
+        ((IConfig)config).Init(configManager, environmentProvider, "App.Settings");
+
+        Assert.False(config.HasValue);
+        Assert.Null(config.Value);
+    }
+
+    [Fact]
+    public void Init_WithRequiredClassConfigAndMissingValue_ThrowsStructuredValidationException()
+    {
+        var config = new RequiredStringConfig();
+
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(config, null));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Equal("App.Settings", failure.Key);
+        Assert.Equal(typeof(RequiredStringConfig), failure.ConfigType);
+        Assert.Equal(typeof(string), failure.ValueType);
+        Assert.Empty(failure.MemberNames);
+        Assert.Equal("A value is required for this configuration key.", failure.Message);
+        Assert.Contains("- <value>: A value is required for this configuration key.", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Production", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Struct_Init_WithRequiredConfigAndMissingValue_ThrowsStructuredValidationException()
+    {
+        var config = new RequiredIntConfig();
+
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            InitStruct(config, null));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Equal("App.Settings", failure.Key);
+        Assert.Equal(typeof(RequiredIntConfig), failure.ConfigType);
+        Assert.Equal(typeof(int), failure.ValueType);
+        Assert.Empty(failure.MemberNames);
+        Assert.Equal("A value is required for this configuration key.", failure.Message);
+        Assert.Contains("- <value>: A value is required for this configuration key.", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Production", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithRequiredClassConfig_AcceptsProviderValue()
+    {
+        var config = new RequiredStringConfig();
+
+        Init(config, "token");
+
+        Assert.True(config.HasValue);
+        Assert.False(config.IsDefaultValue);
+        Assert.Equal("token", config.Value);
+    }
+
+    [Fact]
+    public void Struct_Init_WithRequiredConfig_AcceptsProviderValueIncludingZero()
+    {
+        var config = new RequiredIntConfig();
+
+        InitStruct(config, 0);
+
+        Assert.True(config.HasValue);
+        Assert.False(config.IsDefaultValue);
+        Assert.Equal(0, config.Value);
+    }
+
+    [Fact]
+    public void Init_WithRequiredClassDefaultValue_SatisfiesPresence()
+    {
+        var config = new DefaultRequiredStringConfig();
+
+        Init(config, null);
+
+        Assert.True(config.HasValue);
+        Assert.True(config.IsDefaultValue);
+        Assert.Equal("fallback", config.Value);
+    }
+
+    [Fact]
+    public void Struct_Init_WithRequiredDefaultValue_SatisfiesPresence()
+    {
+        var config = new DefaultRequiredIntConfig();
+
+        InitStruct(config, null);
+
+        Assert.True(config.HasValue);
+        Assert.True(config.IsDefaultValue);
+        Assert.Equal(42, config.Value);
+    }
+
+    [Fact]
+    public void Init_WithRequiredAndNotEmptyMissingValue_ReportsOnlyPresenceFailure()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new RequiredNotEmptyStringConfig(), null));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Contains("required", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("empty", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Init_WithRequiredAndNotEmptyEmptyValue_ReportsOnlyValueFailure()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new RequiredNotEmptyStringConfig(), string.Empty));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Contains("must not be empty", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("required", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Init_WithInheritedRequiredAttribute_UsesDerivedConfigKeySemantics()
+    {
+        var config = new DerivedRequiredStringConfig();
+        var key = ConfigKeyAttribute.GetKeyPath(config.GetType());
+
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(config, null, key));
+
+        Assert.Equal($"{nameof(ConfigTests)}.{nameof(DerivedRequiredStringConfig)}", key);
+        Assert.Equal($"{nameof(ConfigTests)}.{nameof(DerivedRequiredStringConfig)}", exception.Key);
+        Assert.NotEqual("Base.Required", exception.Key);
+        Assert.Equal(typeof(DerivedRequiredStringConfig), exception.ConfigType);
+        Assert.Equal("A value is required for this configuration key.", Assert.Single(exception.Failures).Message);
+    }
+
+    [Fact]
+    public void Init_WithRequiredObjectConfigAndMissingValue_ThrowsPresenceFailure()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new RequiredAnnotatedOptionsConfig(), null));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Equal(typeof(RequiredAnnotatedOptionsConfig), failure.ConfigType);
+        Assert.Equal(typeof(AnnotatedOptions), failure.ValueType);
+        Assert.Empty(failure.MemberNames);
+        Assert.Equal("A value is required for this configuration key.", failure.Message);
+        Assert.Contains("- <object>: A value is required for this configuration key.", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithRequiredObjectConfigAndInvalidValue_RunsDataAnnotations()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(
+                new RequiredAnnotatedOptionsConfig(),
+                new AnnotatedOptions
+                {
+                    Name = null,
+                    RetryCount = 0
+                }));
+
+        Assert.DoesNotContain(
+            exception.Failures,
+            failure => failure.Message.Contains("required for this configuration key", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            exception.Failures,
+            failure => failure.MemberNames.SequenceEqual(["Name"])
+                       && failure.Message.Contains("required", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Init_WithScalarClassDefaultValue_ValidatesDefault()
+    {
+        var config = new DefaultInvalidNotEmptyStringConfig();
+
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(config, null));
+
+        Assert.True(config.HasValue);
+        Assert.True(config.IsDefaultValue);
+        Assert.Equal(string.Empty, config.Value);
+        Assert.Contains("must not be empty", Assert.Single(exception.Failures).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithScalarClassDefaultValue_RunsValidateValueHook()
+    {
+        var config = new HookDefaultFailureConfig();
+
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(config, null));
+
+        Assert.True(config.HasValue);
+        Assert.True(config.IsDefaultValue);
+        Assert.Equal("fallback", config.Value);
+        Assert.Contains("Default hook failure.", Assert.Single(exception.Failures).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithConfigValueMinLength_RejectsShortString()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new MinLengthStringConfig(), "ab"));
+
+        Assert.Contains("at least 3", Assert.Single(exception.Failures).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Struct_Init_WithConfigValueRange_RejectsOutOfRangeIntAndDouble()
+    {
+        var intException = Assert.Throws<ConfigurationValidationException>(() =>
+            InitStruct(new RangedIntConfig(), 6));
+        var doubleException = Assert.Throws<ConfigurationValidationException>(() =>
+            InitStruct(new RangedDoubleConfig(), 6.5));
+
+        Assert.Contains("between 1 and 5", Assert.Single(intException.Failures).Message, StringComparison.Ordinal);
+        Assert.Contains("between 1.5 and 5.5", Assert.Single(doubleException.Failures).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Struct_Init_WithScalarDefaultValue_ValidatesDefault()
+    {
+        var config = new DefaultInvalidRangedIntConfig();
+
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            InitStruct(config, null));
+
+        Assert.True(config.HasValue);
+        Assert.True(config.IsDefaultValue);
+        Assert.Equal(6, config.Value);
+        Assert.Contains("between 1 and 5", Assert.Single(exception.Failures).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Struct_Init_WithConfigValueRange_AcceptsValidIntAndDouble()
+    {
+        var intConfig = new RangedIntConfig();
+        var doubleConfig = new RangedDoubleConfig();
+
+        InitStruct(intConfig, 3);
+        InitStruct(doubleConfig, 3.5);
+
+        Assert.Equal(3, intConfig.Value);
+        Assert.Equal(3.5, doubleConfig.Value);
+    }
+
+    [Fact]
+    public void Struct_Init_WithConfigValueRange_AcceptsDoubleWithIntegerLiteralBounds()
+    {
+        var config = new RangedDoubleWithIntegerBoundsConfig();
+
+        InitStruct(config, 3.5);
+
+        Assert.Equal(3.5, config.Value);
+    }
+
+    [Fact]
+    public void Struct_Init_WithConfigValueNotEmptyGuid_RejectsEmptyGuid()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            InitStruct(new NotEmptyGuidConfig(), Guid.Empty));
+
+        Assert.Contains("must not be empty", Assert.Single(exception.Failures).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithUnsupportedBuiltInType_ThrowsStructuredValidationException()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            InitStruct(new UnsupportedMinLengthIntConfig(), 42));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Empty(failure.MemberNames);
+        Assert.Contains("ConfigValueMinLengthAttribute supports String values", failure.Message, StringComparison.Ordinal);
+        Assert.IsType<ConfigurationValidationException>(exception);
+    }
+
+    [Fact]
+    public void Init_WithInheritedConfigValueValidationAttribute_AppliesRule()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new DerivedInheritedScalarConfig(), "denied"));
+
+        Assert.Contains("Only 'allowed' is accepted.", Assert.Single(exception.Failures).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithCustomConfigValueValidationAttribute_AppliesRule()
+    {
+        var config = new CustomScalarAttributeConfig();
+
+        Init(config, "allowed");
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new CustomScalarAttributeConfig(), "denied"));
+
+        Assert.Equal("allowed", config.Value);
+        Assert.Contains("Only 'allowed' is accepted.", Assert.Single(exception.Failures).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithContextAwareAttribute_ReceivesGuaranteedValidationContextValues()
+    {
+        var config = new ContextAwareScalarConfig();
+
+        Init(config, "value");
+
+        Assert.Equal("value", config.Value);
+    }
+
+    [Fact]
+    public void Init_WithValidateValueFailure_ThrowsStructuredValidationException()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new HookFailureConfig(), "value"));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Equal(["HookMember"], failure.MemberNames);
+        Assert.Contains("Hook failure.", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithValidateValueSuccessNoise_IgnoresNullSuccessAndNullEnumerable()
+    {
+        Init(new HookSuccessNoiseConfig(), "value");
+        Init(new HookNullEnumerableConfig(), "value");
+    }
+
+    [Fact]
+    public void Init_WithValidateValueException_BubblesOriginalException()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            Init(new HookThrowsConfig(), "value"));
+
+        Assert.Equal("Hook broke.", exception.Message);
+    }
+
+    [Fact]
+    public void Init_WithAttributeAndHookFailures_CollectsAttributeFailuresFirst()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new AttributeAndHookFailureConfig(), "abc"));
+
+        Assert.Equal(2, exception.Failures.Count);
+        Assert.Contains("at least 5", exception.Failures[0].Message, StringComparison.Ordinal);
+        Assert.Equal("Hook failure.", exception.Failures[1].Message);
+    }
+
+    [Fact]
+    public void Struct_Init_WithValidateValueHook_RunsWithoutVirtualInit()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            InitStruct(new HookStructConfig(), 3));
+
+        Assert.Contains("Struct hook failure.", Assert.Single(exception.Failures).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithObjectConfig_IgnoresWrapperScalarAttributesAndHook()
+    {
+        ObjectConfigWithScalarValidation.HookRan = false;
+        var config = new ObjectConfigWithScalarValidation();
+
+        Init(
+            config,
+            new AnnotatedOptions
+            {
+                Name = "payments",
+                RetryCount = 3
+            });
+
+        Assert.False(ObjectConfigWithScalarValidation.HookRan);
+        Assert.True(config.HasValue);
+    }
+
+    [Fact]
+    public void Init_WithScalarFailure_UsesValueFailureLabelWithoutChangingObjectLabel()
+    {
+        var scalarException = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new NotEmptyStringConfig(), string.Empty));
+        var objectException = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new ValidatableOptionsConfig(), new ValidatableOptions { Invalid = true }));
+
+        Assert.Contains("- <value>:", scalarException.Message, StringComparison.Ordinal);
+        Assert.Contains("- <object>:", objectException.Message, StringComparison.Ordinal);
+    }
+
     private static void Init<T>(Config<T> config, T? value)
+        where T : class
+    {
+        Init(config, value, "App.Settings");
+    }
+
+    private static void Init<T>(Config<T> config, T? value, string key)
         where T : class
     {
         var configManager = A.Fake<IConfigManager>();
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<T>("Production", "App.Settings"))
+        A.CallTo(() => configManager.GetValue<T>("Production", key))
+            .Returns(value);
+
+        ((IConfig)config).Init(configManager, environmentProvider, key);
+    }
+
+    private static void InitStruct<T>(ConfigStruct<T> config, T? value)
+        where T : struct
+    {
+        var configManager = A.Fake<IConfigManager>();
+        var environmentProvider = A.Fake<IEnvironmentProvider>();
+
+        A.CallTo(() => environmentProvider.Environment).Returns("Production");
+        A.CallTo(() => configManager.GetValue<T?>("Production", "App.Settings"))
             .Returns(value);
 
         ((IConfig)config).Init(configManager, environmentProvider, "App.Settings");

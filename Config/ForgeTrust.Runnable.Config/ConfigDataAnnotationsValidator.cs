@@ -38,7 +38,7 @@ internal static class ConfigDataAnnotationsValidator
         Type valueType,
         object? value)
     {
-        if (value == null || IsScalar(value.GetType()))
+        if (value == null || ConfigScalarTypes.IsScalar(value.GetType()))
         {
             return;
         }
@@ -88,7 +88,7 @@ internal static class ConfigDataAnnotationsValidator
 
             foreach (var result in results)
             {
-                failures.Add(ToFailure(key, configType, valueType, path, result));
+                failures.Add(ConfigValidationFailureFactory.FromValidationResult(key, configType, valueType, path, result));
             }
 
             ValidateFieldAnnotations(key, configType, valueType, value, path, failures);
@@ -142,7 +142,13 @@ internal static class ConfigDataAnnotationsValidator
 
             foreach (var result in results)
             {
-                failures.Add(ToFailure(key, configType, valueType, parentPath, result, field.Name));
+                failures.Add(ConfigValidationFailureFactory.FromValidationResult(
+                    key,
+                    configType,
+                    valueType,
+                    parentPath,
+                    result,
+                    field.Name));
             }
         }
     }
@@ -247,7 +253,7 @@ internal static class ConfigDataAnnotationsValidator
             return;
         }
 
-        if (objectMembersAttribute != null && !IsScalar(memberValue.GetType()))
+        if (objectMembersAttribute != null && !ConfigScalarTypes.IsScalar(memberValue.GetType()))
         {
             ValidateNode(
                 key,
@@ -264,7 +270,7 @@ internal static class ConfigDataAnnotationsValidator
             var index = 0;
             foreach (var item in enumerable)
             {
-                if (item != null && !IsScalar(item.GetType()))
+                if (item != null && !ConfigScalarTypes.IsScalar(item.GetType()))
                 {
                     ValidateNode(
                         key,
@@ -279,38 +285,6 @@ internal static class ConfigDataAnnotationsValidator
                 index++;
             }
         }
-    }
-
-    private static ConfigurationValidationFailure ToFailure(
-        string key,
-        Type configType,
-        Type valueType,
-        string? path,
-        ValidationResult result,
-        string? defaultMemberName = null)
-    {
-        var resultMemberNames = result.MemberNames.ToList();
-        if (resultMemberNames.Count == 0 && defaultMemberName != null)
-        {
-            resultMemberNames.Add(defaultMemberName);
-        }
-
-        var memberNames = resultMemberNames
-            .Select(memberName => PrefixMemberName(path, memberName))
-            .Where(memberName => !string.IsNullOrWhiteSpace(memberName))
-            .ToList();
-
-        if (memberNames.Count == 0 && path != null)
-        {
-            memberNames.Add(path);
-        }
-
-        return new ConfigurationValidationFailure(
-            key,
-            configType,
-            valueType,
-            memberNames,
-            result.ErrorMessage ?? "The configuration value is invalid.");
     }
 
     private static ConfigurationValidationFailure CreateUnsupportedValidatorFailure(
@@ -348,33 +322,6 @@ internal static class ConfigDataAnnotationsValidator
         string.IsNullOrEmpty(prefix)
             ? memberName
             : $"{prefix}.{memberName}";
-
-    private static string PrefixMemberName(string? path, string memberName)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return memberName;
-        }
-
-        return string.IsNullOrWhiteSpace(memberName)
-            ? path
-            : $"{path}.{memberName}";
-    }
-
-    private static bool IsScalar(Type type)
-    {
-        type = Nullable.GetUnderlyingType(type) ?? type;
-
-        return type.IsPrimitive
-               || type.IsEnum
-               || type == typeof(string)
-               || type == typeof(decimal)
-               || type == typeof(DateTime)
-               || type == typeof(DateTimeOffset)
-               || type == typeof(TimeSpan)
-               || type == typeof(Guid)
-               || type == typeof(Uri);
-    }
 
     private sealed class ReferenceEqualityComparer : IEqualityComparer<object>
     {

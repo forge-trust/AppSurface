@@ -68,7 +68,7 @@ public sealed class ConfigurationValidationException : Exception
         IReadOnlyList<ConfigurationValidationFailure> failures)
     {
         var orderedFailures = failures
-            .OrderBy(GetMemberLabel, StringComparer.Ordinal)
+            .OrderBy(failure => GetMemberLabel(failure, valueType), StringComparer.Ordinal)
             .ThenBy(failure => failure.Message, StringComparer.Ordinal)
             .ToList();
 
@@ -87,7 +87,7 @@ public sealed class ConfigurationValidationException : Exception
         {
             builder.Append(Environment.NewLine)
                 .Append("- ")
-                .Append(GetMemberLabel(failure))
+                .Append(GetMemberLabel(failure, valueType))
                 .Append(": ")
                 .Append(failure.Message);
         }
@@ -95,11 +95,11 @@ public sealed class ConfigurationValidationException : Exception
         return builder.ToString();
     }
 
-    private static string GetMemberLabel(ConfigurationValidationFailure failure)
+    private static string GetMemberLabel(ConfigurationValidationFailure failure, Type valueType)
     {
         if (failure.MemberNames.Count == 0)
         {
-            return "<object>";
+            return ConfigScalarTypes.IsScalar(valueType) ? "<value>" : "<object>";
         }
 
         return string.Join(

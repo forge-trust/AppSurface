@@ -1501,6 +1501,26 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task DetailsView_ShouldRenderNonCSharpTitleWithMobileWrappingClasses()
+    {
+        var doc = new DocNode(
+            "ForgeTrust.Runnable.Web.RazorDocs",
+            "Web/ForgeTrust.Runnable.Web.RazorDocs/README.md",
+            "<p>Guide body</p>");
+
+        var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        var title = document.QuerySelector("h1");
+
+        Assert.NotNull(title);
+        Assert.Equal("ForgeTrust.Runnable.Web.RazorDocs", title!.TextContent.Trim());
+        Assert.Contains("max-w-full", title.ClassList);
+        Assert.Contains("break-words", title.ClassList);
+        Assert.Contains("leading-tight", title.ClassList);
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldFallbackToPathBreadcrumbLabels_WhenMetadataTargetsCannotBeVerified()
     {
         var doc = new DocNode(

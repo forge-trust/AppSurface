@@ -27,6 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../ForgeTrust.Runnable.Core/ForgeTrust.Runnable.Core.csproj" />
     <ProjectReference Include="../ForgeTrust.Runnable.Config/ForgeTrust.Runnable.Config.csproj" />
   </ItemGroup>
 

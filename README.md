@@ -126,6 +126,8 @@ dotnet run --project examples/web-app
 dotnet run --project examples/razorwire-mvc/RazorWireWebExample.csproj
 ```
 
+For the intentional validation-failure shape, run `dotnet run --project examples/config-validation`.
+
 The RazorWire MVC example includes a failed-form UX page at `/Reactivity/FormFailures` that shows server-handled validation, development anti-forgery diagnostics, default fallback rendering, and consumer styling hooks.
 
 ## Release notes and upgrade policy
@@ -156,6 +158,8 @@ how to use this project.
   definitions.
 - [Web app example](examples/web-app) – shows a minimal ASP.NET Core app that
   composes middleware and endpoints from modules.
+- [Config validation example](examples/config-validation) – shows scalar
+  validation on a strongly typed config wrapper and the startup failure shape.
 
 ## License
 

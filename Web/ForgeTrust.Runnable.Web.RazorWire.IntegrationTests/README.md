@@ -21,6 +21,21 @@ It also includes a RazorDocs browser regression test that runs against `Web/Forg
   - sidebar search works from `/docs`,
   - navigating to `/docs/search` via Turbo keeps both advanced search and sidebar search functional.
 
+## RazorDocs standalone fixture
+
+The RazorDocs Playwright fixture hosts `ForgeTrust.Runnable.Web.RazorDocs.Standalone` in-process through `RazorDocsStandaloneHost.CreateBuilder`.
+It still binds Kestrel to a real loopback HTTP listener, but it does not shell out to `dotnet run` and does not depend on previously built standalone `bin` output.
+
+The fixture passes the same runtime settings that the standalone smoke path needs:
+
+- `RazorDocs:Mode=Source`
+- `RazorDocs:Source:RepositoryRoot=<repo root>`
+- contributor source/edit URL templates for the current repository
+- `RazorDocs:Contributor:LastUpdatedMode=Git`
+- development environment settings without mutating process-wide environment variables
+
+When adding RazorDocs browser coverage, use the shared fixture or `RazorDocsInProcessHost`. Avoid starting the standalone app as a child process from tests; that can rebuild unrelated projects during fixture startup and can hide stale output bugs during focused local test runs.
+
 ## Run
 
 ```bash
