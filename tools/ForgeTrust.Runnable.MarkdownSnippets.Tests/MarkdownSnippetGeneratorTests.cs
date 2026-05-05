@@ -349,7 +349,7 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
                 """,
             _ => """
                 // docs:snippet sample:start
-                
+
                 // docs:snippet sample:end
                 """
         };
