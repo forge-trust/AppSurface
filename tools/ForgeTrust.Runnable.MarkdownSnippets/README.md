@@ -51,6 +51,11 @@ Supported directive attributes are:
 
 Unknown attributes, duplicate attributes, rooted paths, and paths that escape the repository root fail verification.
 
+When an opening directive is indented or quoted, generated fence, content, and
+closing directive lines keep the same Markdown line prefix. Use that form when
+a snippet block belongs inside a nested Markdown structure such as a list item
+or blockquote.
+
 ## Source Markers
 
 Sources own snippets with matching start and end markers:

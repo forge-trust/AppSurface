@@ -103,10 +103,15 @@ public sealed class RazorWireReadmeContractTests
         Directory.CreateDirectory(Path.Combine(repoRoot, "docs"));
         Directory.CreateDirectory(outsideRoot);
         File.WriteAllText(Path.Combine(outsideRoot, "outside.md"), "# Outside", Encoding.UTF8);
-        Directory.CreateSymbolicLink(Path.Combine(repoRoot, "docs", "linked"), outsideRoot);
+        var linkPath = Path.Combine(repoRoot, "docs", "linked");
 
         try
         {
+            if (!TryCreateDirectorySymlink(linkPath, outsideRoot))
+            {
+                return;
+            }
+
             var linkedPath = Path.Combine(repoRoot, "docs", "linked", "outside.md");
 
             Assert.False(IsUnderRepositoryRoot(repoRoot, linkedPath));
@@ -228,6 +233,27 @@ public sealed class RazorWireReadmeContractTests
         }
 
         return false;
+    }
+
+    private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static HashSet<string> ExtractMarkdownHeadingAnchors(string markdown)

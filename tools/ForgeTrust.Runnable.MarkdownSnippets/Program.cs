@@ -392,19 +392,19 @@ internal static partial class MarkdownSnippetRewriter
         for (var index = 0; index < lines.Length; index++)
         {
             var line = lines[index];
-            var trimmed = line.Trim();
+            var structuralLine = TrimMarkdownLinePrefix(line);
 
-            var codeFence = MarkdownCodeFence.TryParse(trimmed);
+            var codeFence = MarkdownCodeFence.TryParse(structuralLine);
             if (activeCodeFence is null && codeFence is not null)
             {
                 activeCodeFence = codeFence;
             }
-            else if (activeCodeFence is not null && activeCodeFence.Value.IsClosedBy(trimmed))
+            else if (activeCodeFence is not null && activeCodeFence.Value.IsClosedBy(structuralLine))
             {
                 activeCodeFence = null;
             }
 
-            if (activeCodeFence is null && trimmed.StartsWith(OpeningPrefix, StringComparison.Ordinal))
+            if (activeCodeFence is null && IsOpeningDirectiveLine(line))
             {
                 var block = ParseBlock(request, lines, ref index);
                 builder.Append(block.Render());
@@ -437,8 +437,10 @@ internal static partial class MarkdownSnippetRewriter
     /// </exception>
     private static MarkdownSnippetBlock ParseBlock(MarkdownSnippetRequest request, string[] lines, ref int index)
     {
-        var openingLine = lines[index].Trim();
-        var attributes = ParseAttributes(openingLine, request.GetRepositoryRelativeDocumentPath(), index + 1);
+        var openingLine = lines[index].TrimEnd();
+        var linePrefix = GetLinePrefix(openingLine);
+        var openingDirective = openingLine[linePrefix.Length..].Trim();
+        var attributes = ParseAttributes(openingDirective, request.GetRepositoryRelativeDocumentPath(), index + 1);
         var id = ReadRequiredAttribute(attributes, "id", request, index + 1);
         var file = ReadRequiredAttribute(attributes, "file", request, index + 1);
         var marker = ReadRequiredAttribute(attributes, "marker", request, index + 1);
@@ -459,7 +461,47 @@ internal static partial class MarkdownSnippetRewriter
 
         var closeIndex = FindClosingLine(lines, index + 1, request, id);
         index = closeIndex;
-        return new MarkdownSnippetBlock(openingLine, language, content);
+        return new MarkdownSnippetBlock(openingLine, linePrefix, language, content);
+    }
+
+    private static bool IsOpeningDirectiveLine(string line)
+    {
+        return TrimMarkdownLinePrefix(line).StartsWith(OpeningPrefix, StringComparison.Ordinal);
+    }
+
+    private static string GetLinePrefix(string line)
+    {
+        return line[..GetMarkdownLinePrefixLength(line)];
+    }
+
+    private static string TrimMarkdownLinePrefix(string line)
+    {
+        return line[GetMarkdownLinePrefixLength(line)..].Trim();
+    }
+
+    private static int GetMarkdownLinePrefixLength(string line)
+    {
+        var index = 0;
+        while (index < line.Length)
+        {
+            while (index < line.Length && (line[index] == ' ' || line[index] == '\t'))
+            {
+                index++;
+            }
+
+            if (index >= line.Length || line[index] != '>')
+            {
+                return index;
+            }
+
+            index++;
+            if (index < line.Length && line[index] == ' ')
+            {
+                index++;
+            }
+        }
+
+        return index;
     }
 
     /// <summary>
@@ -632,18 +674,18 @@ internal static partial class MarkdownSnippetRewriter
 
         for (var index = startIndex; index < lines.Length; index++)
         {
-            var trimmed = lines[index].Trim();
-            var codeFence = MarkdownCodeFence.TryParse(trimmed);
+            var structuralLine = TrimMarkdownLinePrefix(lines[index]);
+            var codeFence = MarkdownCodeFence.TryParse(structuralLine);
             if (activeCodeFence is null && codeFence is not null)
             {
                 activeCodeFence = codeFence;
             }
-            else if (activeCodeFence is not null && activeCodeFence.Value.IsClosedBy(trimmed))
+            else if (activeCodeFence is not null && activeCodeFence.Value.IsClosedBy(structuralLine))
             {
                 activeCodeFence = null;
             }
 
-            if (activeCodeFence is null && string.Equals(trimmed, ClosingLine, StringComparison.Ordinal))
+            if (activeCodeFence is null && string.Equals(structuralLine, ClosingLine, StringComparison.Ordinal))
             {
                 return index;
             }
@@ -718,7 +760,7 @@ internal readonly record struct MarkdownCodeFence(char Character, int Length)
     }
 }
 
-internal sealed record MarkdownSnippetBlock(string OpeningLine, string Language, string Content)
+internal sealed record MarkdownSnippetBlock(string OpeningLine, string LinePrefix, string Language, string Content)
 {
     /// <summary>
     /// Renders a managed block using an automatically sized backtick fence.
@@ -735,16 +777,29 @@ internal sealed record MarkdownSnippetBlock(string OpeningLine, string Language,
         var builder = new StringBuilder();
         builder.Append(OpeningLine);
         builder.Append('\n');
+        builder.Append(LinePrefix);
         builder.Append(fence);
         builder.Append(Language);
         builder.Append('\n');
-        builder.Append(Content);
-        builder.Append('\n');
+        AppendPrefixedContent(builder, LinePrefix, Content);
         builder.Append(fence);
         builder.Append('\n');
+        builder.Append(LinePrefix);
         builder.Append("<!-- /runnable:snippet -->");
         builder.Append('\n');
         return builder.ToString();
+    }
+
+    private static void AppendPrefixedContent(StringBuilder builder, string linePrefix, string content)
+    {
+        foreach (var line in content.Split('\n'))
+        {
+            builder.Append(linePrefix);
+            builder.Append(line);
+            builder.Append('\n');
+        }
+
+        builder.Append(linePrefix);
     }
 }
 

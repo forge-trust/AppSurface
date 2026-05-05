@@ -50,6 +50,64 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateAsync_PreservesIndentedManagedBlock()
+    {
+        await WriteBasicSourceAsync();
+        await WriteDocumentAsync(
+            """
+            # Sample
+
+            1. Nested snippet:
+
+                <!-- runnable:snippet id="sample" file="src/sample.cs" marker="sample" lang="csharp" -->
+                ```csharp
+                old
+                ```
+                <!-- /runnable:snippet -->
+            """);
+
+        var generated = await new MarkdownSnippetGenerator().GenerateAsync(CreateRequest());
+
+        Assert.Contains(
+            """
+                <!-- runnable:snippet id="sample" file="src/sample.cs" marker="sample" lang="csharp" -->
+                ```csharp
+                Console.WriteLine("hello");
+                ```
+                <!-- /runnable:snippet -->
+            """,
+            generated,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_PreservesBlockquoteManagedBlock()
+    {
+        await WriteBasicSourceAsync();
+        await WriteDocumentAsync(
+            """
+            > <!-- runnable:snippet id="sample" file="src/sample.cs" marker="sample" lang="csharp" -->
+            > ```csharp
+            > old
+            > ```
+            > <!-- /runnable:snippet -->
+            """);
+
+        var generated = await new MarkdownSnippetGenerator().GenerateAsync(CreateRequest());
+
+        Assert.Contains(
+            """
+            > <!-- runnable:snippet id="sample" file="src/sample.cs" marker="sample" lang="csharp" -->
+            > ```csharp
+            > Console.WriteLine("hello");
+            > ```
+            > <!-- /runnable:snippet -->
+            """,
+            generated,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GenerateToFileAsync_UpdatesDocument()
     {
         await WriteBasicSourceAsync();
@@ -445,19 +503,23 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
             Encoding.UTF8);
 
         var linkPath = Path.Combine(_repositoryRoot, "linked");
-        Directory.CreateSymbolicLink(linkPath, outsideRoot);
-        await WriteBasicDocumentAsync("old");
-        await WriteDocumentAsync(
-            """
-            <!-- runnable:snippet id="sample" file="linked/sample.cs" marker="sample" lang="csharp" -->
-            ```csharp
-            old
-            ```
-            <!-- /runnable:snippet -->
-            """);
-
         try
         {
+            if (!TryCreateDirectorySymlink(linkPath, outsideRoot))
+            {
+                return;
+            }
+
+            await WriteBasicDocumentAsync("old");
+            await WriteDocumentAsync(
+                """
+                <!-- runnable:snippet id="sample" file="linked/sample.cs" marker="sample" lang="csharp" -->
+                ```csharp
+                old
+                ```
+                <!-- /runnable:snippet -->
+                """);
+
             var error = await Assert.ThrowsAsync<MarkdownSnippetException>(
                 () => new MarkdownSnippetGenerator().GenerateAsync(CreateRequest()));
 
@@ -519,6 +581,59 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
             () => new MarkdownSnippetGenerator().GenerateAsync(CreateRequest()));
 
         Assert.Contains(expectedMessage, error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ExtractsRazorCommentMarkers()
+    {
+        await WriteFileAsync(
+            "Views/Shared/_Layout.cshtml",
+            """
+            <body>
+                @* docs:snippet scripts:start *@
+                <rw:scripts />
+                @* docs:snippet scripts:end *@
+            </body>
+            """);
+        await WriteDocumentAsync(
+            """
+            <!-- runnable:snippet id="scripts" file="Views/Shared/_Layout.cshtml" marker="scripts" lang="cshtml" -->
+            ```cshtml
+            old
+            ```
+            <!-- /runnable:snippet -->
+            """);
+
+        var generated = await new MarkdownSnippetGenerator().GenerateAsync(CreateRequest());
+
+        Assert.Contains("<rw:scripts />", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_RejectsMalformedRazorCommentMarkers()
+    {
+        await WriteFileAsync(
+            "Views/Shared/_Layout.cshtml",
+            """
+            <body>
+                @* docs:snippet scripts:start *@
+                <rw:scripts />
+                @* docs:snippet scripts:end *
+            </body>
+            """);
+        await WriteDocumentAsync(
+            """
+            <!-- runnable:snippet id="scripts" file="Views/Shared/_Layout.cshtml" marker="scripts" lang="cshtml" -->
+            ```cshtml
+            old
+            ```
+            <!-- /runnable:snippet -->
+            """);
+
+        var error = await Assert.ThrowsAsync<MarkdownSnippetException>(
+            () => new MarkdownSnippetGenerator().GenerateAsync(CreateRequest()));
+
+        Assert.Contains("scripts:end", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -707,5 +822,26 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
         var fullPath = Path.Combine(_repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
+    }
+
+    private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 }

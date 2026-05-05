@@ -875,8 +875,9 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
 
     private Process StartExampleApp(string baseUrl)
     {
+        const string readmeProjectPath = "examples/razorwire-mvc/RazorWireWebExample.csproj";
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var projectPath = Path.Combine(repoRoot, "examples", "razorwire-mvc", "RazorWireWebExample.csproj");
+        var projectPath = Path.Combine(repoRoot, readmeProjectPath.Replace('/', Path.DirectorySeparatorChar));
 
         if (!File.Exists(projectPath))
         {
@@ -886,7 +887,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"run --project \"{projectPath}\" --no-launch-profile",
+            Arguments = $"run --project {readmeProjectPath}",
             WorkingDirectory = repoRoot,
             UseShellExecute = false,
             RedirectStandardOutput = true,
