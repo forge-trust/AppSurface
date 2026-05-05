@@ -340,8 +340,51 @@ public class ConfigTests
     {
     }
 
+    [ConfigKeyRequired]
+    private sealed class RequiredStringConfig : Config<string>
+    {
+    }
+
+    [ConfigKeyRequired]
+    private sealed class DefaultRequiredStringConfig : Config<string>
+    {
+        public override string DefaultValue => "fallback";
+    }
+
+    [ConfigKeyRequired]
+    private sealed class RequiredIntConfig : ConfigStruct<int>
+    {
+    }
+
+    [ConfigKeyRequired]
+    private sealed class DefaultRequiredIntConfig : ConfigStruct<int>
+    {
+        public override int? DefaultValue => 42;
+    }
+
+    [ConfigKeyRequired]
+    private sealed class RequiredAnnotatedOptionsConfig : Config<AnnotatedOptions>
+    {
+    }
+
+    [ConfigKey("Base.Required", root: true)]
+    [ConfigKeyRequired]
+    private class BaseRequiredStringConfig : Config<string>
+    {
+    }
+
+    private sealed class DerivedRequiredStringConfig : BaseRequiredStringConfig
+    {
+    }
+
     [ConfigValueNotEmpty]
     private sealed class NotEmptyStringConfig : Config<string>
+    {
+    }
+
+    [ConfigKeyRequired]
+    [ConfigValueNotEmpty]
+    private sealed class RequiredNotEmptyStringConfig : Config<string>
     {
     }
 
@@ -998,6 +1041,163 @@ public class ConfigTests
     }
 
     [Fact]
+    public void Init_WithRequiredClassConfigAndMissingValue_ThrowsStructuredValidationException()
+    {
+        var config = new RequiredStringConfig();
+
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(config, null));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Equal("App.Settings", failure.Key);
+        Assert.Equal(typeof(RequiredStringConfig), failure.ConfigType);
+        Assert.Equal(typeof(string), failure.ValueType);
+        Assert.Empty(failure.MemberNames);
+        Assert.Equal("A value is required for this configuration key.", failure.Message);
+        Assert.Contains("- <value>: A value is required for this configuration key.", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Production", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Struct_Init_WithRequiredConfigAndMissingValue_ThrowsStructuredValidationException()
+    {
+        var config = new RequiredIntConfig();
+
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            InitStruct(config, null));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Equal("App.Settings", failure.Key);
+        Assert.Equal(typeof(RequiredIntConfig), failure.ConfigType);
+        Assert.Equal(typeof(int), failure.ValueType);
+        Assert.Empty(failure.MemberNames);
+        Assert.Equal("A value is required for this configuration key.", failure.Message);
+        Assert.Contains("- <value>: A value is required for this configuration key.", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Production", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithRequiredClassConfig_AcceptsProviderValue()
+    {
+        var config = new RequiredStringConfig();
+
+        Init(config, "token");
+
+        Assert.True(config.HasValue);
+        Assert.False(config.IsDefaultValue);
+        Assert.Equal("token", config.Value);
+    }
+
+    [Fact]
+    public void Struct_Init_WithRequiredConfig_AcceptsProviderValueIncludingZero()
+    {
+        var config = new RequiredIntConfig();
+
+        InitStruct(config, 0);
+
+        Assert.True(config.HasValue);
+        Assert.False(config.IsDefaultValue);
+        Assert.Equal(0, config.Value);
+    }
+
+    [Fact]
+    public void Init_WithRequiredClassDefaultValue_SatisfiesPresence()
+    {
+        var config = new DefaultRequiredStringConfig();
+
+        Init(config, null);
+
+        Assert.True(config.HasValue);
+        Assert.True(config.IsDefaultValue);
+        Assert.Equal("fallback", config.Value);
+    }
+
+    [Fact]
+    public void Struct_Init_WithRequiredDefaultValue_SatisfiesPresence()
+    {
+        var config = new DefaultRequiredIntConfig();
+
+        InitStruct(config, null);
+
+        Assert.True(config.HasValue);
+        Assert.True(config.IsDefaultValue);
+        Assert.Equal(42, config.Value);
+    }
+
+    [Fact]
+    public void Init_WithRequiredAndNotEmptyMissingValue_ReportsOnlyPresenceFailure()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new RequiredNotEmptyStringConfig(), null));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Contains("required", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("empty", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Init_WithRequiredAndNotEmptyEmptyValue_ReportsOnlyValueFailure()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new RequiredNotEmptyStringConfig(), string.Empty));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Contains("must not be empty", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("required", failure.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Init_WithInheritedRequiredAttribute_UsesDerivedConfigKeySemantics()
+    {
+        var config = new DerivedRequiredStringConfig();
+        var key = ConfigKeyAttribute.GetKeyPath(config.GetType());
+
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(config, null, key));
+
+        Assert.Equal($"{nameof(ConfigTests)}.{nameof(DerivedRequiredStringConfig)}", key);
+        Assert.Equal($"{nameof(ConfigTests)}.{nameof(DerivedRequiredStringConfig)}", exception.Key);
+        Assert.NotEqual("Base.Required", exception.Key);
+        Assert.Equal(typeof(DerivedRequiredStringConfig), exception.ConfigType);
+        Assert.Equal("A value is required for this configuration key.", Assert.Single(exception.Failures).Message);
+    }
+
+    [Fact]
+    public void Init_WithRequiredObjectConfigAndMissingValue_ThrowsPresenceFailure()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(new RequiredAnnotatedOptionsConfig(), null));
+
+        var failure = Assert.Single(exception.Failures);
+        Assert.Equal(typeof(RequiredAnnotatedOptionsConfig), failure.ConfigType);
+        Assert.Equal(typeof(AnnotatedOptions), failure.ValueType);
+        Assert.Empty(failure.MemberNames);
+        Assert.Equal("A value is required for this configuration key.", failure.Message);
+        Assert.Contains("- <object>: A value is required for this configuration key.", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Init_WithRequiredObjectConfigAndInvalidValue_RunsDataAnnotations()
+    {
+        var exception = Assert.Throws<ConfigurationValidationException>(() =>
+            Init(
+                new RequiredAnnotatedOptionsConfig(),
+                new AnnotatedOptions
+                {
+                    Name = null,
+                    RetryCount = 0
+                }));
+
+        Assert.DoesNotContain(
+            exception.Failures,
+            failure => failure.Message.Contains("required for this configuration key", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            exception.Failures,
+            failure => failure.MemberNames.SequenceEqual(["Name"])
+                       && failure.Message.Contains("required", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Init_WithScalarClassDefaultValue_ValidatesDefault()
     {
         var config = new DefaultInvalidNotEmptyStringConfig();
@@ -1216,14 +1416,20 @@ public class ConfigTests
     private static void Init<T>(Config<T> config, T? value)
         where T : class
     {
+        Init(config, value, "App.Settings");
+    }
+
+    private static void Init<T>(Config<T> config, T? value, string key)
+        where T : class
+    {
         var configManager = A.Fake<IConfigManager>();
         var environmentProvider = A.Fake<IEnvironmentProvider>();
 
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => configManager.GetValue<T>("Production", "App.Settings"))
+        A.CallTo(() => configManager.GetValue<T>("Production", key))
             .Returns(value);
 
-        ((IConfig)config).Init(configManager, environmentProvider, "App.Settings");
+        ((IConfig)config).Init(configManager, environmentProvider, key);
     }
 
     private static void InitStruct<T>(ConfigStruct<T> config, T? value)
