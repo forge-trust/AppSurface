@@ -296,7 +296,7 @@ body {
 }
 
 .docs-outline-toggle {
-    display: flex;
+    display: none;
     width: 100%;
     min-height: 2.75rem;
     align-items: center;
@@ -312,6 +312,10 @@ body {
     font-weight: 700;
     text-align: left;
     transition: color 140ms ease, background-color 140ms ease;
+}
+
+.docs-outline-shell[data-outline-enhanced="true"] .docs-outline-toggle {
+    display: flex;
 }
 
 .docs-outline-toggle:hover {
@@ -356,13 +360,17 @@ body {
 }
 
 .docs-outline-label {
-    display: none;
+    display: block;
     margin: 0 0 0.85rem;
     color: #94a3b8;
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.16em;
     text-transform: uppercase;
+}
+
+.docs-outline-shell[data-outline-enhanced="true"] .docs-outline-label {
+    display: none;
 }
 
 .docs-outline-list {
@@ -459,6 +467,10 @@ body {
     }
 
     .docs-outline-label {
+        display: block;
+    }
+
+    .docs-outline-shell[data-outline-enhanced="true"] .docs-outline-label {
         display: block;
     }
 

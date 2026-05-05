@@ -512,6 +512,12 @@ public class RazorDocsWebModuleRegressionTests
                     Assert.Contains("window.__outlineAsset = true;", outlineBody);
                     Assert.Equal("/docs/next/outline-client.js", outlineResponse.RequestMessage?.RequestUri?.AbsolutePath);
 
+                    using var outlineHeadResponse = await client.SendAsync(
+                        new HttpRequestMessage(HttpMethod.Head, "/docs/next/outline-client.js?cache=abc"));
+                    Assert.Equal(HttpStatusCode.OK, outlineHeadResponse.StatusCode);
+                    Assert.Equal("text/javascript", outlineHeadResponse.Content.Headers.ContentType?.MediaType);
+                    Assert.Equal("/docs/next/outline-client.js", outlineHeadResponse.RequestMessage?.RequestUri?.AbsolutePath);
+
                     using var headResponse = await client.SendAsync(
                         new HttpRequestMessage(HttpMethod.Head, "/docs/next/minisearch.min.js?cache=abc"));
                     Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
@@ -1035,6 +1041,7 @@ public class RazorDocsWebModuleRegressionTests
               <link rel="preload" href="/docs/search-index.json" as="fetch" crossorigin="use-credentials" />
               <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json"};</script>
               <script src="/docs/search-client.js"></script>
+              <script src="/docs/outline-client.js"></script>
             </head>
             <body data-tree="release-{{version}}">
               <a id="home" href="/docs">Home</a>
@@ -1061,6 +1068,7 @@ public class RazorDocsWebModuleRegressionTests
         File.WriteAllText(Path.Combine(root, "guide.html"), "<!DOCTYPE html><html><body data-tree=\"release-guide\">Guide</body></html>");
         File.WriteAllText(Path.Combine(root, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Combine(root, "search-client.js"), "window.__releaseTree = true;");
+        File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
         File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
         File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
         return root;

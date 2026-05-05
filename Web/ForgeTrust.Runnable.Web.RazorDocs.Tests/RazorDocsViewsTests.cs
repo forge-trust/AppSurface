@@ -149,6 +149,8 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-trust-bar", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-link", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-toggle", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-label", tailwindEntryStylesheet);
 
         Assert.DoesNotContain(".docs-page-badge", searchStylesheet);
         Assert.DoesNotContain(".docs-metadata-chip", searchStylesheet);

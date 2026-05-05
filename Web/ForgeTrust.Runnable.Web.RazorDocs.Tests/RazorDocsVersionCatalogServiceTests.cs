@@ -91,6 +91,7 @@ public sealed class RazorDocsVersionCatalogServiceTests : IDisposable
         File.WriteAllText(Path.Combine(brokenTree, "search.html"), "<html>search</html>");
         File.WriteAllText(Path.Combine(brokenTree, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Combine(brokenTree, "search-client.js"), "window.__searchClientLoaded = true;");
+        File.WriteAllText(Path.Combine(brokenTree, "outline-client.js"), "window.__outlineClientLoaded = true;");
         File.WriteAllText(Path.Combine(brokenTree, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
 
         var catalogPath = WriteCatalog(
@@ -154,6 +155,36 @@ public sealed class RazorDocsVersionCatalogServiceTests : IDisposable
         var brokenVersion = Assert.Single(catalog.PublicVersions);
         Assert.False(brokenVersion.IsAvailable);
         Assert.Contains("search-client.js", brokenVersion.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldMarkVersionUnavailable_WhenRequiredOutlineAssetIsMissing()
+    {
+        var brokenTree = CreateExactTree("broken-outline");
+        File.Delete(Path.Combine(brokenTree, "outline-client.js"));
+        var catalogPath = WriteCatalog(
+            new RazorDocsVersionCatalog
+            {
+                RecommendedVersion = "1.2.0",
+                Versions =
+                [
+                    new RazorDocsPublishedVersion
+                    {
+                        Version = "1.2.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, brokenTree),
+                        SupportState = RazorDocsVersionSupportState.Current
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        Assert.Null(catalog.RecommendedVersion);
+        var brokenVersion = Assert.Single(catalog.PublicVersions);
+        Assert.False(brokenVersion.IsAvailable);
+        Assert.Contains("outline-client.js", brokenVersion.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -757,6 +788,7 @@ public sealed class RazorDocsVersionCatalogServiceTests : IDisposable
         File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[]}");
         File.WriteAllText(Path.Combine(root, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Combine(root, "search-client.js"), "window.__searchClientLoaded = true;");
+        File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
         File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
         return root;
     }

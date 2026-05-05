@@ -23,6 +23,7 @@ public sealed class RazorDocsVersionCatalogService
         "search-index.json",
         "search.css",
         "search-client.js",
+        "outline-client.js",
         "minisearch.min.js"
     ];
 

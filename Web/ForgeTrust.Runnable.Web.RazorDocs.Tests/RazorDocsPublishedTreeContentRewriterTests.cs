@@ -14,6 +14,7 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
             <head>
               <link rel="stylesheet" href="/docs/search.css" />
               <link rel="preload" href="/docs/search-index.json" as="fetch" crossorigin="use-credentials" />
+              <script src="/docs/outline-client.js"></script>
               <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","docsVersionsUrl":"/docs/versions"};</script>
             </head>
             <body>
@@ -28,6 +29,7 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
 
         Assert.Contains("/docs/v/1.2.3/search.css", rewritten);
         Assert.Contains("/docs/v/1.2.3/search-index.json", rewritten);
+        Assert.Contains("/docs/v/1.2.3/outline-client.js", rewritten);
         Assert.Contains("/docs/v/1.2.3/guide.html", rewritten);
         Assert.Contains("/docs/v/1.2.3/search", rewritten);
         Assert.Contains("\"docsRootPath\":\"/docs/v/1.2.3\"", rewritten);
