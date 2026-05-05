@@ -74,7 +74,22 @@ internal sealed class RazorDocsInProcessHost : IAsyncDisposable
             .Get<IServerAddressesFeature>()
             ?.Addresses;
 
-        var baseAddress = addresses is null ? null : Assert.Single(addresses);
+        return ResolveBoundBaseUrl(addresses);
+    }
+
+    internal static string ResolveBoundBaseUrl(ICollection<string>? addresses)
+    {
+        if (addresses is null || addresses.Count == 0)
+        {
+            throw new InvalidOperationException("RazorDocs standalone host did not publish a listening URL. No addresses were published.");
+        }
+
+        if (addresses.Count != 1)
+        {
+            throw new InvalidOperationException($"RazorDocs standalone host published {addresses.Count} listening URLs; expected exactly one. Values: '{string.Join("', '", addresses)}'.");
+        }
+
+        var baseAddress = addresses.Single();
         if (!Uri.TryCreate(baseAddress, UriKind.Absolute, out var uri))
         {
             throw new InvalidOperationException($"RazorDocs standalone host did not publish a valid listening URL. Value: '{baseAddress}'.");
@@ -122,13 +137,15 @@ internal sealed class RazorDocsInProcessHost : IAsyncDisposable
 
         public string? GetEnvironmentVariable(string name, string? defaultValue = null)
         {
-            if (string.Equals(name, "ASPNETCORE_ENVIRONMENT", StringComparison.Ordinal)
-                || string.Equals(name, "DOTNET_ENVIRONMENT", StringComparison.Ordinal))
+            if (string.Equals(name, "ASPNETCORE_ENVIRONMENT", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "DOTNET_ENVIRONMENT", StringComparison.OrdinalIgnoreCase))
             {
                 return Environments.Development;
             }
 
-            return System.Environment.GetEnvironmentVariable(name) ?? defaultValue;
+            var value = System.Environment.GetEnvironmentVariable(name);
+
+            return string.IsNullOrEmpty(value) ? defaultValue : value;
         }
     }
 }

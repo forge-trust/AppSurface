@@ -578,36 +578,52 @@ public sealed class RazorDocsPlaywrightFixture : IAsyncLifetime
     {
         await EnsurePlaywrightInstalledAsync();
 
-        _playwright = await Playwright.CreateAsync();
-        Browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        try
         {
-            Headless = true
-        });
+            _playwright = await Playwright.CreateAsync();
+            Browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
 
-        _appHost = await RazorDocsInProcessHost.StartAsync("http://127.0.0.1:0");
-        var baseUrl = _appHost.BaseUrl;
-        DocsUrl = $"{baseUrl}/docs";
+            _appHost = await RazorDocsInProcessHost.StartAsync("http://127.0.0.1:0");
+            var baseUrl = _appHost.BaseUrl;
+            DocsUrl = $"{baseUrl}/docs";
 
-        await WaitForAppReadyAsync(DocsUrl, TimeSpan.FromSeconds(60));
-        SearchQuery = await WarmSearchIndexAndResolveQueryAsync(baseUrl, TimeSpan.FromSeconds(90));
+            await WaitForAppReadyAsync(DocsUrl, TimeSpan.FromSeconds(60));
+            SearchQuery = await WarmSearchIndexAndResolveQueryAsync(baseUrl, TimeSpan.FromSeconds(90));
+        }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
     }
 
     public async Task DisposeAsync()
     {
         try
         {
-            if (Browser is not null)
+            var browser = Browser;
+            Browser = null!;
+
+            if (browser is not null)
             {
-                await Browser.DisposeAsync();
+                await browser.DisposeAsync();
             }
 
-            _playwright?.Dispose();
+            var playwright = _playwright;
+            _playwright = null;
+            playwright?.Dispose();
         }
         finally
         {
-            if (_appHost is not null)
+            var appHost = _appHost;
+            _appHost = null;
+
+            if (appHost is not null)
             {
-                await _appHost.DisposeAsync();
+                await appHost.DisposeAsync();
             }
         }
     }
