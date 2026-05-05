@@ -281,6 +281,7 @@ body {
 .docs-detail-layout {
     display: grid;
     gap: 2rem;
+    margin-bottom: -1.5rem;
 }
 
 .docs-detail-primary {
@@ -546,6 +547,18 @@ body {
     .docs-outline-link--level-3[aria-current="location"]::after,
     .docs-outline-link--level-3.docs-outline-link--active::after {
         left: calc(-1.85rem + 1px);
+    }
+}
+
+@media (min-width: 40rem) {
+    .docs-detail-layout {
+        margin-bottom: -2rem;
+    }
+}
+
+@media (min-width: 64rem) {
+    .docs-detail-layout {
+        margin-bottom: -3rem;
     }
 }
 

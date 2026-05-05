@@ -169,6 +169,44 @@ public sealed class RazorDocsWayfindingPlaywrightTests
     }
 
     [Fact]
+    public async Task DesktopOutline_DoesNotAddBlankScrollPastDetailsContent()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1440,
+                Height = 900
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/Namespaces/ForgeTrust.Runnable.Aspire.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+
+        await page.EvaluateAsync("() => document.getElementById('main-content')?.scrollTo(0, 100000)");
+
+        var trailingGap = await page.EvaluateAsync<int>(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              const layout = document.querySelector('.docs-detail-layout');
+              if (!main || !layout) {
+                return Number.MAX_SAFE_INTEGER;
+              }
+
+              return Math.round(main.getBoundingClientRect().bottom - layout.getBoundingClientRect().bottom);
+            }
+            """);
+
+        Assert.InRange(trailingGap, 0, 8);
+    }
+
+    [Fact]
     public async Task OutlineClient_IgnoresStaleHeadingTargets_ForHashAndClickActiveState()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
