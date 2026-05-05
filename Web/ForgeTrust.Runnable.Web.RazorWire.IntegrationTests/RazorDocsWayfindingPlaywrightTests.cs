@@ -233,7 +233,20 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
+
+        var overflowAnchor = await page.EvaluateAsync<string>(
+            "() => getComputedStyle(document.getElementById('main-content')).overflowAnchor");
+        Assert.Equal("none", overflowAnchor);
+
         await page.EvaluateAsync("() => document.getElementById('main-content')?.scrollTo(0, 100000)");
+        await page.EvaluateAsync(
+            """
+            () => {
+              window.setTimeout(() => {
+                document.getElementById('main-content')?.scrollTo(0, 100000);
+              }, 60);
+            }
+            """);
 
         await page.EvaluateAsync(
             """
@@ -253,6 +266,31 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         var scrollTop = await page.EvaluateAsync<int>(
             "() => Math.round(document.getElementById('main-content')?.scrollTop ?? Number.MAX_SAFE_INTEGER)");
         Assert.InRange(scrollTop, 0, 8);
+
+        await page.ClickAsync("#docs-page-outline a[href='#ForgeTrust-Runnable-Aspire-AspireProfile-string-PassThroughArgs-get']");
+        await page.WaitForFunctionAsync(
+            """
+            () => document
+              .querySelector("#docs-page-outline a[href='#ForgeTrust-Runnable-Aspire-AspireProfile-string-PassThroughArgs-get']")
+              ?.getAttribute("aria-current") === "location"
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var trailingGap = await page.EvaluateAsync<int>(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              const layout = document.querySelector('.docs-detail-layout');
+              if (!main || !layout) {
+                return Number.MAX_SAFE_INTEGER;
+              }
+
+              return Math.round(main.getBoundingClientRect().bottom - layout.getBoundingClientRect().bottom);
+            }
+            """);
+
+        Assert.InRange(trailingGap, 0, 8);
     }
 
     [Fact]

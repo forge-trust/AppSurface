@@ -253,15 +253,16 @@
 
                 event.preventDefault();
                 setActiveLink(links, link, currentLabel);
+
+                if (compactMedia?.matches) {
+                    setExpanded(shell, toggle, false);
+                }
+
                 scrollEntryIntoView(entry, mainContent);
 
                 const hash = getLinkHash(link);
                 if (hash && window.location.hash !== hash) {
                     window.history.pushState(null, "", hash);
-                }
-
-                if (compactMedia?.matches) {
-                    setExpanded(shell, toggle, false);
                 }
 
                 for (const delay of [120, 360, 720]) {

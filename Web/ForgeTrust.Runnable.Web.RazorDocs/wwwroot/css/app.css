@@ -10,6 +10,10 @@ body {
     scrollbar-color: #334155 #0f172a;
 }
 
+#main-content {
+    overflow-anchor: none;
+}
+
 /* Custom scrollbar for dark theme */
 ::-webkit-scrollbar {
     width: 8px;

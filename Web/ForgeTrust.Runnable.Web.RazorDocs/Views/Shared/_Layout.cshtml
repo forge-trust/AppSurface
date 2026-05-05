@@ -240,11 +240,7 @@
             return document.getElementById(targetId);
         }
 
-        function restoreMainScrollAfterFrameLoad(event) {
-            if (event.target?.id !== "doc-content" || !mainContent) {
-                return;
-            }
-
+        function restoreMainScrollPosition() {
             const hashTarget = getCurrentHashTarget();
             if (hashTarget) {
                 scrollMainToTarget(hashTarget);
@@ -255,6 +251,24 @@
                 top: 0,
                 behavior: "auto"
             });
+        }
+
+        function restoreMainScrollAfterFrameLoad(event) {
+            if (event.target?.id !== "doc-content" || !mainContent) {
+                return;
+            }
+
+            restoreMainScrollPosition();
+
+            if (typeof requestAnimationFrame === "function") {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(restoreMainScrollPosition);
+                });
+            }
+
+            for (const delay of [80, 240]) {
+                window.setTimeout(restoreMainScrollPosition, delay);
+            }
         }
 
         function closeSidebar({ restoreFocus = true } = {}) {
