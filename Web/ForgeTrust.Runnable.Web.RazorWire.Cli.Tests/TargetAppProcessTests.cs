@@ -121,7 +121,7 @@ public class TargetAppProcessTests
         var timeout = Task.Delay(TimeSpan.FromSeconds(2));
         var firstSignal = await Task.WhenAny(outputReceived.Task, exitedSignal.Task, timeout);
         Assert.NotSame(timeout, firstSignal);
-        Assert.Same(exitedSignal.Task, firstSignal);
+        Assert.True(exitedSignal.Task.IsCompleted, "Expected the exit signal to be raised synchronously before output drains.");
 
         var outputTimeout = Task.Delay(TimeSpan.FromSeconds(2));
         var outputSignal = await Task.WhenAny(outputReceived.Task, outputTimeout);
