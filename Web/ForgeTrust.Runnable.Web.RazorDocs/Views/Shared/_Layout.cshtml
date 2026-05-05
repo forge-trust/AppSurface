@@ -202,6 +202,61 @@
             sidebar.setAttribute("aria-hidden", shouldAutoCloseSidebar() ? "true" : "false");
         }
 
+        function getMainScrollTopForTarget(target) {
+            if (!mainContent || !target) {
+                return 0;
+            }
+
+            const mainRect = mainContent.getBoundingClientRect();
+            const targetRect = target.getBoundingClientRect();
+            const desiredTop = mainContent.scrollTop + targetRect.top - mainRect.top - 64;
+            const maxScrollTop = Math.max(0, mainContent.scrollHeight - mainContent.clientHeight);
+            return Math.min(Math.max(0, desiredTop), maxScrollTop);
+        }
+
+        function scrollMainToTarget(target, behavior = "auto") {
+            if (!mainContent || !target) {
+                return;
+            }
+
+            mainContent.scrollTo({
+                top: getMainScrollTopForTarget(target),
+                behavior
+            });
+        }
+
+        function getCurrentHashTarget() {
+            if (!window.location.hash) {
+                return null;
+            }
+
+            let targetId;
+            try {
+                targetId = decodeURIComponent(window.location.hash.slice(1));
+            } catch {
+                return null;
+            }
+
+            return document.getElementById(targetId);
+        }
+
+        function restoreMainScrollAfterFrameLoad(event) {
+            if (event.target?.id !== "doc-content" || !mainContent) {
+                return;
+            }
+
+            const hashTarget = getCurrentHashTarget();
+            if (hashTarget) {
+                scrollMainToTarget(hashTarget);
+                return;
+            }
+
+            mainContent.scrollTo({
+                top: 0,
+                behavior: "auto"
+            });
+        }
+
         function closeSidebar({ restoreFocus = true } = {}) {
             if (!sidebar || !sidebarOverlay) {
                 return;
@@ -329,6 +384,8 @@
             syncSidebarForViewport();
         });
 
+        document.addEventListener("turbo:frame-load", restoreMainScrollAfterFrameLoad);
+
         document.addEventListener("click", event => {
             if (event.defaultPrevented) {
                 return;
@@ -381,7 +438,7 @@
             const prefersReducedMotion = window.matchMedia
                 && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
             const scrollBehavior = prefersReducedMotion ? "auto" : "smooth";
-            target.scrollIntoView({ behavior: scrollBehavior, block: "start" });
+            scrollMainToTarget(target, scrollBehavior);
         });
     })();
 </script>

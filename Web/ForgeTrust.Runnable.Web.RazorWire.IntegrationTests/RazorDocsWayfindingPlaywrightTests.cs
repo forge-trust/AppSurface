@@ -215,6 +215,47 @@ public sealed class RazorDocsWayfindingPlaywrightTests
     }
 
     [Fact]
+    public async Task DetailsFrameNavigation_ResetMainScroll_WhenMovingFromLongPageToShortApiPage()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1440,
+                Height = 900
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.EvaluateAsync("() => document.getElementById('main-content')?.scrollTo(0, 100000)");
+
+        await page.EvaluateAsync(
+            """
+            () => document
+              .querySelector("#docs-sidebar a[href='/docs/Namespaces/ForgeTrust.Runnable.Aspire.html']")
+              ?.click()
+            """);
+        await page.WaitForFunctionAsync(
+            """
+            () => window.location.pathname === '/docs/Namespaces/ForgeTrust.Runnable.Aspire.html'
+              && document.querySelector('#doc-content h1')?.textContent?.trim() === 'Aspire'
+              && (document.getElementById('main-content')?.scrollTop ?? Number.MAX_SAFE_INTEGER) <= 8
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        var scrollTop = await page.EvaluateAsync<int>(
+            "() => Math.round(document.getElementById('main-content')?.scrollTop ?? Number.MAX_SAFE_INTEGER)");
+        Assert.InRange(scrollTop, 0, 8);
+    }
+
+    [Fact]
     public async Task OutlineClient_IgnoresStaleHeadingTargets_ForHashAndClickActiveState()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
