@@ -148,9 +148,11 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
         var error = new StringWriter();
 
         var missingValueExitCode = await Program.RunAsync(["verify", "--document"], output, error, _repositoryRoot);
+        var optionLikeValueExitCode = await Program.RunAsync(["verify", "--document", "--repo-root", _repositoryRoot], output, error, _repositoryRoot);
         var unknownOptionExitCode = await Program.RunAsync(["verify", "--wat"], output, error, _repositoryRoot);
 
         Assert.Equal(1, missingValueExitCode);
+        Assert.Equal(1, optionLikeValueExitCode);
         Assert.Equal(1, unknownOptionExitCode);
         Assert.Contains("requires a value", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("Unknown option", error.ToString(), StringComparison.Ordinal);
@@ -561,6 +563,26 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
 
         Assert.Contains("if (true)\n{\n    Console.WriteLine(\"hello\");\n}", generated, StringComparison.Ordinal);
         Assert.Contains("        if (true)\n        {\n            Console.WriteLine(\"hello\");\n        }", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_DedentsWhitespaceOnlyEdgeLinesToEmptyLinesBeforeTrimming()
+    {
+        await WriteFileAsync(
+            "src/sample.cs",
+            "public class Sample\n"
+            + "{\n"
+            + "    // docs:snippet sample:start\n"
+            + "        \n"
+            + "        Console.WriteLine(\"hello\");\n"
+            + "        \n"
+            + "    // docs:snippet sample:end\n"
+            + "}\n");
+        await WriteBasicDocumentAsync("old");
+
+        var generated = await new MarkdownSnippetGenerator().GenerateAsync(CreateRequest());
+
+        Assert.Contains("```csharp\nConsole.WriteLine(\"hello\");\n```", generated, StringComparison.Ordinal);
     }
 
     [Fact]

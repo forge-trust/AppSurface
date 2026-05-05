@@ -72,6 +72,29 @@ public sealed class RazorWireReadmeContractTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RazorWireReadme_LinkAndAnchorExtraction_IgnoresFencedExamples()
+    {
+        const string markdown = """
+            ```md
+            [ignored](../missing.md)
+            # Ignored & Heading
+            ```
+
+            [kept](Docs/antiforgery.md)
+
+            # Kept & Heading
+            """;
+
+        var links = ExtractMarkdownLinks(markdown).ToArray();
+        var anchors = ExtractMarkdownHeadingAnchors(markdown);
+
+        Assert.DoesNotContain("../missing.md", links);
+        Assert.Contains("Docs/antiforgery.md", links);
+        Assert.DoesNotContain("ignored--heading", anchors);
+        Assert.Contains("kept--heading", anchors);
+    }
+
     private static string GetRepositoryRoot()
     {
         return PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
@@ -89,9 +112,12 @@ public sealed class RazorWireReadmeContractTests
 
     private static IEnumerable<string> ExtractMarkdownLinks(string markdown)
     {
-        foreach (Match match in Regex.Matches(markdown, @"(?<!!)\[[^\]]+\]\((?<target>[^)\s]+)(?:\s+""[^""]*"")?\)"))
+        foreach (var line in EnumerateNonFencedMarkdownLines(markdown))
         {
-            yield return match.Groups["target"].Value;
+            foreach (Match match in Regex.Matches(line, @"(?<!!)\[[^\]]+\]\((?<target>[^)\s]+)(?:\s+""[^""]*"")?\)"))
+            {
+                yield return match.Groups["target"].Value;
+            }
         }
     }
 
@@ -131,7 +157,7 @@ public sealed class RazorWireReadmeContractTests
     {
         var anchors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var line in markdown.ReplaceLineEndings("\n").Split('\n'))
+        foreach (var line in EnumerateNonFencedMarkdownLines(markdown))
         {
             var match = Regex.Match(line, @"^#{1,6}\s+(?<heading>.+?)\s*$");
             if (match.Success)
@@ -141,6 +167,34 @@ public sealed class RazorWireReadmeContractTests
         }
 
         return anchors;
+    }
+
+    private static IEnumerable<string> EnumerateNonFencedMarkdownLines(string markdown)
+    {
+        MarkdownFence? activeFence = null;
+
+        foreach (var line in markdown.ReplaceLineEndings("\n").Split('\n'))
+        {
+            var trimmed = line.Trim();
+            var fence = MarkdownFence.TryParse(trimmed);
+            if (activeFence is null && fence is not null)
+            {
+                activeFence = fence;
+                continue;
+            }
+
+            if (activeFence is not null)
+            {
+                if (activeFence.Value.IsClosedBy(trimmed))
+                {
+                    activeFence = null;
+                }
+
+                continue;
+            }
+
+            yield return line;
+        }
     }
 
     private static string ToGitHubHeadingAnchor(string heading)
@@ -160,5 +214,40 @@ public sealed class RazorWireReadmeContractTests
         }
 
         return builder.ToString().Trim('-');
+    }
+
+    private readonly record struct MarkdownFence(char Character, int Length)
+    {
+        public static MarkdownFence? TryParse(string trimmedLine)
+        {
+            if (trimmedLine.Length < 3 || trimmedLine[0] is not ('`' or '~'))
+            {
+                return null;
+            }
+
+            var character = trimmedLine[0];
+            var length = 0;
+            foreach (var current in trimmedLine)
+            {
+                if (current != character)
+                {
+                    break;
+                }
+
+                length++;
+            }
+
+            return length >= 3 ? new MarkdownFence(character, length) : null;
+        }
+
+        public bool IsClosedBy(string trimmedLine)
+        {
+            var closingFence = TryParse(trimmedLine);
+            var character = Character;
+            return closingFence is not null
+                && closingFence.Value.Character == character
+                && closingFence.Value.Length >= Length
+                && trimmedLine.All(current => current == character);
+        }
     }
 }

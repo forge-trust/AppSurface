@@ -193,10 +193,15 @@ internal sealed record MarkdownSnippetCommandOptions(MarkdownSnippetRequest Requ
     /// <param name="index">Current option index, advanced to the value index on success.</param>
     /// <param name="argument">Option name for diagnostics.</param>
     /// <returns>The raw option value.</returns>
-    /// <exception cref="MarkdownSnippetException">Thrown when the option has no following non-blank value.</exception>
+    /// <exception cref="MarkdownSnippetException">
+    /// Thrown when the option has no following non-blank value or the next token
+    /// looks like another option.
+    /// </exception>
     private static string ReadRequiredValue(string[] args, ref int index, string argument)
     {
-        if (index + 1 >= args.Length || string.IsNullOrWhiteSpace(args[index + 1]))
+        if (index + 1 >= args.Length
+            || string.IsNullOrWhiteSpace(args[index + 1])
+            || args[index + 1].StartsWith("-", StringComparison.Ordinal))
         {
             throw new MarkdownSnippetException($"Option '{argument}' requires a value.");
         }
@@ -853,7 +858,9 @@ internal static class MarkdownSnippetSourceExtractor
             .Min();
 
         var dedented = lines.Select(line =>
-            line.Length >= minimumIndent ? line[minimumIndent..] : string.Empty);
+            string.IsNullOrWhiteSpace(line)
+                ? string.Empty
+                : line.Length >= minimumIndent ? line[minimumIndent..] : string.Empty);
 
         return string.Join("\n", dedented).Trim('\n');
     }
