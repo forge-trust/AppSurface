@@ -14,6 +14,7 @@ This package provides the configuration layer for Runnable modules. It combines 
 - **`FileBasedConfigProvider`**: Loads configuration from files.
 - **`Config<T>` / `ConfigStruct<T>`**: Base types for strongly typed configuration values.
 - **`ConfigKeyAttribute`**: Associates a configuration type or property with a specific key.
+- **`ConfigKeyRequiredAttribute`**: Requires a config wrapper to resolve a provider or default value during startup.
 - **`ConfigValueNotEmptyAttribute`**: Validates that a resolved scalar `string` or `Guid` value is not empty.
 - **`ConfigValueRangeAttribute`**: Validates that a resolved scalar `int` or `double` value is within an inclusive range.
 - **`ConfigValueMinLengthAttribute`**: Validates that a resolved scalar `string` value meets a minimum length.
@@ -132,6 +133,48 @@ Configuration validation failed for key 'RetryConfig' (RetryConfig -> RetryOptio
 
 The exception also exposes structured failures through `Failures`. Each failure includes the config key, wrapper type, value type, member names, and validation message. Attempted values are not exposed because config values often include secrets.
 
+### Required Key Presence
+
+Config wrappers are optional by default. A missing provider value with no default leaves `HasValue` false and skips value validation. Use `[ConfigKeyRequired]` when the key itself must resolve a value during startup:
+
+```csharp
+using ForgeTrust.Runnable.Config;
+
+[ConfigKeyRequired]
+public sealed class ApiKeyConfig : Config<string>
+{
+}
+```
+
+Required presence runs after provider/default resolution. A provider value satisfies the requirement, and a `DefaultValue` also satisfies it because the requirement is resolved presence, not provider-source auditing:
+
+```csharp
+[ConfigKeyRequired]
+public sealed class RegionConfig : Config<string>
+{
+    public override string? DefaultValue => "us-east-1";
+}
+```
+
+When a required wrapper has no provider value and no default, Runnable throws `ConfigurationValidationException` through the same startup failure family used by object and scalar validation:
+
+```text
+Configuration validation failed for key 'ApiKeyConfig' (ApiKeyConfig -> String): 1 error(s).
+- <value>: A value is required for this configuration key.
+```
+
+Combine presence and value validation when both contracts matter:
+
+```csharp
+[ConfigKeyRequired]
+[ConfigValueNotEmpty]
+public sealed class ApiKeyConfig : Config<string>
+{
+}
+```
+
+In that example, a missing key reports the required-presence failure. A supplied empty string reports the `ConfigValueNotEmpty` value failure. The two attributes are intentionally separate so operators can distinguish "nothing resolved" from "a resolved value was invalid."
+
 ### Scalar Value Validation
 
 Scalar wrappers such as `Config<string>` and `ConfigStruct<int>` validate the resolved value from attributes placed on the wrapper class. This keeps simple configuration as a primitive while still giving startup-time validation:
@@ -183,7 +226,7 @@ public sealed class TenantSlugConfig : Config<string>
 }
 ```
 
-Scalar validation runs only for non-null resolved scalar values. `[ConfigValueNotEmpty]` rejects an empty value that was supplied by a provider or default, but it does not make a missing config value required. Use a default, application startup policy, or a dedicated presence check when the key itself must exist.
+Scalar validation runs only for non-null resolved scalar values. `[ConfigValueNotEmpty]` rejects an empty value that was supplied by a provider or default, but it does not make a missing config value required. Use `[ConfigKeyRequired]` when the key itself must exist.
 
 When both wrapper attributes and `ValidateValue` fail, attribute failures are reported first. Hook exceptions are not wrapped; they bubble to the caller so programming errors remain visible.
 
@@ -228,7 +271,9 @@ Runnable uses the Microsoft marker attributes as the public authoring contract, 
 ### Pitfalls
 
 - DataAnnotations attributes such as `[Range]` on the wrapper class are not scalar validation attributes. Use Runnable `ConfigValue*` attributes on scalar wrappers, or wrap related settings in an options object and use ordinary DataAnnotations on that object.
+- `[ConfigKeyRequired]` on a wrapper and `[Required]` on an options property solve different problems. The wrapper attribute requires a config key to resolve; the DataAnnotations attribute validates a member on an object value that already resolved.
 - Scalar validation validates values that exist after provider/default resolution. It is not a required-presence contract for missing keys.
+- Required key presence does not report which provider did or did not supply a value. It only reports that provider/default resolution ended without a value.
 - Built-in scalar attributes support only the value types documented above. Use `ValidateValue` for decimal, date/time, URI, domain-specific, or cross-cutting scalar rules.
 - DataAnnotations can short-circuit. For example, object-level `IValidatableObject` validation may not run when property validation already failed.
 - Recursive validation is opt-in. A nested object without `[ValidateObjectMembers]` and a collection without `[ValidateEnumeratedItems]` is not traversed.

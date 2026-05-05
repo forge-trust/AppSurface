@@ -12,6 +12,7 @@ namespace ForgeTrust.Runnable.Config;
 /// <see cref="ConfigurationValidationException"/>, so callers that activate config wrappers can catch
 /// that exception and surface its structured failures. Ensure defaults satisfy the same validation
 /// rules as configured values; an invalid default prevents initialization when no provider value exists.
+/// Apply <see cref="ConfigKeyRequiredAttribute"/> to require resolved provider/default presence.
 /// </summary>
 /// <typeparam name="T">The type of the configuration value.</typeparam>
 public class Config<T> : IConfig
@@ -51,7 +52,8 @@ public class Config<T> : IConfig
     /// <param name="environmentProvider">The environment provider used to choose the active environment.</param>
     /// <param name="key">The configuration key to resolve.</param>
     /// <exception cref="ConfigurationValidationException">
-    /// Thrown when the provider value or default value violates object DataAnnotations or scalar validation rules.
+    /// Thrown when the wrapper requires a value and no provider/default value resolves, or when the provider value
+    /// or default value violates object DataAnnotations or scalar validation rules.
     /// </exception>
     internal virtual void Init(
         IConfigManager configManager,
@@ -62,6 +64,11 @@ public class Config<T> : IConfig
         Value = rawValue ?? DefaultValue;
         IsDefaultValue = rawValue == null || Equals(Value, DefaultValue);
         HasValue = Value != null;
+        ConfigPresenceValidator.Validate(
+            key,
+            GetType(),
+            typeof(T),
+            HasValue);
         ConfigDataAnnotationsValidator.Validate(
             key,
             GetType(),
