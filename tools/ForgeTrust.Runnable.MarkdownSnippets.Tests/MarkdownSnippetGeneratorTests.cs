@@ -137,6 +137,83 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task Main_HandlesHelp()
+    {
+        var originalOut = Console.Out;
+        await using var output = new StringWriter();
+
+        try
+        {
+            Console.SetOut(output);
+
+            var exitCode = await Program.Main(["--help"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Usage:", output.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HandlesNoArgsAndCommandHelp()
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var noArgsExitCode = await Program.RunAsync([], output, error, _repositoryRoot);
+        var commandHelpExitCode = await Program.RunAsync(["verify", "--help"], output, error, _repositoryRoot);
+
+        Assert.Equal(1, noArgsExitCode);
+        Assert.Equal(0, commandHelpExitCode);
+        Assert.Contains("Usage:", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Usage:", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_GenerateAndVerifyUseExplicitPaths()
+    {
+        await WriteBasicSourceAsync();
+        await WriteBasicDocumentAsync("old");
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var args = new[]
+        {
+            "--repo-root",
+            _repositoryRoot,
+            "--document",
+            Path.Combine("docs", "README.md")
+        };
+
+        var generateExitCode = await Program.RunAsync(["generate", .. args], output, error, _repositoryRoot);
+        var verifyExitCode = await Program.RunAsync(["verify", .. args], output, error, _repositoryRoot);
+
+        Assert.Equal(0, generateExitCode);
+        Assert.Equal(0, verifyExitCode);
+        Assert.Contains("Generated docs/README.md.", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Markdown snippets are up to date.", output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public void Parse_DefaultsToRepositoryRootRazorWireReadme()
+    {
+        var options = MarkdownSnippetCommandOptions.Parse([], _repositoryRoot);
+
+        Assert.Equal(Path.GetFullPath(_repositoryRoot), options.Request.RepositoryRoot);
+        Assert.Equal(
+            Path.Combine(
+                Path.GetFullPath(_repositoryRoot),
+                "Web",
+                "ForgeTrust.Runnable.Web.RazorWire",
+                "README.md"),
+            options.Request.DocumentPath);
+    }
+
+    [Fact]
     public async Task GenerateAsync_ThrowsWhenRepositoryRootOrDocumentIsMissing()
     {
         var missingRoot = Path.Combine(_repositoryRoot, "missing");
@@ -225,6 +302,25 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateAsync_RejectsOpeningDirectiveWithoutCommentClose()
+    {
+        await WriteBasicSourceAsync();
+        await WriteDocumentAsync(
+            """
+            <!-- runnable:snippet id="sample" file="src/sample.cs" marker="sample" lang="csharp"
+            ```csharp
+            old
+            ```
+            <!-- /runnable:snippet -->
+            """);
+
+        var error = await Assert.ThrowsAsync<MarkdownSnippetException>(
+            () => new MarkdownSnippetGenerator().GenerateAsync(CreateRequest()));
+
+        Assert.Contains("missing closing '-->'", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GenerateAsync_RejectsInvalidBlockAttributes()
     {
         await WriteBasicSourceAsync();
@@ -267,6 +363,7 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
     [Theory]
     [InlineData("", "must define attributes")]
     [InlineData("id=\"bad id\" file=\"src/sample.cs\" marker=\"sample\" lang=\"csharp\"", "invalid snippet id")]
+    [InlineData("id=\"sample\" marker=\"sample\" lang=\"csharp\"", "must define 'file'")]
     [InlineData("id=\"sample\" file=\"src/sample.cs\" marker=\"bad id\" lang=\"csharp\"", "invalid snippet marker")]
     [InlineData("id=\"sample\" file=\"src/sample.cs\" marker=\"sample\" lang=\"c sharp\"", "invalid language")]
     [InlineData("id=\"sample\" file=\"src/sample.cs\" marker=\"sample\" lang=\"csharp\" dedent=\"maybe\"", "invalid boolean")]
