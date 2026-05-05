@@ -1821,8 +1821,8 @@ public class RazorDocsViewsTests
             [
                 new DocOutlineItem
                 {
-                    Title = "Install",
-                    Id = "install",
+                    Title = " Install ",
+                    Id = " install ",
                     Level = 2
                 },
                 new DocOutlineItem
@@ -1871,6 +1871,43 @@ public class RazorDocsViewsTests
         Assert.Contains("src=\"/docs/outline-client.js\"", html);
         Assert.Contains("data-doc-outline-client=\"true\"", html);
         Assert.DoesNotContain("rounded-2xl border border-slate-800 bg-slate-900/60", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldHideOutlineRail_WhenOnlyMalformedOutlineEntriesExist()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var doc = new DocNode("Quickstart", "guides/quickstart.md", "<h2 id='install'>Install</h2>");
+        var model = CreateDetailsViewModel(
+            doc,
+            outline:
+            [
+                null!,
+                new DocOutlineItem
+                {
+                    Title = "Missing fragment",
+                    Id = " ",
+                    Level = 2
+                },
+                new DocOutlineItem
+                {
+                    Title = " ",
+                    Id = "missing-title",
+                    Level = 2
+                }
+            ]);
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/Details.cshtml",
+            model);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        Assert.Null(document.QuerySelector("#docs-page-outline"));
+        Assert.Null(document.QuerySelector("script[data-doc-outline-client='true']"));
+        Assert.DoesNotContain("docs-detail-layout--with-outline", html);
+        Assert.NotNull(document.QuerySelector(".docs-detail-primary"));
+        Assert.Contains("<h2 id='install'>Install</h2>", html);
     }
 
     [Fact]

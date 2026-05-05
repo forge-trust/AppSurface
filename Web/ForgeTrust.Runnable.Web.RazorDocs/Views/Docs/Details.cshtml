@@ -32,6 +32,16 @@
     var provenanceLabel = string.IsNullOrWhiteSpace(provenance?.Label) ? "Source of truth" : provenance!.Label.Trim();
     var lastUpdatedUtc = provenance?.LastUpdatedUtc?.ToUniversalTime();
     var showContributorProvenance = sourceHref is not null || editHref is not null || lastUpdatedUtc is not null;
+    var outlineItems = Model.Outline
+        .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Title))
+        .Select(item => new
+        {
+            Id = item.Id.Trim(),
+            Title = item.Title.Trim(),
+            item.Level
+        })
+        .ToList();
+    var hasOutline = outlineItems.Count > 0;
 }
 @functions {
     private static readonly System.Text.RegularExpressions.Regex RootedSymbolSourceLinkRegex = new(
@@ -247,7 +257,7 @@
     }
 </header>
 
-<div class="docs-detail-layout @(Model.HasOutline ? "docs-detail-layout--with-outline" : null)">
+<div class="docs-detail-layout @(hasOutline ? "docs-detail-layout--with-outline" : null)">
     <div class="docs-detail-primary">
         @if (Model.IsSectionLanding)
         {
@@ -462,7 +472,7 @@
         }
     </div>
 
-    @if (Model.HasOutline)
+    @if (hasOutline)
     {
         <aside id="docs-page-outline"
                class="docs-outline-shell"
@@ -481,7 +491,7 @@
                  aria-label="On this page">
                 <div class="docs-outline-label">On this page</div>
                 <ol class="docs-outline-list">
-                    @foreach (var item in Model.Outline.Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Title)))
+                    @foreach (var item in outlineItems)
                     {
                         var linkClass = item.Level > 2
                             ? "docs-outline-link docs-outline-link--level-3"
@@ -500,7 +510,7 @@
     }
 </div>
 
-@if (Model.HasOutline)
+@if (hasOutline)
 {
     <script src="@docsOutlineClientUrl" defer data-doc-outline-client="true"></script>
 }
