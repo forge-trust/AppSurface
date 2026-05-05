@@ -31,6 +31,8 @@ public sealed class RazorDocsInProcessHostTests
 
         Assert.False(host.IsStarted);
         Assert.Equal("RazorDocs standalone host has stopped.", host.Diagnostics);
+
+        await host.DisposeAsync();
     }
 
     [Fact]
@@ -39,6 +41,14 @@ public sealed class RazorDocsInProcessHostTests
         var baseUrl = RazorDocsInProcessHost.ResolveBoundBaseUrl(["http://127.0.0.1:5000"]);
 
         Assert.Equal("http://127.0.0.1:5000", baseUrl);
+    }
+
+    [Fact]
+    public void ResolveBoundBaseUrl_PreservesIpv6Authority()
+    {
+        var baseUrl = RazorDocsInProcessHost.ResolveBoundBaseUrl(["http://[::1]:5000"]);
+
+        Assert.Equal("http://[::1]:5000", baseUrl);
     }
 
     [Fact]
