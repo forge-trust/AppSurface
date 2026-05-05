@@ -58,6 +58,7 @@ Runnable is putting the release contract in place before `v0.1.0`. This slice is
 - Nested config validation can now opt into Microsoft Options `[ValidateObjectMembers]` and `[ValidateEnumeratedItems]` markers while Runnable owns traversal, path formatting, and cycle protection.
 - Scalar config wrappers can now validate resolved primitive values directly with `ConfigValueNotEmpty`, `ConfigValueRange`, and `ConfigValueMinLength` attributes, while wrapper-specific scalar rules can override `ValidateValue`.
 - Config wrappers can now opt into required resolved presence with `ConfigKeyRequired`, so startup fails when no provider value and no default are available while defaults and supplied zero values still count as present.
+- `ConfigKeyAttribute` now lives in its own public API source file, keeping configuration key attributes discoverable while leaving `RunnableConfigModule` focused on service registration.
 - The new `examples/config-validation` sample demonstrates an intentional startup validation failure for a scalar `ConfigStruct<int>` without printing the invalid configured value.
 - Environment variables can now patch individual members of object-valued config loaded from lower-priority providers, so `APP__SETTINGS__DATABASE__PORT` can override one nested value without replacing the rest of the JSON-backed options object.
 
