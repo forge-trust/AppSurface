@@ -23,18 +23,33 @@ When consuming package builds from a configured feed, reference `ForgeTrust.Runn
 
 `examples/razorwire-mvc/Views/Shared/Components/Counter/Default.cshtml`
 
+<!-- runnable:snippet id="razorwire-counter" file="examples/razorwire-mvc/Views/Shared/Components/Counter/Default.cshtml" marker="razorwire-counter" lang="cshtml" -->
 ```cshtml
-<div id="instance-score-value">@Model</div>
-<div id="session-score-value">0</div>
+<div id="counter-widget" class="p-4 bg-white border border-slate-100 rounded-xl shadow-sm flex items-center justify-between group">
+    <div class="flex gap-6">
+        <div class="space-y-0.5">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Instance Score</span>
+            <div id="instance-score-value" class="text-2xl font-black text-indigo-600 tabular-nums">@Model</div>
+        </div>
+        <div class="space-y-0.5">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Session Score</span>
+            <div id="session-score-value" class="text-2xl font-black text-indigo-400 tabular-nums">0</div>
+        </div>
+    </div>
 
-<form asp-controller="Reactivity" asp-action="IncrementCounter" method="post" rw-active="true">
-    <input type="hidden" name="clientCount" id="client-count-input" value="0" />
-    <button type="submit" aria-label="Increment counter">+</button>
-</form>
+    <form asp-controller="Reactivity" asp-action="IncrementCounter" method="post" rw-active="true" data-counter-form>
+        <input type="hidden" name="clientCount" id="client-count-input" value="0" />
+        <button type="submit" aria-label="Increment counter" class="h-10 w-10 bg-indigo-600 text-white rounded-lg flex items-center justify-center hover:bg-indigo-700 active:scale-90 transition-all shadow-sm shadow-indigo-100">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+        </button>
+    </form>
+</div>
 ```
+<!-- /runnable:snippet -->
 
 `examples/razorwire-mvc/Controllers/ReactivityController.cs`
 
+<!-- runnable:snippet id="razorwire-increment-counter" file="examples/razorwire-mvc/Controllers/ReactivityController.cs" marker="razorwire-increment-counter" lang="csharp" -->
 ```csharp
 [HttpPost]
 [ValidateAntiForgeryToken]
@@ -46,24 +61,40 @@ public IActionResult IncrementCounter([FromForm] int clientCount)
     if (Request.IsTurboRequest())
     {
         return this.RazorWireStream()
-            .Update("instance-score-value", CounterViewComponent.Count.ToString())
+            .Update(
+                "instance-score-value",
+                CounterViewComponent.Count.ToString())
             .Update("session-score-value", clientCount.ToString())
-            .ReplacePartial("client-count-input", "_CounterInput", clientCount)
+            .ReplacePartial(
+                "client-count-input",
+                "_CounterInput",
+                clientCount)
             .BuildResult();
     }
 
+    // Safe redirect
     var referer = Request.Headers["Referer"].ToString();
+
     return Url.IsLocalUrl(referer) ? Redirect(referer) : RedirectToAction(nameof(Index));
 }
 ```
+<!-- /runnable:snippet -->
 
 `examples/razorwire-mvc/Views/Reactivity/_CounterInput.cshtml`
 
+<!-- runnable:snippet id="razorwire-counter-input" file="examples/razorwire-mvc/Views/Reactivity/_CounterInput.cshtml" marker="razorwire-counter-input" lang="cshtml" -->
 ```cshtml
-<input type="hidden" name="clientCount" id="client-count-input" value="@Model" />
+<input type='hidden' name='clientCount' id='client-count-input' value='@Model' />
 ```
+<!-- /runnable:snippet -->
 
 Read the [focused proof path](../../examples/razorwire-mvc/README.md#start-here-return-razor-fragments) for the file-by-file walkthrough. If copying this pattern gives you a bare `400 Bad Request`, anti-forgery is the first thing to check. See [Security & Anti-Forgery](Docs/antiforgery.md).
+
+The source-backed snippets in this README are generated from `docs:snippet` markers in the sample app. After changing marked sample code, run:
+
+```bash
+dotnet run --project tools/ForgeTrust.Runnable.MarkdownSnippets/ForgeTrust.Runnable.MarkdownSnippets.csproj -- generate
+```
 
 For failed submissions, RazorWire also ships a convention-based form UX stack: default form-local fallbacks for unhandled failures, server helpers for validation errors, anti-forgery diagnostics in development, and styling/event hooks for consumers. See [Failed Form UX](Docs/form-failures.md) or run the sample and visit `/Reactivity/FormFailures`.
 
@@ -91,21 +122,22 @@ public class MyRootModule : IRunnableWebModule
 
 RazorWire markup only lights up when your views import the package TagHelpers and your shared layout renders the client scripts once. Without this step, `rw:island`, `rw:stream-source`, and `rw-active` forms fall back to plain HTML behavior.
 
-`Views/_ViewImports.cshtml`
+`examples/razorwire-mvc/Views/_ViewImports.cshtml`
 
+<!-- runnable:snippet id="razorwire-view-imports" file="examples/razorwire-mvc/Views/_ViewImports.cshtml" marker="razorwire-view-imports" lang="cshtml" -->
 ```cshtml
 @addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
 @addTagHelper *, ForgeTrust.Runnable.Web.RazorWire
 ```
+<!-- /runnable:snippet -->
 
-`Views/Shared/_Layout.cshtml`
+`examples/razorwire-mvc/Views/Shared/_Layout.cshtml`
 
+<!-- runnable:snippet id="razorwire-scripts" file="examples/razorwire-mvc/Views/Shared/_Layout.cshtml" marker="razorwire-scripts" lang="cshtml" -->
 ```cshtml
-<head>
-    ...
-    <rw:scripts />
-</head>
+<rw:scripts/>
 ```
+<!-- /runnable:snippet -->
 
 ## Configure Services (Optional)
 

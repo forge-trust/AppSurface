@@ -1,5 +1,6 @@
 @model int
 
+@* docs:snippet razorwire-counter:start *@
 <div id="counter-widget" class="p-4 bg-white border border-slate-100 rounded-xl shadow-sm flex items-center justify-between group">
     <div class="flex gap-6">
         <div class="space-y-0.5">
@@ -11,7 +12,7 @@
             <div id="session-score-value" class="text-2xl font-black text-indigo-400 tabular-nums">0</div>
         </div>
     </div>
-    
+
     <form asp-controller="Reactivity" asp-action="IncrementCounter" method="post" rw-active="true" data-counter-form>
         <input type="hidden" name="clientCount" id="client-count-input" value="0" />
         <button type="submit" aria-label="Increment counter" class="h-10 w-10 bg-indigo-600 text-white rounded-lg flex items-center justify-center hover:bg-indigo-700 active:scale-90 transition-all shadow-sm shadow-indigo-100">
@@ -19,3 +20,4 @@
         </button>
     </form>
 </div>
+@* docs:snippet razorwire-counter:end *@

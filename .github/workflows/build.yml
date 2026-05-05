@@ -36,6 +36,10 @@ jobs:
         run: |
           dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj -- verify
 
+      - name: Verify generated Markdown snippets
+        run: |
+          dotnet run --project tools/ForgeTrust.Runnable.MarkdownSnippets/ForgeTrust.Runnable.MarkdownSnippets.csproj -- verify
+
       - name: Build project
         run: dotnet build --configuration Release
 
@@ -87,6 +91,10 @@ jobs:
       - name: Verify generated package chooser
         run: |
           dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj -- verify
+
+      - name: Verify generated Markdown snippets
+        run: |
+          dotnet run --project tools/ForgeTrust.Runnable.MarkdownSnippets/ForgeTrust.Runnable.MarkdownSnippets.csproj -- verify
 
       - name: Build RazorWire CLI (Release)
         run: |
