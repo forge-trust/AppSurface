@@ -346,6 +346,62 @@ This keeps RazorDocs from inventing fake precision for pages that do not have on
 - Do not invent additional `SymbolSourceUrlTemplate` tokens. RazorDocs rejects unsupported placeholders such as `{commit}` or `{linen}` instead of rendering silently broken links.
 - Do not expect automatic edit links on namespace-synthetic API pages. Symbol links point to source browsing locations, while README-authored namespace intros keep the page-level edit link.
 
+## Namespace README Intros
+
+RazorDocs can merge an authored `README.md` into a generated namespace API page so teams can explain a namespace in prose without replacing the generated symbol list.
+
+### Authoring contract
+
+A README qualifies as a namespace intro only when all of these are true:
+
+- The C# API harvester generated a namespace page at `Namespaces/{Dotted.Namespace}`.
+- The authored file is named `README.md`.
+- The README is harvested as a root documentation node, not as a child fragment.
+- The README directory resolves to the same dotted namespace as the generated page.
+- The path has an explicit docs-owned prefix before the namespace directory, currently a `docs/` segment or a `Namespaces/` segment.
+
+Positive examples:
+
+| README path | Merged target |
+| --- | --- |
+| `docs/ForgeTrust.Runnable.Web/README.md` | `Namespaces/ForgeTrust.Runnable.Web` |
+| `Namespaces/ForgeTrust.Runnable.Web/README.md` | `Namespaces/ForgeTrust.Runnable.Web` |
+
+Negative examples:
+
+| README path | Behavior |
+| --- | --- |
+| `Web/ForgeTrust.Runnable.Web/README.md` | Stays a package README page. |
+| `src/ForgeTrust.Runnable.Web/README.md` | Stays a source-adjacent README page if harvested. |
+| `README.md` | Stays the repository-root docs landing source. |
+| `docs/Unknown.Namespace/README.md` | Stays a normal README page unless a generated `Namespaces/Unknown.Namespace` page exists. |
+
+### Merge behavior
+
+- The generated namespace page keeps its `Namespaces/{Dotted.Namespace}` route.
+- README HTML is inserted into the namespace page as the namespace intro.
+- The standalone README node is removed after a successful merge so readers do not see duplicate pages.
+- README metadata can override the namespace page metadata, but derived Markdown defaults are ignored when they would accidentally replace API-reference classification.
+- README-relative links are resolved from the README source path before the standalone README page is removed.
+- Links that target the removed README page itself are not rewritten to a published page. Avoid self-links such as `./README.md` inside namespace intros because the standalone README route disappears after merge.
+- Contributor provenance points at the README source, while symbol-level source links still point at the generated API declarations.
+
+### Decision guidance
+
+Use a namespace README when the content is specifically about the namespace API surface: concepts, intended usage, lifecycle notes, or cross-type orientation for that namespace.
+
+Use a package README when the content is about package adoption: installation, package-level configuration, examples, compatibility, and links to broader guides. Package READMEs such as `Web/ForgeTrust.Runnable.Web/README.md` and `src/ForgeTrust.Runnable.Web/README.md` do not automatically become namespace intros, even when the folder name matches a namespace. That boundary is intentional so package docs do not disappear into API pages by folder-name coincidence.
+
+Future dual-use package and namespace docs should use an explicit opt-in contract instead of reopening implicit path matching. At the product-contract level, a future design could use a front matter flag that names the target namespace, a paired sidecar mapping a README to `Namespaces/{Dotted.Namespace}`, or a resolver extension point that receives an explicit namespace target. This repository should still prefer sidecar or resolver-based opt-in for authored `README.md` files because repository and package READMEs are expected to stay portable and free of inline front matter. Any future design should require the namespace name to be authored directly, preserve predictable package-doc behavior, and fail closed when the target namespace page does not exist.
+
+### Pitfalls
+
+- Do not move package READMEs under package folders expecting them to merge into namespace pages.
+- Do not rely on the final folder name alone. A path needs a docs-owned prefix before the namespace directory.
+- Do not expect a README to create a namespace API page. It only merges into a namespace page produced by the C# harvester.
+- Do not include README self-links such as `./README.md` in a namespace intro. Link to surviving guide pages, generated namespace anchors, or package docs instead.
+- Do not use namespace README merging as a general redirect or alias mechanism. Use explicit metadata and link authoring for those behaviors.
+
 ## Usage
 
 Reference the package and add the module to your Runnable web application:
