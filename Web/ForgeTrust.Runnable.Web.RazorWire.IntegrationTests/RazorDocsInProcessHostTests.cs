@@ -63,6 +63,17 @@ public sealed class RazorDocsInProcessHostTests
     }
 
     [Fact]
+    public void ResolveBoundBaseUrl_RequiresPublishedAddress_WhenAddressesAreNull()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => RazorDocsInProcessHost.ResolveBoundBaseUrl(null));
+
+        Assert.Equal(
+            "RazorDocs standalone host did not publish a listening URL. No addresses were published.",
+            exception.Message);
+    }
+
+    [Fact]
     public void ResolveBoundBaseUrl_RequiresSinglePublishedAddress()
     {
         var exception = Assert.Throws<InvalidOperationException>(
