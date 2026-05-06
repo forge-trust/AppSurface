@@ -56,6 +56,10 @@ internal sealed class BrowserStatusPageRenderer
     /// Call this during startup to fail fast if neither the conventional app/shared view nor the framework
     /// fallback view can be resolved for any supported status. Runtime rendering also resolves lazily, but this
     /// method turns a missing view into a predictable startup error instead of a request-time failure.
+    ///
+    /// Validation also warms and pins the runtime view-path cache by resolving every
+    /// <see cref="BrowserStatusPageDescriptor.Supported"/> entry. If an app adds or removes status page views after
+    /// this method runs, the startup-selected app or framework fallback path remains in use for the process lifetime.
     /// </remarks>
     public void ValidateConfiguredViews()
     {
@@ -74,14 +78,18 @@ internal sealed class BrowserStatusPageRenderer
     /// request is a direct render without a re-execute feature or reserved-route status code. This method does
     /// not change <see cref="HttpResponse.StatusCode"/> itself, which lets direct previews keep their existing
     /// 200 response and re-executed status requests preserve their original HTTP status.
+    ///
+    /// <see cref="CreateModel(HttpContext)"/> can receive an explicit status from re-execution metadata or the
+    /// reserved route. That status must be supported by <see cref="BrowserStatusPageDescriptor"/>; otherwise this
+    /// method throws instead of rendering a mismatched page for the existing <see cref="HttpResponse.StatusCode"/>.
     /// </remarks>
     public async Task RenderAsync(HttpContext httpContext)
     {
         var model = CreateModel(httpContext);
         if (!BrowserStatusPageDescriptor.TryGet(model.StatusCode, out var descriptor))
         {
-            descriptor = BrowserStatusPageDescriptor.NotFound;
-            model = model with { StatusCode = descriptor.StatusCode };
+            throw new InvalidOperationException(
+                $"Runnable browser status pages do not support HTTP status {model.StatusCode}. Use one of the supported browser status page codes before rendering.");
         }
 
         var viewData = new ViewDataDictionary(_metadataProvider, new ModelStateDictionary())

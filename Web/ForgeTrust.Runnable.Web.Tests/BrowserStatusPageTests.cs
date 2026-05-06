@@ -507,6 +507,18 @@ public sealed class BrowserStatusPageTests
     }
 
     [Fact]
+    public async Task RenderAsync_Throws_WhenRouteStatusCodeIsUnsupported()
+    {
+        var renderer = CreateRenderer(CreateViewEngineWithAppViews());
+        var httpContext = CreateRoutedStatusContext(StatusCodes.Status500InternalServerError);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => renderer.RenderAsync(httpContext));
+
+        Assert.Contains("do not support HTTP status 500", exception.Message);
+        Assert.Contains("supported browser status page codes", exception.Message);
+    }
+
+    [Fact]
     public async Task RenderAsync_CachesResolvedViewPaths_PerStatusCode()
     {
         var viewEngine = CreateViewEngineWithAppViews();
