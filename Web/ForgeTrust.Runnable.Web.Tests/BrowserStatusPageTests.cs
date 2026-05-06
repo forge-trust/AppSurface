@@ -534,6 +534,32 @@ public sealed class BrowserStatusPageTests
         Assert.Equal(1, viewEngine.GetViewCalls[BrowserStatusPageDefaults.GetAppViewPath(StatusCodes.Status403Forbidden)]);
     }
 
+    [Fact]
+    public async Task RenderAsync_UsesValidatedFrameworkFallbackPath_FromCache()
+    {
+        var fallbackStatusCode = StatusCodes.Status403Forbidden;
+        var fallbackAppViewPath = BrowserStatusPageDefaults.GetAppViewPath(fallbackStatusCode);
+        var viewResults = BrowserStatusPageDescriptor.Supported
+            .Where(descriptor => descriptor.StatusCode != fallbackStatusCode)
+            .ToDictionary(
+                descriptor => descriptor.AppViewPath,
+                descriptor => ViewEngineResult.Found(descriptor.AppViewPath, new StubView(descriptor.AppViewPath)));
+        var viewEngine = new StubCompositeViewEngine(
+            viewResults,
+            ViewEngineResult.Found(
+                BrowserStatusPageDefaults.FrameworkFallbackViewPath,
+                new StubView(BrowserStatusPageDefaults.FrameworkFallbackViewPath)));
+        var renderer = CreateRenderer(viewEngine);
+        var fallbackContext = CreateRoutedStatusContext(fallbackStatusCode);
+
+        renderer.ValidateConfiguredViews();
+        await renderer.RenderAsync(fallbackContext);
+        await renderer.RenderAsync(fallbackContext);
+
+        Assert.Equal(1, viewEngine.GetViewCalls[fallbackAppViewPath]);
+        Assert.Equal(1, viewEngine.GetViewCalls[BrowserStatusPageDefaults.FrameworkFallbackViewPath]);
+    }
+
     private static StubCompositeViewEngine CreateViewEngineWithAppViews()
     {
         return new StubCompositeViewEngine(
