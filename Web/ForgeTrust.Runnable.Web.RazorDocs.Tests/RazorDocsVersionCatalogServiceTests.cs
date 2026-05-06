@@ -158,10 +158,13 @@ public sealed class RazorDocsVersionCatalogServiceTests : IDisposable
     }
 
     [Fact]
-    public void GetCatalog_ShouldMarkVersionUnavailable_WhenRequiredOutlineAssetIsMissing()
+    public void GetCatalog_ShouldMarkVersionUnavailable_WhenReferencedOutlineAssetIsMissing()
     {
         var brokenTree = CreateExactTree("broken-outline");
         File.Delete(Path.Combine(brokenTree, "outline-client.js"));
+        File.WriteAllText(
+            Path.Combine(brokenTree, "api.html"),
+            """<html><head><script src="/docs/outline-client.js"></script></head><body>API</body></html>""");
         var catalogPath = WriteCatalog(
             new RazorDocsVersionCatalog
             {
@@ -185,6 +188,35 @@ public sealed class RazorDocsVersionCatalogServiceTests : IDisposable
         var brokenVersion = Assert.Single(catalog.PublicVersions);
         Assert.False(brokenVersion.IsAvailable);
         Assert.Contains("outline-client.js", brokenVersion.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldKeepVersionAvailable_WhenMissingOutlineAssetIsNotReferenced()
+    {
+        var exactTree = CreateExactTree("historical-without-outline");
+        File.Delete(Path.Combine(exactTree, "outline-client.js"));
+        var catalogPath = WriteCatalog(
+            new RazorDocsVersionCatalog
+            {
+                RecommendedVersion = "1.2.0",
+                Versions =
+                [
+                    new RazorDocsPublishedVersion
+                    {
+                        Version = "1.2.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, exactTree),
+                        SupportState = RazorDocsVersionSupportState.Current
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var exactVersion = Assert.Single(catalog.PublicVersions);
+        Assert.True(exactVersion.IsAvailable);
+        Assert.Same(exactVersion, catalog.RecommendedVersion);
     }
 
     [Fact]

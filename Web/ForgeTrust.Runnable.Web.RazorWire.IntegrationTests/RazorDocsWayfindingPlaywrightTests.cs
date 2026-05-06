@@ -76,6 +76,67 @@ public sealed class RazorDocsWayfindingPlaywrightTests
     }
 
     [Fact]
+    public async Task DetailsFrameNavigation_LoadsOutlineClient_WhenMovingFromPageWithoutOutline()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1440,
+                Height = 900
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await page.WaitForSelectorAsync("#docs-search-input", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        Assert.Equal(0, await page.Locator("#docs-page-outline").CountAsync());
+        Assert.Equal(0, await page.Locator("script[data-doc-outline-client='true']").CountAsync());
+
+        const string outlinePagePath = "/docs/examples/razorwire-mvc/README.md.html";
+        var examplesSection = page.Locator("#docs-sidebar details").Filter(new LocatorFilterOptions
+        {
+            Has = page.Locator($"a[href='{outlinePagePath}']")
+        }).First;
+        if (!await examplesSection.EvaluateAsync<bool>("section => section.open"))
+        {
+            await examplesSection.Locator("summary span[aria-hidden='true']").ClickAsync();
+        }
+
+        var outlineLink = examplesSection.Locator($"a[href='{outlinePagePath}']").First;
+        await outlineLink.WaitForAsync(new LocatorWaitForOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await outlineLink.ClickAsync();
+
+        await page.WaitForURLAsync(
+            $"**{outlinePagePath}",
+            new PageWaitForURLOptions { Timeout = 30_000 });
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+
+        await page.WaitForFunctionAsync(
+            """
+            () => document.querySelector("#doc-content .docs-content h1")?.textContent?.trim() === "RazorWire MVC Example"
+              && document.getElementById("docs-page-outline")?.dataset.outlineEnhanced === "true"
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        Assert.Equal(1, await page.Locator("#docs-page-outline").CountAsync());
+        Assert.Equal("true", await page.GetAttributeAsync("#docs-page-outline", "data-outline-enhanced"));
+    }
+
+    [Fact]
     public async Task DesktopOutline_StaysInRightRail_AndMarksActiveSection()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions

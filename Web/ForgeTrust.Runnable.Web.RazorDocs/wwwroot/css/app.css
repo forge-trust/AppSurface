@@ -293,6 +293,7 @@ body {
 }
 
 .docs-outline-shell {
+    order: -1;
     margin-bottom: 0.5rem;
     overflow: hidden;
     border: 1px solid rgba(30, 41, 59, 0.95);
@@ -449,6 +450,7 @@ body {
     }
 
     .docs-outline-shell {
+        order: 0;
         position: sticky;
         top: 2rem;
         max-height: calc(100vh - 6rem);

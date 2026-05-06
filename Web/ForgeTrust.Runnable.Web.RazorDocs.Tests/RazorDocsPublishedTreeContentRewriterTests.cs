@@ -81,6 +81,7 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
             <html>
             <head>
               <link rel="stylesheet" href="/docs/search.css" />
+              <script src="/docs/outline-client.js"></script>
               <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","docsVersionsUrl":"/docs/versions"};</script>
             </head>
             <body>
@@ -101,6 +102,7 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
         Assert.Contains("href=\"/some-base/docs/versions\"", rewritten);
         Assert.Contains("href=\"/some-base/docs/preview/search\"", rewritten);
         Assert.Contains("href=\"/some-base/docs/v/1.2.3/search.css\"", rewritten);
+        Assert.Contains("src=\"/some-base/docs/v/1.2.3/outline-client.js\"", rewritten);
         Assert.Contains("\"docsRootPath\":\"/some-base/docs/v/1.2.3\"", rewritten);
         Assert.Contains("\"docsSearchUrl\":\"/some-base/docs/v/1.2.3/search\"", rewritten);
         Assert.Contains("\"docsSearchIndexUrl\":\"/some-base/docs/v/1.2.3/search-index.json\"", rewritten);

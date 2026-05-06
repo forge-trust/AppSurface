@@ -1899,9 +1899,19 @@ public class RazorDocsViewsTests
         Assert.True(
             document.QuerySelector(".docs-detail-primary")!.CompareDocumentPosition(document.QuerySelector("#docs-page-outline")!)
                 .HasFlag(DocumentPositions.Following));
-        Assert.Contains("src=\"/docs/outline-client.js\"", html);
-        Assert.Contains("data-doc-outline-client=\"true\"", html);
+        Assert.Contains("/docs/outline-client.js", html);
+        Assert.Contains("data-doc-outline-client-loader=\"true\"", html);
+        Assert.Contains("script.dataset.docOutlineClient = \"true\"", html);
         Assert.DoesNotContain("rounded-2xl border border-slate-800 bg-slate-900/60", html);
+
+        var tenantHtml = await RenderViewAsync(
+            services,
+            "/Views/Docs/Details.cshtml",
+            model,
+            pathBase: "/tenant");
+
+        Assert.Contains("/tenant/docs/outline-client.js", tenantHtml);
+        Assert.Contains("data-doc-outline-client-loader=\"true\"", tenantHtml);
     }
 
     [Fact]
