@@ -125,10 +125,10 @@ Enable versioning when you want the host to keep serving the live unreleased sna
   - Optional absolute or app-relative repository root for source harvesting.
   - When omitted, RazorDocs falls back to repository discovery from the content root.
 - `RazorDocs:CacheExpirationMinutes`
-  - Controls the absolute lifetime of the shared docs snapshot that backs docs pages, public-section data, and `/docs/search-index.json`.
+  - Controls the absolute lifetime of the shared docs snapshot that backs docs pages, public-section data, and `{DocsRootPath}/search-index.json`; for example, `/docs/search-index.json` by default or `/docs/next/search-index.json` when `RazorDocs:Routing:DocsRootPath` is `/docs/next`.
   - Defaults to `5` minutes.
   - Must be a finite positive number from `0.016666666666666666` through `35791394.1`, inclusive.
-  - Must map to a whole number of seconds, because `/docs/search-index.json` uses the same duration for its private `Cache-Control` `max-age` header.
+  - Must map to a whole number of seconds, because `{DocsRootPath}/search-index.json` uses the same duration for its private `Cache-Control` `max-age` header.
   - Do not use `0`, sub-second values, or extreme values such as `double.MaxValue`; RazorDocs rejects values outside the supported range during options validation.
 - `RazorDocs:Routing:DocsRootPath`
   - Controls the live source-backed docs root.
