@@ -8,10 +8,9 @@ namespace ForgeTrust.Runnable.Web.RazorDocs.Services;
 /// The service performs best-effort validation so a broken stored release tree becomes unavailable without preventing
 /// healthy versions or the live preview surface from loading. Validation is intentionally release-local: every version
 /// is checked independently for a readable tree root, the required landing and search pages, the search index, and
-/// the shared search runtime assets that exact-version pages depend on. The page-local outline runtime is validated
-/// conditionally so historical exact trees that never reference <c>outline-client.js</c> remain available after a host
-/// upgrade, while newer trees that emit the outline rail still fail fast when the referenced client asset is missing.
-/// Public
+/// the shared search runtime assets that exact-version pages depend on. Exact trees are otherwise treated as immutable,
+/// self-contained artifacts: outline-aware exports should include the page-local outline runtime they reference, while
+/// historical trees are not crawled or upgraded at host startup. Public
 /// <see cref="RazorDocsResolvedVersion.AvailabilityIssue"/> values are sanitized for archive UI consumption, while
 /// filesystem paths and exception details stay in structured logs only.
 /// </remarks>
@@ -28,12 +27,6 @@ public sealed class RazorDocsVersionCatalogService
         "search-client.js",
         "minisearch.min.js"
     ];
-
-    private static readonly EnumerationOptions ExactTreeHtmlEnumerationOptions = new()
-    {
-        IgnoreInaccessible = true,
-        RecurseSubdirectories = true
-    };
 
     private static readonly JsonDocumentOptions CatalogDocumentOptions = new()
     {
@@ -533,12 +526,6 @@ public sealed class RazorDocsVersionCatalogService
             }
         }
 
-        var outlineAssetValidationIssue = ValidateOutlineClientAsset(exactTreePath);
-        if (outlineAssetValidationIssue is not null)
-        {
-            return outlineAssetValidationIssue;
-        }
-
         var searchIndexValidationIssue = ValidateSearchIndexPayload(Path.Combine(exactTreePath, "search-index.json"));
         if (searchIndexValidationIssue is not null)
         {
@@ -546,37 +533,6 @@ public sealed class RazorDocsVersionCatalogService
         }
 
         return null;
-    }
-
-    private static AvailabilityFailure? ValidateOutlineClientAsset(string exactTreePath)
-    {
-        var outlineClientPath = Path.Combine(exactTreePath, "outline-client.js");
-        if (File.Exists(outlineClientPath))
-        {
-            return null;
-        }
-
-        foreach (var htmlPath in Directory.EnumerateFiles(exactTreePath, "*.*", ExactTreeHtmlEnumerationOptions))
-        {
-            if (!IsHtmlFile(htmlPath)
-                || !File.ReadAllText(htmlPath).Contains("outline-client.js", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            return new AvailabilityFailure(
-                PublicMessage: "Published release tree is missing outline-client.js.",
-                InternalDetail: $"ExactTreePath '{exactTreePath}' references outline-client.js but the asset is missing.");
-        }
-
-        return null;
-    }
-
-    private static bool IsHtmlFile(string path)
-    {
-        var extension = Path.GetExtension(path);
-        return string.Equals(extension, ".html", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(extension, ".htm", StringComparison.OrdinalIgnoreCase);
     }
 
     private static AvailabilityFailure? ValidateSearchIndexPayload(string searchIndexPath)

@@ -246,6 +246,10 @@
 
         for (const link of links) {
             addLifecycleEventListener(link, "click", event => {
+                if (!mainContent) {
+                    return;
+                }
+
                 const entry = getEntryForLink(entries, link);
                 if (!entry) {
                     return;

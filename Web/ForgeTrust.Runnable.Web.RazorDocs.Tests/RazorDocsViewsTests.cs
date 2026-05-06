@@ -168,6 +168,7 @@ public class RazorDocsViewsTests
 
         Assert.Contains("const outlineSelector = \"#docs-page-outline\"", outlineClient);
         Assert.Contains("const mainContent = document.getElementById(\"main-content\")", outlineClient);
+        Assert.Contains("if (!mainContent)", outlineClient);
         Assert.Contains("root: mainContent", outlineClient);
         Assert.Contains("document.addEventListener(\"turbo:frame-load\"", outlineClient);
         Assert.Contains("activeObserver?.disconnect()", outlineClient);

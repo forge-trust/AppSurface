@@ -158,12 +158,12 @@ public sealed class RazorDocsVersionCatalogServiceTests : IDisposable
     }
 
     [Fact]
-    public void GetCatalog_ShouldMarkVersionUnavailable_WhenReferencedOutlineAssetIsMissing()
+    public void GetCatalog_ShouldNotCrawlHistoricalHtml_WhenOutlineAssetIsMissing()
     {
-        var brokenTree = CreateExactTree("broken-outline");
-        File.Delete(Path.Combine(brokenTree, "outline-client.js"));
+        var exactTree = CreateExactTree("historical-without-outline-asset");
+        File.Delete(Path.Combine(exactTree, "outline-client.js"));
         File.WriteAllText(
-            Path.Combine(brokenTree, "api.html"),
+            Path.Combine(exactTree, "api.html"),
             """<html><head><script src="/docs/outline-client.js"></script></head><body>API</body></html>""");
         var catalogPath = WriteCatalog(
             new RazorDocsVersionCatalog
@@ -174,7 +174,7 @@ public sealed class RazorDocsVersionCatalogServiceTests : IDisposable
                     new RazorDocsPublishedVersion
                     {
                         Version = "1.2.0",
-                        ExactTreePath = Path.GetRelativePath(_tempDirectory, brokenTree),
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, exactTree),
                         SupportState = RazorDocsVersionSupportState.Current
                     }
                 ]
@@ -184,10 +184,9 @@ public sealed class RazorDocsVersionCatalogServiceTests : IDisposable
 
         var catalog = service.GetCatalog();
 
-        Assert.Null(catalog.RecommendedVersion);
-        var brokenVersion = Assert.Single(catalog.PublicVersions);
-        Assert.False(brokenVersion.IsAvailable);
-        Assert.Contains("outline-client.js", brokenVersion.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        var exactVersion = Assert.Single(catalog.PublicVersions);
+        Assert.True(exactVersion.IsAvailable);
+        Assert.Same(exactVersion, catalog.RecommendedVersion);
     }
 
     [Fact]
