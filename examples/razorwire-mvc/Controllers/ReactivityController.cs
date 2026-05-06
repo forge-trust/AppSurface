@@ -150,6 +150,7 @@ public class ReactivityController : Controller
     /// </summary>
     /// <param name="clientCount">The current session client count (will be incremented).</param>
     /// <returns>`IActionResult` that is a Turbo stream updating counters for Turbo requests; otherwise a redirect to the referring local URL or the Index action.</returns>
+    // docs:snippet razorwire-increment-counter:start
     [HttpPost]
     [ValidateAntiForgeryToken]
     public IActionResult IncrementCounter([FromForm] int clientCount)
@@ -176,6 +177,7 @@ public class ReactivityController : Controller
 
         return Url.IsLocalUrl(referer) ? Redirect(referer) : RedirectToAction(nameof(Index));
     }
+    // docs:snippet razorwire-increment-counter:end
 
     /// <summary>
     /// Demonstrates a server-handled validation failure that returns a form-local RazorWire error summary.

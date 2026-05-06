@@ -17,6 +17,11 @@ It also includes a RazorDocs browser regression test that runs against `Web/Forg
   - single-session increment updates instance/session/client-count values without refresh,
   - multi-session flow keeps session score independent while instance score is global,
   - session score persists while navigating across Home, Navigation, and Reactivity pages.
+- RazorWire README contract:
+  - the documented repo-root quickstart command points at the supported sample project,
+  - local README links and heading anchors resolve,
+  - source-backed snippets document the Markdown generator command that keeps README code fences in sync,
+  - `ReadmeQuickstart_ReactivityCounter_UpdatesScoresWithoutRefresh` exercises the README quickstart's `/Reactivity` counter path in a browser.
 - RazorDocs search behavior:
   - sidebar search works from `/docs`,
   - navigating to `/docs/search` via Turbo keeps both advanced search and sidebar search functional.

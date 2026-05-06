@@ -35,6 +35,8 @@
     <Project Path="examples/razorwire-mvc/RazorWireWebExample.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/ForgeTrust.Runnable.MarkdownSnippets.Tests/ForgeTrust.Runnable.MarkdownSnippets.Tests.csproj" />
+    <Project Path="tools/ForgeTrust.Runnable.MarkdownSnippets/ForgeTrust.Runnable.MarkdownSnippets.csproj" />
     <Project Path="tools/ForgeTrust.Runnable.PackageIndex.Tests/ForgeTrust.Runnable.PackageIndex.Tests.csproj" />
     <Project Path="tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj" />
   </Folder>

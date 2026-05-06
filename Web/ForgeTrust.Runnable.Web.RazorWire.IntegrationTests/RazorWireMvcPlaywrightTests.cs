@@ -178,6 +178,41 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task ReadmeQuickstart_ReactivityCounter_UpdatesScoresWithoutRefresh()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync(_fixture.ReactivityUrl);
+        await WaitForStreamConnectedAsync(page);
+        await WaitForCounterReadyAsync(page);
+
+        await PlantNoRefreshMarkerAsync(page);
+        var initialInstance = await GetIntTextAsync(page, "#instance-score-value");
+        var initialSession = await GetIntTextAsync(page, "#session-score-value");
+        var initialClientCount = await GetIntInputValueAsync(page, "#client-count-input");
+
+        var incrementButton = page.GetByRole(AriaRole.Button, new PageGetByRoleOptions
+        {
+            Name = "Increment counter",
+            Exact = true
+        });
+        var incrementResponse = await page.RunAndWaitForResponseAsync(
+            () => incrementButton.ClickAsync(),
+            response => response.Url.Contains("/Reactivity/IncrementCounter", StringComparison.OrdinalIgnoreCase)
+                        && response.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase),
+            new PageRunAndWaitForResponseOptions { Timeout = 45_000 });
+
+        Assert.True(incrementResponse.Ok, $"README quickstart IncrementCounter POST failed with status {(int)incrementResponse.Status}.");
+        await ExpectCounterValuesAsync(
+            page,
+            expectedInstance: initialInstance + 1,
+            expectedSession: initialSession + 1,
+            expectedClientCount: initialClientCount + 1);
+        await AssertNoPageRefreshAsync(page, _fixture.ReactivityUrl);
+    }
+
+    [Fact]
     public async Task IncrementCounter_SingleSession_UpdatesValuesWithoutRefresh()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
@@ -840,8 +875,9 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
 
     private Process StartExampleApp(string baseUrl)
     {
+        const string readmeProjectPath = "examples/razorwire-mvc/RazorWireWebExample.csproj";
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var projectPath = Path.Combine(repoRoot, "examples", "razorwire-mvc", "RazorWireWebExample.csproj");
+        var projectPath = Path.Combine(repoRoot, readmeProjectPath.Replace('/', Path.DirectorySeparatorChar));
 
         if (!File.Exists(projectPath))
         {
@@ -851,7 +887,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"run --project \"{projectPath}\" --no-launch-profile",
+            Arguments = $"run --project {readmeProjectPath} --no-launch-profile",
             WorkingDirectory = repoRoot,
             UseShellExecute = false,
             RedirectStandardOutput = true,
