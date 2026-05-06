@@ -113,6 +113,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
+        await page.EvaluateAsync("() => { window.__rwFrameNavigationSentinel = 'alive'; }");
         await outlineLink.ClickAsync();
 
         await page.WaitForFunctionAsync(
@@ -127,7 +128,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
 
         await page.WaitForFunctionAsync(
             """
-            () => document.querySelector("#doc-content .docs-content h1")?.textContent?.trim() === "RazorWire MVC Example"
+            () => window.__rwFrameNavigationSentinel === "alive"
+              && document.querySelector("#doc-content .docs-content h1")?.textContent?.trim() === "RazorWire MVC Example"
               && document.getElementById("docs-page-outline")?.dataset.outlineEnhanced === "true"
             """,
             null,
@@ -319,6 +321,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
               }, 60);
             }
             """);
+        await page.EvaluateAsync("() => { window.__rwFrameNavigationSentinel = 'alive'; }");
 
         await page.EvaluateAsync(
             """
@@ -328,7 +331,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             """);
         await page.WaitForFunctionAsync(
             """
-            () => window.location.pathname === '/docs/Namespaces/ForgeTrust.Runnable.Aspire.html'
+            () => window.__rwFrameNavigationSentinel === 'alive'
+              && window.location.pathname === '/docs/Namespaces/ForgeTrust.Runnable.Aspire.html'
               && document.querySelector('#doc-content h1')?.textContent?.trim() === 'Aspire'
               && (document.getElementById('main-content')?.scrollTop ?? Number.MAX_SAFE_INTEGER) <= 8
             """,
@@ -387,6 +391,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
+        await page.GotoAsync(_fixture.DocsUrl);
         await page.SetContentAsync(
             """
             <main id="main-content">
@@ -440,6 +445,39 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
+        Assert.Equal("true", await page.GetAttributeAsync("#docs-page-outline [data-doc-outline-toggle]", "aria-expanded"));
+
+        await page.SetContentAsync(
+            """
+            <main id="main-content">
+              <turbo-frame id="doc-content">
+                <div class="docs-detail-layout docs-detail-layout--with-outline">
+                  <div class="docs-detail-primary">
+                    <p>Body without matching heading IDs.</p>
+                  </div>
+                  <aside id="docs-page-outline" data-outline-expanded="true">
+                    <button type="button" aria-expanded="true" data-doc-outline-toggle="true">
+                      <span>On this page</span>
+                      <span data-doc-outline-current></span>
+                    </button>
+                    <nav id="docs-page-outline-panel" aria-label="On this page">
+                      <ol>
+                        <li><a href="#missing-section" data-doc-outline-link="true">Missing Section</a></li>
+                      </ol>
+                    </nav>
+                  </aside>
+                </div>
+              </turbo-frame>
+            </main>
+            """);
+        await page.EvaluateAsync(
+            """
+            () => document
+              .getElementById('doc-content')
+              ?.dispatchEvent(new Event('turbo:frame-load', { bubbles: true }))
+            """);
+
+        Assert.Null(await page.GetAttributeAsync("#docs-page-outline", "data-outline-enhanced"));
         Assert.Equal("true", await page.GetAttributeAsync("#docs-page-outline [data-doc-outline-toggle]", "aria-expanded"));
     }
 

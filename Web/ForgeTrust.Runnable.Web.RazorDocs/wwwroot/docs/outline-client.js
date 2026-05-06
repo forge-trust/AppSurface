@@ -227,6 +227,10 @@
         }
 
         const entries = getOutlineEntries(links);
+        if (entries.length === 0) {
+            return;
+        }
+
         lifecycleController = createLifecycleController();
         shell.dataset.outlineEnhanced = "true";
 
@@ -281,7 +285,7 @@
             setActiveLink(links, getActiveEntryFromHash(entries)?.link ?? null, currentLabel);
         });
 
-        if (entries.length === 0 || !("IntersectionObserver" in window) || !mainContent) {
+        if (!("IntersectionObserver" in window) || !mainContent) {
             return;
         }
 

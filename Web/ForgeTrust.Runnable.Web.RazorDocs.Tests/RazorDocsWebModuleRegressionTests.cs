@@ -287,6 +287,11 @@ public class RazorDocsWebModuleRegressionTests
                     Assert.Equal(HttpStatusCode.OK, recommendedAssetResponse.StatusCode);
                     Assert.Contains("window.__releaseTree = true;", recommendedAssetBody);
 
+                    using var recommendedOutlineResponse = await client.GetAsync("/docs/outline-client.js");
+                    var recommendedOutlineBody = await recommendedOutlineResponse.Content.ReadAsStringAsync();
+                    Assert.Equal(HttpStatusCode.OK, recommendedOutlineResponse.StatusCode);
+                    Assert.Contains("window.__outlineClientLoaded = true;", recommendedOutlineBody);
+
                     using var archiveResponse = await client.GetAsync("/docs/versions");
                     var archiveHtml = await archiveResponse.Content.ReadAsStringAsync();
                     Assert.Equal(HttpStatusCode.OK, archiveResponse.StatusCode);
