@@ -43,12 +43,15 @@ public sealed class RazorDocsOptions
 
     /// <summary>
     /// Gets or sets the absolute docs snapshot cache lifetime in minutes.
-    /// The default is 5 minutes.
+    /// The default is <see cref="DefaultCacheExpirationMinutes"/> minutes.
     /// </summary>
     /// <remarks>
     /// This setting controls the shared aggregation snapshot used by docs pages, public-section data, and the generated
     /// search-index payload. Shorter values make source-backed development changes visible sooner, while longer values
-    /// reduce repeated harvest and search-index generation work in production hosts.
+    /// reduce repeated harvest and search-index generation work in production hosts. The value must be finite, must be
+    /// between <see cref="MinCacheExpirationMinutes"/> and <see cref="MaxCacheExpirationMinutes"/>, and must represent
+    /// a whole number of seconds because the generated search-index <c>Cache-Control</c> <c>max-age</c> header uses
+    /// whole-second delta values. Values outside those constraints are rejected during options validation.
     /// </remarks>
     public double CacheExpirationMinutes { get; set; } = DefaultCacheExpirationMinutes;
 
@@ -327,7 +330,7 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         if (!IsValidCacheExpirationMinutes(options.CacheExpirationMinutes))
         {
             failures.Add(
-                $"RazorDocs:CacheExpirationMinutes must be a finite number between {RazorDocsOptions.MinCacheExpirationMinutes} and {RazorDocsOptions.MaxCacheExpirationMinutes}.");
+                $"RazorDocs:CacheExpirationMinutes must be a finite number between {RazorDocsOptions.MinCacheExpirationMinutes} and {RazorDocsOptions.MaxCacheExpirationMinutes} minutes that maps to a whole number of seconds.");
         }
 
         if (source is null)
@@ -501,9 +504,15 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
 
     internal static bool IsValidCacheExpirationMinutes(double cacheExpirationMinutes)
     {
-        return double.IsFinite(cacheExpirationMinutes)
-               && cacheExpirationMinutes >= RazorDocsOptions.MinCacheExpirationMinutes
-               && cacheExpirationMinutes <= RazorDocsOptions.MaxCacheExpirationMinutes;
+        if (!double.IsFinite(cacheExpirationMinutes)
+            || cacheExpirationMinutes < RazorDocsOptions.MinCacheExpirationMinutes
+            || cacheExpirationMinutes > RazorDocsOptions.MaxCacheExpirationMinutes)
+        {
+            return false;
+        }
+
+        var cacheDuration = TimeSpan.FromMinutes(cacheExpirationMinutes);
+        return cacheDuration.Ticks % TimeSpan.TicksPerSecond == 0;
     }
 
     private static bool IsValidDocsRootPath(string docsRootPath)

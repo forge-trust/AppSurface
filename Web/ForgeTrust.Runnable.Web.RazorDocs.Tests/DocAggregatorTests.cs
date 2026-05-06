@@ -3298,6 +3298,7 @@ public class DocAggregatorTests : IDisposable
     [Theory]
     [InlineData(0)]
     [InlineData(double.Epsilon)]
+    [InlineData(0.333)]
     [InlineData(double.MaxValue)]
     public void Constructor_ShouldThrow_WhenCacheExpirationIsInvalid(double cacheExpirationMinutes)
     {

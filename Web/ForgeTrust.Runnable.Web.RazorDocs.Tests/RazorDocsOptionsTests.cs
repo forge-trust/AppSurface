@@ -449,6 +449,7 @@ public sealed class RazorDocsOptionsTests
     [InlineData(double.NaN)]
     [InlineData(double.Epsilon)]
     [InlineData(0.0001)]
+    [InlineData(0.333)]
     [InlineData(double.MaxValue)]
     [InlineData(35791395)]
     public void Validator_ShouldRejectInvalidCacheExpirationMinutes(double cacheExpirationMinutes)
@@ -467,6 +468,24 @@ public sealed class RazorDocsOptionsTests
             failure => failure.Contains(
                 "CacheExpirationMinutes must be a finite number between",
                 StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldAllowWholeSecondCacheExpirationMinutes()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            CacheExpirationMinutes = 0.1,
+            Routing = new RazorDocsRoutingOptions
+            {
+                DocsRootPath = "/docs"
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(result.Failed);
     }
 
     [Fact]
