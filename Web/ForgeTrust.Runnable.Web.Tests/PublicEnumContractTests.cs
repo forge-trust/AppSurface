@@ -3,11 +3,11 @@ namespace ForgeTrust.Runnable.Web.Tests;
 public class PublicEnumContractTests
 {
     [Theory]
-    [InlineData(ConventionalNotFoundPageMode.Auto, 0)]
-    [InlineData(ConventionalNotFoundPageMode.Enabled, 1)]
-    [InlineData(ConventionalNotFoundPageMode.Disabled, 2)]
-    public void ConventionalNotFoundPageMode_NumericValues_AreStable(
-        ConventionalNotFoundPageMode value,
+    [InlineData(BrowserStatusPageMode.Auto, 0)]
+    [InlineData(BrowserStatusPageMode.Enabled, 1)]
+    [InlineData(BrowserStatusPageMode.Disabled, 2)]
+    public void BrowserStatusPageMode_NumericValues_AreStable(
+        BrowserStatusPageMode value,
         int expected)
     {
         Assert.Equal(expected, (int)value);

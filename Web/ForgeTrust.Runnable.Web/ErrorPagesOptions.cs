@@ -1,60 +1,60 @@
 namespace ForgeTrust.Runnable.Web;
 
 /// <summary>
-/// Represents configuration options for Runnable's conventional browser error pages.
+/// Represents configuration options for Runnable's conventional browser status pages.
 /// </summary>
 /// <remarks>
-/// The default configuration keeps <see cref="NotFoundPageMode"/> at <see cref="ConventionalNotFoundPageMode.Auto"/>,
-/// which enables the conventional page only when MVC support already includes Razor views. Apps that need the
-/// HTML 404 experience regardless of their starting MVC mode can opt into
-/// <see cref="ConventionalNotFoundPageMode.Enabled"/>, while API-only or custom error handling stacks should use
-/// <see cref="ConventionalNotFoundPageMode.Disabled"/>.
+/// The default configuration keeps <see cref="BrowserStatusPageMode"/> at <see cref="BrowserStatusPageMode.Auto"/>,
+/// which enables conventional 401, 403, and 404 browser pages only when MVC support already includes Razor
+/// views. Apps that need the HTML status-page experience regardless of their starting MVC mode can opt into
+/// <see cref="BrowserStatusPageMode.Enabled"/>, while API-only or custom error handling stacks should use
+/// <see cref="BrowserStatusPageMode.Disabled"/>.
 /// </remarks>
 public record ErrorPagesOptions
 {
     /// <summary>
-    /// Gets a default instance of <see cref="ErrorPagesOptions"/> with <see cref="ConventionalNotFoundPageMode.Auto"/>.
+    /// Gets a default instance of <see cref="ErrorPagesOptions"/> with <see cref="BrowserStatusPageMode.Auto"/>.
     /// </summary>
     public static ErrorPagesOptions Default => new();
 
     /// <summary>
-    /// Gets or sets the conventional not-found page behavior for the application.
+    /// Gets or sets the conventional browser status page behavior for the application.
     /// </summary>
     /// <remarks>
-    /// <see cref="ConventionalNotFoundPageMode.Auto"/> is the default and turns the feature on only when the
+    /// <see cref="BrowserStatusPageMode.Auto"/> is the default and turns the feature on only when the
     /// app's MVC support reaches <see cref="MvcSupport.ControllersWithViews"/>. Choosing
-    /// <see cref="ConventionalNotFoundPageMode.Enabled"/> can cause Runnable startup to upgrade MVC support so
-    /// the conventional Razor view can render. Choosing <see cref="ConventionalNotFoundPageMode.Disabled"/>
-    /// prevents the reserved framework route and browser-oriented 404 handling from activating.
+    /// <see cref="BrowserStatusPageMode.Enabled"/> can cause Runnable startup to upgrade MVC support so
+    /// the conventional Razor views can render. Choosing <see cref="BrowserStatusPageMode.Disabled"/>
+    /// prevents the reserved framework routes and browser-oriented status handling from activating.
     /// </remarks>
-    public ConventionalNotFoundPageMode NotFoundPageMode { get; set; } = ConventionalNotFoundPageMode.Auto;
+    public BrowserStatusPageMode BrowserStatusPageMode { get; set; } = BrowserStatusPageMode.Auto;
 
     /// <summary>
-    /// Explicitly enables Runnable's conventional not-found page.
+    /// Explicitly enables Runnable's conventional browser status pages.
     /// </summary>
     /// <remarks>
-    /// Use this when an app must always render the conventional HTML 404 page. Runnable may effectively require
-    /// controllers with views at startup so the configured Razor page can execute.
+    /// Use this when an app must always render the conventional HTML 401, 403, and 404 pages. Runnable may
+    /// effectively require controllers with views at startup so the configured Razor pages can execute.
     /// </remarks>
-    public void UseConventionalNotFoundPage()
+    public void UseConventionalBrowserStatusPages()
     {
-        NotFoundPageMode = ConventionalNotFoundPageMode.Enabled;
+        BrowserStatusPageMode = BrowserStatusPageMode.Enabled;
     }
 
     /// <summary>
-    /// Explicitly disables Runnable's conventional not-found page.
+    /// Explicitly disables Runnable's conventional browser status pages.
     /// </summary>
     /// <remarks>
-    /// Use this for APIs, custom status-code middleware, or any app that wants to keep the conventional 404
-    /// route and browser handling out of the pipeline even when MVC view support is available.
+    /// Use this for APIs, custom status-code middleware, or any app that wants to keep conventional browser
+    /// status routes and handling out of the pipeline even when MVC view support is available.
     /// </remarks>
-    public void DisableNotFoundPage()
+    public void DisableBrowserStatusPages()
     {
-        NotFoundPageMode = ConventionalNotFoundPageMode.Disabled;
+        BrowserStatusPageMode = BrowserStatusPageMode.Disabled;
     }
 
     /// <summary>
-    /// Determines whether Runnable should enable the conventional not-found page for the supplied MVC support level.
+    /// Determines whether Runnable should enable conventional browser status pages for the supplied MVC support level.
     /// </summary>
     /// <param name="mvcSupportLevel">The MVC capability currently configured for the app.</param>
     /// <returns>
@@ -62,16 +62,16 @@ public record ErrorPagesOptions
     /// </returns>
     /// <remarks>
     /// This helper is used by Runnable startup after module and app options are applied. In
-    /// <see cref="ConventionalNotFoundPageMode.Auto"/>, the feature only turns on when MVC already includes
-    /// views. In <see cref="ConventionalNotFoundPageMode.Enabled"/>, the feature is active regardless of the
+    /// <see cref="BrowserStatusPageMode.Auto"/>, the feature only turns on when MVC already includes
+    /// views. In <see cref="BrowserStatusPageMode.Enabled"/>, the feature is active regardless of the
     /// incoming MVC level because startup may upgrade the app to support Razor views.
     /// </remarks>
-    internal bool IsConventionalNotFoundPageEnabled(MvcSupport mvcSupportLevel)
+    internal bool AreConventionalBrowserStatusPagesEnabled(MvcSupport mvcSupportLevel)
     {
-        return NotFoundPageMode switch
+        return BrowserStatusPageMode switch
         {
-            ConventionalNotFoundPageMode.Enabled => true,
-            ConventionalNotFoundPageMode.Disabled => false,
+            BrowserStatusPageMode.Enabled => true,
+            BrowserStatusPageMode.Disabled => false,
             _ => mvcSupportLevel >= MvcSupport.ControllersWithViews
         };
     }

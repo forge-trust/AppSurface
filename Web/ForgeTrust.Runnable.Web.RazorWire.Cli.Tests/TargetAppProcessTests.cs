@@ -119,7 +119,7 @@ public class TargetAppProcessTests
         process.Start();
 
         var timeout = Task.Delay(TimeSpan.FromSeconds(2));
-        var firstSignal = await Task.WhenAny(outputReceived.Task, exitedSignal.Task, timeout);
+        var firstSignal = await Task.WhenAny(exitedSignal.Task, outputReceived.Task, timeout);
         Assert.NotSame(timeout, firstSignal);
         Assert.Same(exitedSignal.Task, firstSignal);
 
