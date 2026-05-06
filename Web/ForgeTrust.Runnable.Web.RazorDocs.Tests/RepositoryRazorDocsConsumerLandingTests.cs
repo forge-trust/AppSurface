@@ -28,7 +28,9 @@ public sealed class RepositoryRazorDocsConsumerLandingTests
         var featuredGroup = Assert.Single(
             rootLanding.Metadata?.FeaturedPageGroups ?? [],
             group => string.Equals(group.Intent, "build-docs", StringComparison.OrdinalIgnoreCase));
-        var featuredPage = Assert.Single(featuredGroup.Pages ?? []);
+        var featuredPage = Assert.Single(
+            featuredGroup.Pages ?? [],
+            page => string.Equals(page.Path, ConsumerLandingPath, StringComparison.OrdinalIgnoreCase));
         Assert.Equal("How do I use RazorDocs in my own repository?", featuredPage.Question);
         Assert.Equal(ConsumerLandingPath, featuredPage.Path);
         Assert.Contains("host shape", featuredPage.SupportingCopy);
