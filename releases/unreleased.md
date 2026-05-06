@@ -92,6 +92,7 @@ Runnable is putting the release contract in place before `v0.1.0`. This slice is
 - Contributor provenance now degrades safely: namespace and API pages stay explicit-override-only for the MVP, and missing or slow git history omits only freshness instead of breaking docs rendering.
 - RazorDocs generated C# API references can now render per-symbol source links for documented types, methods, properties, and enums that point at the exact source file and line, with immutable refs available when hosts want links pinned to the code version used to build the docs.
 - The primary RazorDocs Pages deployment now configures commit-pinned symbol source links, so generated C# API `Source` chips resolve to the exact file and line from the CI build revision.
+- RazorDocs snapshot caching is now configurable with `RazorDocs:CacheExpirationMinutes`, so development hosts can shorten reuse while production hosts can choose a longer docs and search-index cache lifetime.
 - Shared RazorDocs badges, metadata chips, provenance strips, and trust bars now live in the shared package stylesheet while `search.css` stays focused on search-specific UI.
 - RazorDocs search now keeps failure recovery markup out of the active search shell until the index actually fails to load, so successful searches no longer expose hidden failure copy to text extraction tools.
 - RazorDocs now documents the namespace README merge contract with positive and negative examples, while detail-page titles wrap on narrow screens so long package names do not clip on mobile.

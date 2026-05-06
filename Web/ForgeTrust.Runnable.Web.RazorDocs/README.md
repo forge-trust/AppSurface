@@ -75,6 +75,7 @@ Use the default single-surface configuration when you want the live docs experie
 {
   "RazorDocs": {
     "Mode": "Source",
+    "CacheExpirationMinutes": 5,
     "Source": {
       "RepositoryRoot": "/path/to/repo"
     }
@@ -224,6 +225,16 @@ RazorDocs does not regenerate these trees at request time. It resolves extension
 - Do not point `recommendedVersion` at a hidden or broken release tree.
 - Do not assume `RazorDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
+
+`RazorDocs:CacheExpirationMinutes` controls the absolute lifetime of the shared docs snapshot that backs docs pages, public-section data, and `/docs/search-index.json`. It defaults to `5`, must be a finite number between `RazorDocsOptions.MinCacheExpirationMinutes` and `RazorDocsOptions.MaxCacheExpirationMinutes`, and is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
+
+Pitfalls:
+
+- Do not set `CacheExpirationMinutes` to `0` to disable caching. RazorDocs rejects zero and negative values because every request would rebuild the docs snapshot and search index.
+- Do not set tiny positive values below `RazorDocsOptions.MinCacheExpirationMinutes`; the search-index `Cache-Control` `max-age` header cannot represent sub-second cache lifetimes.
+- Do not set huge finite values such as `double.MaxValue`. RazorDocs caps the value so the derived search-index `Cache-Control` `max-age` remains representable.
+- The search-index response uses the same duration for its private `Cache-Control` `max-age`, so client refresh behavior stays aligned with server-side snapshot reuse.
+- Manual refresh through `/docs/search-index.json?refresh=1` still invalidates the server snapshot generation immediately for authenticated users; it does not change the configured TTL for later entries.
 
 ## Contributor Provenance
 
