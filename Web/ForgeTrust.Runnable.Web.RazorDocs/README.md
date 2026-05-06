@@ -241,7 +241,7 @@ Pitfalls:
 - Do not set fractional-second values such as `0.333` minutes. RazorDocs rejects values that cannot round-trip to a whole-second `max-age`.
 - Do not set huge finite values such as `double.MaxValue`. RazorDocs caps the value so the derived search-index `Cache-Control` `max-age` remains representable.
 - The search-index response uses the same duration for its private `Cache-Control` `max-age`, so client refresh behavior stays aligned with server-side snapshot reuse.
-- Manual refresh through `/docs/search-index.json?refresh=1` still invalidates the server snapshot generation immediately for authenticated users; it does not change the configured TTL for later entries.
+- Manual refresh through `{DocsRootPath}/search-index.json?refresh=1` still invalidates the server snapshot generation immediately for authenticated users; it does not change the configured TTL for later entries. For example, when `RazorDocs:Routing:DocsRootPath` is `/docs/next`, use `/docs/next/search-index.json?refresh=1`.
 
 ## Contributor Provenance
 

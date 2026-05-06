@@ -78,6 +78,31 @@ public sealed class RazorDocsOptionsTests
     }
 
     [Fact]
+    public void AddRazorDocs_ShouldRejectInvalidConfiguredCacheExpirationMinutes()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:CacheExpirationMinutes"] = "-1"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value);
+
+        Assert.Contains(
+            ex.Failures,
+            failure => failure.Contains("CacheExpirationMinutes", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void AddRazorDocs_ShouldTrimAndDeduplicateConfiguredNamespacePrefixes()
     {
         var services = new ServiceCollection();
