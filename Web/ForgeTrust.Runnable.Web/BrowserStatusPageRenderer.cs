@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -27,8 +28,7 @@ internal sealed class BrowserStatusPageRenderer
     private readonly IModelMetadataProvider _metadataProvider;
     private readonly ILogger<BrowserStatusPageRenderer> _logger;
 
-    private readonly object _resolvedViewPathsLock = new();
-    private readonly Dictionary<int, string> _resolvedViewPaths = [];
+    private readonly ConcurrentDictionary<int, string> _resolvedViewPaths = new();
 
     /// <summary>
     /// Initializes a renderer with the MVC services required to validate and execute browser status page views.
@@ -105,55 +105,52 @@ internal sealed class BrowserStatusPageRenderer
 
     private string ResolveViewPath(BrowserStatusPageDescriptor descriptor)
     {
-        lock (_resolvedViewPathsLock)
+        return _resolvedViewPaths.GetOrAdd(
+            descriptor.StatusCode,
+            _ => ResolveViewPathUncached(descriptor));
+    }
+
+    private string ResolveViewPathUncached(BrowserStatusPageDescriptor descriptor)
+    {
+        var appViewResult = _viewEngine.GetView(
+            executingFilePath: null,
+            viewPath: descriptor.AppViewPath,
+            isMainPage: true);
+
+        if (appViewResult.Success)
         {
-            if (_resolvedViewPaths.TryGetValue(descriptor.StatusCode, out var resolvedViewPath))
-            {
-                return resolvedViewPath;
-            }
-
-            var appViewResult = _viewEngine.GetView(
-                executingFilePath: null,
-                viewPath: descriptor.AppViewPath,
-                isMainPage: true);
-
-            if (appViewResult.Success)
-            {
-                _resolvedViewPaths[descriptor.StatusCode] = descriptor.AppViewPath;
-                _logger.LogInformation(
-                    "Resolved conventional browser status page {StatusCode} view to {ViewPath}.",
-                    descriptor.StatusCode,
-                    descriptor.AppViewPath);
-                return descriptor.AppViewPath;
-            }
-
-            var frameworkViewResult = _viewEngine.GetView(
-                executingFilePath: null,
-                viewPath: descriptor.FrameworkFallbackViewPath,
-                isMainPage: true);
-
-            if (frameworkViewResult.Success)
-            {
-                _resolvedViewPaths[descriptor.StatusCode] = descriptor.FrameworkFallbackViewPath;
-                _logger.LogInformation(
-                    "Resolved conventional browser status page {StatusCode} view to framework fallback {ViewPath}.",
-                    descriptor.StatusCode,
-                    descriptor.FrameworkFallbackViewPath);
-                return descriptor.FrameworkFallbackViewPath;
-            }
-
-            var searchedLocations = appViewResult.SearchedLocations
-                .Concat(frameworkViewResult.SearchedLocations)
-                .Distinct()
-                .ToArray();
-
-            var locationsMessage = searchedLocations.Length == 0
-                ? "No Razor view locations were reported."
-                : string.Join(Environment.NewLine, searchedLocations);
-
-            throw new InvalidOperationException(
-                $"Runnable browser status pages are enabled for {descriptor.StatusCode}, but no Razor view could be resolved. Add '{descriptor.AppViewPath}' or restore the framework fallback view '{descriptor.FrameworkFallbackViewPath}'.{Environment.NewLine}Searched locations:{Environment.NewLine}{locationsMessage}");
+            _logger.LogInformation(
+                "Resolved conventional browser status page {StatusCode} view to {ViewPath}.",
+                descriptor.StatusCode,
+                descriptor.AppViewPath);
+            return descriptor.AppViewPath;
         }
+
+        var frameworkViewResult = _viewEngine.GetView(
+            executingFilePath: null,
+            viewPath: descriptor.FrameworkFallbackViewPath,
+            isMainPage: true);
+
+        if (frameworkViewResult.Success)
+        {
+            _logger.LogInformation(
+                "Resolved conventional browser status page {StatusCode} view to framework fallback {ViewPath}.",
+                descriptor.StatusCode,
+                descriptor.FrameworkFallbackViewPath);
+            return descriptor.FrameworkFallbackViewPath;
+        }
+
+        var searchedLocations = appViewResult.SearchedLocations
+            .Concat(frameworkViewResult.SearchedLocations)
+            .Distinct()
+            .ToArray();
+
+        var locationsMessage = searchedLocations.Length == 0
+            ? "No Razor view locations were reported."
+            : string.Join(Environment.NewLine, searchedLocations);
+
+        throw new InvalidOperationException(
+            $"Runnable browser status pages are enabled for {descriptor.StatusCode}, but no Razor view could be resolved. Add '{descriptor.AppViewPath}' or restore the framework fallback view '{descriptor.FrameworkFallbackViewPath}'.{Environment.NewLine}Searched locations:{Environment.NewLine}{locationsMessage}");
     }
 
     private static BrowserStatusPageModel CreateModel(HttpContext httpContext)
