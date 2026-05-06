@@ -1114,7 +1114,7 @@ public sealed record DocDetailsViewModel
     /// Gets a value indicating whether the page should use the API reference reading surface.
     /// </summary>
     /// <remarks>
-    /// This covers generated C# API documents and Markdown documents explicitly marked with API-oriented metadata,
+    /// This covers non-Markdown generated documents and Markdown documents explicitly marked with API-oriented metadata,
     /// while <see cref="IsCSharpApiDoc" /> remains scoped to C# generated page chrome decisions.
     /// </remarks>
     public bool IsApiSurfaceDoc { get; init; }

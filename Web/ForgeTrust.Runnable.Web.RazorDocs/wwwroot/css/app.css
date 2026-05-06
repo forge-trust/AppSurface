@@ -385,12 +385,6 @@ body {
     line-height: 1.3;
 }
 
-.docs-content--markdown h4 {
-    margin: 1.6rem 0 0.55rem;
-    font-size: 1.05rem;
-    line-height: 1.35;
-}
-
 .docs-content--markdown h5,
 .docs-content--markdown h6 {
     margin: 1.35rem 0 0.45rem;

@@ -1445,6 +1445,24 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task DetailsView_ShouldUseApiContentSurface_ForGeneratedExtensionlessDocs()
+    {
+        var doc = new DocNode(
+            "Namespaces",
+            "Namespaces",
+            "<p>Namespace body</p>",
+            Metadata: new DocMetadata
+            {
+                NavGroup = "API Reference"
+            });
+
+        var html = await RenderDetailsViewAsync(doc);
+
+        Assert.Contains("class=\"docs-content docs-content--api\"", html);
+        Assert.DoesNotContain("class=\"docs-content docs-content--markdown\"", html);
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldHandleNamespacesRootPath()
     {
         using var services = CreateServiceProvider(CreateDocs());
@@ -3373,7 +3391,7 @@ public class RazorDocsViewsTests
             Summary = metadata?.Summary,
             ShowSummary = !string.IsNullOrWhiteSpace(metadata?.Summary) && metadata?.SummaryIsDerived != true,
             IsCSharpApiDoc = doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
-            IsApiSurfaceDoc = doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+            IsApiSurfaceDoc = !IsMarkdownDoc(doc.Path)
                               || IsApiSurfacePageType(metadata?.PageType),
             PageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge(metadata?.PageType),
             Component = metadata?.ComponentIsDerived == true || string.IsNullOrWhiteSpace(metadata?.Component)
@@ -3397,6 +3415,12 @@ public class RazorDocsViewsTests
         var normalizedPageType = DocMetadataPresentation.NormalizeToken(pageType);
 
         return normalizedPageType is "api" or "api-reference";
+    }
+
+    private static bool IsMarkdownDoc(string path)
+    {
+        return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase);
     }
 
     private static DocSidebarViewModel CreateSidebarViewModel(

@@ -1224,7 +1224,7 @@ public class DocsController : Controller
 
     private static bool IsApiSurfaceDoc(DocNode doc)
     {
-        return doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+        return !IsMarkdownDoc(doc.Path)
                || IsApiSurfacePageType(doc.Metadata?.PageType);
     }
 
@@ -1233,6 +1233,12 @@ public class DocsController : Controller
         var normalizedPageType = DocMetadataPresentation.NormalizeToken(pageType);
 
         return normalizedPageType is "api" or "api-reference";
+    }
+
+    private static bool IsMarkdownDoc(string path)
+    {
+        return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase);
     }
 
     private static RazorDocsVersionCatalogService CreateDefaultVersionCatalogService()
