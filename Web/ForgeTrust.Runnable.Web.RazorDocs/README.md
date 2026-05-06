@@ -6,6 +6,8 @@ Documentation site generation and hosting for Runnable web applications.
 
 `ForgeTrust.Runnable.Web.RazorDocs` is the reusable Razor Class Library package behind the RazorDocs experience. It aggregates Markdown and C# API documentation into a browsable docs UI, supports an optional version archive for published releases, and is intended to be embedded into Runnable web applications or used by the standalone RazorDocs host.
 
+If you are evaluating RazorDocs for your own repository, start with [Use RazorDocs in your repository](./use-razordocs.md). That page explains the consumer model, host shape, authoring metadata, and adoption checklist before you drill into this package reference.
+
 ## What It Provides
 
 - `RazorDocsWebModule` for wiring the docs UI into a Runnable web host
