@@ -550,50 +550,36 @@ public sealed class RazorDocsVersionCatalogService
             return null;
         }
 
-        if (!ExactTreeReferencesOutlineClient(exactTreePath, out var validationFailure))
-        {
-            return validationFailure;
-        }
-
-        return new AvailabilityFailure(
-            PublicMessage: "Published release tree is missing outline-client.js.",
-            InternalDetail: $"ExactTreePath '{exactTreePath}' references outline-client.js but the asset is missing.");
-    }
-
-    private static bool ExactTreeReferencesOutlineClient(
-        string exactTreePath,
-        out AvailabilityFailure? validationFailure)
-    {
-        validationFailure = null;
-
         try
         {
             foreach (var htmlPath in Directory.EnumerateFiles(exactTreePath, "*.*", SearchOption.AllDirectories))
             {
-                var extension = Path.GetExtension(htmlPath);
-                if (!string.Equals(extension, ".html", StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(extension, ".htm", StringComparison.OrdinalIgnoreCase))
+                if (!IsHtmlFile(htmlPath)
+                    || !File.ReadAllText(htmlPath).Contains("outline-client.js", StringComparison.Ordinal))
                 {
                     continue;
                 }
 
-                foreach (var line in File.ReadLines(htmlPath))
-                {
-                    if (line.Contains("outline-client.js", StringComparison.Ordinal))
-                    {
-                        return true;
-                    }
-                }
+                return new AvailabilityFailure(
+                    PublicMessage: "Published release tree is missing outline-client.js.",
+                    InternalDetail: $"ExactTreePath '{exactTreePath}' references outline-client.js but the asset is missing.");
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            validationFailure = new AvailabilityFailure(
+            return new AvailabilityFailure(
                 PublicMessage: "Published release tree outline asset references could not be validated.",
                 InternalDetail: $"ExactTreePath '{exactTreePath}' could not be scanned for outline-client.js references: {ex.Message}");
         }
 
-        return false;
+        return null;
+    }
+
+    private static bool IsHtmlFile(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return string.Equals(extension, ".html", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(extension, ".htm", StringComparison.OrdinalIgnoreCase);
     }
 
     private static AvailabilityFailure? ValidateSearchIndexPayload(string searchIndexPath)
