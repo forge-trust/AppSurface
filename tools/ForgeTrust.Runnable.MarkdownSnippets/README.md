@@ -49,7 +49,10 @@ Supported directive attributes are:
 - `lang`: Markdown fence language.
 - `dedent`: optional boolean. Defaults to `true`; use `false` when leading indentation is meaningful.
 
-Unknown attributes, duplicate attributes, rooted paths, and paths that escape the repository root fail verification.
+Unknown attributes, duplicate attributes, rooted paths, paths that escape the
+repository root, and `file=` paths that cross a symlink or reparse-point segment
+fail verification. Keep sample directories physically inside the repository
+rather than linking them in from elsewhere.
 
 When an opening directive is indented or quoted, generated fence, content, and
 closing directive lines keep the same Markdown line prefix. Use that form when

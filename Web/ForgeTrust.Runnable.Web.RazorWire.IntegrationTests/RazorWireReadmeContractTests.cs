@@ -139,6 +139,18 @@ public sealed class RazorWireReadmeContractTests
         Assert.Contains("examples-2", anchors);
     }
 
+    [Fact]
+    public void RazorWireReadme_HeadingAnchors_PreserveUnderscores()
+    {
+        const string markdown = """
+            # Configure API_KEYS
+            """;
+
+        var anchors = ExtractMarkdownHeadingAnchors(markdown);
+
+        Assert.Contains("configure-api_keys", anchors);
+    }
+
     private static string GetRepositoryRoot()
     {
         return PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
@@ -320,6 +332,10 @@ public sealed class RazorWireReadmeContractTests
             if (Rune.IsLetterOrDigit(rune))
             {
                 builder.Append(rune.ToString().ToLowerInvariant());
+            }
+            else if (rune.Value == '_')
+            {
+                builder.Append('_');
             }
             else if (Rune.IsWhiteSpace(rune) || rune.Value == '-')
             {
