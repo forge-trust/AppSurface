@@ -1427,6 +1427,24 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task DetailsView_ShouldUseApiContentSurface_ForApiReferenceMarkdown()
+    {
+        var doc = new DocNode(
+            "API Guide",
+            "guides/api-reference.md",
+            "<p>Reference body</p>",
+            Metadata: new DocMetadata
+            {
+                PageType = "api-reference"
+            });
+
+        var html = await RenderDetailsViewAsync(doc);
+
+        Assert.Contains("class=\"docs-content docs-content--api\"", html);
+        Assert.DoesNotContain("class=\"docs-content docs-content--markdown\"", html);
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldHandleNamespacesRootPath()
     {
         using var services = CreateServiceProvider(CreateDocs());
@@ -3355,6 +3373,8 @@ public class RazorDocsViewsTests
             Summary = metadata?.Summary,
             ShowSummary = !string.IsNullOrWhiteSpace(metadata?.Summary) && metadata?.SummaryIsDerived != true,
             IsCSharpApiDoc = doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
+            IsApiSurfaceDoc = doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                              || IsApiSurfacePageType(metadata?.PageType),
             PageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge(metadata?.PageType),
             Component = metadata?.ComponentIsDerived == true || string.IsNullOrWhiteSpace(metadata?.Component)
                 ? null
@@ -3370,6 +3390,13 @@ public class RazorDocsViewsTests
             ContributorSourceUsesTurbo = contributorSourceUsesTurbo,
             ContributorEditUsesTurbo = contributorEditUsesTurbo
         };
+    }
+
+    private static bool IsApiSurfacePageType(string? pageType)
+    {
+        var normalizedPageType = DocMetadataPresentation.NormalizeToken(pageType);
+
+        return normalizedPageType is "api" or "api-reference";
     }
 
     private static DocSidebarViewModel CreateSidebarViewModel(

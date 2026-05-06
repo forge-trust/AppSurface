@@ -722,6 +722,7 @@ public class DocsController : Controller
             Summary = summary,
             ShowSummary = showSummary,
             IsCSharpApiDoc = doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
+            IsApiSurfaceDoc = IsApiSurfaceDoc(doc),
             PageTypeBadge = pageTypeBadge,
             Component = component,
             Audience = audience,
@@ -1219,6 +1220,19 @@ public class DocsController : Controller
         }
 
         return expectedTypes.Any(expected => string.Equals(pageType, expected, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsApiSurfaceDoc(DocNode doc)
+    {
+        return doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+               || IsApiSurfacePageType(doc.Metadata?.PageType);
+    }
+
+    private static bool IsApiSurfacePageType(string? pageType)
+    {
+        var normalizedPageType = DocMetadataPresentation.NormalizeToken(pageType);
+
+        return normalizedPageType is "api" or "api-reference";
     }
 
     private static RazorDocsVersionCatalogService CreateDefaultVersionCatalogService()

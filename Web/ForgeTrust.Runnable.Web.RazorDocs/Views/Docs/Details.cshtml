@@ -406,7 +406,7 @@
     </section>
 }
 
-<div class="docs-content @(Model.IsCSharpApiDoc ? "docs-content--api" : "docs-content--markdown")">
+<div class="docs-content @(Model.IsApiSurfaceDoc ? "docs-content--api" : "docs-content--markdown")">
     @* Safe: Content is sanitized by DocAggregator before caching. *@
     @Html.Raw(ResolveGeneratedContentHrefs(Model.Document.Content))
 </div>
