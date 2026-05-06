@@ -29,6 +29,12 @@ public sealed class RazorDocsVersionCatalogService
         "minisearch.min.js"
     ];
 
+    private static readonly EnumerationOptions ExactTreeHtmlEnumerationOptions = new()
+    {
+        IgnoreInaccessible = true,
+        RecurseSubdirectories = true
+    };
+
     private static readonly JsonDocumentOptions CatalogDocumentOptions = new()
     {
         CommentHandling = JsonCommentHandling.Skip,
@@ -550,26 +556,17 @@ public sealed class RazorDocsVersionCatalogService
             return null;
         }
 
-        try
+        foreach (var htmlPath in Directory.EnumerateFiles(exactTreePath, "*.*", ExactTreeHtmlEnumerationOptions))
         {
-            foreach (var htmlPath in Directory.EnumerateFiles(exactTreePath, "*.*", SearchOption.AllDirectories))
+            if (!IsHtmlFile(htmlPath)
+                || !File.ReadAllText(htmlPath).Contains("outline-client.js", StringComparison.Ordinal))
             {
-                if (!IsHtmlFile(htmlPath)
-                    || !File.ReadAllText(htmlPath).Contains("outline-client.js", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                return new AvailabilityFailure(
-                    PublicMessage: "Published release tree is missing outline-client.js.",
-                    InternalDetail: $"ExactTreePath '{exactTreePath}' references outline-client.js but the asset is missing.");
+                continue;
             }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
+
             return new AvailabilityFailure(
-                PublicMessage: "Published release tree outline asset references could not be validated.",
-                InternalDetail: $"ExactTreePath '{exactTreePath}' could not be scanned for outline-client.js references: {ex.Message}");
+                PublicMessage: "Published release tree is missing outline-client.js.",
+                InternalDetail: $"ExactTreePath '{exactTreePath}' references outline-client.js but the asset is missing.");
         }
 
         return null;
