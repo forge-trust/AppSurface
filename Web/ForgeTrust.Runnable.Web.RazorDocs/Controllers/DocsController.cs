@@ -667,8 +667,8 @@ public class DocsController : Controller
         IReadOnlyList<DocNode> docs,
         IReadOnlyList<DocSectionSnapshot> sections)
     {
-        var lookup = BuildDocLookup(docs);
         var doc = details.Document;
+        var pathResolver = DocPathResolver.Create(docs);
         var pathBaseAwareDoc = doc with
         {
             Content = DocContentLinkRewriter.PrefixPathBaseForDocsUrls(
@@ -731,9 +731,9 @@ public class DocsController : Controller
             PublicSectionLabel = currentSectionSnapshot?.Label,
             PublicSectionHref = currentSectionSnapshot is null ? null : _docsUrlBuilder.BuildSectionUrl(currentSectionSnapshot.Section),
             PublicSectionPurpose = currentSectionSnapshot is null ? null : DocPublicSectionCatalog.GetPurpose(currentSectionSnapshot.Section),
-            ContributorSourceUsesTurbo = ShouldUseDocsFrame(details.ContributorProvenance?.SourceHref, lookup),
-            ContributorEditUsesTurbo = ShouldUseDocsFrame(details.ContributorProvenance?.EditHref, lookup),
-            TrustMigrationUsesTurbo = ShouldUseDocsFrame(metadata?.Trust?.Migration?.Href, lookup),
+            ContributorSourceUsesTurbo = ShouldUseDocsFrame(details.ContributorProvenance?.SourceHref, pathResolver),
+            ContributorEditUsesTurbo = ShouldUseDocsFrame(details.ContributorProvenance?.EditHref, pathResolver),
+            TrustMigrationUsesTurbo = ShouldUseDocsFrame(metadata?.Trust?.Migration?.Href, pathResolver),
             IsSectionLanding = isSectionLanding,
             FeaturedPageGroups = featuredPageGroups,
             SectionGroups = sectionGroups
@@ -973,75 +973,6 @@ public class DocsController : Controller
         return false;
     }
 
-    private sealed class DocLookupBucket
-    {
-        public List<DocNode> OrderedDocs { get; } = [];
-
-        public HashSet<DocNode> SeenDocs { get; } = [];
-    }
-
-    private static Dictionary<string, DocLookupBucket> BuildDocLookup(IEnumerable<DocNode> docs)
-    {
-        var lookup = new Dictionary<string, DocLookupBucket>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var doc in docs)
-        {
-            AddLookupEntry(lookup, NormalizeLookupPath(doc.Path), doc);
-            AddLookupEntry(lookup, NormalizeLookupPath(GetSnapshotCanonicalPath(doc)), doc);
-        }
-
-        return lookup;
-    }
-
-    private static void AddLookupEntry(Dictionary<string, DocLookupBucket> lookup, string key, DocNode doc)
-    {
-        if (!lookup.TryGetValue(key, out var bucket))
-        {
-            bucket = new DocLookupBucket();
-            lookup[key] = bucket;
-        }
-
-        if (bucket.SeenDocs.Add(doc))
-        {
-            bucket.OrderedDocs.Add(doc);
-        }
-    }
-
-    private static DocNode? ResolveDocByPath(
-        string path,
-        IReadOnlyDictionary<string, DocLookupBucket> lookup)
-    {
-        var lookupPath = NormalizeLookupPath(path);
-        var lookupCanonicalPath = NormalizeCanonicalPath(path);
-
-        if (!lookup.TryGetValue(lookupPath, out var bucket) || bucket.OrderedDocs.Count == 0)
-        {
-            return null;
-        }
-
-        var candidates = bucket.OrderedDocs;
-
-        var exactCanonicalMatch = candidates.FirstOrDefault(
-            doc => string.Equals(
-                       NormalizeCanonicalPath(GetSnapshotCanonicalPath(doc)),
-                       lookupCanonicalPath,
-                       StringComparison.OrdinalIgnoreCase)
-                   || string.Equals(
-                       NormalizeCanonicalPath(doc.Path),
-                       lookupCanonicalPath,
-                       StringComparison.OrdinalIgnoreCase));
-        if (exactCanonicalMatch is not null)
-        {
-            return exactCanonicalMatch;
-        }
-
-        return candidates
-            .OrderBy(doc => string.IsNullOrWhiteSpace(GetFragment(GetSnapshotCanonicalPath(doc))) ? 0 : 1)
-            .ThenBy(doc => string.IsNullOrWhiteSpace(doc.Content) ? 1 : 0)
-            .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
-    }
-
     private SearchPageViewModel BuildSearchPageViewModel(IReadOnlyList<DocNode> docs)
     {
         return new SearchPageViewModel(
@@ -1093,12 +1024,12 @@ public class DocsController : Controller
 
     private IReadOnlyList<SearchPageFallbackLink> BuildSearchFallbackLinks(IReadOnlyList<DocNode> docs)
     {
-        var lookup = BuildDocLookup(docs);
+        var pathResolver = DocPathResolver.Create(docs);
         var links = new List<SearchPageFallbackLink>();
 
         TryAddFallbackLink(
             links,
-            lookup,
+            pathResolver,
             SelectFallbackDoc(
                 docs,
                 doc => HasPageType(doc, "guide", "concept", "tutorial", "troubleshooting")
@@ -1108,7 +1039,7 @@ public class DocsController : Controller
 
         TryAddFallbackLink(
             links,
-            lookup,
+            pathResolver,
             SelectFallbackDoc(
                 docs,
                 doc => HasPageType(doc, "example")
@@ -1118,7 +1049,7 @@ public class DocsController : Controller
 
         TryAddFallbackLink(
             links,
-            lookup,
+            pathResolver,
             SelectFallbackDoc(
                 docs,
                 doc => HasPageType(doc, "api-reference", "api")
@@ -1133,7 +1064,7 @@ public class DocsController : Controller
                 doc => string.Equals(doc.Path, "Namespaces", StringComparison.OrdinalIgnoreCase));
             TryAddFallbackLink(
                 links,
-                lookup,
+                pathResolver,
                 namespacesRoot,
                 "Browse namespaces",
                 "Use the namespace index when you need the reference map.");
@@ -1154,7 +1085,7 @@ public class DocsController : Controller
 
     private void TryAddFallbackLink(
         ICollection<SearchPageFallbackLink> links,
-        IReadOnlyDictionary<string, DocLookupBucket> lookup,
+        DocPathResolver pathResolver,
         DocNode? doc,
         string title,
         string description)
@@ -1175,10 +1106,10 @@ public class DocsController : Controller
                 title,
                 href,
                 description,
-                UsesDocsFrame: ShouldUseDocsFrame(href, lookup)));
+                UsesDocsFrame: ShouldUseDocsFrame(href, pathResolver)));
     }
 
-    private bool ShouldUseDocsFrame(string? href, IReadOnlyDictionary<string, DocLookupBucket> lookup)
+    private bool ShouldUseDocsFrame(string? href, DocPathResolver pathResolver)
     {
         if (string.IsNullOrWhiteSpace(href))
         {
@@ -1203,7 +1134,7 @@ public class DocsController : Controller
             return false;
         }
 
-        return ResolveDocByPath(hrefPath.TrimStart('/'), lookup) is not null;
+        return pathResolver.Resolve(hrefPath.TrimStart('/')) is not null;
     }
 
     private static DocNode? SelectFallbackDoc(
@@ -1245,39 +1176,11 @@ public class DocsController : Controller
         };
     }
 
-    private static string NormalizeLookupPath(string path)
-    {
-        var sanitized = path.Trim().Replace('\\', '/').Trim('/');
-        var hashIndex = sanitized.IndexOf('#');
-        if (hashIndex >= 0)
-        {
-            sanitized = sanitized[..hashIndex];
-        }
-
-        return sanitized;
-    }
-
-    private static string NormalizeCanonicalPath(string path)
-    {
-        return path.Trim().Replace('\\', '/').Trim('/');
-    }
     private static string GetSnapshotCanonicalPath(DocNode doc)
     {
         return doc.CanonicalPath
                ?? throw new InvalidOperationException(
                    $"DocsController requires snapshot canonical paths. Doc '{doc.Path}' was missing CanonicalPath.");
-    }
-
-    private static string? GetFragment(string path)
-    {
-        var canonical = NormalizeCanonicalPath(path);
-        var hashIndex = canonical.IndexOf('#');
-        if (hashIndex < 0 || hashIndex == canonical.Length - 1)
-        {
-            return null;
-        }
-
-        return canonical[(hashIndex + 1)..];
     }
 
     private static string ExtractHrefPath(string href)

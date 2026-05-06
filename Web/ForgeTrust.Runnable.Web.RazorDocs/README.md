@@ -538,7 +538,7 @@ featured_page_groups:
 - `order` is optional on groups and pages. Lower values sort first, and ties preserve authored order.
 - `pages` must contain the featured destinations for the group. Empty page lists are skipped.
 - `question` is the reader-facing label shown on a row. If omitted, RazorDocs falls back to the destination page title.
-- `path` accepts either the source path or canonical docs path for the destination page. RazorDocs normalizes forward-slash and backslash separators during resolution.
+- `path` accepts either the source path or canonical docs path for the destination page, including an exact `#fragment` suffix when the card should land on a specific section. RazorDocs normalizes forward-slash and backslash separators during resolution while preserving fragment identifiers, and the same resolver used by page details handles configured docs-root prefixes such as `/docs` or a custom live docs root.
 - `supporting_copy` is optional landing-only text. If omitted, RazorDocs falls back to the destination page summary.
 
 Author three to five groups for a broad landing page, and one to three pages per group. Prefer plain reader intents such as `understand`, `choose-package`, `see-it-working`, `release-risk`, and `api-reference`. Use custom intents when your product has domain-specific decisions that those defaults do not capture.
@@ -570,6 +570,7 @@ Diagnostics include the source file, field path when available, problem, cause, 
 - Do not create both `.yml` and `.yaml` sidecars for the same Markdown file. RazorDocs treats that as an authoring error and ignores both.
 - Do not use a sidecar as a second secret metadata system. It supports the same `DocMetadata` schema as inline front matter, and it is best reserved for files whose Markdown needs to stay portable on other surfaces.
 - Do not put `path` or `question` directly under a group. Page fields belong under `pages`.
+- Prefer source-relative paths for authored curation when the docs may be exported or mounted under more than one route. Canonical `/docs/...html` paths are accepted for parity with browser links, but source paths stay easier to review and move with the file.
 - README portability matters most at the repository and package level. In this repo, authored `README.md` files should stay free of inline front matter so GitHub renders them cleanly.
 
 ## Metadata-Driven Wayfinding
