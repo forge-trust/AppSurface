@@ -115,9 +115,10 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         await outlineLink.ClickAsync();
 
-        await page.WaitForURLAsync(
-            $"**{outlinePagePath}",
-            new PageWaitForURLOptions { Timeout = 30_000 });
+        await page.WaitForFunctionAsync(
+            "path => window.location.pathname === path",
+            outlinePagePath,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
