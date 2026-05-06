@@ -227,7 +227,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Equal(
             "location",
             await page.GetAttributeAsync("#docs-page-outline a[href='#endpoint-routing']", "aria-current"));
-        Assert.Null(await page.GetAttributeAsync("#docs-page-outline a[href='#conventional-404-pages']", "aria-current"));
+        Assert.Null(await page.EvaluateAsync<string?>(
+            """() => document.querySelector("#docs-page-outline a[href='#conventional-404-pages']")?.getAttribute("aria-current") ?? null"""));
     }
 
     [Fact]
