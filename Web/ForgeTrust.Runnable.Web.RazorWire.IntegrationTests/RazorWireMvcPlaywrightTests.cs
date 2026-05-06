@@ -887,7 +887,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"run --project {readmeProjectPath}",
+            Arguments = $"run --project {readmeProjectPath} --no-launch-profile",
             WorkingDirectory = repoRoot,
             UseShellExecute = false,
             RedirectStandardOutput = true,
