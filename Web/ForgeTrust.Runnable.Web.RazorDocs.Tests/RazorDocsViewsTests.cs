@@ -155,6 +155,22 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public void Stylesheets_ShouldDefineMarkdownProseReadabilityRules()
+    {
+        var tailwindEntryStylesheet = ReadTailwindEntryStylesheetMarkup();
+
+        Assert.Contains(".docs-content--markdown", tailwindEntryStylesheet);
+        Assert.Contains("max-width: 70ch;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown p", tailwindEntryStylesheet);
+        Assert.Contains("margin: 0 0 1.08rem;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown ul,", tailwindEntryStylesheet);
+        Assert.Contains("list-style: disc;", tailwindEntryStylesheet);
+        Assert.Contains("list-style: decimal;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown blockquote", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown :not(pre) > code", tailwindEntryStylesheet);
+    }
+
+    [Fact]
     public void Layout_ShouldKeepSidebarVisibleByDefault_ForNoScriptFallback()
     {
         var layout = ReadLayoutMarkup();
@@ -1390,6 +1406,24 @@ public class RazorDocsViewsTests
 
         Assert.DoesNotContain("text-3xl font-bold text-white tracking-tight", html);
         Assert.Contains("Example body", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldMarkMarkdownAndApiContent_ForSurfaceSpecificProseStyling()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+
+        var markdownHtml = await RenderDocsViewAsync(
+            services,
+            "Details",
+            c => c.Details("guides/intro.md"));
+        var apiHtml = await RenderDocsViewAsync(
+            services,
+            "Details",
+            c => c.Details("src/Example.cs"));
+
+        Assert.Contains("class=\"docs-content docs-content--markdown\"", markdownHtml);
+        Assert.Contains("class=\"docs-content docs-content--api\"", apiHtml);
     }
 
     [Fact]

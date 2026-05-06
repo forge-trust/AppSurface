@@ -37,6 +37,7 @@ This changelog is the compact release ledger for Runnable. The monorepo ships in
 - The RazorWire MVC sample counter button now has an accessible name while preserving the compact icon-only UI.
 - RazorDocs source-path, canonical-path, fragment, and docs-root-prefixed lookups now share one resolver across page details, landing curation, related-page links, and search fallback links.
 - RazorDocs landing curation now renders reader-intent `featured_page_groups` instead of one flat featured list.
+- RazorDocs authored Markdown pages now use a tighter prose layout while generated API pages keep the wider reference treatment.
 - The PackageIndex generator now has a successful `--help`/`-h` path with command and option guidance instead of a bare usage failure.
 - The conventional browser 404 page now favors user recovery, including documentation search for missing docs routes and a home link for other missing pages.
 - `StartupContext.ApplicationName` is now treated as a display label while `IHostEnvironment.ApplicationName` stays assembly-backed for static web asset manifest discovery.

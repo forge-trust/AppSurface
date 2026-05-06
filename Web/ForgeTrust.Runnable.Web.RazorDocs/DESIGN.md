@@ -19,6 +19,7 @@ If a new surface starts to feel like a feature grid, a landing page, or an AI-ge
 
 - Primary typeface: `Outfit`
 - Body copy should stay clean and readable with generous line-height
+- Authored Markdown prose should use a shorter measure and stronger paragraph/list rhythm than generated API reference pages. Release notes and long guides must scan as editorial documents, not as one uninterrupted text column.
 - Headings should feel compact and intentional, not oversized hero copy
 - Search results should privilege readable title hierarchy over decorative framing
 
@@ -55,6 +56,7 @@ Use this order when deciding where a new style belongs:
 
 - One-off owned chrome is easiest to read when the intent stays in the Razor markup that owns it.
 - Harvested content is safest to style through a wrapper such as `.docs-content` because RazorDocs does not control each nested node or authoring shape.
+- Markdown and generated API reference are both harvested content, but they are different reading jobs. Use `.docs-content--markdown` for prose rhythm and keep `.docs-content--api` on the wider base reference treatment.
 - Reusable package components deserve semantic names even when RazorDocs owns the markup, because repeated UI contracts are easier to review and update when they have one stable selector.
 - Search surfaces need semantic hooks because the stylesheet and `search-client.js` both rely on the same stable names across loading, empty, failure, and active-filter states.
 
