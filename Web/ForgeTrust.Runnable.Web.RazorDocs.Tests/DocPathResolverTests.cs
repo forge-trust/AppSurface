@@ -46,10 +46,16 @@ public sealed class DocPathResolverTests
         var exactFragment = resolver.Resolve("Namespaces/Foo.html#Foo-Type");
         var missingFragment = resolver.Resolve("Namespaces/Foo.html#Missing");
         var sourceBase = resolver.Resolve("Namespaces/Foo");
+        var rootedExactFragment = resolver.Resolve("/docs/Namespaces/Foo.html#Foo-Type", "/docs");
+        var rootedMissingFragment = resolver.Resolve("/docs/Namespaces/Foo.html#Missing", "/docs");
+        var rootedBase = resolver.Resolve("/docs/Namespaces/Foo", "/docs");
 
         Assert.Same(fragment, exactFragment);
         Assert.Same(basePage, missingFragment);
         Assert.Same(basePage, sourceBase);
+        Assert.Same(fragment, rootedExactFragment);
+        Assert.Same(basePage, rootedMissingFragment);
+        Assert.Same(basePage, rootedBase);
     }
 
     [Fact]

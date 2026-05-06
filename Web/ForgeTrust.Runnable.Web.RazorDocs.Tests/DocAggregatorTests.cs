@@ -1203,6 +1203,54 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDocDetailsAsync_ShouldResolveRelatedPagesWithCurrentDocsRootPrefixedCanonicalPaths()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Current",
+                "guides/current.md",
+                "<p>Current</p>",
+                Metadata: new DocMetadata
+                {
+                    RelatedPages = ["/docs/next/guides/related.md.html"]
+                }),
+            new(
+                "Related",
+                "guides/related.md",
+                "<p>Related</p>",
+                Metadata: new DocMetadata
+                {
+                    Summary = "Follow the next preview step."
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        using var memo = new Memo(cache);
+        var aggregator = new DocAggregator(
+            [_harvesterFake],
+            new RazorDocsOptions
+            {
+                Routing = new RazorDocsRoutingOptions
+                {
+                    DocsRootPath = "/docs/next"
+                }
+            },
+            _envFake,
+            memo,
+            _sanitizerFake,
+            _loggerFake);
+
+        var details = await aggregator.GetDocDetailsAsync("guides/current.md");
+
+        var relatedPage = Assert.Single(details!.RelatedPages);
+        Assert.Equal("Related", relatedPage.Title);
+        Assert.Equal("/docs/next/guides/related.md.html", relatedPage.Href);
+        Assert.Equal("Follow the next preview step.", relatedPage.Summary);
+    }
+
+    [Fact]
     public async Task GetDocDetailsAsync_ShouldResolveRelatedPagesWithMissingMetadata()
     {
         var harvestedDocs = new List<DocNode>

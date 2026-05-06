@@ -538,7 +538,7 @@ featured_page_groups:
 - `order` is optional on groups and pages. Lower values sort first, and ties preserve authored order.
 - `pages` must contain the featured destinations for the group. Empty page lists are skipped.
 - `question` is the reader-facing label shown on a row. If omitted, RazorDocs falls back to the destination page title.
-- `path` accepts either the source path or canonical docs path for the destination page. RazorDocs normalizes forward-slash and backslash separators during resolution, and the same resolver used by page details handles configured docs-root prefixes such as `/docs` or a custom live docs root.
+- `path` accepts either the source path or canonical docs path for the destination page, including an exact `#fragment` suffix when the card should land on a specific section. RazorDocs normalizes forward-slash and backslash separators during resolution while preserving fragment identifiers, and the same resolver used by page details handles configured docs-root prefixes such as `/docs` or a custom live docs root.
 - `supporting_copy` is optional landing-only text. If omitted, RazorDocs falls back to the destination page summary.
 
 Author three to five groups for a broad landing page, and one to three pages per group. Prefer plain reader intents such as `understand`, `choose-package`, `see-it-working`, `release-risk`, and `api-reference`. Use custom intents when your product has domain-specific decisions that those defaults do not capture.
