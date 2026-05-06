@@ -96,7 +96,6 @@ public class DocAggregator
     // Bound per-document heading volume so search-index size stays predictable for large docs sets.
     private const int MaxHeadingsPerDocument = 24;
     private const int SearchSnippetMaxLength = 220;
-    internal static readonly TimeSpan SnapshotCacheDuration = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan HarvesterTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ContributorFreshnessTimeout = TimeSpan.FromSeconds(30);
 
@@ -109,10 +108,15 @@ public class DocAggregator
     private readonly RazorDocsContributorOptions _contributorOptions;
     private readonly Func<string, CancellationToken, Task<DateTimeOffset?>> _resolveGitLastUpdatedUtcAsync;
     private readonly TimeSpan _contributorFreshnessTimeout;
+    private readonly CachePolicy _docsCachePolicy;
     private readonly Func<DateTimeOffset> _utcNow;
-    private static readonly CachePolicy DocsCachePolicy = CachePolicy.Absolute(SnapshotCacheDuration);
     private readonly Guid _cacheScope = Guid.NewGuid();
     private long _cacheGeneration;
+
+    /// <summary>
+    /// Gets the configured absolute lifetime for the shared docs snapshot cache.
+    /// </summary>
+    internal TimeSpan SnapshotCacheDuration { get; }
 
     private static readonly Regex ScriptOrStyleRegex = new(
         "<script[^>]*>[\\s\\S]*?</script>|<style[^>]*>[\\s\\S]*?</style>",
@@ -299,6 +303,8 @@ public class DocAggregator
         _docsUrlBuilder = docsUrlBuilder;
         _logger = logger;
         _contributorOptions = options.Contributor ?? throw new ArgumentNullException(nameof(options.Contributor));
+        SnapshotCacheDuration = ResolveSnapshotCacheDuration(options);
+        _docsCachePolicy = CachePolicy.Absolute(SnapshotCacheDuration);
         _contributorFreshnessTimeout = contributorFreshnessTimeout ?? ContributorFreshnessTimeout;
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
         _repositoryRoot = options.Mode switch
@@ -317,6 +323,19 @@ public class DocAggregator
         {
             return ResolveGitLastUpdatedUtcAsync(_repositoryRoot, sourcePath, _logger, cancellationToken);
         }
+    }
+
+    private static TimeSpan ResolveSnapshotCacheDuration(RazorDocsOptions options)
+    {
+        if (!RazorDocsOptionsValidator.IsValidCacheExpirationMinutes(options.CacheExpirationMinutes))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(RazorDocsOptions.CacheExpirationMinutes),
+                options.CacheExpirationMinutes,
+                $"RazorDocs cache expiration must be a finite number of minutes between {RazorDocsOptions.MinCacheExpirationMinutes} and {RazorDocsOptions.MaxCacheExpirationMinutes}.");
+        }
+
+        return TimeSpan.FromMinutes(options.CacheExpirationMinutes);
     }
 
     private static string ResolveRepositoryRoot(
@@ -472,7 +491,8 @@ public class DocAggregator
     /// The search-index payload is generated from the same harvested snapshot.
     /// Caller cancellation does not cancel shared snapshot computation; callers can cancel their own wait.
     /// Harvester execution is bounded by a timeout so a single slow harvester cannot block snapshot regeneration indefinitely.
-    /// The memoized cache entry is created with a 5-minute absolute expiration.
+    /// The memoized cache entry is created with the configured absolute expiration from
+    /// <see cref="RazorDocsOptions.CacheExpirationMinutes"/>.
     /// </remarks>
     /// <returns>A cached snapshot containing both docs and search-index payload.</returns>
     private async Task<CachedDocsSnapshot> GetCachedDocsSnapshotAsync()
@@ -484,6 +504,7 @@ public class DocAggregator
         var logger = _logger;
         var harvesterTimeout = HarvesterTimeout;
         var snapshotCacheDuration = SnapshotCacheDuration;
+        var docsCachePolicy = _docsCachePolicy;
 
         return await _memo.GetAsync(
                    _cacheScope,
@@ -626,7 +647,7 @@ public class DocAggregator
                            searchIndexPayload,
                            contributorProvenanceByPath);
                    },
-                   DocsCachePolicy,
+                   docsCachePolicy,
                    cancellationToken: CancellationToken.None);
     }
 

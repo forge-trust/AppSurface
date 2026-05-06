@@ -89,6 +89,45 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDocsAsync_ShouldExpireSnapshotUsingConfiguredCacheExpiration()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        var harvestCount = 0;
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .ReturnsLazily(() =>
+            {
+                var currentHarvest = Interlocked.Increment(ref harvestCount);
+                return new[] { new DocNode($"Harvest {currentHarvest}", "path", "<p>content</p>") };
+            });
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        using var memo = new Memo(cache);
+        var aggregator = new DocAggregator(
+            [harvester],
+            new RazorDocsOptions
+            {
+                CacheExpirationMinutes = RazorDocsOptions.MinCacheExpirationMinutes,
+                Source = new RazorDocsSourceOptions
+                {
+                    RepositoryRoot = Path.GetTempPath()
+                }
+            },
+            _envFake,
+            memo,
+            _sanitizerFake,
+            _loggerFake);
+
+        var first = await aggregator.GetDocsAsync();
+        await Task.Delay(TimeSpan.FromMilliseconds(1100));
+        var second = await aggregator.GetDocsAsync();
+
+        Assert.Equal("Harvest 1", Assert.Single(first).Title);
+        Assert.Equal("Harvest 2", Assert.Single(second).Title);
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .MustHaveHappenedTwiceExactly();
+    }
+
+    [Fact]
     public async Task GetDocsAsync_ShouldSanitizeContent_WhenHarvested()
     {
         // Arrange
@@ -3254,6 +3293,30 @@ public class DocAggregatorTests : IDisposable
 
         Assert.Equal(nameof(RazorDocsSourceOptions.RepositoryRoot), ex.ParamName);
         Assert.Contains("whitespace", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(double.Epsilon)]
+    [InlineData(0.333)]
+    [InlineData(double.MaxValue)]
+    public void Constructor_ShouldThrow_WhenCacheExpirationIsInvalid(double cacheExpirationMinutes)
+    {
+        var options = new RazorDocsOptions
+        {
+            CacheExpirationMinutes = cacheExpirationMinutes
+        };
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(
+            () => new DocAggregator(
+                new[] { _harvesterFake },
+                options,
+                _envFake,
+                _memo,
+                _sanitizerFake,
+                _loggerFake));
+
+        Assert.Equal(nameof(RazorDocsOptions.CacheExpirationMinutes), ex.ParamName);
     }
 
     [Fact]

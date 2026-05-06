@@ -14,9 +14,46 @@ public sealed class RazorDocsOptions
     public const string SectionName = "RazorDocs";
 
     /// <summary>
+    /// Gets the default value, in minutes, for <see cref="CacheExpirationMinutes"/>.
+    /// </summary>
+    public const double DefaultCacheExpirationMinutes = 5;
+
+    /// <summary>
+    /// Gets the smallest supported value, in minutes, for <see cref="CacheExpirationMinutes"/>.
+    /// </summary>
+    /// <remarks>
+    /// The limit keeps the configured duration representable by the derived search-index <c>Cache-Control</c>
+    /// <c>max-age</c> header, which uses whole seconds.
+    /// </remarks>
+    public const double MinCacheExpirationMinutes = 1d / 60d;
+
+    /// <summary>
+    /// Gets the largest supported value, in minutes, for <see cref="CacheExpirationMinutes"/>.
+    /// </summary>
+    /// <remarks>
+    /// The limit keeps the derived search-index <c>Cache-Control</c> <c>max-age</c> within the range of a 32-bit
+    /// positive delta-seconds value.
+    /// </remarks>
+    public const double MaxCacheExpirationMinutes = (int.MaxValue - 1) / 60d;
+
+    /// <summary>
     /// Gets or sets the active docs source mode.
     /// </summary>
     public RazorDocsMode Mode { get; set; } = RazorDocsMode.Source;
+
+    /// <summary>
+    /// Gets or sets the absolute docs snapshot cache lifetime in minutes.
+    /// The default is <see cref="DefaultCacheExpirationMinutes"/> minutes.
+    /// </summary>
+    /// <remarks>
+    /// This setting controls the shared aggregation snapshot used by docs pages, public-section data, and the generated
+    /// search-index payload. Shorter values make source-backed development changes visible sooner, while longer values
+    /// reduce repeated harvest and search-index generation work in production hosts. The value must be finite, must be
+    /// between <see cref="MinCacheExpirationMinutes"/> and <see cref="MaxCacheExpirationMinutes"/>, and must represent
+    /// a whole number of seconds because the generated search-index <c>Cache-Control</c> <c>max-age</c> header uses
+    /// whole-second delta values. Values outside those constraints are rejected during options validation.
+    /// </remarks>
+    public double CacheExpirationMinutes { get; set; } = DefaultCacheExpirationMinutes;
 
     /// <summary>
     /// Gets source-mode settings used when docs are harvested from a repository checkout.
@@ -290,6 +327,12 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
             failures.Add($"Unsupported RazorDocs mode '{options.Mode}'.");
         }
 
+        if (!IsValidCacheExpirationMinutes(options.CacheExpirationMinutes))
+        {
+            failures.Add(
+                $"RazorDocs:CacheExpirationMinutes must be a finite number between {RazorDocsOptions.MinCacheExpirationMinutes} and {RazorDocsOptions.MaxCacheExpirationMinutes} minutes that maps to a whole number of seconds.");
+        }
+
         if (source is null)
         {
             failures.Add("RazorDocs:Source must not be null.");
@@ -457,6 +500,19 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         return failures.Count == 0
             ? ValidateOptionsResult.Success
             : ValidateOptionsResult.Fail(failures);
+    }
+
+    internal static bool IsValidCacheExpirationMinutes(double cacheExpirationMinutes)
+    {
+        if (!double.IsFinite(cacheExpirationMinutes)
+            || cacheExpirationMinutes < RazorDocsOptions.MinCacheExpirationMinutes
+            || cacheExpirationMinutes > RazorDocsOptions.MaxCacheExpirationMinutes)
+        {
+            return false;
+        }
+
+        var cacheDuration = TimeSpan.FromMinutes(cacheExpirationMinutes);
+        return cacheDuration.Ticks % TimeSpan.TicksPerSecond == 0;
     }
 
     private static bool IsValidDocsRootPath(string docsRootPath)

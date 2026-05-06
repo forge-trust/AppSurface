@@ -23,7 +23,6 @@ public class DocsController : Controller
     private const string CuratedLandingDescription = "Start with the proof path that answers the first evaluator questions, then move into the sections that fit your next decision.";
     private const string SectionUnavailableHeading = "Section unavailable";
     private static readonly string[] DefaultProofPathStageLabels = ["Understand", "See Proof", "Adopt Next"];
-    private static readonly TimeSpan SearchIndexCacheDuration = DocAggregator.SnapshotCacheDuration;
     private static readonly TimeSpan SearchShellFallbackBudget = TimeSpan.FromMilliseconds(500);
 
     private readonly DocAggregator _aggregator;
@@ -363,7 +362,7 @@ public class DocsController : Controller
         }
 
         // Keep response caching private by default; docs may be served behind auth.
-        Response.Headers.CacheControl = $"private,max-age={(int)SearchIndexCacheDuration.TotalSeconds}";
+        Response.Headers.CacheControl = $"private,max-age={(int)_aggregator.SnapshotCacheDuration.TotalSeconds}";
 
         var payload = await _aggregator.GetSearchIndexPayloadAsync(HttpContext.RequestAborted);
         var pathBaseAwarePayload = PrefixSearchIndexPathsForPathBase(payload, Request.PathBase.Value);

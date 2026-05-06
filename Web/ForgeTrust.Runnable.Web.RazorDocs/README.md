@@ -75,6 +75,7 @@ Use the default single-surface configuration when you want the live docs experie
 {
   "RazorDocs": {
     "Mode": "Source",
+    "CacheExpirationMinutes": 5,
     "Source": {
       "RepositoryRoot": "/path/to/repo"
     }
@@ -123,6 +124,12 @@ Enable versioning when you want the host to keep serving the live unreleased sna
 - `RazorDocs:Source:RepositoryRoot`
   - Optional absolute or app-relative repository root for source harvesting.
   - When omitted, RazorDocs falls back to repository discovery from the content root.
+- `RazorDocs:CacheExpirationMinutes`
+  - Controls the absolute lifetime of the shared docs snapshot that backs docs pages, public-section data, and `{DocsRootPath}/search-index.json`; for example, `/docs/search-index.json` by default or `/docs/next/search-index.json` when `RazorDocs:Routing:DocsRootPath` is `/docs/next`.
+  - Defaults to `5` minutes.
+  - Must be a finite positive number from `0.016666666666666666` through `35791394.1`, inclusive.
+  - Must map to a whole number of seconds, because `{DocsRootPath}/search-index.json` uses the same duration for its private `Cache-Control` `max-age` header.
+  - Do not use `0`, sub-second values, or extreme values such as `double.MaxValue`; RazorDocs rejects values outside the supported range during options validation.
 - `RazorDocs:Routing:DocsRootPath`
   - Controls the live source-backed docs root.
   - Defaults to `/docs` when versioning is off.
@@ -224,6 +231,17 @@ RazorDocs does not regenerate these trees at request time. It resolves extension
 - Do not point `recommendedVersion` at a hidden or broken release tree.
 - Do not assume `RazorDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
+
+`RazorDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
+
+Pitfalls:
+
+- Do not set `CacheExpirationMinutes` to `0` to disable caching. RazorDocs rejects zero and negative values because every request would rebuild the docs snapshot and search index.
+- Do not set tiny positive values below `0.016666666666666666` minutes; the search-index `Cache-Control` `max-age` header cannot represent sub-second cache lifetimes.
+- Do not set fractional-second values such as `0.333` minutes. RazorDocs rejects values that cannot round-trip to a whole-second `max-age`.
+- Do not set huge finite values such as `double.MaxValue`. RazorDocs caps the value so the derived search-index `Cache-Control` `max-age` remains representable.
+- The search-index response uses the same duration for its private `Cache-Control` `max-age`, so client refresh behavior stays aligned with server-side snapshot reuse.
+- Manual refresh through `{DocsRootPath}/search-index.json?refresh=1` still invalidates the server snapshot generation immediately for authenticated users; it does not change the configured TTL for later entries. For example, when `RazorDocs:Routing:DocsRootPath` is `/docs/next`, use `/docs/next/search-index.json?refresh=1`.
 
 ## Contributor Provenance
 
