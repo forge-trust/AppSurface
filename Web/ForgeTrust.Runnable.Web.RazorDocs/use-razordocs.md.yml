@@ -1,0 +1,22 @@
+title: Use RazorDocs in your repository
+summary: Learn when to adopt RazorDocs, how to host it, and how to use authored metadata to turn repository Markdown and C# APIs into a usable docs site.
+page_type: guide
+nav_group: Start Here
+order: 15
+aliases:
+  - RazorDocs adoption
+  - repository docs
+  - docs hosting
+  - generated API reference
+keywords:
+  - RazorDocsWebModule
+  - AddRazorDocs
+  - featured_page_groups
+  - repository root
+breadcrumbs:
+  - Start Here
+  - Use RazorDocs in your repository
+related_pages:
+  - Web/ForgeTrust.Runnable.Web.RazorDocs/README.md
+  - Web/ForgeTrust.Runnable.Web.RazorDocs.Standalone/README.md
+  - packages/README.md
