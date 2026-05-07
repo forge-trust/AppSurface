@@ -37,9 +37,11 @@ public sealed class ConventionalExceptionPageTests
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
-        Assert.Contains("Runnable default 500", html);
+        Assert.Contains("Something went wrong", html);
         Assert.Contains("Request id:", html);
-        Assert.Contains(ThrowingEndpointWebModule.ExpectedRequestId, html);
+        Assert.DoesNotContain("Runnable default 500", html);
+        Assert.DoesNotContain("App owners", html);
+        Assert.DoesNotContain("~/Views/Shared/500.cshtml", html);
     }
 
     [Fact]
@@ -61,7 +63,7 @@ public sealed class ConventionalExceptionPageTests
 
         if (exception is null)
         {
-            Assert.DoesNotContain("Runnable default 500", body);
+            Assert.DoesNotContain("Something went wrong", body);
         }
     }
 
@@ -94,7 +96,7 @@ public sealed class ConventionalExceptionPageTests
         var html = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
-        Assert.Contains("Runnable default 500", html);
+        Assert.Contains("Something went wrong", html);
     }
 
     [Fact]
@@ -116,7 +118,7 @@ public sealed class ConventionalExceptionPageTests
         var html = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
-        Assert.Contains("Runnable default 500", html);
+        Assert.Contains("Something went wrong", html);
         Assert.DoesNotContain(ThrowingEndpointWebModule.SecretExceptionMessage, html);
         Assert.DoesNotContain("secret-header-value", html);
         Assert.DoesNotContain("secret-cookie-value", html);
@@ -139,7 +141,7 @@ public sealed class ConventionalExceptionPageTests
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
-        Assert.DoesNotContain("Runnable default 500", body);
+        Assert.DoesNotContain("Something went wrong", body);
     }
 
     [Fact]
@@ -163,7 +165,7 @@ public sealed class ConventionalExceptionPageTests
 
         if (exception is null)
         {
-            Assert.DoesNotContain("Runnable default 500", body);
+            Assert.DoesNotContain("Something went wrong", body);
             Assert.Contains(ResponseStartedWebModule.StartedBody, body);
         }
     }
@@ -229,6 +231,20 @@ public sealed class ConventionalExceptionPageTests
     }
 
     [Fact]
+    public void ValidateConfiguredViews_CachesResolvedViewPath()
+    {
+        var viewEngine = new StubCompositeViewEngine(
+            appResult: ViewEngineResult.Found(ConventionalExceptionPageDefaults.AppViewPath, new StubView(ConventionalExceptionPageDefaults.AppViewPath)));
+        var renderer = CreateRenderer(viewEngine);
+
+        renderer.ValidateConfiguredViews();
+        renderer.ValidateConfiguredViews();
+
+        Assert.Equal(1, viewEngine.GetViewCallCount(ConventionalExceptionPageDefaults.AppViewPath));
+        Assert.Equal(0, viewEngine.GetViewCallCount(ConventionalExceptionPageDefaults.FrameworkFallbackViewPath));
+    }
+
+    [Fact]
     public async Task RenderAsync_UsesSafeModel_With500StatusAndRequestId()
     {
         var executor = new CapturingViewResultExecutor();
@@ -236,20 +252,30 @@ public sealed class ConventionalExceptionPageTests
             new StubCompositeViewEngine(
                 appResult: ViewEngineResult.Found(ConventionalExceptionPageDefaults.AppViewPath, new StubView(ConventionalExceptionPageDefaults.AppViewPath))),
             executor);
-        var httpContext = new DefaultHttpContext
+        var previousCurrent = Activity.Current;
+        Activity.Current = null;
+
+        try
         {
-            TraceIdentifier = "renderer-request-id"
-        };
+            var httpContext = new DefaultHttpContext
+            {
+                TraceIdentifier = "renderer-request-id"
+            };
 
-        await renderer.RenderAsync(httpContext);
+            await renderer.RenderAsync(httpContext);
 
-        Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
-        Assert.Equal(StatusCodes.Status500InternalServerError, executor.Model?.StatusCode);
-        Assert.Equal("renderer-request-id", executor.Model?.RequestId);
+            Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
+            Assert.Equal(StatusCodes.Status500InternalServerError, executor.Model?.StatusCode);
+            Assert.Equal("renderer-request-id", executor.Model?.RequestId);
+        }
+        finally
+        {
+            Activity.Current = previousCurrent;
+        }
     }
 
     [Fact]
-    public async Task RenderAsync_UsesActivityId_WhenTraceIdentifierIsBlank()
+    public async Task RenderAsync_UsesActivityId_WhenAvailable()
     {
         var executor = new CapturingViewResultExecutor();
         var renderer = CreateRenderer(
@@ -261,7 +287,7 @@ public sealed class ConventionalExceptionPageTests
         activity.Start();
         var httpContext = new DefaultHttpContext
         {
-            TraceIdentifier = " "
+            TraceIdentifier = "renderer-request-id"
         };
 
         try
@@ -455,7 +481,8 @@ public sealed class ConventionalExceptionPageTests
             BaseUrl = baseUrl;
             Client = new HttpClient
             {
-                BaseAddress = new Uri(baseUrl)
+                BaseAddress = new Uri(baseUrl),
+                Timeout = TimeSpan.FromSeconds(30)
             };
         }
 
@@ -488,6 +515,7 @@ public sealed class ConventionalExceptionPageTests
     {
         private readonly ViewEngineResult _appResult;
         private readonly ViewEngineResult _frameworkResult;
+        private readonly Dictionary<string, int> _getViewCallCounts = [];
 
         public StubCompositeViewEngine(ViewEngineResult appResult, ViewEngineResult? frameworkResult = null)
         {
@@ -506,12 +534,19 @@ public sealed class ConventionalExceptionPageTests
 
         public ViewEngineResult GetView(string? executingFilePath, string viewPath, bool isMainPage)
         {
+            _getViewCallCounts[viewPath] = GetViewCallCount(viewPath) + 1;
+
             return viewPath switch
             {
                 var path when path == ConventionalExceptionPageDefaults.AppViewPath => _appResult,
                 var path when path == ConventionalExceptionPageDefaults.FrameworkFallbackViewPath => _frameworkResult,
                 _ => ViewEngineResult.NotFound(viewPath, [])
             };
+        }
+
+        public int GetViewCallCount(string viewPath)
+        {
+            return _getViewCallCounts.GetValueOrDefault(viewPath);
         }
     }
 

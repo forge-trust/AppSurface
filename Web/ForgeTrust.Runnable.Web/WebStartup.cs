@@ -421,26 +421,22 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
             return false;
         }
 
-        var acceptsHtml = httpContext.Request.GetTypedHeaders().Accept?
-            .Any(mediaType =>
-                mediaType.MediaType.HasValue
-                && (mediaType.MediaType.Value.Equals("text/html", StringComparison.OrdinalIgnoreCase)
-                    || mediaType.MediaType.Value.Equals("application/xhtml+xml", StringComparison.OrdinalIgnoreCase)))
-            ?? false;
-
-        return acceptsHtml;
+        return RequestAcceptsHtml(httpContext);
     }
 
     internal static bool ShouldApplyConventionalExceptionPage(HttpContext httpContext)
     {
-        var acceptsHtml = httpContext.Request.GetTypedHeaders().Accept?
+        return RequestAcceptsHtml(httpContext);
+    }
+
+    private static bool RequestAcceptsHtml(HttpContext httpContext)
+    {
+        return httpContext.Request.GetTypedHeaders().Accept?
             .Any(mediaType =>
                 mediaType.MediaType.HasValue
                 && (mediaType.MediaType.Value.Equals("text/html", StringComparison.OrdinalIgnoreCase)
                     || mediaType.MediaType.Value.Equals("application/xhtml+xml", StringComparison.OrdinalIgnoreCase)))
             ?? false;
-
-        return acceptsHtml;
     }
 
     private static async Task ReExecuteConventionalBrowserStatusPageAsync(

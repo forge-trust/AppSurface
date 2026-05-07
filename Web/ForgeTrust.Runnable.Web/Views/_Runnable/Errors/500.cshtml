@@ -1,4 +1,3 @@
-@using ForgeTrust.Runnable.Web
 @model ForgeTrust.Runnable.Web.ExceptionPageModel
 @{
     Layout = null;
@@ -85,14 +84,14 @@
 </head>
 <body>
 <main>
-    <p>Runnable default 500</p>
     <h1>Something went wrong</h1>
     <p>The app hit an unexpected problem. Try again in a moment, or return home and continue from there.</p>
     <nav class="actions" aria-label="Recovery actions">
         <a class="recovery-link" href="@Url.Content("~/")">Return home</a>
     </nav>
     <p class="developer-note">Request id: <code>@Model.RequestId</code></p>
-    <p class="developer-note">App owners can replace this fallback with <code>@ConventionalExceptionPageDefaults.AppViewPath</code>. Keep production pages generic, include a request id for support, and never render exception details or request data.</p>
+    @* App owners can replace this fallback with ~/Views/Shared/500.cshtml.
+       Keep production pages generic, include a request id for support, and never render exception details or request data. *@
 </main>
 </body>
 </html>

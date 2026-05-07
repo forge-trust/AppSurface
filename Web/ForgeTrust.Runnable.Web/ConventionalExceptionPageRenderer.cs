@@ -27,6 +27,7 @@ internal sealed class ConventionalExceptionPageRenderer
     private readonly IModelMetadataProvider _metadataProvider;
     private readonly ILogger<ConventionalExceptionPageRenderer> _logger;
 
+    private readonly object _viewPathLock = new();
     private string? _resolvedViewPath;
 
     /// <summary>
@@ -95,11 +96,20 @@ internal sealed class ConventionalExceptionPageRenderer
 
     private string ResolveViewPath()
     {
-        if (_resolvedViewPath is not null)
+        var resolvedViewPath = _resolvedViewPath;
+        if (resolvedViewPath is not null)
         {
-            return _resolvedViewPath;
+            return resolvedViewPath;
         }
 
+        lock (_viewPathLock)
+        {
+            return _resolvedViewPath ??= ResolveViewPathUncached();
+        }
+    }
+
+    private string ResolveViewPathUncached()
+    {
         var appViewResult = _viewEngine.GetView(
             executingFilePath: null,
             viewPath: ConventionalExceptionPageDefaults.AppViewPath,
@@ -107,11 +117,10 @@ internal sealed class ConventionalExceptionPageRenderer
 
         if (appViewResult.Success)
         {
-            _resolvedViewPath = ConventionalExceptionPageDefaults.AppViewPath;
             _logger.LogInformation(
                 "Resolved conventional 500 view to {ViewPath}.",
-                _resolvedViewPath);
-            return _resolvedViewPath;
+                ConventionalExceptionPageDefaults.AppViewPath);
+            return ConventionalExceptionPageDefaults.AppViewPath;
         }
 
         var frameworkViewResult = _viewEngine.GetView(
@@ -121,11 +130,10 @@ internal sealed class ConventionalExceptionPageRenderer
 
         if (frameworkViewResult.Success)
         {
-            _resolvedViewPath = ConventionalExceptionPageDefaults.FrameworkFallbackViewPath;
             _logger.LogInformation(
                 "Resolved conventional 500 view to framework fallback {ViewPath}.",
-                _resolvedViewPath);
-            return _resolvedViewPath;
+                ConventionalExceptionPageDefaults.FrameworkFallbackViewPath);
+            return ConventionalExceptionPageDefaults.FrameworkFallbackViewPath;
         }
 
         var searchedLocations = appViewResult.SearchedLocations
@@ -143,10 +151,10 @@ internal sealed class ConventionalExceptionPageRenderer
 
     private static ExceptionPageModel CreateModel(HttpContext httpContext)
     {
-        var requestId = httpContext.TraceIdentifier;
+        var requestId = Activity.Current?.Id;
         if (string.IsNullOrWhiteSpace(requestId))
         {
-            requestId = Activity.Current?.Id ?? string.Empty;
+            requestId = httpContext.TraceIdentifier;
         }
 
         return new ExceptionPageModel(StatusCodes.Status500InternalServerError, requestId);
