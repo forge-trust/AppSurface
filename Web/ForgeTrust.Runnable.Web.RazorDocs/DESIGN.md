@@ -141,6 +141,33 @@ Search has distinct states and they should look distinct.
 
 Do not reuse the no-results treatment for actual failures.
 
+## Page-Local Navigation
+
+`On this page` is a local map for the current document, not a second global navigation surface. The left sidebar owns the docs product hierarchy. The page outline owns the reader's position inside the current article.
+
+Desktop details pages with an outline should use an article-first composition:
+
+1. page title and current article content
+2. quiet page-local outline rail
+3. active section marker visible enough to scan without competing with reading
+
+The persistent rail appears only on wide desktop (`>=1280px`) so the article column stays readable. Below that breakpoint, use one collapsed `On this page` control above the article. Do not render separate desktop and mobile outlines.
+
+Visual rules:
+
+- Keep the rail editorial and quiet: border/separator structure beats boxed cards.
+- Use cyan for active and focus states only.
+- Borrow the active-row treatment from the approved mockup direction: subtle row fill plus a cyan marker.
+- Keep H2 links stronger and H3 links quieter/indented.
+- Use small row radii only. Do not wrap the whole rail in a large rounded card.
+- Preserve the existing RazorDocs global sidebar; do not replace it with icon-only chrome for this pattern.
+
+Interaction rules:
+
+- The active outline link uses `aria-current="location"`.
+- Mobile outline links collapse the outline after navigation so the reader returns to content.
+- JavaScript enhances server-rendered hash links. It must not create a hidden-only outline when scripts fail.
+
 ## Interaction Rules
 
 - `/` focuses the visible search input when the user is not already typing

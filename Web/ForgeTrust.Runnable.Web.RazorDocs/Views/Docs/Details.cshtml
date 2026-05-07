@@ -1,6 +1,9 @@
+@using System.Text.Json
 @model ForgeTrust.Runnable.Web.RazorDocs.Models.DocDetailsViewModel
+@inject ForgeTrust.Runnable.Web.RazorDocs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
     ViewData["Title"] = Model.Title;
+    var docsOutlineClientUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("outline-client.js"));
     var trust = Model.Document.Metadata?.Trust;
     var trustStatus = string.IsNullOrWhiteSpace(trust?.Status) ? null : trust!.Status!.Trim();
     var trustSummary = string.IsNullOrWhiteSpace(trust?.Summary) ? null : trust!.Summary!.Trim();
@@ -30,27 +33,22 @@
     var provenanceLabel = string.IsNullOrWhiteSpace(provenance?.Label) ? "Source of truth" : provenance!.Label.Trim();
     var lastUpdatedUtc = provenance?.LastUpdatedUtc?.ToUniversalTime();
     var showContributorProvenance = sourceHref is not null || editHref is not null || lastUpdatedUtc is not null;
+    var outlineItems = Model.Outline
+        .Where(item => item is not null && !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Title))
+        .Select(item => new
+        {
+            Id = item.Id.Trim(),
+            Title = item.Title.Trim(),
+            item.Level
+        })
+        .ToList();
+    var hasOutline = outlineItems.Count > 0;
 }
 @functions {
     private static readonly System.Text.RegularExpressions.Regex RootedSymbolSourceLinkRegex = new(
         """<a\b(?:(?:[^>]*\bhref\s*=\s*"(?<hrefBefore>/[^"]*)"[^>]*\bclass\s*=\s*"(?:doc-symbol-source-link(?:\s[^"]*)?|[^"]*\sdoc-symbol-source-link(?:\s[^"]*)?)")|(?:[^>]*\bclass\s*=\s*"(?:doc-symbol-source-link(?:\s[^"]*)?|[^"]*\sdoc-symbol-source-link(?:\s[^"]*)?)"[^>]*\bhref\s*=\s*"(?<hrefAfter>/[^"]*)"))[^>]*>""",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase
         | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
-
-    private string ResolveAppHref(string href)
-    {
-        if (string.IsNullOrWhiteSpace(href))
-        {
-            return "#";
-        }
-
-        var trimmed = href.Trim();
-        return trimmed.Equals("/docs", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("/docs/", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("/docs?", StringComparison.OrdinalIgnoreCase)
-            ? Url.Content($"~{trimmed}")
-            : Url.Content(trimmed);
-    }
 
     private string ResolveGeneratedContentHrefs(string content)
     {
@@ -86,6 +84,8 @@
     {
         <div class="mb-4 md:hidden">
             <a href="@Url.PathBaseAware(Model.PublicSectionHref)"
+               data-turbo-frame="doc-content"
+               data-turbo-action="advance"
                class="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-slate-200 transition-colors hover:border-cyan-500/40 hover:text-cyan-200">
                 <span class="text-slate-500">Section</span>
                 <span>@Model.PublicSectionLabel</span>
@@ -258,234 +258,284 @@
     }
 </header>
 
-@if (Model.HasOutline)
-{
-    <section id="docs-page-outline" class="mb-8 rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-4">
-        <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">On this page</div>
-        <nav aria-label="On this page" class="mt-3">
-            <ol class="space-y-2">
-                @foreach (var item in Model.Outline)
-                {
-                    var indentClass = item.Level > 2 ? "pl-4" : string.Empty;
-                    <li class="@indentClass">
-                        <a href="#@item.Id"
-                           data-doc-outline-link="true"
-                           class="text-sm text-slate-300 hover:text-cyan-400 transition-colors">
-                            @item.Title
+<div class="docs-detail-layout @(hasOutline ? "docs-detail-layout--with-outline" : null)">
+    <div class="docs-detail-primary">
+        @if (Model.IsSectionLanding)
+        {
+            <section class="mb-10 rounded-2xl border border-slate-800 bg-slate-950/35 p-5 sm:p-6">
+                <div class="flex flex-col gap-3 border-b border-slate-800 pb-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Section landing</p>
+                        <h2 class="mt-2 text-xl font-semibold text-white">Use this section as the entry point.</h2>
+                        @if (!string.IsNullOrWhiteSpace(Model.PublicSectionPurpose))
+                        {
+                            <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-300">@Model.PublicSectionPurpose</p>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(Model.PublicSectionHref))
+                    {
+                        <a href="@Url.PathBaseAware(Model.PublicSectionHref)"
+                           data-turbo-frame="doc-content"
+                           data-turbo-action="advance"
+                           class="inline-flex items-center gap-2 self-start rounded-full border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition-colors hover:border-cyan-500/40 hover:text-cyan-200">
+                            Section route
                         </a>
-                    </li>
-                }
-            </ol>
-        </nav>
-    </section>
-}
+                    }
+                </div>
 
-@if (Model.IsSectionLanding)
-{
-    <section class="mb-10 rounded-2xl border border-slate-800 bg-slate-950/35 p-5 sm:p-6">
-        <div class="flex flex-col gap-3 border-b border-slate-800 pb-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Section landing</p>
-                <h2 class="mt-2 text-xl font-semibold text-white">Use this section as the entry point.</h2>
-                @if (!string.IsNullOrWhiteSpace(Model.PublicSectionPurpose))
+                @if (Model.HasFeaturedPages)
                 {
-                    <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-300">@Model.PublicSectionPurpose</p>
+                    <div class="mt-5 space-y-5">
+                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Next steps</p>
+                        @foreach (var featuredGroup in Model.FeaturedPageGroups.Where(group => group.Pages.Count > 0))
+                        {
+                            <section>
+                                <h3 class="text-sm font-semibold text-white">@featuredGroup.Label</h3>
+                                @if (!string.IsNullOrWhiteSpace(featuredGroup.Summary))
+                                {
+                                    <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-400">@featuredGroup.Summary</p>
+                                }
+                                <ul class="mt-3 space-y-3">
+                                    @foreach (var featuredPage in featuredGroup.Pages)
+                                    {
+                                        <li>
+                                            <a href="@Url.PathBaseAware(featuredPage.Href)"
+                                               data-turbo-frame="doc-content"
+                                               data-turbo-action="advance"
+                                               class="group block rounded-xl border border-slate-900 bg-slate-950/60 px-4 py-3 transition-colors hover:border-cyan-500/30 hover:bg-slate-950">
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    @if (!string.IsNullOrWhiteSpace(featuredPage.Question))
+                                                    {
+                                                        <span class="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">@featuredPage.Question</span>
+                                                    }
+                                                    @if (featuredPage.PageTypeBadge is not null)
+                                                    {
+                                                        <span class="docs-page-badge docs-page-badge--@featuredPage.PageTypeBadge.Variant">@featuredPage.PageTypeBadge.Label</span>
+                                                    }
+                                                </div>
+                                                <h4 class="mt-2 text-base font-semibold text-white transition-colors group-hover:text-cyan-100">@featuredPage.Title</h4>
+                                                @if (!string.IsNullOrWhiteSpace(featuredPage.SupportingText))
+                                                {
+                                                    <p class="mt-2 text-sm leading-6 text-slate-400">@featuredPage.SupportingText</p>
+                                                }
+                                            </a>
+                                        </li>
+                                    }
+                                </ul>
+                            </section>
+                        }
+                    </div>
                 }
-            </div>
-            @if (!string.IsNullOrWhiteSpace(Model.PublicSectionHref))
-            {
-                <a href="@Url.PathBaseAware(Model.PublicSectionHref)"
-                   class="inline-flex items-center gap-2 self-start rounded-full border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition-colors hover:border-cyan-500/40 hover:text-cyan-200">
-                    Section route
-                </a>
-            }
+
+                @if (Model.SectionGroups.Count > 0)
+                {
+                    <div class="mt-6">
+                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">In this section</p>
+                        <div class="mt-3 space-y-5">
+                            @foreach (var sectionGroup in Model.SectionGroups)
+                            {
+                                <section>
+                                    @if (!string.IsNullOrWhiteSpace(sectionGroup.Title))
+                                    {
+                                        <h3 class="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">@sectionGroup.Title</h3>
+                                    }
+                                    <ul class="space-y-3">
+                                        @foreach (var link in sectionGroup.Links)
+                                        {
+                                            <li>
+                                                <a href="@Url.PathBaseAware(link.Href)"
+                                                   data-turbo-frame="doc-content"
+                                                   data-turbo-action="advance"
+                                                   class="group block rounded-xl border border-slate-900 bg-slate-950/50 px-4 py-3 transition-colors hover:border-cyan-500/30 hover:bg-slate-950">
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <span class="text-sm font-semibold text-white transition-colors group-hover:text-cyan-100">@link.Title</span>
+                                                        @if (link.PageTypeBadge is not null)
+                                                        {
+                                                            <span class="docs-page-badge docs-page-badge--@link.PageTypeBadge.Variant">@link.PageTypeBadge.Label</span>
+                                                        }
+                                                    </div>
+                                                    @if (!string.IsNullOrWhiteSpace(link.Summary))
+                                                    {
+                                                        <p class="mt-2 text-sm leading-6 text-slate-400">@link.Summary</p>
+                                                    }
+                                                </a>
+
+                                                @if (link.Children.Count > 0)
+                                                {
+                                                    <ul class="ml-4 mt-2 space-y-1 border-l border-slate-800">
+                                                        @foreach (var child in link.Children)
+                                                        {
+                                                            <li>
+                                                                <a href="@Url.PathBaseAware(child.Href)"
+                                                                   data-doc-anchor-link="true"
+                                                                   data-turbo-frame="doc-content"
+                                                                   data-turbo-action="advance"
+                                                                   class="block px-4 py-1 text-xs text-slate-500 transition-colors hover:text-cyan-300">
+                                                                    @child.Title
+                                                                </a>
+                                                            </li>
+                                                        }
+                                                    </ul>
+                                                }
+                                            </li>
+                                        }
+                                    </ul>
+                                </section>
+                            }
+                        </div>
+                    </div>
+                }
+            </section>
+        }
+
+        <div class="docs-content @(Model.IsApiSurfaceDoc ? "docs-content--api" : "docs-content--markdown")">
+            @* Safe: Content is sanitized by DocAggregator before caching. *@
+            @Html.Raw(ResolveGeneratedContentHrefs(Model.Document.Content))
         </div>
 
-        @if (Model.HasFeaturedPages)
+        @if (Model.HasWayfinding)
         {
-            <div class="mt-5 space-y-5">
-                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Next steps</p>
-                @foreach (var featuredGroup in Model.FeaturedPageGroups.Where(group => group.Pages.Count > 0))
+            <section id="docs-page-wayfinding" class="mt-10 space-y-6 border-t border-slate-800 pt-8">
+                @if (Model.PreviousPage is not null || Model.NextPage is not null)
                 {
-                    <section>
-                        <h3 class="text-sm font-semibold text-white">@featuredGroup.Label</h3>
-                        @if (!string.IsNullOrWhiteSpace(featuredGroup.Summary))
-                        {
-                            <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-400">@featuredGroup.Summary</p>
-                        }
-                        <ul class="mt-3 space-y-3">
-                            @foreach (var featuredPage in featuredGroup.Pages)
+                    <div class="space-y-3">
+                        <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Continue the proof path</div>
+                        <div class="grid gap-3 md:grid-cols-2">
+                            @if (Model.PreviousPage is not null)
                             {
-                                <li>
-                                    <a href="@Url.PathBaseAware(featuredPage.Href)"
-                                       data-turbo-frame="doc-content"
-                                       data-turbo-action="advance"
-                                       class="group block rounded-xl border border-slate-900 bg-slate-950/60 px-4 py-3 transition-colors hover:border-cyan-500/30 hover:bg-slate-950">
-                                        <div class="flex flex-wrap items-center gap-2">
-                                            @if (!string.IsNullOrWhiteSpace(featuredPage.Question))
-                                            {
-                                                <span class="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">@featuredPage.Question</span>
-                                            }
-                                            @if (featuredPage.PageTypeBadge is not null)
-                                            {
-                                                <span class="docs-page-badge docs-page-badge--@featuredPage.PageTypeBadge.Variant">@featuredPage.PageTypeBadge.Label</span>
-                                            }
-                                        </div>
-                                        <h4 class="mt-2 text-base font-semibold text-white transition-colors group-hover:text-cyan-100">@featuredPage.Title</h4>
-                                        @if (!string.IsNullOrWhiteSpace(featuredPage.SupportingText))
-                                        {
-                                            <p class="mt-2 text-sm leading-6 text-slate-400">@featuredPage.SupportingText</p>
-                                        }
-                                    </a>
-                                </li>
+                                <a href="@Url.PathBaseAware(Model.PreviousPage.Href)"
+                                   data-doc-wayfinding="previous"
+                                   data-turbo-frame="doc-content"
+                                   data-turbo-action="advance"
+                                   class="block rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-4 transition-colors hover:border-cyan-500/40 hover:bg-slate-900">
+                                    <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Previous</div>
+                                    <div class="mt-2 text-base font-semibold text-white">@Model.PreviousPage.Title</div>
+                                    @if (Model.PreviousPage.PageTypeBadge is not null)
+                                    {
+                                        <span class="docs-page-badge docs-page-badge--@Model.PreviousPage.PageTypeBadge.Variant mt-3 inline-flex">@Model.PreviousPage.PageTypeBadge.Label</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(Model.PreviousPage.Summary))
+                                    {
+                                        <p class="mt-3 text-sm text-slate-400">@Model.PreviousPage.Summary</p>
+                                    }
+                                </a>
                             }
-                        </ul>
-                    </section>
+                            @if (Model.NextPage is not null)
+                            {
+                                <a href="@Url.PathBaseAware(Model.NextPage.Href)"
+                                   data-doc-wayfinding="next"
+                                   data-turbo-frame="doc-content"
+                                   data-turbo-action="advance"
+                                   class="block rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-4 transition-colors hover:border-cyan-500/40 hover:bg-slate-900">
+                                    <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Next</div>
+                                    <div class="mt-2 text-base font-semibold text-white">@Model.NextPage.Title</div>
+                                    @if (Model.NextPage.PageTypeBadge is not null)
+                                    {
+                                        <span class="docs-page-badge docs-page-badge--@Model.NextPage.PageTypeBadge.Variant mt-3 inline-flex">@Model.NextPage.PageTypeBadge.Label</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(Model.NextPage.Summary))
+                                    {
+                                        <p class="mt-3 text-sm text-slate-400">@Model.NextPage.Summary</p>
+                                    }
+                                </a>
+                            }
+                        </div>
+                    </div>
                 }
-            </div>
-        }
 
-        @if (Model.SectionGroups.Count > 0)
-        {
-            <div class="mt-6">
-                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">In this section</p>
-                <div class="mt-3 space-y-5">
-                    @foreach (var sectionGroup in Model.SectionGroups)
-                    {
-                        <section>
-                            @if (!string.IsNullOrWhiteSpace(sectionGroup.Title))
+                @if (Model.RelatedPages.Count > 0)
+                {
+                    <div class="space-y-3">
+                        <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Related pages</div>
+                        <div class="grid gap-3 md:grid-cols-2">
+                            @foreach (var relatedPage in Model.RelatedPages)
                             {
-                                <h3 class="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">@sectionGroup.Title</h3>
+                                <a href="@Url.PathBaseAware(relatedPage.Href)"
+                                   data-doc-related-link="true"
+                                   data-turbo-frame="doc-content"
+                                   data-turbo-action="advance"
+                                   class="block rounded-2xl border border-slate-800 bg-slate-900/40 px-4 py-4 transition-colors hover:border-cyan-500/40 hover:bg-slate-900">
+                                    <div class="text-base font-semibold text-white">@relatedPage.Title</div>
+                                    @if (relatedPage.PageTypeBadge is not null)
+                                    {
+                                        <span class="docs-page-badge docs-page-badge--@relatedPage.PageTypeBadge.Variant mt-3 inline-flex">@relatedPage.PageTypeBadge.Label</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(relatedPage.Summary))
+                                    {
+                                        <p class="mt-3 text-sm text-slate-400">@relatedPage.Summary</p>
+                                    }
+                                </a>
                             }
-                            <ul class="space-y-3">
-                                @foreach (var link in sectionGroup.Links)
-                                {
-                                    <li>
-                                        <a href="@Url.PathBaseAware(link.Href)"
-                                           data-turbo-frame="doc-content"
-                                           data-turbo-action="advance"
-                                           class="group block rounded-xl border border-slate-900 bg-slate-950/50 px-4 py-3 transition-colors hover:border-cyan-500/30 hover:bg-slate-950">
-                                            <div class="flex flex-wrap items-center gap-2">
-                                                <span class="text-sm font-semibold text-white transition-colors group-hover:text-cyan-100">@link.Title</span>
-                                                @if (link.PageTypeBadge is not null)
-                                                {
-                                                    <span class="docs-page-badge docs-page-badge--@link.PageTypeBadge.Variant">@link.PageTypeBadge.Label</span>
-                                                }
-                                            </div>
-                                            @if (!string.IsNullOrWhiteSpace(link.Summary))
-                                            {
-                                                <p class="mt-2 text-sm leading-6 text-slate-400">@link.Summary</p>
-                                            }
-                                        </a>
-
-                                        @if (link.Children.Count > 0)
-                                        {
-                                            <ul class="ml-4 mt-2 space-y-1 border-l border-slate-800">
-                                                @foreach (var child in link.Children)
-                                                {
-                                                    <li>
-                                                        <a href="@Url.PathBaseAware(child.Href)"
-                                                           data-doc-anchor-link="true"
-                                                           data-turbo-frame="doc-content"
-                                                           data-turbo-action="advance"
-                                                           class="block px-4 py-1 text-xs text-slate-500 transition-colors hover:text-cyan-300">
-                                                            @child.Title
-                                                        </a>
-                                                    </li>
-                                                }
-                                            </ul>
-                                        }
-                                    </li>
-                                }
-                            </ul>
-                        </section>
-                    }
-                </div>
-            </div>
+                        </div>
+                    </div>
+                }
+            </section>
         }
-    </section>
-}
+    </div>
 
-<div class="docs-content @(Model.IsApiSurfaceDoc ? "docs-content--api" : "docs-content--markdown")">
-    @* Safe: Content is sanitized by DocAggregator before caching. *@
-    @Html.Raw(ResolveGeneratedContentHrefs(Model.Document.Content))
+    @if (hasOutline)
+    {
+        <aside id="docs-page-outline"
+               class="docs-outline-shell"
+               data-doc-outline="true"
+               data-outline-expanded="true">
+            <button class="docs-outline-toggle"
+                    type="button"
+                    aria-expanded="true"
+                    aria-controls="docs-page-outline-panel"
+                    data-doc-outline-toggle="true">
+                <span>On this page</span>
+                <span class="docs-outline-toggle-current" data-doc-outline-current aria-hidden="true"></span>
+            </button>
+            <nav id="docs-page-outline-panel"
+                 class="docs-outline-panel"
+                 aria-label="On this page">
+                <div class="docs-outline-label">On this page</div>
+                <ol class="docs-outline-list">
+                    @foreach (var item in outlineItems)
+                    {
+                        var linkClass = item.Level > 2
+                            ? "docs-outline-link docs-outline-link--level-3"
+                            : "docs-outline-link";
+                        <li>
+                            <a href="#@item.Id"
+                               data-doc-outline-link="true"
+                               class="@linkClass">
+                                @item.Title
+                            </a>
+                        </li>
+                    }
+                </ol>
+            </nav>
+        </aside>
+    }
 </div>
 
-@if (Model.HasWayfinding)
+@if (hasOutline)
 {
-    <section id="docs-page-wayfinding" class="mt-10 space-y-6 border-t border-slate-800 pt-8">
-        @if (Model.PreviousPage is not null || Model.NextPage is not null)
-        {
-            <div class="space-y-3">
-                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Continue the proof path</div>
-                <div class="grid gap-3 md:grid-cols-2">
-                    @if (Model.PreviousPage is not null)
-                    {
-                        <a href="@Url.PathBaseAware(Model.PreviousPage.Href)"
-                           data-doc-wayfinding="previous"
-                           data-turbo-frame="doc-content"
-                           data-turbo-action="advance"
-                           class="block rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-4 transition-colors hover:border-cyan-500/40 hover:bg-slate-900">
-                            <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Previous</div>
-                            <div class="mt-2 text-base font-semibold text-white">@Model.PreviousPage.Title</div>
-                            @if (Model.PreviousPage.PageTypeBadge is not null)
-                            {
-                                <span class="docs-page-badge docs-page-badge--@Model.PreviousPage.PageTypeBadge.Variant mt-3 inline-flex">@Model.PreviousPage.PageTypeBadge.Label</span>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(Model.PreviousPage.Summary))
-                            {
-                                <p class="mt-3 text-sm text-slate-400">@Model.PreviousPage.Summary</p>
-                            }
-                        </a>
-                    }
-                    @if (Model.NextPage is not null)
-                    {
-                        <a href="@Url.PathBaseAware(Model.NextPage.Href)"
-                           data-doc-wayfinding="next"
-                           data-turbo-frame="doc-content"
-                           data-turbo-action="advance"
-                           class="block rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-4 transition-colors hover:border-cyan-500/40 hover:bg-slate-900">
-                            <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Next</div>
-                            <div class="mt-2 text-base font-semibold text-white">@Model.NextPage.Title</div>
-                            @if (Model.NextPage.PageTypeBadge is not null)
-                            {
-                                <span class="docs-page-badge docs-page-badge--@Model.NextPage.PageTypeBadge.Variant mt-3 inline-flex">@Model.NextPage.PageTypeBadge.Label</span>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(Model.NextPage.Summary))
-                            {
-                                <p class="mt-3 text-sm text-slate-400">@Model.NextPage.Summary</p>
-                            }
-                        </a>
-                    }
-                </div>
-            </div>
-        }
+    <script data-doc-outline-client-loader="true">
+        (() => {
+            const outlineClientUrl = @Html.Raw(JsonSerializer.Serialize(docsOutlineClientUrl));
+            const outlineClientKey = "__razorDocsOutlineClient";
+            const initOutlineClient = () => window[outlineClientKey]?.init?.();
 
-        @if (Model.RelatedPages.Count > 0)
-        {
-            <div class="space-y-3">
-                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Related pages</div>
-                <div class="grid gap-3 md:grid-cols-2">
-                    @foreach (var relatedPage in Model.RelatedPages)
-                    {
-                        <a href="@Url.PathBaseAware(relatedPage.Href)"
-                           data-doc-related-link="true"
-                           data-turbo-frame="doc-content"
-                           data-turbo-action="advance"
-                           class="block rounded-2xl border border-slate-800 bg-slate-900/40 px-4 py-4 transition-colors hover:border-cyan-500/40 hover:bg-slate-900">
-                            <div class="text-base font-semibold text-white">@relatedPage.Title</div>
-                            @if (relatedPage.PageTypeBadge is not null)
-                            {
-                                <span class="docs-page-badge docs-page-badge--@relatedPage.PageTypeBadge.Variant mt-3 inline-flex">@relatedPage.PageTypeBadge.Label</span>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(relatedPage.Summary))
-                            {
-                                <p class="mt-3 text-sm text-slate-400">@relatedPage.Summary</p>
-                            }
-                        </a>
-                    }
-                </div>
-            </div>
-        }
-    </section>
+            if (window[outlineClientKey]?.init) {
+                initOutlineClient();
+                return;
+            }
+
+            const existingScript = document.querySelector("script[data-doc-outline-client='true']");
+            if (existingScript) {
+                existingScript.addEventListener("load", initOutlineClient, { once: true });
+                return;
+            }
+
+            const script = document.createElement("script");
+            script.src = outlineClientUrl;
+            script.async = false;
+            script.dataset.docOutlineClient = "true";
+            script.addEventListener("load", initOutlineClient, { once: true });
+            document.head.append(script);
+        })();
+    </script>
 }
