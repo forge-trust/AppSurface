@@ -50,7 +50,7 @@ packages:
     classification: public
     order: 70
     use_when: Install this first for a normal ASP.NET Core app with Runnable modules when you want the base web startup pipeline before layering on optional UI or docs packages.
-    includes: Base ASP.NET Core hosting, middleware and endpoint composition, and the core Runnable web module contract.
+    includes: Base ASP.NET Core hosting, middleware and endpoint composition, conventional browser error-page hooks, and the core Runnable web module contract.
     does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, or the RazorDocs host.
     start_here_path: Web/ForgeTrust.Runnable.Web/README.md
     recipe_summary: Add `ForgeTrust.Runnable.Web.OpenApi` after `ForgeTrust.Runnable.Web` when you want generated OpenAPI endpoints.
