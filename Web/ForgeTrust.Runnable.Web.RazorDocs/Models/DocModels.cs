@@ -515,6 +515,154 @@ public record DocNode(
     IReadOnlyList<DocSymbolSourceProvenance>? SymbolSourceProvenance = null);
 
 /// <summary>
+/// Describes the overall health of the latest RazorDocs harvest snapshot.
+/// </summary>
+/// <remarks>
+/// Numeric values are a stable public compatibility contract for persisted and serialized representations. Do not
+/// remove, reorder, or renumber existing members.
+/// </remarks>
+public enum DocHarvestHealthStatus
+{
+    /// <summary>
+    /// At least one configured harvester returned documentation and no harvester failed.
+    /// </summary>
+    Healthy = 0,
+
+    /// <summary>
+    /// Harvesting completed without failed harvesters, but no documentation nodes were produced.
+    /// </summary>
+    Empty = 1,
+
+    /// <summary>
+    /// At least one harvester completed successfully while at least one other harvester failed, timed out, or canceled.
+    /// </summary>
+    Degraded = 2,
+
+    /// <summary>
+    /// Every configured harvester failed, timed out, or canceled.
+    /// </summary>
+    Failed = 3
+}
+
+/// <summary>
+/// Describes one configured harvester's contribution to a RazorDocs harvest snapshot.
+/// </summary>
+/// <remarks>
+/// Numeric values are a stable public compatibility contract for persisted and serialized representations. Do not
+/// remove, reorder, or renumber existing members.
+/// </remarks>
+public enum DocHarvesterHealthStatus
+{
+    /// <summary>
+    /// The harvester completed and returned one or more documentation nodes.
+    /// </summary>
+    Succeeded = 0,
+
+    /// <summary>
+    /// The harvester completed without error and returned no documentation nodes.
+    /// </summary>
+    ReturnedEmpty = 1,
+
+    /// <summary>
+    /// The harvester threw an exception while scanning documentation.
+    /// </summary>
+    Failed = 2,
+
+    /// <summary>
+    /// The harvester exceeded RazorDocs' per-harvester timeout budget.
+    /// </summary>
+    TimedOut = 3,
+
+    /// <summary>
+    /// The harvester observed cancellation that was not caused by RazorDocs' timeout budget.
+    /// </summary>
+    Canceled = 4
+}
+
+/// <summary>
+/// Describes the severity of a structured RazorDocs harvest diagnostic.
+/// </summary>
+/// <remarks>
+/// Numeric values are a stable public compatibility contract for persisted and serialized representations. Do not
+/// remove, reorder, or renumber existing members.
+/// </remarks>
+public enum DocHarvestDiagnosticSeverity
+{
+    /// <summary>
+    /// Informational state that does not indicate a failed harvest.
+    /// </summary>
+    Information = 0,
+
+    /// <summary>
+    /// Non-fatal problem that may reduce the harvested docs corpus.
+    /// </summary>
+    Warning = 1,
+
+    /// <summary>
+    /// Harvester-level failure that prevented that harvester from contributing documentation.
+    /// </summary>
+    Error = 2,
+
+    /// <summary>
+    /// Aggregate failure that means RazorDocs could not harvest any configured source successfully.
+    /// </summary>
+    Critical = 3
+}
+
+/// <summary>
+/// Captures the structured health of one RazorDocs harvest snapshot.
+/// </summary>
+/// <param name="Status">Overall health rollup for the snapshot.</param>
+/// <param name="GeneratedUtc">UTC timestamp when the snapshot was generated.</param>
+/// <param name="RepositoryRoot">Repository root passed to configured harvesters.</param>
+/// <param name="TotalHarvesters">Number of harvesters configured for the snapshot.</param>
+/// <param name="SuccessfulHarvesters">Number of harvesters that completed with either docs or a valid empty result.</param>
+/// <param name="FailedHarvesters">Number of harvesters that failed, timed out, or canceled.</param>
+/// <param name="TotalDocs">Number of documentation nodes published by the final cached docs snapshot.</param>
+/// <param name="Harvesters">Per-harvester health entries. Never <see langword="null" /> in RazorDocs-created snapshots.</param>
+/// <param name="Diagnostics">Structured diagnostics for failed, degraded, or noteworthy states. Never <see langword="null" /> in RazorDocs-created snapshots.</param>
+public sealed record DocHarvestHealthSnapshot(
+    DocHarvestHealthStatus Status,
+    DateTimeOffset GeneratedUtc,
+    string RepositoryRoot,
+    int TotalHarvesters,
+    int SuccessfulHarvesters,
+    int FailedHarvesters,
+    int TotalDocs,
+    IReadOnlyList<DocHarvesterHealth> Harvesters,
+    IReadOnlyList<DocHarvestDiagnostic> Diagnostics);
+
+/// <summary>
+/// Captures one configured harvester's status inside a RazorDocs harvest snapshot.
+/// </summary>
+/// <param name="HarvesterType">Concrete harvester type name used in logs and diagnostics.</param>
+/// <param name="Status">Harvester-level health status.</param>
+/// <param name="DocCount">Number of documentation nodes returned by the harvester before RazorDocs post-processing.</param>
+/// <param name="Diagnostic">Diagnostic explaining a failed, timed-out, or canceled harvester; usually <see langword="null" /> for non-failure outcomes.</param>
+public sealed record DocHarvesterHealth(
+    string HarvesterType,
+    DocHarvesterHealthStatus Status,
+    int DocCount,
+    DocHarvestDiagnostic? Diagnostic);
+
+/// <summary>
+/// Describes one structured RazorDocs harvest health diagnostic.
+/// </summary>
+/// <param name="Code">Stable diagnostic code suitable for tests, logs, documentation, and host UI branching.</param>
+/// <param name="Severity">Diagnostic severity.</param>
+/// <param name="HarvesterType">Concrete harvester type when the diagnostic belongs to one harvester, or <see langword="null" /> for aggregate diagnostics.</param>
+/// <param name="Problem">Operator-facing summary of what went wrong.</param>
+/// <param name="Cause">Explanation of why RazorDocs could not safely treat the harvest as fully healthy.</param>
+/// <param name="Fix">Suggested operator or docs-author action that resolves the problem.</param>
+public sealed record DocHarvestDiagnostic(
+    string Code,
+    DocHarvestDiagnosticSeverity Severity,
+    string? HarvesterType,
+    string Problem,
+    string Cause,
+    string Fix);
+
+/// <summary>
 /// Enumerates the built-in public documentation sections used by RazorDocs.
 /// </summary>
 /// <remarks>

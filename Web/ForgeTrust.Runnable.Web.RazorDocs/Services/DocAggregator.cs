@@ -96,7 +96,7 @@ public class DocAggregator
     // Bound per-document heading volume so search-index size stays predictable for large docs sets.
     private const int MaxHeadingsPerDocument = 24;
     private const int SearchSnippetMaxLength = 220;
-    private static readonly TimeSpan HarvesterTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DefaultHarvesterTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ContributorFreshnessTimeout = TimeSpan.FromSeconds(30);
 
     private readonly IEnumerable<IDocHarvester> _harvesters;
@@ -107,6 +107,7 @@ public class DocAggregator
     private readonly ILogger<DocAggregator> _logger;
     private readonly RazorDocsContributorOptions _contributorOptions;
     private readonly Func<string, CancellationToken, Task<DateTimeOffset?>> _resolveGitLastUpdatedUtcAsync;
+    private readonly TimeSpan _harvesterTimeout;
     private readonly TimeSpan _contributorFreshnessTimeout;
     private readonly CachePolicy _docsCachePolicy;
     private readonly Func<DateTimeOffset> _utcNow;
@@ -143,7 +144,14 @@ public class DocAggregator
         DocPathResolver PathResolver,
         IReadOnlyList<DocSectionSnapshot> PublicSections,
         DocsSearchIndexPayload SearchIndexPayload,
-        Dictionary<string, DocContributorProvenanceViewModel> ContributorProvenanceByPath);
+        Dictionary<string, DocContributorProvenanceViewModel> ContributorProvenanceByPath,
+        DocHarvestHealthSnapshot HarvestHealth);
+
+    private sealed record HarvesterRunResult(
+        string HarvesterType,
+        DocHarvesterHealthStatus Status,
+        IReadOnlyList<DocNode> Docs,
+        DocHarvestDiagnostic? Diagnostic);
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocAggregator"/> with the provided dependencies and determines the repository root.
@@ -185,6 +193,9 @@ public class DocAggregator
     /// <param name="resolveGitLastUpdatedUtcAsync">
     /// Optional freshness resolver used by tests to simulate git-backed timestamps and failure modes.
     /// </param>
+    /// <param name="harvesterTimeout">
+    /// Optional timeout override for each configured harvester during snapshot generation.
+    /// </param>
     /// <param name="contributorFreshnessTimeout">
     /// Optional timeout override for snapshot-time contributor freshness resolution.
     /// </param>
@@ -199,6 +210,7 @@ public class DocAggregator
         IRazorDocsHtmlSanitizer sanitizer,
         ILogger<DocAggregator> logger,
         Func<string, CancellationToken, Task<DateTimeOffset?>>? resolveGitLastUpdatedUtcAsync,
+        TimeSpan? harvesterTimeout = null,
         TimeSpan? contributorFreshnessTimeout = null,
         Func<DateTimeOffset>? utcNow = null)
         : this(
@@ -210,6 +222,7 @@ public class DocAggregator
             new DocsUrlBuilder(options),
             logger,
             resolveGitLastUpdatedUtcAsync,
+            harvesterTimeout,
             contributorFreshnessTimeout,
             utcNow)
     {
@@ -261,6 +274,10 @@ public class DocAggregator
     /// When <see langword="null" />, <see cref="ResolveGitLastUpdatedUtcAsync(string, string, ILogger, CancellationToken, Func{string, IReadOnlyList{string}, string, ILogger, CancellationToken, Task{CommandResult}}?)"/>
     /// is used against the resolved repository root.
     /// </param>
+    /// <param name="harvesterTimeout">
+    /// Optional timeout override for each configured harvester during snapshot generation. When
+    /// <see langword="null" />, the aggregator uses the default 30 second timeout.
+    /// </param>
     /// <param name="contributorFreshnessTimeout">
     /// Optional timeout override for snapshot-time contributor freshness resolution. When <see langword="null" />, the
     /// aggregator uses the default 30 second freshness budget for the entire freshness phase of one snapshot build, and
@@ -286,6 +303,7 @@ public class DocAggregator
         DocsUrlBuilder docsUrlBuilder,
         ILogger<DocAggregator> logger,
         Func<string, CancellationToken, Task<DateTimeOffset?>>? resolveGitLastUpdatedUtcAsync,
+        TimeSpan? harvesterTimeout = null,
         TimeSpan? contributorFreshnessTimeout = null,
         Func<DateTimeOffset>? utcNow = null)
     {
@@ -297,7 +315,7 @@ public class DocAggregator
         ArgumentNullException.ThrowIfNull(docsUrlBuilder);
         ArgumentNullException.ThrowIfNull(logger);
 
-        _harvesters = harvesters;
+        _harvesters = harvesters.ToArray();
         _memo = memo;
         _sanitizer = sanitizer;
         _docsUrlBuilder = docsUrlBuilder;
@@ -305,6 +323,7 @@ public class DocAggregator
         _contributorOptions = options.Contributor ?? throw new ArgumentNullException(nameof(options.Contributor));
         SnapshotCacheDuration = ResolveSnapshotCacheDuration(options);
         _docsCachePolicy = CachePolicy.Absolute(SnapshotCacheDuration);
+        _harvesterTimeout = ResolveHarvesterTimeout(harvesterTimeout);
         _contributorFreshnessTimeout = contributorFreshnessTimeout ?? ContributorFreshnessTimeout;
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
         _repositoryRoot = options.Mode switch
@@ -336,6 +355,24 @@ public class DocAggregator
         }
 
         return TimeSpan.FromMinutes(options.CacheExpirationMinutes);
+    }
+
+    private static TimeSpan ResolveHarvesterTimeout(TimeSpan? harvesterTimeout)
+    {
+        if (harvesterTimeout is null)
+        {
+            return DefaultHarvesterTimeout;
+        }
+
+        if (harvesterTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(harvesterTimeout),
+                harvesterTimeout,
+                "RazorDocs harvester timeout must be a positive value.");
+        }
+
+        return harvesterTimeout.Value;
     }
 
     private static string ResolveRepositoryRoot(
@@ -372,6 +409,22 @@ public class DocAggregator
     {
         var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
         return snapshot.DocsByPath.Values.OrderBy(n => n.Path).ToList();
+    }
+
+    /// <summary>
+    /// Returns structured health for the current RazorDocs harvest snapshot.
+    /// </summary>
+    /// <remarks>
+    /// The health snapshot is produced by the same memoized harvest used by <see cref="GetDocsAsync(CancellationToken)"/>.
+    /// If no docs snapshot exists yet, calling this method triggers the same snapshot generation as a docs read. Caller
+    /// cancellation cancels only the caller's wait; it does not cancel or poison the shared snapshot computation.
+    /// </remarks>
+    /// <param name="cancellationToken">An optional token to observe while waiting for the cached snapshot.</param>
+    /// <returns>Structured harvest health that distinguishes valid empty docs from failed or degraded harvests.</returns>
+    public async Task<DocHarvestHealthSnapshot> GetHarvestHealthAsync(CancellationToken cancellationToken = default)
+    {
+        var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
+        return snapshot.HarvestHealth;
     }
 
     /// <summary>
@@ -502,9 +555,10 @@ public class DocAggregator
         var repositoryRoot = _repositoryRoot;
         var sanitizer = _sanitizer;
         var logger = _logger;
-        var harvesterTimeout = HarvesterTimeout;
+        var harvesterTimeout = _harvesterTimeout;
         var snapshotCacheDuration = SnapshotCacheDuration;
         var docsCachePolicy = _docsCachePolicy;
+        var utcNow = _utcNow;
 
         return await _memo.GetAsync(
                    _cacheScope,
@@ -512,52 +566,14 @@ public class DocAggregator
                    async (_, _, _) =>
                    {
                        var sw = System.Diagnostics.Stopwatch.StartNew();
-                       var allNodes = new List<DocNode>();
-                       var tasks = harvesters.Select(async harvester =>
-                       {
-                           using var timeoutCts = new CancellationTokenSource(harvesterTimeout);
-                           try
-                           {
-                               return await harvester.HarvestAsync(repositoryRoot, timeoutCts.Token);
-                           }
-                           catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
-                           {
-                               logger.LogWarning(
-                                   ex,
-                                   "Harvester {HarvesterType} timed out after {TimeoutSeconds}s at {RepositoryRoot}. Skipping its docs.",
-                                   harvester.GetType().Name,
-                                   harvesterTimeout.TotalSeconds,
-                                   repositoryRoot);
-
-                               return Enumerable.Empty<DocNode>();
-                           }
-                           catch (OperationCanceledException ex)
-                           {
-                               logger.LogWarning(
-                                   ex,
-                                   "Harvester {HarvesterType} canceled at {RepositoryRoot}. Skipping its docs.",
-                                   harvester.GetType().Name,
-                                   repositoryRoot);
-
-                               return Enumerable.Empty<DocNode>();
-                           }
-                           catch (Exception ex)
-                           {
-                               logger.LogError(
-                                   ex,
-                                   "Harvester {HarvesterType} failed at {RepositoryRoot}",
-                                   harvester.GetType().Name,
-                                   repositoryRoot);
-
-                               return Enumerable.Empty<DocNode>();
-                           }
-                       });
-
-                       var results = await Task.WhenAll(tasks);
-                       foreach (var result in results)
-                       {
-                           allNodes.AddRange(result);
-                       }
+                       var harvesterResults = await RunHarvestersAsync(
+                           harvesters,
+                           repositoryRoot,
+                           harvesterTimeout,
+                           logger);
+                       var allNodes = harvesterResults
+                           .SelectMany(result => result.Docs)
+                           .ToList();
 
                        var nodesWithSymbolSourceLinks = allNodes
                            .Select(n => n with { Content = ReplaceSymbolSourcePlaceholders(n) })
@@ -631,6 +647,12 @@ public class DocAggregator
                            docsByPath.Values,
                            CancellationToken.None);
                        var (searchIndexPayload, searchRecordCount) = BuildSearchIndexPayload(docsByPath.Values, publicSections);
+                       var harvestHealth = BuildHarvestHealthSnapshot(
+                           harvesterResults,
+                           docsByPath.Count,
+                           repositoryRoot,
+                           utcNow(),
+                           logger);
 
                        sw.Stop();
                        logger.LogInformation(
@@ -645,10 +667,197 @@ public class DocAggregator
                            pathResolver,
                            publicSections,
                            searchIndexPayload,
-                           contributorProvenanceByPath);
+                           contributorProvenanceByPath,
+                           harvestHealth);
                    },
                    docsCachePolicy,
                    cancellationToken: CancellationToken.None);
+    }
+
+    private static async Task<IReadOnlyList<HarvesterRunResult>> RunHarvestersAsync(
+        IEnumerable<IDocHarvester> harvesters,
+        string repositoryRoot,
+        TimeSpan harvesterTimeout,
+        ILogger logger)
+    {
+        var harvesterArray = harvesters.ToArray();
+        if (harvesterArray.Length == 0)
+        {
+            return [];
+        }
+
+        var tasks = harvesterArray.Select(
+            harvester => RunHarvesterAsync(harvester, repositoryRoot, harvesterTimeout, logger));
+        return await Task.WhenAll(tasks);
+    }
+
+    private static async Task<HarvesterRunResult> RunHarvesterAsync(
+        IDocHarvester harvester,
+        string repositoryRoot,
+        TimeSpan harvesterTimeout,
+        ILogger logger)
+    {
+        var harvesterType = harvester.GetType().Name;
+        using var timeoutCts = new CancellationTokenSource(harvesterTimeout);
+        try
+        {
+            var docs = await harvester.HarvestAsync(repositoryRoot, timeoutCts.Token) ?? [];
+            var status = docs.Count == 0
+                ? DocHarvesterHealthStatus.ReturnedEmpty
+                : DocHarvesterHealthStatus.Succeeded;
+            return new HarvesterRunResult(harvesterType, status, docs, Diagnostic: null);
+        }
+        catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                ex,
+                "Harvester {HarvesterType} timed out after {TimeoutSeconds}s at {RepositoryRoot}. Skipping its docs.",
+                harvesterType,
+                harvesterTimeout.TotalSeconds,
+                repositoryRoot);
+
+            return new HarvesterRunResult(
+                harvesterType,
+                DocHarvesterHealthStatus.TimedOut,
+                [],
+                new DocHarvestDiagnostic(
+                    "razordocs.harvest.harvester_timed_out",
+                    DocHarvestDiagnosticSeverity.Warning,
+                    harvesterType,
+                    "A RazorDocs harvester timed out.",
+                    "The harvester did not complete within the per-harvester timeout budget, so RazorDocs skipped its docs for this snapshot.",
+                    "Check the harvester for slow filesystem access, long-running parsing, or unobserved cancellation."));
+        }
+        catch (OperationCanceledException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Harvester {HarvesterType} canceled at {RepositoryRoot}. Skipping its docs.",
+                harvesterType,
+                repositoryRoot);
+
+            return new HarvesterRunResult(
+                harvesterType,
+                DocHarvesterHealthStatus.Canceled,
+                [],
+                new DocHarvestDiagnostic(
+                    "razordocs.harvest.harvester_canceled",
+                    DocHarvestDiagnosticSeverity.Warning,
+                    harvesterType,
+                    "A RazorDocs harvester canceled.",
+                    "The harvester observed cancellation outside RazorDocs' timeout budget, so RazorDocs skipped its docs for this snapshot.",
+                    "Check whether the harvester is observing an external cancellation token or canceling its own work."));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Harvester {HarvesterType} failed at {RepositoryRoot}",
+                harvesterType,
+                repositoryRoot);
+
+            return new HarvesterRunResult(
+                harvesterType,
+                DocHarvesterHealthStatus.Failed,
+                [],
+                new DocHarvestDiagnostic(
+                    "razordocs.harvest.harvester_failed",
+                    DocHarvestDiagnosticSeverity.Error,
+                    harvesterType,
+                    "A RazorDocs harvester failed.",
+                    "The harvester threw while scanning the docs repository, so RazorDocs skipped its docs for this snapshot.",
+                    "Inspect the host logs for exception details, then fix the harvester configuration, repository root, or source content."));
+        }
+    }
+
+    private static DocHarvestHealthSnapshot BuildHarvestHealthSnapshot(
+        IReadOnlyList<HarvesterRunResult> harvesterResults,
+        int totalDocs,
+        string repositoryRoot,
+        DateTimeOffset generatedUtc,
+        ILogger logger)
+    {
+        var harvesters = harvesterResults
+            .Select(
+                result => new DocHarvesterHealth(
+                    result.HarvesterType,
+                    result.Status,
+                    result.Docs.Count,
+                    result.Diagnostic))
+            .ToArray();
+        var diagnostics = harvesterResults
+            .Select(result => result.Diagnostic)
+            .OfType<DocHarvestDiagnostic>()
+            .ToList();
+
+        if (harvesters.Length == 0)
+        {
+            diagnostics.Add(
+                new DocHarvestDiagnostic(
+                    "razordocs.harvest.no_harvesters",
+                    DocHarvestDiagnosticSeverity.Information,
+                    HarvesterType: null,
+                    "No RazorDocs harvesters are registered.",
+                    "RazorDocs has no configured sources to scan, so the docs corpus is empty by configuration.",
+                    "Register at least one IDocHarvester if this host should publish source-backed documentation."));
+        }
+
+        var successfulHarvesters = harvesters.Count(harvester => IsNonFailure(harvester.Status));
+        var failedHarvesters = harvesters.Length - successfulHarvesters;
+        var status = ResolveHarvestHealthStatus(harvesters.Length, successfulHarvesters, failedHarvesters, totalDocs);
+
+        if (status == DocHarvestHealthStatus.Failed)
+        {
+            var aggregateDiagnostic = new DocHarvestDiagnostic(
+                "razordocs.harvest.all_failed",
+                DocHarvestDiagnosticSeverity.Critical,
+                HarvesterType: null,
+                "All RazorDocs harvesters failed.",
+                "Every configured harvester failed, timed out, or canceled, so RazorDocs could not produce a trustworthy docs corpus.",
+                "Inspect the preceding harvester logs, fix the failing source or configuration, and refresh the RazorDocs cache.");
+            diagnostics.Add(aggregateDiagnostic);
+
+            logger.LogCritical(
+                "All RazorDocs harvesters failed at {RepositoryRoot}. {FailedHarvesters}/{TotalHarvesters} harvesters produced no usable docs.",
+                repositoryRoot,
+                failedHarvesters,
+                harvesters.Length);
+        }
+
+        return new DocHarvestHealthSnapshot(
+            status,
+            generatedUtc,
+            repositoryRoot,
+            harvesters.Length,
+            successfulHarvesters,
+            failedHarvesters,
+            totalDocs,
+            harvesters,
+            diagnostics.ToArray());
+    }
+
+    private static DocHarvestHealthStatus ResolveHarvestHealthStatus(
+        int totalHarvesters,
+        int successfulHarvesters,
+        int failedHarvesters,
+        int totalDocs)
+    {
+        if (totalHarvesters == 0 || failedHarvesters == 0)
+        {
+            return totalDocs > 0 ? DocHarvestHealthStatus.Healthy : DocHarvestHealthStatus.Empty;
+        }
+
+        if (successfulHarvesters == 0)
+        {
+            return DocHarvestHealthStatus.Failed;
+        }
+
+        return DocHarvestHealthStatus.Degraded;
+    }
+
+    private static bool IsNonFailure(DocHarvesterHealthStatus status)
+    {
+        return status is DocHarvesterHealthStatus.Succeeded or DocHarvesterHealthStatus.ReturnedEmpty;
     }
 
     private async Task<Dictionary<string, DocContributorProvenanceViewModel>> BuildContributorProvenanceByPathAsync(

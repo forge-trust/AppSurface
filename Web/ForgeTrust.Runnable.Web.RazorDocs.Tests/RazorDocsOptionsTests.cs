@@ -1,4 +1,5 @@
 using System.Text;
+using ForgeTrust.Runnable.Web.RazorDocs.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,19 @@ public sealed class RazorDocsOptionsTests
         Assert.Equal(0, (int)RazorDocsVersionAdvisoryState.None);
         Assert.Equal(1, (int)RazorDocsVersionAdvisoryState.Vulnerable);
         Assert.Equal(2, (int)RazorDocsVersionAdvisoryState.SecurityRisk);
+        Assert.Equal(0, (int)DocHarvestHealthStatus.Healthy);
+        Assert.Equal(1, (int)DocHarvestHealthStatus.Empty);
+        Assert.Equal(2, (int)DocHarvestHealthStatus.Degraded);
+        Assert.Equal(3, (int)DocHarvestHealthStatus.Failed);
+        Assert.Equal(0, (int)DocHarvesterHealthStatus.Succeeded);
+        Assert.Equal(1, (int)DocHarvesterHealthStatus.ReturnedEmpty);
+        Assert.Equal(2, (int)DocHarvesterHealthStatus.Failed);
+        Assert.Equal(3, (int)DocHarvesterHealthStatus.TimedOut);
+        Assert.Equal(4, (int)DocHarvesterHealthStatus.Canceled);
+        Assert.Equal(0, (int)DocHarvestDiagnosticSeverity.Information);
+        Assert.Equal(1, (int)DocHarvestDiagnosticSeverity.Warning);
+        Assert.Equal(2, (int)DocHarvestDiagnosticSeverity.Error);
+        Assert.Equal(3, (int)DocHarvestDiagnosticSeverity.Critical);
     }
 
     [Fact]
