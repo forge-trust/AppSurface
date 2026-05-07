@@ -1,14 +1,15 @@
 namespace ForgeTrust.Runnable.Web;
 
 /// <summary>
-/// Represents configuration options for Runnable's conventional browser status pages.
+/// Represents configuration options for Runnable's conventional browser error pages.
 /// </summary>
 /// <remarks>
 /// The default configuration keeps <see cref="BrowserStatusPageMode"/> at <see cref="BrowserStatusPageMode.Auto"/>,
 /// which enables conventional 401, 403, and 404 browser pages only when MVC support already includes Razor
 /// views. Apps that need the HTML status-page experience regardless of their starting MVC mode can opt into
-/// <see cref="BrowserStatusPageMode.Enabled"/>, while API-only or custom error handling stacks should use
-/// <see cref="BrowserStatusPageMode.Disabled"/>.
+/// <see cref="BrowserStatusPageMode.Enabled"/>, while API-only or custom status-code handling stacks should use
+/// <see cref="BrowserStatusPageMode.Disabled"/>. Conventional production 500 pages are separate and always
+/// require an explicit call to <see cref="UseConventionalExceptionPage"/>.
 /// </remarks>
 public record ErrorPagesOptions
 {
@@ -28,6 +29,17 @@ public record ErrorPagesOptions
     /// prevents the reserved framework routes and browser-oriented status handling from activating.
     /// </remarks>
     public BrowserStatusPageMode BrowserStatusPageMode { get; set; } = BrowserStatusPageMode.Auto;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether Runnable should render the conventional production exception page.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="false"/> so apps do not accidentally replace an existing exception-handling
+    /// policy. Set this through <see cref="UseConventionalExceptionPage"/> when browser users should see a safe,
+    /// generic HTML 500 page for unhandled exceptions in non-development environments. Runnable uses ASP.NET Core's
+    /// exception-handler middleware for this feature; status-code pages cannot catch thrown exceptions.
+    /// </remarks>
+    public bool ConventionalExceptionPageEnabled { get; set; }
 
     /// <summary>
     /// Explicitly enables Runnable's conventional browser status pages.
@@ -51,6 +63,34 @@ public record ErrorPagesOptions
     public void DisableBrowserStatusPages()
     {
         BrowserStatusPageMode = BrowserStatusPageMode.Disabled;
+    }
+
+    /// <summary>
+    /// Explicitly enables Runnable's conventional production exception page.
+    /// </summary>
+    /// <remarks>
+    /// Use this for browser-facing apps that want Runnable to own the production 500 page through ASP.NET Core
+    /// exception handling. The page renders only safe generic copy plus a request id, and Runnable leaves
+    /// Development behavior alone so developer exception diagnostics can remain active during local work. API-only
+    /// apps or applications with custom exception middleware should leave this disabled and register their own
+    /// handling before application endpoints.
+    /// </remarks>
+    public void UseConventionalExceptionPage()
+    {
+        ConventionalExceptionPageEnabled = true;
+    }
+
+    /// <summary>
+    /// Explicitly disables Runnable's conventional production exception page.
+    /// </summary>
+    /// <remarks>
+    /// Use this when a module enables the conventional exception page but the application host needs to supply a
+    /// different exception-handling policy, such as JSON problem details, tenant-specific pages, or telemetry-first
+    /// middleware.
+    /// </remarks>
+    public void DisableConventionalExceptionPage()
+    {
+        ConventionalExceptionPageEnabled = false;
     }
 
     /// <summary>
