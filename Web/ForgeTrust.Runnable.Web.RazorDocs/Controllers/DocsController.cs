@@ -1222,12 +1222,29 @@ public class DocsController : Controller
         return expectedTypes.Any(expected => string.Equals(pageType, expected, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Determines whether a documentation node should render with the API reference reading surface.
+    /// </summary>
+    /// <remarks>
+    /// Non-Markdown generated docs use the API surface by default because RazorDocs cannot assume extensionless
+    /// generated pages have authored prose rhythm. Markdown docs opt into the API surface only when
+    /// <c>page_type</c> normalizes to <c>api</c> or <c>api-reference</c>. Extensionless authored content is therefore
+    /// treated as generated API/reference content unless a future harvester exposes a stronger authorship signal.
+    /// </remarks>
     private static bool IsApiSurfaceDoc(DocNode doc)
     {
         return !IsMarkdownDoc(doc.Path)
                || IsApiSurfacePageType(doc.Metadata?.PageType);
     }
 
+    /// <summary>
+    /// Determines whether raw page-type metadata explicitly requests the API reference reading surface.
+    /// </summary>
+    /// <remarks>
+    /// Values are normalized with <see cref="DocMetadataPresentation.NormalizeToken(string?)" /> before comparison,
+    /// so values such as <c>api_reference</c> and <c>API Reference</c> match <c>api-reference</c>. Null or blank
+    /// metadata does not opt a Markdown document into the API surface.
+    /// </remarks>
     private static bool IsApiSurfacePageType(string? pageType)
     {
         var normalizedPageType = DocMetadataPresentation.NormalizeToken(pageType);
@@ -1235,6 +1252,13 @@ public class DocsController : Controller
         return normalizedPageType is "api" or "api-reference";
     }
 
+    /// <summary>
+    /// Determines whether a source path represents authored Markdown by checking known Markdown filename suffixes.
+    /// </summary>
+    /// <remarks>
+    /// Matching is case-insensitive and currently recognizes <c>.md</c> and <c>.markdown</c>. Callers should pass a
+    /// non-null harvested path; extensionless paths are intentionally treated as non-Markdown generated docs.
+    /// </remarks>
     private static bool IsMarkdownDoc(string path)
     {
         return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)

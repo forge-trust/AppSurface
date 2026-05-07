@@ -1426,8 +1426,10 @@ public class RazorDocsViewsTests
         Assert.Contains("class=\"docs-content docs-content--api\"", apiHtml);
     }
 
-    [Fact]
-    public async Task DetailsView_ShouldUseApiContentSurface_ForApiReferenceMarkdown()
+    [Theory]
+    [InlineData("api")]
+    [InlineData("api-reference")]
+    public async Task DetailsView_ShouldUseApiContentSurface_ForApiPageTypeMarkdown(string pageType)
     {
         var doc = new DocNode(
             "API Guide",
@@ -1435,7 +1437,7 @@ public class RazorDocsViewsTests
             "<p>Reference body</p>",
             Metadata: new DocMetadata
             {
-                PageType = "api-reference"
+                PageType = pageType
             });
 
         var html = await RenderDetailsViewAsync(doc);
