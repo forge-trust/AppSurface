@@ -333,6 +333,7 @@ public sealed class RazorDocsVersionArchiveControllerTests : IDisposable
         File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[]}");
         File.WriteAllText(Path.Combine(root, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Combine(root, "search-client.js"), "window.__searchClientLoaded = true;");
+        File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
         File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
         return root;
     }

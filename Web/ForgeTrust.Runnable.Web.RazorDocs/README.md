@@ -13,6 +13,7 @@ If you are evaluating RazorDocs for your own repository, start with [Use RazorDo
 - `RazorDocsWebModule` for wiring the docs UI into a Runnable web host
 - `AddRazorDocs()` for typed options binding and core service registration
 - `DocAggregator` plus the built-in Markdown and C# harvesters
+- Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by RazorDocs consumers
 - `DocsUrlBuilder` plus the MVC surface used by RazorDocs consumers so the live docs root, search shell, and archive routes stay in one shared contract
 - `RazorDocsVersionCatalog` plus `RazorDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
 - Structured trust metadata plus a built-in trust bar for release notes, upgrade guides, and other pages that need status and provenance near the top
@@ -34,14 +35,14 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 | Surface | Default | Why | Real examples | Exception / note |
 | --- | --- | --- | --- | --- |
 | One-off owned package chrome in Razor views | Prefer Tailwind utility classes in markup | RazorDocs fully owns the markup, so local utility classes keep intent obvious where the change happens | docs landing shell in `Views/Docs/Index.cshtml`, sidebar shell and layout framing in `Views/Shared/_Layout.cshtml`, one-off page header spacing in `Views/Docs/Details.cshtml` | If the same styling contract repeats across package surfaces, promote it to a semantic component class instead of copying long utility strings |
-| Reusable owned package components or stable cross-file UI selectors | Use semantic component classes in the shared package stylesheet | Shared selectors keep repeated UI stable across Razor, CSS, and sometimes JavaScript | `docs-page-badge`, `docs-metadata-chip`, `docs-page-meta`, `docs-provenance-strip`, `docs-trust-bar` in `wwwroot/css/app.css` | Utilities can still handle surrounding layout and one-off placement |
+| Reusable owned package components or stable cross-file UI selectors | Use semantic component classes in the shared package stylesheet | Shared selectors keep repeated UI stable across Razor, CSS, and sometimes JavaScript | `docs-page-badge`, `docs-metadata-chip`, `docs-page-meta`, `docs-provenance-strip`, `docs-trust-bar`, and `docs-outline-*` in `wwwroot/css/app.css` | Utilities can still handle surrounding layout and one-off placement |
 | Harvested or generated document bodies that RazorDocs does not fully author element by element | Use wrapper-scoped semantic CSS such as `.docs-content ...` in the shared package stylesheet | RazorDocs cannot safely push utility classes into nested harvested HTML | headings, paragraphs, code blocks, overload groups, and namespace sections inside `.docs-content` in `Views/Docs/Details.cshtml` and `wwwroot/css/app.css` | Do not rewrite harvested nested HTML just to satisfy utility-class purity |
 | JavaScript-generated or stateful UI that needs CSS and JavaScript to share stable hooks | Use semantic hook classes, then style them in CSS | Runtime UI needs stable names both the stylesheet and script can rely on | search result rows, filter chips, active-filter pills, and state containers in `wwwroot/docs/search.css` and `wwwroot/docs/search-client.js` | Use `id` values where uniqueness or ARIA wiring require them, but keep reusable styling and state contracts on semantic classes |
 
 ### Common Calls
 
 - New one-off page header spacing or typography in owned Razor markup: use Tailwind utilities in the view.
-- New reusable badge, metadata chip, page metadata row, or trust/provenance surface: add or extend a semantic component class in `wwwroot/css/app.css`, then use utilities around it only when they are purely local.
+- New reusable badge, metadata chip, page metadata row, trust/provenance surface, or page-local outline state: add or extend a semantic component class in `wwwroot/css/app.css`, then use utilities around it only when they are purely local.
 - For `Views/Docs/Search.cshtml`, keep the stateful search container or interactive hook semantic, but use local utilities for one-off header copy, helper layout, and fallback-link chrome inside that view.
 - Restyling paragraphs, headings, or code blocks inside `.docs-content`: update wrapper-scoped CSS instead of pushing utility classes into harvested HTML.
 - New search filter pill, active-filter surface, or other stateful search UI: use a semantic hook class because CSS and JavaScript both need to recognize it.
@@ -210,10 +211,11 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
   - Missing or blank `path`/`title` values cause RazorDocs to reject the published release tree during startup validation.
 - `search.css` at the tree root
 - `search-client.js` at the tree root
+- `outline-client.js` at the tree root for outline-aware exports whose HTML references the page-local outline runtime
 - `minisearch.min.js` at the tree root
 - any section, detail, partial, and asset routes that belong to the exported `/docs` surface for that release
 
-RazorDocs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both `/docs` and `/docs/v/{version}` honestly. Exporters should validate `search-index.json`, `search.css`, `search-client.js`, and `minisearch.min.js` before publishing because a missing runtime asset or a malformed search payload keeps that release unavailable until the artifact is fixed. Use the [RazorWire CLI](../ForgeTrust.Runnable.Web.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+RazorDocs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both `/docs` and `/docs/v/{version}` honestly. Exporters should validate `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.Runnable.Web.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
 
 ### Archive ordering
 
@@ -600,6 +602,27 @@ RazorDocs can render two kinds of page-local wayfinding on details pages without
 - `On this page` links come from the harvested `DocNode.Outline` contract.
 - `Previous` and `Next` proof-path links come from explicit metadata, not folder inference.
 
+### Page-local outline behavior
+
+`On this page` is local navigation for the current detail page. It intentionally does not mirror the left sidebar, which remains global documentation navigation. This keeps the two maps separate: the sidebar answers "where am I in the docs product?" while the outline answers "where am I on this page?"
+
+When `DocDetailsViewModel.HasOutline` is true, RazorDocs renders one semantic outline nav:
+
+- wide desktop (`>=1280px`): a sticky right rail beside the article
+- narrower viewports: a closed-by-default `On this page` toggle above the article
+- all viewports: the same outline list, never separate desktop and mobile TOCs
+
+The outline client enhances the server-rendered links by:
+
+- using `#main-content` as the scroll root for `IntersectionObserver`
+- marking the current section with `aria-current="location"`
+- initializing from the current URL hash
+- rebinding after RazorWire/Turbo frame navigation replaces `rw:island id="doc-content"`
+- collapsing the mobile outline after an outline link is chosen
+- skipping missing heading targets for active-state tracking while leaving their normal hash links intact instead of marking stale entries current or closing the drawer
+
+If JavaScript is unavailable, the server-rendered outline remains a normal list of hash links. If `IntersectionObserver` is unavailable, RazorDocs keeps static and hash-based behavior rather than adding a scroll polling fallback.
+
 ### Sequence contract
 
 Use `sequence_key` together with `order` when a set of pages should behave like one proof path:
@@ -658,7 +681,7 @@ The built-in Markdown and C# harvesters now populate `DocNode.Outline` directly 
 - heading metadata in the current-surface `search-index.json`
 - stable behavior without re-parsing rendered HTML later
 
-Each outline entry should provide the rendered fragment `Id`, the reader-facing `Title`, and the normalized heading `Level`. For visual parity with the built-in wayfinding UI, custom `IDocHarvester` implementations should populate `DocNode.Outline` only with entries that have a non-empty rendered fragment `Id` and non-empty `Title`; headings or generated sections missing either value are skipped by the built-ins. The Markdown harvester emits source-ordered H2-H3 headings by default, with titles normalized from inline heading text and IDs taken from the rendered heading fragment. The C# harvester emits level 2 entries for documented types and enums, and level 3 entries for method groups and properties. Matching those defaults keeps custom outlines aligned with the built-in `On this page` section and search heading metadata.
+Each outline entry should provide the rendered fragment `Id`, the reader-facing `Title`, and the normalized heading `Level`. For visual parity with the built-in wayfinding UI, custom `IDocHarvester` implementations should populate `DocNode.Outline` only with entries that have a non-empty rendered fragment `Id` and non-empty `Title`; headings or generated sections missing either value are skipped by the built-ins. The Markdown harvester emits source-ordered H2-H3 headings by default, with titles normalized from inline heading text and IDs taken from the rendered heading fragment. The C# harvester emits level 2 entries for documented types and enums, and level 3 entries for method groups and properties. Matching those defaults keeps custom outlines aligned with the built-in `On this page` rail, active-section behavior, and search heading metadata.
 
 Public visibility note:
 

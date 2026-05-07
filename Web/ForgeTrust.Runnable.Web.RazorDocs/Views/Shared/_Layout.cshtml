@@ -43,7 +43,7 @@
 </head>
 <body class="h-full flex flex-col text-slate-200 overflow-hidden">
 <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-0 focus:left-0 focus:z-50 focus:p-4 focus:bg-slate-900 focus:text-white">Skip to content</a>
-<div class="flex h-full">
+<div class="flex h-full min-h-0 overflow-hidden">
     <button id="docs-sidebar-overlay"
             class="fixed inset-0 z-30 bg-slate-950/70 backdrop-blur-sm hidden md:hidden"
             type="button"
@@ -98,7 +98,7 @@
     </aside>
 
     <!-- Main Content -->
-    <main id="main-content" role="main" class="flex-grow min-w-0 overflow-y-auto bg-slate-900">
+    <main id="main-content" role="main" class="h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-slate-900">
         <header class="md:hidden sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 backdrop-blur px-4 py-3 flex items-center gap-3">
             <button id="docs-sidebar-open"
                     type="button"
@@ -200,6 +200,75 @@
             sidebar.removeAttribute("aria-modal");
             sidebar.removeAttribute("aria-label");
             sidebar.setAttribute("aria-hidden", shouldAutoCloseSidebar() ? "true" : "false");
+        }
+
+        function getMainScrollTopForTarget(target) {
+            if (!mainContent || !target) {
+                return 0;
+            }
+
+            const mainRect = mainContent.getBoundingClientRect();
+            const targetRect = target.getBoundingClientRect();
+            const desiredTop = mainContent.scrollTop + targetRect.top - mainRect.top - 64;
+            const maxScrollTop = Math.max(0, mainContent.scrollHeight - mainContent.clientHeight);
+            return Math.min(Math.max(0, desiredTop), maxScrollTop);
+        }
+
+        function scrollMainToTarget(target, behavior = "auto") {
+            if (!mainContent || !target) {
+                return;
+            }
+
+            mainContent.scrollTo({
+                top: getMainScrollTopForTarget(target),
+                behavior
+            });
+        }
+
+        function getCurrentHashTarget() {
+            if (!window.location.hash) {
+                return null;
+            }
+
+            let targetId;
+            try {
+                targetId = decodeURIComponent(window.location.hash.slice(1));
+            } catch {
+                return null;
+            }
+
+            return document.getElementById(targetId);
+        }
+
+        function restoreMainScrollPosition() {
+            const hashTarget = getCurrentHashTarget();
+            if (hashTarget) {
+                scrollMainToTarget(hashTarget);
+                return;
+            }
+
+            mainContent.scrollTo({
+                top: 0,
+                behavior: "auto"
+            });
+        }
+
+        function restoreMainScrollAfterFrameLoad(event) {
+            if (event.target?.id !== "doc-content" || !mainContent) {
+                return;
+            }
+
+            restoreMainScrollPosition();
+
+            if (typeof requestAnimationFrame === "function") {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(restoreMainScrollPosition);
+                });
+            }
+
+            for (const delay of [80, 240]) {
+                window.setTimeout(restoreMainScrollPosition, delay);
+            }
         }
 
         function closeSidebar({ restoreFocus = true } = {}) {
@@ -329,6 +398,8 @@
             syncSidebarForViewport();
         });
 
+        document.addEventListener("turbo:frame-load", restoreMainScrollAfterFrameLoad);
+
         document.addEventListener("click", event => {
             if (event.defaultPrevented) {
                 return;
@@ -381,7 +452,7 @@
             const prefersReducedMotion = window.matchMedia
                 && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
             const scrollBehavior = prefersReducedMotion ? "auto" : "smooth";
-            target.scrollIntoView({ behavior: scrollBehavior, block: "start" });
+            scrollMainToTarget(target, scrollBehavior);
         });
     })();
 </script>

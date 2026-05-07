@@ -327,6 +327,7 @@ public class RazorDocsWebModuleTests
             File.WriteAllText(Path.Combine(treePath, "search-index.json"), "{\"documents\":[]}");
             File.WriteAllText(Path.Combine(treePath, "search.css"), "body { color: #fff; }");
             File.WriteAllText(Path.Combine(treePath, "search-client.js"), "window.__searchClientLoaded = true;");
+            File.WriteAllText(Path.Combine(treePath, "outline-client.js"), "window.__outlineClientLoaded = true;");
             File.WriteAllText(Path.Combine(treePath, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
 
             var catalogPath = Path.Combine(tempDirectory, "catalog.json");
