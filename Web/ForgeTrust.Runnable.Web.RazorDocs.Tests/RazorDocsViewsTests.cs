@@ -1973,9 +1973,8 @@ public class RazorDocsViewsTests
         Assert.True(
             document.QuerySelector(".docs-detail-primary")!.CompareDocumentPosition(document.QuerySelector("#docs-page-outline")!)
                 .HasFlag(DocumentPositions.Following));
-        Assert.Contains("/docs/outline-client.js", html);
-        Assert.Contains("data-doc-outline-client-loader=\"true\"", html);
-        Assert.Contains("script.dataset.docOutlineClient = \"true\"", html);
+        Assert.NotNull(document.QuerySelector("script[src='/docs/outline-client.js'][data-doc-outline-client='true']"));
+        Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", html);
         Assert.DoesNotContain("rounded-2xl border border-slate-800 bg-slate-900/60", html);
 
         var tenantHtml = await RenderViewAsync(
@@ -1983,9 +1982,10 @@ public class RazorDocsViewsTests
             "/Views/Docs/Details.cshtml",
             model,
             pathBase: "/tenant");
+        var tenantDocument = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(tenantHtml);
 
-        Assert.Contains("/tenant/docs/outline-client.js", tenantHtml);
-        Assert.Contains("data-doc-outline-client-loader=\"true\"", tenantHtml);
+        Assert.NotNull(tenantDocument.QuerySelector("script[src='/tenant/docs/outline-client.js'][data-doc-outline-client='true']"));
+        Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", tenantHtml);
     }
 
     [Fact]
