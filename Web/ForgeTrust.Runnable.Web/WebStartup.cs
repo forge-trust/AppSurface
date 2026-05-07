@@ -136,7 +136,8 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
 
         _configureOptions?.Invoke(_options);
 
-        if (_options.Errors.BrowserStatusPageMode == BrowserStatusPageMode.Enabled
+        if ((_options.Errors.BrowserStatusPageMode == BrowserStatusPageMode.Enabled
+                || _options.Errors.ConventionalExceptionPageEnabled)
             && _options.Mvc.MvcSupportLevel < MvcSupport.ControllersWithViews)
         {
             _options.Mvc = _options.Mvc with { MvcSupportLevel = MvcSupport.ControllersWithViews };
@@ -190,15 +191,24 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
                 }
             }
 
-            if (_options.Errors.AreConventionalBrowserStatusPagesEnabled(mvcOpts.MvcSupportLevel))
+            if (_options.Errors.AreConventionalBrowserStatusPagesEnabled(mvcOpts.MvcSupportLevel)
+                || _options.Errors.ConventionalExceptionPageEnabled)
             {
                 var frameworkAssembly = typeof(WebOptions).Assembly;
                 if (frameworkAssembly != context.EntryPointAssembly)
                 {
                     mvcBuilder.AddApplicationPart(frameworkAssembly);
                 }
+            }
 
+            if (_options.Errors.AreConventionalBrowserStatusPagesEnabled(mvcOpts.MvcSupportLevel))
+            {
                 services.TryAddSingleton<BrowserStatusPageRenderer>();
+            }
+
+            if (_options.Errors.ConventionalExceptionPageEnabled)
+            {
+                services.TryAddSingleton<ConventionalExceptionPageRenderer>();
             }
 
             mvcOpts.ConfigureMvc?.Invoke(mvcBuilder);
@@ -286,6 +296,31 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
     /// <param name="app">The application builder to configure (middleware, routing, CORS, endpoints, etc.).</param>
     private void InitializeWebApplication(StartupContext context, IApplicationBuilder app)
     {
+        if (_options.Errors.ConventionalExceptionPageEnabled && !context.IsDevelopment)
+        {
+            app.ApplicationServices
+                .GetRequiredService<ConventionalExceptionPageRenderer>()
+                .ValidateConfiguredViews();
+
+            app.UseExceptionHandler(exceptionHandlerApp =>
+            {
+                exceptionHandlerApp.Run(
+                    async httpContext =>
+                    {
+                        httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
+
+                        if (!ShouldApplyConventionalExceptionPage(httpContext))
+                        {
+                            return;
+                        }
+
+                        await httpContext.RequestServices
+                            .GetRequiredService<ConventionalExceptionPageRenderer>()
+                            .RenderAsync(httpContext);
+                    });
+                });
+        }
+
         if (_options.Errors.AreConventionalBrowserStatusPagesEnabled(_options.Mvc.MvcSupportLevel))
         {
             app.ApplicationServices
@@ -386,6 +421,18 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
             return false;
         }
 
+        var acceptsHtml = httpContext.Request.GetTypedHeaders().Accept?
+            .Any(mediaType =>
+                mediaType.MediaType.HasValue
+                && (mediaType.MediaType.Value.Equals("text/html", StringComparison.OrdinalIgnoreCase)
+                    || mediaType.MediaType.Value.Equals("application/xhtml+xml", StringComparison.OrdinalIgnoreCase)))
+            ?? false;
+
+        return acceptsHtml;
+    }
+
+    internal static bool ShouldApplyConventionalExceptionPage(HttpContext httpContext)
+    {
         var acceptsHtml = httpContext.Request.GetTypedHeaders().Accept?
             .Any(mediaType =>
                 mediaType.MediaType.HasValue

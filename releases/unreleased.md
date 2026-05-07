@@ -72,6 +72,7 @@ Runnable is putting the release contract in place before `v0.1.0`. This slice is
 - Runnable Web now ships conventional browser status pages for empty HTML `401`, `403`, and `404` responses. The public surface is now `BrowserStatusPageMode`, `BrowserStatusPageModel`, `UseConventionalBrowserStatusPages()`, and `DisableBrowserStatusPages()`, with preview routes at `/_runnable/errors/401`, `/_runnable/errors/403`, and `/_runnable/errors/404`.
 - Browser status page overrides are status-specific: use `~/Views/Shared/401.cshtml`, `~/Views/Shared/403.cshtml`, or `~/Views/Shared/404.cshtml`. JSON/API responses, non-empty responses, and non-GET/HEAD requests keep their original behavior.
 - Static export remains deliberately 404-only. RazorWire CLI probes `/_runnable/errors/404` and writes `404.html`; it does not emit `401.html` or `403.html`.
+- Runnable Web can now opt into a conventional production 500 page backed by ASP.NET Core exception handling, rendering only safe generic copy and a request id while leaving Development exception diagnostics and API-oriented responses alone.
 - Runnable now assigns explicit numeric values to public Web and RazorWire enums, preserving existing ordinals for consumers that persist, serialize, bind, or compare those values.
 - Runnable startup now keeps custom `StartupContext.ApplicationName` values as display labels while preserving assembly-backed host identity for ASP.NET static web asset manifests, so custom-labeled web hosts can still serve package styles and scripts.
 
