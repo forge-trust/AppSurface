@@ -1111,6 +1111,15 @@ public sealed record DocDetailsViewModel
     public bool IsCSharpApiDoc { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the page should use the API reference reading surface.
+    /// </summary>
+    /// <remarks>
+    /// This covers non-Markdown generated documents and Markdown documents explicitly marked with API-oriented metadata,
+    /// while <see cref="IsCSharpApiDoc" /> remains scoped to C# generated page chrome decisions.
+    /// </remarks>
+    public bool IsApiSurfaceDoc { get; init; }
+
+    /// <summary>
     /// Gets the normalized page-type badge presentation for the current page when available.
     /// </summary>
     public DocPageTypeBadgePresentation? PageTypeBadge { get; init; }

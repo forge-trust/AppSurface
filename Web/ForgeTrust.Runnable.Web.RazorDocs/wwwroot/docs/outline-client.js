@@ -113,6 +113,15 @@
     function getActiveEntryFromScrollPosition(entries, root) {
         const rootTop = root.getBoundingClientRect().top;
         const activationTop = rootTop + 64;
+        const hashEntry = getActiveEntryFromHash(entries);
+
+        if (hashEntry) {
+            const hashTargetTop = hashEntry.target.getBoundingClientRect().top;
+            if (hashTargetTop >= rootTop - 16 && hashTargetTop <= rootTop + 160) {
+                return hashEntry;
+            }
+        }
+
         let activeEntry = entries[0];
 
         for (const entry of entries) {
