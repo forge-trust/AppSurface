@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using ForgeTrust.Runnable.Core;
@@ -190,6 +191,17 @@ public sealed class ConventionalExceptionPageTests
     }
 
     [Fact]
+    public void DisableConventionalExceptionPage_ClearsEnabledFlag()
+    {
+        var options = new ErrorPagesOptions();
+        options.UseConventionalExceptionPage();
+
+        options.DisableConventionalExceptionPage();
+
+        Assert.False(options.ConventionalExceptionPageEnabled);
+    }
+
+    [Fact]
     public void ValidateConfiguredViews_ThrowsWithSearchedLocations_WhenNoViewsResolve()
     {
         var renderer = CreateRenderer(
@@ -234,6 +246,35 @@ public sealed class ConventionalExceptionPageTests
         Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
         Assert.Equal(StatusCodes.Status500InternalServerError, executor.Model?.StatusCode);
         Assert.Equal("renderer-request-id", executor.Model?.RequestId);
+    }
+
+    [Fact]
+    public async Task RenderAsync_UsesActivityId_WhenTraceIdentifierIsBlank()
+    {
+        var executor = new CapturingViewResultExecutor();
+        var renderer = CreateRenderer(
+            new StubCompositeViewEngine(
+                appResult: ViewEngineResult.Found(ConventionalExceptionPageDefaults.AppViewPath, new StubView(ConventionalExceptionPageDefaults.AppViewPath))),
+            executor);
+        using var activity = new Activity("conventional-exception-page-test");
+        var previousCurrent = Activity.Current;
+        activity.Start();
+        var httpContext = new DefaultHttpContext
+        {
+            TraceIdentifier = " "
+        };
+
+        try
+        {
+            await renderer.RenderAsync(httpContext);
+        }
+        finally
+        {
+            activity.Stop();
+            Activity.Current = previousCurrent;
+        }
+
+        Assert.Equal(activity.Id, executor.Model?.RequestId);
     }
 
     private static HttpRequestMessage CreateHtmlRequest(HttpMethod method, string requestUri)

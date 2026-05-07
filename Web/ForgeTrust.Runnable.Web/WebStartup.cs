@@ -318,7 +318,7 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
                             .GetRequiredService<ConventionalExceptionPageRenderer>()
                             .RenderAsync(httpContext);
                     });
-                });
+            });
         }
 
         if (_options.Errors.AreConventionalBrowserStatusPagesEnabled(_options.Mvc.MvcSupportLevel))
