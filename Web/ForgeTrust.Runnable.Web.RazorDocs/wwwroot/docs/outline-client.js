@@ -66,6 +66,39 @@
         if (!link && currentLabel) {
             currentLabel.textContent = "";
         }
+
+        keepOutlineLinkVisible(link);
+    }
+
+    function keepOutlineLinkVisible(link) {
+        if (!link) {
+            return;
+        }
+
+        const shell = link.closest(outlineSelector);
+        if (!(shell instanceof HTMLElement) || shell.scrollHeight <= shell.clientHeight) {
+            return;
+        }
+
+        const shellRect = shell.getBoundingClientRect();
+        const linkRect = link.getBoundingClientRect();
+        const topInset = 48;
+        const bottomInset = 56;
+        let nextScrollTop = shell.scrollTop;
+
+        if (linkRect.top < shellRect.top + topInset) {
+            nextScrollTop += linkRect.top - shellRect.top - topInset;
+        } else if (linkRect.bottom > shellRect.bottom - bottomInset) {
+            nextScrollTop += linkRect.bottom - shellRect.bottom + bottomInset;
+        } else {
+            return;
+        }
+
+        const maxScrollTop = Math.max(0, shell.scrollHeight - shell.clientHeight);
+        shell.scrollTo({
+            top: Math.min(Math.max(0, nextScrollTop), maxScrollTop),
+            behavior: "auto"
+        });
     }
 
     function getActiveEntryFromHash(entries) {

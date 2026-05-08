@@ -463,16 +463,6 @@ body {
         scrollbar-width: thin;
     }
 
-    .docs-outline-shell::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        left: 0;
-        width: 1px;
-        background: rgba(51, 65, 85, 0.88);
-    }
-
     .docs-outline-toggle {
         display: none;
     }
@@ -483,7 +473,19 @@ body {
 
     .docs-outline-panel {
         display: block !important;
+        position: relative;
+        min-height: 100%;
         padding: 0;
+    }
+
+    .docs-outline-panel::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: -1.15rem;
+        width: 1px;
+        background: rgba(51, 65, 85, 0.88);
     }
 
     .docs-outline-label {
