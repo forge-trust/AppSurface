@@ -111,6 +111,9 @@ public class RazorDocsWebModuleTests
         Assert.Contains("header", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("details", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("summary", sanitizer.InnerSanitizer.AllowedTags);
+        Assert.Contains("pre", sanitizer.InnerSanitizer.AllowedTags);
+        Assert.Contains("code", sanitizer.InnerSanitizer.AllowedTags);
+        Assert.Contains("span", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("class", sanitizer.InnerSanitizer.AllowedAttributes);
         Assert.Contains("id", sanitizer.InnerSanitizer.AllowedAttributes);
         Assert.Contains("open", sanitizer.InnerSanitizer.AllowedAttributes);

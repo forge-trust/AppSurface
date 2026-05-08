@@ -202,6 +202,74 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldRenderFencedCodeBlocksThroughRazorDocsHighlighter()
+    {
+        var highlighter = new RecordingCodeHighlighter();
+        var harvester = new MarkdownHarvester(_loggerFake, File.ReadAllTextAsync, highlighter);
+        var content = """
+            # Guide
+
+            ```csharp
+            public class Demo { }
+            ```
+            """;
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, "Guide.md"), content);
+
+        var doc = Assert.Single(await harvester.HarvestAsync(_testRoot));
+
+        Assert.Contains("<pre class=\"doc-code test-code\"><code>public class Demo { }</code></pre>", doc.Content);
+        var block = Assert.Single(highlighter.Blocks);
+        Assert.Equal("csharp", block.Language);
+        Assert.Equal("public class Demo { }", block.Code.Trim());
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldUseFirstInfoTokenAndIgnoreFenceMetadata()
+    {
+        var highlighter = new RecordingCodeHighlighter();
+        var harvester = new MarkdownHarvester(_loggerFake, File.ReadAllTextAsync, highlighter);
+        var content = """
+            # Guide
+
+            ```csharp {2} title="demo"
+            var value = 1;
+            ```
+            """;
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, "Guide.md"), content);
+
+        _ = Assert.Single(await harvester.HarvestAsync(_testRoot));
+
+        var block = Assert.Single(highlighter.Blocks);
+        Assert.Equal("csharp", block.Language);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldStillCaptureOutline_WhenCodeHighlightingIsEnabled()
+    {
+        var content = """
+            # Guide
+
+            ## Install
+
+            ```json
+            { "enabled": true }
+            ```
+
+            ### Verify
+            """;
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, "Guide.md"), content);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.NotNull(doc.Outline);
+        Assert.Collection(
+            doc.Outline!,
+            first => Assert.Equal("Install", first.Title),
+            second => Assert.Equal("Verify", second.Title));
+        Assert.Contains("doc-code--language-json language-json", doc.Content);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldReadRootReadmeMetadataFromPairedSidecar()
     {
         var guidesDir = Path.Combine(_testRoot, "guides");
@@ -725,6 +793,20 @@ public class MarkdownHarvesterTests : IDisposable
     {
         var message = call.GetArgument<object>(2)?.ToString();
         return message?.Contains(expectedMessageFragment, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private sealed class RecordingCodeHighlighter : IRazorDocsCodeHighlighter
+    {
+        internal List<RazorDocsCodeBlock> Blocks { get; } = [];
+
+        public RazorDocsHighlightedCode Highlight(RazorDocsCodeBlock block)
+        {
+            Blocks.Add(block);
+            return new RazorDocsHighlightedCode(
+                $"<pre class=\"doc-code test-code\"><code>{System.Net.WebUtility.HtmlEncode(block.Code.Trim())}</code></pre>",
+                block.Language ?? "plaintext",
+                IsHighlighted: true);
+        }
     }
 
     public void Dispose()

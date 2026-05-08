@@ -902,14 +902,97 @@ body {
     border-radius: 0.5rem;
     padding: 0.9rem;
     border: 1px solid #334155;
-    white-space: pre-wrap;
-    overflow-wrap: break-word;
+    white-space: pre;
+    overflow-wrap: normal;
     margin: 0.65rem 0 0.85rem;
     overflow-x: auto;
 }
 
 .docs-content code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.docs-content pre code {
+    display: block;
+    min-width: max-content;
+}
+
+.docs-content .doc-code {
+    position: relative;
+    background: #111827;
+    border-color: #334155;
+    color: #dbe4f0;
+    line-height: 1.62;
+    tab-size: 4;
+}
+
+.docs-content .doc-code code {
+    position: relative;
+    padding-top: 1.35rem;
+}
+
+.docs-content .doc-code__language {
+    position: absolute;
+    top: 0.78rem;
+    right: 0.9rem;
+    color: #93c5fd;
+    font-family: Outfit, ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.docs-content .doc-code--plain {
+    background: #172033;
+    border-color: #29384f;
+}
+
+.docs-content .doc-code--plain .doc-code__language {
+    color: #94a3b8;
+}
+
+.docs-content .doc-token--keyword {
+    color: #f9a8d4;
+}
+
+.docs-content .doc-token--string {
+    color: #86efac;
+}
+
+.docs-content .doc-token--comment {
+    color: #94a3b8;
+}
+
+.docs-content .doc-token--number,
+.docs-content .doc-token--literal {
+    color: #fca5a5;
+}
+
+.docs-content .doc-token--type {
+    color: #a5b4fc;
+}
+
+.docs-content .doc-token--member {
+    color: #f8fafc;
+}
+
+.docs-content .doc-token--parameter {
+    color: #fcd34d;
+}
+
+.docs-content .doc-token--operator,
+.docs-content .doc-token--punctuation {
+    color: #cbd5e1;
+}
+
+.docs-content .doc-token--inserted {
+    color: #86efac;
+}
+
+.docs-content .doc-token--deleted {
+    color: #fca5a5;
 }
 
 @media (max-width: 767px) {

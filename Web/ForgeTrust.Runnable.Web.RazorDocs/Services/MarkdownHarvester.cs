@@ -36,14 +36,30 @@ public class MarkdownHarvester : IDocHarvester
     internal MarkdownHarvester(
         ILogger<MarkdownHarvester> logger,
         Func<string, CancellationToken, Task<string>> readAllTextAsync)
+        : this(logger, readAllTextAsync, RazorDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> for testing or internal use with a custom file reader and code highlighter.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read file contents.</param>
+    /// <param name="codeHighlighter">Highlighter used when Markdown fenced code blocks are rendered to HTML.</param>
+    internal MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        Func<string, CancellationToken, Task<string>> readAllTextAsync,
+        IRazorDocsCodeHighlighter codeHighlighter)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(readAllTextAsync);
+        ArgumentNullException.ThrowIfNull(codeHighlighter);
 
         _logger = logger;
         _readAllTextAsync = readAllTextAsync;
         _pipeline = new MarkdownPipelineBuilder()
             .UseAdvancedExtensions()
+            .Use(new RazorDocsCodeBlockMarkdownExtension(codeHighlighter))
             .Build();
     }
 
