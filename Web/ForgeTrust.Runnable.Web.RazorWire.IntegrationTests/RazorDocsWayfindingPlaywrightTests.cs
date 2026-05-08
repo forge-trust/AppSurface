@@ -234,6 +234,62 @@ public sealed class RazorDocsWayfindingPlaywrightTests
     }
 
     [Fact]
+    public async Task DesktopOutline_UpdatesActiveSection_WhenScrollingInsideLongSection()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1440,
+                Height = 900
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/Web/ForgeTrust.Runnable.Web.RazorWire/README.md.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+
+        await page.EvaluateAsync(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              const heroProof = document.getElementById('hero-proof');
+              const rootTop = main?.getBoundingClientRect().top ?? 0;
+              const targetTop = heroProof?.getBoundingClientRect().top ?? 0;
+              main?.scrollTo(0, main.scrollTop + targetTop - rootTop + 220);
+            }
+            """);
+
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              const next = document.getElementById('generated-ui-design-contract');
+              const active = document.querySelector("#docs-page-outline a[href='#hero-proof']");
+              if (!main || !next || active?.getAttribute('aria-current') !== 'location') {
+                return false;
+              }
+
+              const mainRect = main.getBoundingClientRect();
+              const nextRect = next.getBoundingClientRect();
+              return nextRect.top > mainRect.top + main.clientHeight;
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        Assert.Equal(
+            "location",
+            await page.GetAttributeAsync("#docs-page-outline a[href='#hero-proof']", "aria-current"));
+        Assert.Null(await page.EvaluateAsync<string?>(
+            """() => document.querySelector("#docs-page-outline a[href='#60-second-quickstart']")?.getAttribute("aria-current") ?? null"""));
+    }
+
+    [Fact]
     public async Task DesktopOutline_DoesNotAddBlankScrollPastDetailsContent()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
