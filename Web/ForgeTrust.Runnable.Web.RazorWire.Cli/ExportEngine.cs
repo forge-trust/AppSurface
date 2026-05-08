@@ -62,6 +62,7 @@ public class ExportEngine
 
     private const string DocsStaticPartialsMetaName = "rw-docs-static-partials";
     private const string DocsStaticPartialsMetaTag = "<meta name=\"rw-docs-static-partials\" content=\"1\" />";
+    private const string RazorDocsClientConfigMarker = "window.__razorDocsConfig";
 
     private static readonly Regex TurboFrameOpenTagRegex = new(
         @"<turbo-frame\b[^>]*>",
@@ -219,13 +220,15 @@ public class ExportEngine
             if (isHtml)
             {
                 var html = await response.Content.ReadAsStringAsync(cancellationToken);
-                var htmlForWrite = IsDocsRoute(route)
+                var docContentFrame = ExtractDocContentFrame(html);
+                var isDocsPage = IsDocsExportPage(route, html, docContentFrame);
+                var htmlForWrite = isDocsPage
                     ? AddDocsStaticPartialsMarker(html)
                     : html;
                 await File.WriteAllTextAsync(filePath, htmlForWrite, cancellationToken);
 
                 // Export frame fragments for docs pages so static navigation can fetch only the content island.
-                await TryWriteDocsPartialAsync(route, filePath, html, cancellationToken);
+                await TryWriteDocsPartialAsync(filePath, docContentFrame, cancellationToken);
 
                 // Extract links, frames, and assets only from HTML
                 ExtractLinks(html, context);
@@ -338,6 +341,31 @@ public class ExportEngine
     {
         return route.Equals("/docs", StringComparison.OrdinalIgnoreCase)
                || route.StartsWith("/docs/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Determines whether an exported HTML page should receive RazorDocs static partial support.
+    /// </summary>
+    /// <param name="route">The root-relative route being exported.</param>
+    /// <param name="html">The fetched HTML document.</param>
+    /// <param name="docContentFrame">The extracted <c>doc-content</c> frame, when the caller has already parsed it.</param>
+    /// <returns>
+    /// <c>true</c> for the legacy <c>/docs</c> route family or HTML that carries RazorDocs runtime markers; otherwise
+    /// <c>false</c>.
+    /// </returns>
+    /// <remarks>
+    /// Custom RazorDocs hosts can mount under route families such as <c>/foo/bar</c>, so export detection cannot rely
+    /// only on path prefixes. The client config marker covers search and shell pages, while the content frame covers
+    /// document detail pages.
+    /// </remarks>
+    internal static bool IsDocsExportPage(string route, string html, string? docContentFrame = null)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+        ArgumentNullException.ThrowIfNull(html);
+
+        return IsDocsRoute(route)
+               || !string.IsNullOrWhiteSpace(docContentFrame)
+               || html.Contains(RazorDocsClientConfigMarker, StringComparison.Ordinal);
     }
 
     internal static string MapHtmlFilePathToPartialPath(string htmlFilePath)
@@ -457,24 +485,17 @@ public class ExportEngine
     }
 
     private async Task TryWriteDocsPartialAsync(
-        string route,
         string htmlFilePath,
-        string html,
+        string? docContentFrame,
         CancellationToken cancellationToken)
     {
-        if (!IsDocsRoute(route))
-        {
-            return;
-        }
-
-        var frameHtml = ExtractDocContentFrame(html);
-        if (string.IsNullOrWhiteSpace(frameHtml))
+        if (string.IsNullOrWhiteSpace(docContentFrame))
         {
             return;
         }
 
         var partialPath = MapHtmlFilePathToPartialPath(htmlFilePath);
-        await File.WriteAllTextAsync(partialPath, frameHtml, cancellationToken);
+        await File.WriteAllTextAsync(partialPath, docContentFrame, cancellationToken);
     }
 
     /// <summary>

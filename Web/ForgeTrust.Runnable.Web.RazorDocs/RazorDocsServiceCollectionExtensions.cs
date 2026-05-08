@@ -27,7 +27,9 @@ public static class RazorDocsServiceCollectionExtensions
     /// <para>
     /// During post-configuration this method rehydrates null nested option blocks with defaults, trims nullable string
     /// settings such as repository roots and contributor URL templates, normalizes
+    /// <see cref="RazorDocsRoutingOptions.RouteRootPath"/> and
     /// <see cref="RazorDocsRoutingOptions.DocsRootPath"/> through
+    /// <see cref="DocsUrlBuilder.NormalizeRouteRootPath(string?, string, bool)"/> and
     /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/>, trims
     /// <see cref="RazorDocsVersioningOptions.CatalogPath"/>, and removes blank or duplicate sidebar namespace
     /// prefixes. Callers that omit <see cref="RazorDocsOptions.Routing"/> or
@@ -70,9 +72,17 @@ public static class RazorDocsServiceCollectionExtensions
                     options.Contributor.DefaultBranch = NormalizeOrNull(options.Contributor.DefaultBranch);
                     options.Contributor.SourceUrlTemplate = NormalizeOrNull(options.Contributor.SourceUrlTemplate);
                     options.Contributor.EditUrlTemplate = NormalizeOrNull(options.Contributor.EditUrlTemplate);
-                    options.Routing.DocsRootPath = DocsUrlBuilder.NormalizeDocsRootPath(
-                        options.Routing.DocsRootPath,
+                    var configuredDocsRootPath = options.Routing.DocsRootPath;
+                    var normalizedDocsRootPath = DocsUrlBuilder.NormalizeDocsRootPath(
+                        configuredDocsRootPath,
                         options.Versioning.Enabled);
+                    options.Routing.RouteRootPath = DocsUrlBuilder.NormalizeRouteRootPath(
+                        options.Routing.RouteRootPath,
+                        normalizedDocsRootPath,
+                        options.Versioning.Enabled);
+                    options.Routing.DocsRootPath = string.IsNullOrWhiteSpace(configuredDocsRootPath)
+                        ? DocsUrlBuilder.ResolveDefaultDocsRootPath(options.Routing.RouteRootPath, options.Versioning.Enabled)
+                        : normalizedDocsRootPath;
                     options.Versioning.CatalogPath = NormalizeOrNull(options.Versioning.CatalogPath);
                     options.Contributor.SymbolSourceUrlTemplate = NormalizeOrNull(options.Contributor.SymbolSourceUrlTemplate);
                     options.Contributor.SourceRef = NormalizeOrNull(options.Contributor.SourceRef);
@@ -110,4 +120,5 @@ public static class RazorDocsServiceCollectionExtensions
 
         return value.Trim();
     }
+
 }

@@ -37,21 +37,6 @@
         System.Text.RegularExpressions.RegexOptions.IgnoreCase
         | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
 
-    private string ResolveAppHref(string href)
-    {
-        if (string.IsNullOrWhiteSpace(href))
-        {
-            return "#";
-        }
-
-        var trimmed = href.Trim();
-        return trimmed.Equals("/docs", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("/docs/", StringComparison.OrdinalIgnoreCase)
-               || trimmed.StartsWith("/docs?", StringComparison.OrdinalIgnoreCase)
-            ? Url.Content($"~{trimmed}")
-            : Url.Content(trimmed);
-    }
-
     private string ResolveGeneratedContentHrefs(string content)
     {
         if (string.IsNullOrEmpty(content)

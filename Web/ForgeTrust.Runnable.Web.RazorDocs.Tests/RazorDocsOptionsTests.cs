@@ -130,6 +130,7 @@ public sealed class RazorDocsOptionsTests
         using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
 
+        Assert.Equal("/docs", options.Routing.RouteRootPath);
         Assert.Equal("/docs", options.Routing.DocsRootPath);
     }
 
@@ -152,6 +153,7 @@ public sealed class RazorDocsOptionsTests
         using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
 
+        Assert.Equal("/docs", options.Routing.RouteRootPath);
         Assert.Equal("/docs/next", options.Routing.DocsRootPath);
     }
 
@@ -173,7 +175,78 @@ public sealed class RazorDocsOptionsTests
         using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
 
+        Assert.Equal("/docs/preview", options.Routing.RouteRootPath);
         Assert.Equal("/docs/preview", options.Routing.DocsRootPath);
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldDefaultDocsRootFromCustomRouteRoot_WhenVersioningIsDisabled()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Routing:RouteRootPath"] = "foo/bar"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
+
+        Assert.Equal("/foo/bar", options.Routing.RouteRootPath);
+        Assert.Equal("/foo/bar", options.Routing.DocsRootPath);
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldDefaultDocsRootFromCustomRouteRoot_WhenVersioningIsEnabled()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Routing:RouteRootPath"] = "/foo/bar",
+                        ["RazorDocs:Versioning:Enabled"] = "true",
+                        ["RazorDocs:Versioning:CatalogPath"] = "catalog.json"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
+
+        Assert.Equal("/foo/bar", options.Routing.RouteRootPath);
+        Assert.Equal("/foo/bar/next", options.Routing.DocsRootPath);
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldSupportRootRouteFamilyWithVersionedPreview()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Routing:RouteRootPath"] = "/",
+                        ["RazorDocs:Versioning:Enabled"] = "true",
+                        ["RazorDocs:Versioning:CatalogPath"] = "catalog.json"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
+
+        Assert.Equal("/", options.Routing.RouteRootPath);
+        Assert.Equal("/next", options.Routing.DocsRootPath);
     }
 
     [Fact]
@@ -368,6 +441,7 @@ public sealed class RazorDocsOptionsTests
 
         Assert.NotNull(options.Routing);
         Assert.NotNull(options.Versioning);
+        Assert.Equal("/docs", options.Routing.RouteRootPath);
         Assert.Equal("/docs", options.Routing.DocsRootPath);
         Assert.False(options.Versioning.Enabled);
     }
@@ -521,7 +595,7 @@ public sealed class RazorDocsOptionsTests
         var result = validator.Validate(Options.DefaultName, options);
 
         Assert.True(result.Failed);
-        Assert.Contains(result.Failures, failure => failure.Contains("cannot use '/docs' as the live source docs root", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("cannot use the route-family root", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -548,14 +622,12 @@ public sealed class RazorDocsOptionsTests
             Assert.True(result.Failed);
             Assert.Contains(
                 result.Failures,
-                failure => failure.Contains("reserved versioning path", StringComparison.OrdinalIgnoreCase));
+                failure => failure.Contains("reserved archive or exact-version child", StringComparison.OrdinalIgnoreCase));
         }
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Validator_ShouldAllowRootMountedDocsRootPath(bool versioningEnabled)
+    [Fact]
+    public void Validator_ShouldAllowRootMountedDocsRootPath_WhenVersioningIsDisabled()
     {
         var validator = new RazorDocsOptionsValidator();
         var options = new RazorDocsOptions
@@ -566,8 +638,30 @@ public sealed class RazorDocsOptionsTests
             },
             Versioning = new RazorDocsVersioningOptions
             {
-                Enabled = versioningEnabled,
-                CatalogPath = versioningEnabled ? "catalog.json" : null
+                Enabled = false
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(result.Failed);
+    }
+
+    [Fact]
+    public void Validator_ShouldAllowRootRouteFamilyWithVersionedPreview()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Routing = new RazorDocsRoutingOptions
+            {
+                RouteRootPath = "/",
+                DocsRootPath = "/next"
+            },
+            Versioning = new RazorDocsVersioningOptions
+            {
+                Enabled = true,
+                CatalogPath = "catalog.json"
             }
         };
 
@@ -579,9 +673,10 @@ public sealed class RazorDocsOptionsTests
     [Theory]
     [InlineData("   ")]
     [InlineData("guides")]
-    [InlineData("/docsx")]
-    [InlineData("/docs-preview")]
     [InlineData("/docs/")]
+    [InlineData("https://example.com/docs")]
+    [InlineData("/docs?view=full")]
+    [InlineData("/docs#top")]
     public void Validator_ShouldRejectInvalidDocsRootPaths(string docsRootPath)
     {
         var validator = new RazorDocsOptionsValidator();
@@ -598,7 +693,35 @@ public sealed class RazorDocsOptionsTests
         Assert.True(result.Failed);
         Assert.Contains(
             result.Failures,
-            failure => failure.Contains("DocsRootPath must be exactly '/' or start with '/docs'", StringComparison.OrdinalIgnoreCase));
+            failure => failure.Contains("DocsRootPath must be an app-relative path", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("   ")]
+    [InlineData("foo/bar")]
+    [InlineData("/foo/bar/")]
+    [InlineData("https://example.com/foo")]
+    [InlineData("/foo/bar?view=full")]
+    [InlineData("/foo/bar#top")]
+    [InlineData("/foo/bar/versions")]
+    [InlineData("/foo/bar/v")]
+    public void Validator_ShouldRejectInvalidRouteRootPaths(string routeRootPath)
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Routing = new RazorDocsRoutingOptions
+            {
+                RouteRootPath = routeRootPath
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("RouteRootPath", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

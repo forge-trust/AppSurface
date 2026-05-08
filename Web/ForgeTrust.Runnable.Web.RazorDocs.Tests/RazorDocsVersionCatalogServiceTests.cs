@@ -82,6 +82,34 @@ public sealed class RazorDocsVersionCatalogServiceTests : IDisposable
     }
 
     [Fact]
+    public void GetCatalog_ShouldResolveExactRootUrlsFromConfiguredRouteRoot()
+    {
+        var stableTree = CreateExactTree("stable-custom-root");
+        var catalogPath = WriteCatalog(
+            new RazorDocsVersionCatalog
+            {
+                RecommendedVersion = "1.2.0",
+                Versions =
+                [
+                    new RazorDocsPublishedVersion
+                    {
+                        Version = "1.2.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, stableTree),
+                        SupportState = RazorDocsVersionSupportState.Current
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath, routeRootPath: "/foo/bar", docsRootPath: "/foo/bar/next");
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.True(version.IsAvailable);
+        Assert.Equal("/foo/bar/v/1.2.0", version.ExactRootUrl);
+    }
+
+    [Fact]
     public void GetCatalog_ShouldKeepHealthyVersions_WhenOneExactTreeIsBroken()
     {
         var healthyTree = CreateExactTree("healthy");
@@ -730,11 +758,19 @@ public sealed class RazorDocsVersionCatalogServiceTests : IDisposable
         }
     }
 
-    private RazorDocsVersionCatalogService CreateCatalogService(string? catalogPath, bool versioningEnabled = true)
+    private RazorDocsVersionCatalogService CreateCatalogService(
+        string? catalogPath,
+        bool versioningEnabled = true,
+        string routeRootPath = "/docs",
+        string docsRootPath = "/docs/next")
     {
         var options = new RazorDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions { DocsRootPath = "/docs/next" },
+            Routing = new RazorDocsRoutingOptions
+            {
+                RouteRootPath = routeRootPath,
+                DocsRootPath = docsRootPath
+            },
             Versioning = new RazorDocsVersioningOptions
             {
                 Enabled = versioningEnabled,

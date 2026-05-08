@@ -33,6 +33,7 @@ public sealed class RazorDocsVersionCatalogService
     };
 
     private readonly RazorDocsOptions _options;
+    private readonly DocsUrlBuilder _docsUrlBuilder;
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<RazorDocsVersionCatalogService> _logger;
     private readonly Lazy<RazorDocsResolvedVersionCatalog> _catalog;
@@ -49,6 +50,7 @@ public sealed class RazorDocsVersionCatalogService
         ILogger<RazorDocsVersionCatalogService> logger)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _docsUrlBuilder = new DocsUrlBuilder(_options);
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _catalog = new Lazy<RazorDocsResolvedVersionCatalog>(LoadCatalog, LazyThreadSafetyMode.ExecutionAndPublication);
@@ -393,7 +395,7 @@ public sealed class RazorDocsVersionCatalogService
     {
         var label = string.IsNullOrWhiteSpace(version.Label) ? normalizedVersion : version.Label.Trim();
         var summary = string.IsNullOrWhiteSpace(version.Summary) ? null : version.Summary.Trim();
-        var exactRootUrl = DocsUrlBuilder.DocsVersionPrefix + "/" + Uri.EscapeDataString(normalizedVersion);
+        var exactRootUrl = _docsUrlBuilder.BuildVersionRootUrl(normalizedVersion);
         var isPublic = version.Visibility == RazorDocsVersionVisibility.Public;
         string? exactTreePath;
         AvailabilityFailure? availabilityFailure;

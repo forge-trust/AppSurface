@@ -3,9 +3,10 @@
 @inject ForgeTrust.Runnable.Web.RazorDocs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
     var stylesheetPath = AssetPathResolver.StylesheetPath;
-    var docsHomeUrl = Url.PathBaseAware(DocsUrlBuilder.BuildHomeUrl());
-    var docsSearchUrl = Url.PathBaseAware(DocsUrlBuilder.BuildSearchUrl());
-    var docsSearchIndexUrl = Url.PathBaseAware(DocsUrlBuilder.BuildSearchIndexUrl());
+    var docsRoutes = DocsUrlBuilder.Routes;
+    var docsHomeUrl = Url.PathBaseAware(docsRoutes.Home);
+    var docsSearchUrl = Url.PathBaseAware(docsRoutes.Search);
+    var docsSearchIndexUrl = Url.PathBaseAware(docsRoutes.SearchIndex);
     var docsSearchStylesheetUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("search.css"));
     var docsMiniSearchUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("minisearch.min.js"));
     var docsSearchClientUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("search-client.js"));

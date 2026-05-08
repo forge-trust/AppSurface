@@ -1517,6 +1517,7 @@ public class DocAggregator
             var relatedDoc = pathResolver.Resolve(
                                  normalizedEntry,
                                  _docsUrlBuilder.CurrentDocsRootPath,
+                                 _docsUrlBuilder.RouteRootPath,
                                  DocsUrlBuilder.DocsEntryPath)
                              ?? ResolveDocByTitle(normalizedEntry, docs);
             if (relatedDoc is null || relatedDoc.Metadata?.HideFromPublicNav == true)

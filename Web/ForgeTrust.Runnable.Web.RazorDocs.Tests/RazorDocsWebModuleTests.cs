@@ -503,12 +503,87 @@ public class RazorDocsWebModuleTests
                 Versions: [version],
                 RecommendedVersion: version);
 
-            var (mounts, providers) = RazorDocsWebModule.BuildPublishedTreeMounts(catalog);
+            var docsUrlBuilder = new DocsUrlBuilder(
+                new RazorDocsOptions
+                {
+                    Routing = new RazorDocsRoutingOptions
+                    {
+                        RouteRootPath = "/docs",
+                        DocsRootPath = "/docs/next"
+                    },
+                    Versioning = new RazorDocsVersioningOptions
+                    {
+                        Enabled = true,
+                        CatalogPath = "catalog.json"
+                    }
+                });
+            var (mounts, providers) = RazorDocsWebModule.BuildPublishedTreeMounts(catalog, docsUrlBuilder);
 
             Assert.Equal(2, mounts.Count);
             Assert.Single(providers);
             Assert.Equal("/docs/v/1.2.3", mounts[0].MountRootPath);
             Assert.Equal("/docs", mounts[1].MountRootPath);
+            Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void BuildPublishedTreeMounts_ShouldUseConfiguredRouteRoot_ForRecommendedAlias()
+    {
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "razordocs-web-module-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            var exactTreePath = Path.Combine(tempDirectory, "1.2.3");
+            Directory.CreateDirectory(exactTreePath);
+            var version = new RazorDocsResolvedVersion(
+                Version: "1.2.3",
+                Label: "1.2.3",
+                Summary: null,
+                ExactTreePath: exactTreePath,
+                ExactRootUrl: "/foo/bar/v/1.2.3",
+                SupportState: RazorDocsVersionSupportState.Current,
+                Visibility: RazorDocsVersionVisibility.Public,
+                AdvisoryState: RazorDocsVersionAdvisoryState.None,
+                IsAvailable: true,
+                AvailabilityIssue: null);
+            var catalog = new RazorDocsResolvedVersionCatalog(
+                RazorDocsResolvedVersionCatalogStatus.Resolved,
+                CatalogPath: Path.Combine(tempDirectory, "catalog.json"),
+                Versions: [version],
+                RecommendedVersion: version);
+            var docsUrlBuilder = new DocsUrlBuilder(
+                new RazorDocsOptions
+                {
+                    Routing = new RazorDocsRoutingOptions
+                    {
+                        RouteRootPath = "/foo/bar",
+                        DocsRootPath = "/foo/bar/next"
+                    },
+                    Versioning = new RazorDocsVersioningOptions
+                    {
+                        Enabled = true,
+                        CatalogPath = "catalog.json"
+                    }
+                });
+
+            var (mounts, providers) = RazorDocsWebModule.BuildPublishedTreeMounts(catalog, docsUrlBuilder);
+
+            Assert.Equal(2, mounts.Count);
+            Assert.Single(providers);
+            Assert.Equal("/foo/bar/v/1.2.3", mounts[0].MountRootPath);
+            Assert.Equal("/foo/bar", mounts[1].MountRootPath);
             Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
         }
         finally

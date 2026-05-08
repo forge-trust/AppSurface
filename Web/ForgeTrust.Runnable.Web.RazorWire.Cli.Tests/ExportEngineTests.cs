@@ -609,6 +609,20 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void IsDocsExportPage_ShouldDetectCustomRootRazorDocsClientConfig()
+    {
+        var html = """
+            <html>
+              <head>
+                <script>window.__razorDocsConfig = {"docsRootPath":"/foo/bar/next"};</script>
+              </head>
+            </html>
+            """;
+
+        Assert.True(ExportEngine.IsDocsExportPage("/foo/bar/next/search", html));
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Export_Docs_Partial_Fragments()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -652,6 +666,45 @@ public class ExportEngineTests
             var nextPartialHtml = await File.ReadAllTextAsync(nextPartialPath);
             Assert.Contains("<turbo-frame id=\"doc-content\">", nextPartialHtml);
             Assert.Contains("<article>Next doc</article>", nextPartialHtml);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Export_CustomRoot_Docs_Partial_Fragments()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        Directory.CreateDirectory(tempDir);
+        await File.WriteAllLinesAsync(seedFile, ["/foo/bar/next"]);
+
+        try
+        {
+            var client = new HttpClient(new CustomRootDocsPartialHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var fullPagePath = Path.Combine(tempDir, "foo", "bar", "next.html");
+            var partialPath = Path.Combine(tempDir, "foo", "bar", "next.partial.html");
+
+            Assert.True(File.Exists(fullPagePath), "Expected custom-root docs full page export.");
+            Assert.True(File.Exists(partialPath), "Expected custom-root docs partial export.");
+
+            var fullHtml = await File.ReadAllTextAsync(fullPagePath);
+            Assert.Contains("<meta name=\"rw-docs-static-partials\" content=\"1\" />", fullHtml);
+
+            var partialHtml = await File.ReadAllTextAsync(partialPath);
+            Assert.Contains("<turbo-frame id=\"doc-content\">", partialHtml);
+            Assert.Contains("<article>Mounted doc</article>", partialHtml);
+            Assert.DoesNotContain("<html", partialHtml, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -877,6 +930,35 @@ public class ExportEngineTests
                       <body>
                         <turbo-frame id="doc-content">
                           <article>Next doc</article>
+                        </turbo-frame>
+                      </body>
+                    </html>
+                    """;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(html, Encoding.UTF8, "text/html")
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class CustomRootDocsPartialHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/foo/bar/next")
+            {
+                var html = """
+                    <html>
+                      <head>
+                        <script>window.__razorDocsConfig = {"docsRootPath":"/foo/bar/next","docsSearchUrl":"/foo/bar/next/search","docsSearchIndexUrl":"/foo/bar/next/search-index.json"};</script>
+                      </head>
+                      <body>
+                        <turbo-frame id="doc-content">
+                          <article>Mounted doc</article>
                         </turbo-frame>
                       </body>
                     </html>

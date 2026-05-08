@@ -84,6 +84,20 @@ Use the default single-surface configuration when you want the live docs experie
 
 If `RazorDocs:Source:RepositoryRoot` is omitted, the package falls back to repository discovery from the app content root.
 
+To host the same live source surface somewhere else, set the route-family root. With versioning disabled, the live docs root defaults to the route root:
+
+```json
+{
+  "RazorDocs": {
+    "Routing": {
+      "RouteRootPath": "/foo/bar"
+    }
+  }
+}
+```
+
+That configuration serves the live docs home at `/foo/bar`, search at `/foo/bar/search`, and the live search index at `/foo/bar/search-index.json`.
+
 ### Source-backed docs with published-version routing
 
 Enable versioning when you want the host to keep serving the live unreleased snapshot from source while also mounting exact published release trees under stable public routes:
@@ -96,7 +110,8 @@ Enable versioning when you want the host to keep serving the live unreleased sna
       "RepositoryRoot": "/path/to/repo"
     },
     "Routing": {
-      "DocsRootPath": "/docs/next"
+      "RouteRootPath": "/foo/bar",
+      "DocsRootPath": "/foo/bar/next"
     },
     "Versioning": {
       "Enabled": true,
@@ -106,14 +121,39 @@ Enable versioning when you want the host to keep serving the live unreleased sna
 }
 ```
 
+The route-family root owns the stable entry alias, archive, and exact release routes. The docs root owns the live source-backed preview. In the example above, `/foo/bar` is the recommended-release alias, `/foo/bar/versions` is the archive, `/foo/bar/v/{version}` serves immutable release trees, and `/foo/bar/next` remains the live preview.
+
 ### Route contract
 
-- When `RazorDocs:Versioning:Enabled` is `false`, the live source-backed docs surface stays rooted at `/docs`.
-- When `RazorDocs:Versioning:Enabled` is `true`, the live source-backed docs surface moves to `/docs/next` by default.
-- When versioning is enabled, `/docs` becomes the stable public entry alias for the catalog's recommended published release.
-- Exact published versions are mounted under `/docs/v/{version}`.
-- The public archive is always mounted at `/docs/versions`.
-- The live search shell and search index follow the current source surface root. That means `/docs/search` and `/docs/search-index.json` when versioning is off, and `/docs/next/search` plus `/docs/next/search-index.json` when versioning is on.
+RazorDocs keeps two roots on purpose:
+
+- `RazorDocs:Routing:RouteRootPath` is the route-family root. It owns the stable entry alias, public archive, and exact-version release routes.
+- `RazorDocs:Routing:DocsRootPath` is the live source-backed docs root. It owns current docs pages, the current search shell, and the current `search-index.json`.
+
+Default routing:
+
+| Configuration | Route root | Live docs root | Archive | Exact versions |
+| --- | --- | --- | --- | --- |
+| Versioning off, no routing config | `/docs` | `/docs` | `/docs/versions` | `/docs/v/{version}` |
+| Versioning on, no routing config | `/docs` | `/docs/next` | `/docs/versions` | `/docs/v/{version}` |
+| Versioning off, `RouteRootPath=/foo/bar` | `/foo/bar` | `/foo/bar` | `/foo/bar/versions` | `/foo/bar/v/{version}` |
+| Versioning on, `RouteRootPath=/foo/bar` | `/foo/bar` | `/foo/bar/next` | `/foo/bar/versions` | `/foo/bar/v/{version}` |
+| Versioning on, `RouteRootPath=/` | `/` | `/next` | `/versions` | `/v/{version}` |
+
+`DocsRootPath` can be configured explicitly, but RazorDocs does not infer `RouteRootPath` by stripping `/next` or any other suffix. If you want versioned docs under `/foo/bar`, configure `RouteRootPath=/foo/bar`; setting only `DocsRootPath=/foo/bar/next` keeps the route family at the default `/docs`.
+
+### Route references
+
+Consumers should resolve `DocsUrlBuilder` and use `DocsUrlBuilder.Routes` instead of hardcoding route strings:
+
+```csharp
+var routes = app.Services.GetRequiredService<DocsUrlBuilder>().Routes;
+var home = routes.Home;
+var search = routes.Search;
+var searchIndexRefresh = routes.SearchIndexRefresh;
+```
+
+`RazorDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, and `Versions`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
 ### Option reference
 
@@ -123,14 +163,21 @@ Enable versioning when you want the host to keep serving the live unreleased sna
 - `RazorDocs:Source:RepositoryRoot`
   - Optional absolute or app-relative repository root for source harvesting.
   - When omitted, RazorDocs falls back to repository discovery from the content root.
+- `RazorDocs:Routing:RouteRootPath`
+  - Controls the route-family root for stable entry, archive, and exact-version routes.
+  - Defaults to `/docs` when versioning is on.
+  - Defaults to `DocsRootPath` when versioning is off.
+  - Relative-looking values such as `foo/bar` are normalized to app-relative paths like `/foo/bar` during `AddRazorDocs()` post-configuration.
+  - `/` is supported for single-purpose root-mounted docs hosts.
+  - The path must be app-relative, must not end with `/` except for `/`, cannot contain query or fragment segments, and cannot be a reserved child such as `/foo/bar/versions` or `/foo/bar/v`.
 - `RazorDocs:Routing:DocsRootPath`
   - Controls the live source-backed docs root.
-  - Defaults to `/docs` when versioning is off.
-  - Defaults to `/docs/next` when versioning is on.
-  - Relative-looking values such as `docs/preview` are normalized to app-relative paths like `/docs/preview`.
-  - The one supported exception is `/`, which mounts docs at the application root for single-purpose docs hosts.
-  - Other than that root-mount exception, the path must start with `/docs`, must not end with `/`, and cannot contain query or fragment segments.
-  - When versioning is on, non-root-mounted values still cannot be `/docs`, `/docs/versions`, `/docs/v`, or any `/docs/v/...` path.
+  - Defaults to the route root when versioning is off.
+  - Defaults to `{RouteRootPath}/next` when versioning is on.
+  - Relative-looking values such as `foo/bar/preview` are normalized to app-relative paths like `/foo/bar/preview` during `AddRazorDocs()` post-configuration.
+  - `/` is supported for single-purpose unversioned docs hosts.
+  - The path must be app-relative, must not end with `/` except for `/`, and cannot contain query or fragment segments.
+  - When versioning is on, it cannot equal the route root and cannot use the route root's reserved archive or exact-version children, such as `/foo/bar/versions`, `/foo/bar/v`, or `/foo/bar/v/1.2.3`.
 - `RazorDocs:Versioning:Enabled`
   - Turns on the published-version route contract and archive surface.
   - Does not switch the runtime into bundle mode.
@@ -170,8 +217,8 @@ The version catalog is the release-level source of truth for version routing and
 ```
 
 - `recommendedVersion`
-  - Exact version string that should also be mounted at `/docs`.
-  - Must point at a public, available version or the `/docs` entry falls back to the archive-style recovery surface.
+  - Exact version string that should also be mounted at `RouteRootPath`.
+  - Must point at a public, available version or the route-root entry falls back to the archive-style recovery surface.
 - `versions[].version`
   - Exact version identifier such as `1.2.3` or `1.2.3-rc.1`.
 - `versions[].label`
@@ -179,9 +226,9 @@ The version catalog is the release-level source of truth for version routing and
 - `versions[].summary`
   - Optional archive summary copy.
 - `versions[].exactTreePath`
-  - Path to the exported stable `/docs` subtree for one exact release.
+  - Path to the exported stable docs subtree for one exact release.
   - Relative paths resolve from the directory containing the catalog file.
-  - RazorDocs can mount that same artifact at `/docs` for the recommended alias and at `/docs/v/{version}` for the exact release surface.
+  - RazorDocs can mount that same artifact at `RouteRootPath` for the recommended alias and at `{RouteRootPath}/v/{version}` for the exact release surface.
 - `versions[].supportState`
   - Archive posture badge. Supported values are `Current`, `Maintained`, `Deprecated`, and `Archived`.
 - `versions[].visibility`
@@ -191,7 +238,7 @@ The version catalog is the release-level source of truth for version routing and
 
 ### Exact-version tree contract
 
-Each `exactTreePath` directory is treated as a prebuilt static subtree for one exact release. It should be exported from the stable `/docs` surface, and at minimum it must include:
+Each `exactTreePath` directory is treated as a prebuilt static subtree for one exact release. It is usually exported from the stable `/docs` surface, and at minimum it must include:
 
 - `index.html` at the tree root
 - `search.html` at the tree root
@@ -202,9 +249,9 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `search.css` at the tree root
 - `search-client.js` at the tree root
 - `minisearch.min.js` at the tree root
-- any section, detail, partial, and asset routes that belong to the exported `/docs` surface for that release
+- any section, detail, partial, and asset routes that belong to the exported docs surface for that release
 
-RazorDocs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both `/docs` and `/docs/v/{version}` honestly. Exporters should validate `search-index.json`, `search.css`, `search-client.js`, and `minisearch.min.js` before publishing because a missing runtime asset or a malformed search payload keeps that release unavailable until the artifact is fixed. Use the [RazorWire CLI](../ForgeTrust.Runnable.Web.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+RazorDocs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. Exporters should validate `search-index.json`, `search.css`, `search-client.js`, and `minisearch.min.js` before publishing because a missing runtime asset or a malformed search payload keeps that release unavailable until the artifact is fixed. Use the [RazorWire CLI](../ForgeTrust.Runnable.Web.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
 
 ### Archive ordering
 
@@ -216,11 +263,12 @@ RazorDocs does not regenerate these trees at request time. It resolves extension
 - Version validation is best-effort and release-local.
 - A missing or malformed `exactTreePath` marks only that release unavailable.
 - Healthy published versions and the live preview surface continue to load.
-- If the configured `recommendedVersion` is hidden, missing, or unavailable, RazorDocs does not mount it at `/docs`; the `/docs` route falls back to the archive-style recovery surface with a link to the live preview.
+- If the configured `recommendedVersion` is hidden, missing, or unavailable, RazorDocs does not mount it at the route root; that entry route falls back to the archive-style recovery surface with a link to the live preview.
 
 ### Pitfalls
 
-- Do not set `RazorDocs:Routing:DocsRootPath` to `/docs` when versioning is enabled. That collides with the stable published-release alias.
+- Do not set `RazorDocs:Routing:DocsRootPath` to the same value as `RouteRootPath` when versioning is enabled. That collides with the stable published-release alias.
+- Do not configure only `DocsRootPath=/foo/bar/next` and expect archive routes to move to `/foo/bar`; set `RouteRootPath=/foo/bar` explicitly.
 - Do not point `recommendedVersion` at a hidden or broken release tree.
 - Do not assume `RazorDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
@@ -425,7 +473,7 @@ RazorDocs now organizes public documentation around a fixed section-first model 
 - `Troubleshooting`
 - `Internals`
 
-These sections back the current docs home, the sidebar shell, and the dedicated section routes under the current docs surface such as `/docs/sections/{slug}` or `/docs/next/sections/{slug}`.
+These sections back the current docs home, the sidebar shell, and the dedicated section routes under the current docs surface, for example `{DocsRootPath}/sections/{slug}`.
 
 ### `nav_group` normalization and fallback rules
 
@@ -443,7 +491,7 @@ These sections back the current docs home, the sidebar shell, and the dedicated 
 
 ### Section routes and landing docs
 
-- The current docs surface exposes section routes such as `/docs/sections/start-here` when versioning is off or `/docs/next/sections/start-here` when versioning is on.
+- The current docs surface exposes section routes such as `{DocsRootPath}/sections/start-here`.
 - Only canonical slugs are served directly; label- or alias-shaped section requests redirect to the canonical section route.
 - When a section has an authored landing doc, RazorDocs redirects the section route to that page.
 - Sections with visible pages but no landing doc render a grouped fallback section page instead of a dead end.
@@ -464,17 +512,17 @@ Field behavior and pitfalls:
 
 - The page must still belong to a valid built-in public section through explicit or derived `nav_group`.
 - If multiple docs in one section set `section_landing: true`, RazorDocs keeps the lowest `order` value, then the lowest canonical path, and logs a warning for the others.
-- A section landing doc can also author `featured_page_groups`; RazorDocs uses those reader-intent groups for section-level “next steps” on the detail page and collapses the first resolved rows into section preview links surfaced on `/docs`.
+- A section landing doc can also author `featured_page_groups`; RazorDocs uses those reader-intent groups for section-level “next steps” on the detail page and collapses the first resolved rows into section preview links surfaced on the current docs home.
 - `HideFromPublicNav = true` always wins. Hidden pages do not appear in section routes, the sidebar, the docs home, or the public search index even if they declare a section or landing status.
 
 ## Docs Link Authoring
 
-RazorDocs rewrites links inside harvested Markdown so authors can use source-friendly paths while readers stay on canonical docs-surface routes such as `/docs/...html` or `/docs/next/...html` with Turbo history support.
+RazorDocs rewrites links inside harvested Markdown so authors can use source-friendly paths while readers stay on canonical docs-surface routes such as `{DocsRootPath}/...html` with Turbo history support.
 
 ### Authoring contract
 
 - Link to another harvested doc with its source path, such as `./guide.md`, `../CHANGELOG.md`, or `/releases/unreleased.md`.
-- Link to an already canonical docs route only when the target is a harvested doc, such as `/docs/releases/unreleased.md.html` or `/docs/next/releases/unreleased.md.html`.
+- Link to an already canonical docs route only when the target is a harvested doc, such as `/docs/releases/unreleased.md.html`, `/docs/next/releases/unreleased.md.html`, or a custom-root equivalent like `/foo/bar/releases/unreleased.md.html`.
 - Use ordinary site URLs, such as `/privacy.html` or `../status.html`, for non-doc pages. RazorDocs leaves those links untouched.
 - Use browser-facing URLs for metadata fields that render plain anchors without content rewriting, such as `trust.migration.href`.
 
@@ -482,7 +530,7 @@ RazorDocs rewrites links inside harvested Markdown so authors can use source-fri
 
 During aggregation, RazorDocs builds a manifest from the harvested documentation nodes. Link rewriting consults that manifest before converting any source or canonical-looking link into the active docs surface.
 
-This means a link is rewritten only when the target exists in the harvested docs set. A missing `./guide.md`, an ambiguous `/docs/missing.md.html`, or a normal site page like `../privacy.html` remains authored as-is instead of being guessed into a broken docs route.
+This means a link is rewritten only when the target exists in the harvested docs set. A missing `./guide.md`, an ambiguous canonical docs route like `/docs/missing.md.html`, or a normal site page like `../privacy.html` remains authored as-is instead of being guessed into a broken docs route.
 
 ### Pitfalls
 
@@ -498,8 +546,8 @@ RazorDocs can turn the root docs landing into a curated reader-intent surface by
 
 `featured_page_groups` is parsed as part of `DocMetadata`, so the metadata contract stays page-agnostic. RazorDocs uses those groups in two places:
 
-- the root `README.md` metadata drives grouped proof-path rows on `/docs`
-- any authored section landing doc can drive grouped section-level next-step rows and the section preview links shown on `/docs`
+- the root `README.md` metadata drives grouped proof-path rows on the current docs home
+- any authored section landing doc can drive grouped section-level next-step rows and the section preview links shown on the current docs home
 
 Authors can now supply that metadata in either of two places:
 
@@ -538,7 +586,7 @@ featured_page_groups:
 - `order` is optional on groups and pages. Lower values sort first, and ties preserve authored order.
 - `pages` must contain the featured destinations for the group. Empty page lists are skipped.
 - `question` is the reader-facing label shown on a row. If omitted, RazorDocs falls back to the destination page title.
-- `path` accepts either the source path or canonical docs path for the destination page, including an exact `#fragment` suffix when the card should land on a specific section. RazorDocs normalizes forward-slash and backslash separators during resolution while preserving fragment identifiers, and the same resolver used by page details handles configured docs-root prefixes such as `/docs` or a custom live docs root.
+- `path` accepts either the source path or canonical docs path for the destination page, including an exact `#fragment` suffix when the card should land on a specific section. RazorDocs normalizes forward-slash and backslash separators during resolution while preserving fragment identifiers, and the same resolver used by page details handles the configured live docs root.
 - `supporting_copy` is optional landing-only text. If omitted, RazorDocs falls back to the destination page summary.
 
 Author three to five groups for a broad landing page, and one to three pages per group. Prefer plain reader intents such as `understand`, `choose-package`, `see-it-working`, `release-risk`, and `api-reference`. Use custom intents when your product has domain-specific decisions that those defaults do not capture.
@@ -549,7 +597,7 @@ Preview locally from the repository root with the standalone docs host:
 dotnet run --project Web/ForgeTrust.Runnable.Web.RazorDocs.Standalone -- --urls http://localhost:5189
 ```
 
-Then open `http://localhost:5189/docs`. This is only the docs site running locally; the separate `razordocs preview --repo .` CLI idea is intentionally deferred.
+Then open the configured docs home, `http://localhost:5189/docs` by default. This is only the docs site running locally; the separate `razordocs preview --repo .` CLI idea is intentionally deferred.
 
 ### Fallback and visibility rules
 
@@ -570,7 +618,7 @@ Diagnostics include the source file, field path when available, problem, cause, 
 - Do not create both `.yml` and `.yaml` sidecars for the same Markdown file. RazorDocs treats that as an authoring error and ignores both.
 - Do not use a sidecar as a second secret metadata system. It supports the same `DocMetadata` schema as inline front matter, and it is best reserved for files whose Markdown needs to stay portable on other surfaces.
 - Do not put `path` or `question` directly under a group. Page fields belong under `pages`.
-- Prefer source-relative paths for authored curation when the docs may be exported or mounted under more than one route. Canonical `/docs/...html` paths are accepted for parity with browser links, but source paths stay easier to review and move with the file.
+- Prefer source-relative paths for authored curation when the docs may be exported or mounted under more than one route. Canonical docs-surface paths are accepted for parity with browser links, but source paths stay easier to review and move with the file.
 - README portability matters most at the repository and package level. In this repo, authored `README.md` files should stay free of inline front matter so GitHub renders them cleanly.
 
 ## Metadata-Driven Wayfinding
@@ -595,7 +643,7 @@ related_pages:
 - `sequence_key` opts a page into a specific sequence. Pages do not join a sequence just because they share a folder.
 - `order` determines the relative previous/next position inside that sequence.
 - `related_pages` stays independent from sequencing and can point to source paths, canonical docs paths, or exact page titles.
-- RazorDocs publishes authored sequence metadata to the current-surface search index for custom clients and integrations. The live source surface emits that payload at `{DocsRootPath}/search-index.json` (for example, `/docs/search-index.json` by default when versioning is off and `/docs/next/search-index.json` by default when versioning is on); exported exact-version trees carry their own `search-index.json` payload at the tree root. The `sequence_key` front-matter value becomes `sequenceKey`, `order` stays `order`, and `related_pages` stays separate as `relatedPages`; for example: `{ "sequenceKey": "razorwire-proof", "order": 20, "relatedPages": ["Web/ForgeTrust.Runnable.Web.RazorWire/README.md"] }`.
+- RazorDocs publishes authored sequence metadata to the current-surface search index for custom clients and integrations. The live source surface emits that payload at `{DocsRootPath}/search-index.json` (for example, `/docs/search-index.json` by default when versioning is off, `/docs/next/search-index.json` by default when versioning is on, or `/foo/bar/search-index.json` for a custom unversioned route root); exported exact-version trees carry their own `search-index.json` payload at the tree root. The `sequence_key` front-matter value becomes `sequenceKey`, `order` stays `order`, and `related_pages` stays separate as `relatedPages`; for example: `{ "sequenceKey": "razorwire-proof", "order": 20, "relatedPages": ["Web/ForgeTrust.Runnable.Web.RazorWire/README.md"] }`.
 
 ### Resolution rules
 
