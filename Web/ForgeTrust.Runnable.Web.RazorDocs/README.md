@@ -705,6 +705,9 @@ The outline client enhances the server-rendered links by:
 
 - using `#main-content` as the scroll root for `IntersectionObserver`
 - marking the current section with `aria-current="location"`
+- refreshing the active section from the scroll position on scroll, throttled through `requestAnimationFrame`, so long sections do not stay pinned to the previous outline item until the next heading enters the observer band
+- keeping the active outline link visible inside the sticky desktop rail when the page-local outline is taller than the viewport
+- easing outline-link clicks to the target section over 620 ms, while preserving instant jumps for readers who prefer reduced motion and canceling the animation when the reader manually wheels or touches the scroll root
 - initializing from the current URL hash
 - rebinding after RazorWire/Turbo frame navigation replaces `rw:island id="doc-content"`
 - collapsing the mobile outline after an outline link is chosen
