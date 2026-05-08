@@ -2900,6 +2900,30 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenHarvesterIgnoresCancellation()
+    {
+        var harvester = new NonCancelingHarvester();
+        var aggregator = CreateHarvestHealthAggregator([harvester], harvesterTimeout: TimeSpan.FromMilliseconds(10));
+        var healthTask = aggregator.GetHarvestHealthAsync();
+
+        try
+        {
+            var completedTask = await Task.WhenAny(healthTask, Task.Delay(TimeSpan.FromSeconds(1)));
+
+            Assert.Same(healthTask, completedTask);
+            var health = await healthTask;
+            Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+            var harvesterHealth = Assert.Single(health.Harvesters);
+            Assert.Equal(DocHarvesterHealthStatus.TimedOut, harvesterHealth.Status);
+            Assert.Equal(DocHarvestDiagnosticCodes.HarvesterTimedOut, harvesterHealth.Diagnostic?.Code);
+        }
+        finally
+        {
+            harvester.Release();
+        }
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldRecordCanceledHarvester_WhenHarvesterCancelsOutsideTimeout()
     {
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
@@ -3760,6 +3784,24 @@ public class DocAggregatorTests : IDisposable
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return [];
+        }
+    }
+
+    private sealed class NonCancelingHarvester : IDocHarvester
+    {
+        private readonly TaskCompletionSource<IReadOnlyList<DocNode>> _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            return _release.Task;
+        }
+
+        public void Release()
+        {
+            _release.TrySetResult([new DocNode("Late", "late.md", "late")]);
         }
     }
 

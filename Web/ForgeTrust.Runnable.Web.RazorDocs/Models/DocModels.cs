@@ -614,13 +614,21 @@ public enum DocHarvestDiagnosticSeverity
 /// </summary>
 /// <param name="Status">Overall health rollup for the snapshot.</param>
 /// <param name="GeneratedUtc">UTC timestamp when the snapshot was generated.</param>
-/// <param name="RepositoryRoot">Repository root passed to configured harvesters.</param>
+/// <param name="RepositoryRoot">
+/// Repository root passed to configured harvesters. Treat this as server-only operational data because it can contain
+/// sensitive or environment-specific filesystem paths; redact or omit it before sending snapshots to clients.
+/// </param>
 /// <param name="TotalHarvesters">Number of harvesters configured for the snapshot.</param>
 /// <param name="SuccessfulHarvesters">Number of harvesters that completed with either docs or a valid empty result.</param>
 /// <param name="FailedHarvesters">Number of harvesters that failed, timed out, or canceled.</param>
 /// <param name="TotalDocs">Number of documentation nodes published by the final cached docs snapshot.</param>
 /// <param name="Harvesters">Per-harvester health entries. Never <see langword="null" /> in RazorDocs-created snapshots.</param>
 /// <param name="Diagnostics">Structured diagnostics for failed, degraded, or noteworthy states. Never <see langword="null" /> in RazorDocs-created snapshots.</param>
+/// <remarks>
+/// RazorDocs-created snapshots retain non-null <see cref="Harvesters"/> and <see cref="Diagnostics"/> collections for
+/// safe server-side inspection, but callers that serialize this record into client-visible payloads must sanitize
+/// <see cref="RepositoryRoot"/> first.
+/// </remarks>
 public sealed record DocHarvestHealthSnapshot(
     DocHarvestHealthStatus Status,
     DateTimeOffset GeneratedUtc,

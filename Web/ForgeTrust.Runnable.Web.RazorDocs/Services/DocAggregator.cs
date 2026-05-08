@@ -701,14 +701,28 @@ public class DocAggregator
         ILogger logger)
     {
         var harvesterType = harvester.GetType().Name;
-        using var timeoutCts = new CancellationTokenSource(harvesterTimeout);
+        using var timeoutCts = new CancellationTokenSource();
+        timeoutCts.CancelAfter(harvesterTimeout);
         try
         {
-            var docs = await harvester.HarvestAsync(repositoryRoot, timeoutCts.Token) ?? [];
+            var harvestTask = harvester.HarvestAsync(repositoryRoot, timeoutCts.Token);
+            var docs = await harvestTask.WaitAsync(harvesterTimeout) ?? [];
             var status = docs.Count == 0
                 ? DocHarvesterHealthStatus.ReturnedEmpty
                 : DocHarvesterHealthStatus.Succeeded;
             return new HarvesterRunResult(harvesterType, status, docs, Diagnostic: null);
+        }
+        catch (TimeoutException ex)
+        {
+            timeoutCts.Cancel();
+            logger.LogWarning(
+                ex,
+                "Harvester {HarvesterType} timed out after {TimeoutSeconds}s at {RepositoryRoot}. Skipping its docs.",
+                harvesterType,
+                harvesterTimeout.TotalSeconds,
+                repositoryRoot);
+
+            return CreateTimedOutHarvesterRunResult(harvesterType);
         }
         catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
         {
@@ -719,17 +733,7 @@ public class DocAggregator
                 harvesterTimeout.TotalSeconds,
                 repositoryRoot);
 
-            return new HarvesterRunResult(
-                harvesterType,
-                DocHarvesterHealthStatus.TimedOut,
-                [],
-                new DocHarvestDiagnostic(
-                    DocHarvestDiagnosticCodes.HarvesterTimedOut,
-                    DocHarvestDiagnosticSeverity.Warning,
-                    harvesterType,
-                    "A RazorDocs harvester timed out.",
-                    "The harvester did not complete within the per-harvester timeout budget, so RazorDocs skipped its docs for this snapshot.",
-                    "Check the harvester for slow filesystem access, long-running parsing, or unobserved cancellation."));
+            return CreateTimedOutHarvesterRunResult(harvesterType);
         }
         catch (OperationCanceledException ex)
         {
@@ -771,6 +775,21 @@ public class DocAggregator
                     "The harvester threw while scanning the docs repository, so RazorDocs skipped its docs for this snapshot.",
                     "Inspect the host logs for exception details, then fix the harvester configuration, repository root, or source content."));
         }
+    }
+
+    private static HarvesterRunResult CreateTimedOutHarvesterRunResult(string harvesterType)
+    {
+        return new HarvesterRunResult(
+            harvesterType,
+            DocHarvesterHealthStatus.TimedOut,
+            [],
+            new DocHarvestDiagnostic(
+                DocHarvestDiagnosticCodes.HarvesterTimedOut,
+                DocHarvestDiagnosticSeverity.Warning,
+                harvesterType,
+                "A RazorDocs harvester timed out.",
+                "The harvester did not complete within the per-harvester timeout budget, so RazorDocs skipped its docs for this snapshot.",
+                "Check the harvester for slow filesystem access, long-running parsing, or unobserved cancellation."));
     }
 
     private static DocHarvestHealthSnapshot BuildHarvestHealthSnapshot(
