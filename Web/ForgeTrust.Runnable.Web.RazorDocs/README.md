@@ -79,7 +79,17 @@ if (health.Status is DocHarvestHealthStatus.Failed or DocHarvestHealthStatus.Deg
 {
     foreach (var diagnostic in health.Diagnostics)
     {
-        logger.LogWarning(
+        var logLevel = diagnostic.Severity switch
+        {
+            DocHarvestDiagnosticSeverity.Information => LogLevel.Information,
+            DocHarvestDiagnosticSeverity.Warning => LogLevel.Warning,
+            DocHarvestDiagnosticSeverity.Error => LogLevel.Error,
+            DocHarvestDiagnosticSeverity.Critical => LogLevel.Critical,
+            _ => LogLevel.Warning
+        };
+
+        logger.Log(
+            logLevel,
             "RazorDocs harvest diagnostic {Code}: {Problem} {Fix}",
             diagnostic.Code,
             diagnostic.Problem,
@@ -92,7 +102,7 @@ The returned `DocHarvestHealthSnapshot` includes:
 
 - `Status`: the aggregate `DocHarvestHealthStatus`.
 - `GeneratedUtc`: the timestamp for the cached snapshot generation.
-- `RepositoryRoot`: the resolved source root passed to harvesters.
+- `RepositoryRoot`: the resolved source root passed to harvesters. Treat this as server-only operational data; redact or omit it before forwarding harvest health to client-visible UI or public APIs.
 - `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for the configured harvesters.
 - `TotalDocs`: the number of documentation nodes in the final cached docs snapshot after RazorDocs post-processing.
 - `Harvesters`: one `DocHarvesterHealth` entry per configured harvester, including its concrete type name, `DocHarvesterHealthStatus`, raw returned doc count, and optional diagnostic.
@@ -123,11 +133,11 @@ Each `DocHarvestDiagnostic` has a stable `Code`, `Severity`, optional `Harvester
 
 RazorDocs currently emits these codes:
 
-- `razordocs.harvest.harvester_timed_out`
-- `razordocs.harvest.harvester_canceled`
-- `razordocs.harvest.harvester_failed`
-- `razordocs.harvest.no_harvesters`
-- `razordocs.harvest.all_failed`
+- `DocHarvestDiagnosticCodes.HarvesterTimedOut` (`razordocs.harvest.harvester_timed_out`)
+- `DocHarvestDiagnosticCodes.HarvesterCanceled` (`razordocs.harvest.harvester_canceled`)
+- `DocHarvestDiagnosticCodes.HarvesterFailed` (`razordocs.harvest.harvester_failed`)
+- `DocHarvestDiagnosticCodes.NoHarvesters` (`razordocs.harvest.no_harvesters`)
+- `DocHarvestDiagnosticCodes.AllFailed` (`razordocs.harvest.all_failed`)
 
 An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
 

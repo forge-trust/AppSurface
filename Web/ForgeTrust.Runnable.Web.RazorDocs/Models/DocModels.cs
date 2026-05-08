@@ -663,6 +663,41 @@ public sealed record DocHarvestDiagnostic(
     string Fix);
 
 /// <summary>
+/// Defines the stable diagnostic codes emitted by RazorDocs harvest health snapshots.
+/// </summary>
+/// <remarks>
+/// Use these constants when testing or branching on <see cref="DocHarvestDiagnostic.Code"/> values. The string values are
+/// public compatibility contracts and must not be changed once released.
+/// </remarks>
+public static class DocHarvestDiagnosticCodes
+{
+    /// <summary>
+    /// A harvester exceeded RazorDocs' per-harvester timeout budget.
+    /// </summary>
+    public const string HarvesterTimedOut = "razordocs.harvest.harvester_timed_out";
+
+    /// <summary>
+    /// A harvester observed cancellation outside RazorDocs' timeout budget.
+    /// </summary>
+    public const string HarvesterCanceled = "razordocs.harvest.harvester_canceled";
+
+    /// <summary>
+    /// A harvester threw while scanning the documentation source.
+    /// </summary>
+    public const string HarvesterFailed = "razordocs.harvest.harvester_failed";
+
+    /// <summary>
+    /// No harvesters were registered for the RazorDocs host.
+    /// </summary>
+    public const string NoHarvesters = "razordocs.harvest.no_harvesters";
+
+    /// <summary>
+    /// Every configured harvester failed, timed out, or canceled for the snapshot.
+    /// </summary>
+    public const string AllFailed = "razordocs.harvest.all_failed";
+}
+
+/// <summary>
 /// Enumerates the built-in public documentation sections used by RazorDocs.
 /// </summary>
 /// <remarks>

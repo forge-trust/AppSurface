@@ -2792,11 +2792,13 @@ public class DocAggregatorTests : IDisposable
         Assert.Equal(0, harvester.DocCount);
     }
 
-    [Fact]
-    public void Constructor_ShouldRejectNonPositiveHarvesterTimeout()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Constructor_ShouldRejectNonPositiveHarvesterTimeout(int milliseconds)
     {
         var exception = Assert.Throws<ArgumentOutOfRangeException>(
-            () => CreateHarvestHealthAggregator([_harvesterFake], harvesterTimeout: TimeSpan.Zero));
+            () => CreateHarvestHealthAggregator([_harvesterFake], harvesterTimeout: TimeSpan.FromMilliseconds(milliseconds)));
 
         Assert.Equal("harvesterTimeout", exception.ParamName);
     }
@@ -2815,7 +2817,7 @@ public class DocAggregatorTests : IDisposable
         Assert.Equal(0, health.TotalDocs);
         Assert.Empty(health.Harvesters);
         var diagnostic = Assert.Single(health.Diagnostics);
-        Assert.Equal("razordocs.harvest.no_harvesters", diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticCodes.NoHarvesters, diagnostic.Code);
         Assert.Equal(DocHarvestDiagnosticSeverity.Information, diagnostic.Severity);
         Assert.Null(diagnostic.HarvesterType);
     }
@@ -2842,8 +2844,8 @@ public class DocAggregatorTests : IDisposable
         Assert.Equal(1, health.TotalDocs);
         Assert.Contains(health.Harvesters, item => item.Status == DocHarvesterHealthStatus.Succeeded);
         var failed = Assert.Single(health.Harvesters, item => item.Status == DocHarvesterHealthStatus.Failed);
-        Assert.Equal("razordocs.harvest.harvester_failed", failed.Diagnostic?.Code);
-        Assert.DoesNotContain(health.Diagnostics, diagnostic => diagnostic.Code == "razordocs.harvest.all_failed");
+        Assert.Equal(DocHarvestDiagnosticCodes.HarvesterFailed, failed.Diagnostic?.Code);
+        Assert.DoesNotContain(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.AllFailed);
         Assert.Equal(0, CountLogCalls(_loggerFake, LogLevel.Critical));
     }
 
@@ -2870,7 +2872,7 @@ public class DocAggregatorTests : IDisposable
         Assert.Equal(2, firstHealth.FailedHarvesters);
         Assert.Equal(0, firstHealth.TotalDocs);
         Assert.All(firstHealth.Harvesters, item => Assert.Equal(DocHarvesterHealthStatus.Failed, item.Status));
-        Assert.Contains(firstHealth.Diagnostics, diagnostic => diagnostic.Code == "razordocs.harvest.all_failed");
+        Assert.Contains(firstHealth.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.AllFailed);
         Assert.DoesNotContain(
             firstHealth.Diagnostics.SelectMany(diagnostic => new[] { diagnostic.Problem, diagnostic.Cause, diagnostic.Fix }),
             value => value.Contains("Harvester boom", StringComparison.OrdinalIgnoreCase));
@@ -2893,8 +2895,8 @@ public class DocAggregatorTests : IDisposable
         Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
         var harvesterHealth = Assert.Single(health.Harvesters);
         Assert.Equal(DocHarvesterHealthStatus.TimedOut, harvesterHealth.Status);
-        Assert.Equal("razordocs.harvest.harvester_timed_out", harvesterHealth.Diagnostic?.Code);
-        Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == "razordocs.harvest.all_failed");
+        Assert.Equal(DocHarvestDiagnosticCodes.HarvesterTimedOut, harvesterHealth.Diagnostic?.Code);
+        Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.AllFailed);
     }
 
     [Fact]
@@ -2908,7 +2910,29 @@ public class DocAggregatorTests : IDisposable
         Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
         var harvesterHealth = Assert.Single(health.Harvesters);
         Assert.Equal(DocHarvesterHealthStatus.Canceled, harvesterHealth.Status);
-        Assert.Equal("razordocs.harvest.harvester_canceled", harvesterHealth.Diagnostic?.Code);
+        Assert.Equal(DocHarvestDiagnosticCodes.HarvesterCanceled, harvesterHealth.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldReturnDefensiveCopyOfSnapshotLists()
+    {
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new InvalidOperationException("Harvester boom"));
+
+        var firstHealth = await _aggregator.GetHarvestHealthAsync();
+        var firstHarvesters = Assert.IsType<DocHarvesterHealth[]>(firstHealth.Harvesters);
+        var firstDiagnostics = Assert.IsType<DocHarvestDiagnostic[]>(firstHealth.Diagnostics);
+        firstHarvesters[0] = firstHarvesters[0] with { Status = DocHarvesterHealthStatus.Succeeded };
+        firstDiagnostics[0] = firstDiagnostics[0] with { Code = "mutated" };
+
+        var secondHealth = await _aggregator.GetHarvestHealthAsync();
+
+        Assert.NotSame(firstHealth.Harvesters, secondHealth.Harvesters);
+        Assert.NotSame(firstHealth.Diagnostics, secondHealth.Diagnostics);
+        var secondHarvester = Assert.Single(secondHealth.Harvesters);
+        Assert.Equal(DocHarvesterHealthStatus.Failed, secondHarvester.Status);
+        Assert.DoesNotContain(secondHealth.Diagnostics, diagnostic => diagnostic.Code == "mutated");
+        Assert.Contains(secondHealth.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.HarvesterFailed);
     }
 
     [Fact]

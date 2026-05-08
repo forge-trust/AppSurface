@@ -40,6 +40,16 @@ public sealed class RazorDocsOptionsTests
     }
 
     [Fact]
+    public void DocHarvestDiagnosticCodes_ShouldPreserveStringContracts()
+    {
+        Assert.Equal("razordocs.harvest.harvester_timed_out", DocHarvestDiagnosticCodes.HarvesterTimedOut);
+        Assert.Equal("razordocs.harvest.harvester_canceled", DocHarvestDiagnosticCodes.HarvesterCanceled);
+        Assert.Equal("razordocs.harvest.harvester_failed", DocHarvestDiagnosticCodes.HarvesterFailed);
+        Assert.Equal("razordocs.harvest.no_harvesters", DocHarvestDiagnosticCodes.NoHarvesters);
+        Assert.Equal("razordocs.harvest.all_failed", DocHarvestDiagnosticCodes.AllFailed);
+    }
+
+    [Fact]
     public void AddRazorDocs_ShouldFallbackToLegacyRepositoryRootSetting()
     {
         var services = new ServiceCollection();

@@ -99,7 +99,7 @@ public class DocAggregator
     private static readonly TimeSpan DefaultHarvesterTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ContributorFreshnessTimeout = TimeSpan.FromSeconds(30);
 
-    private readonly IEnumerable<IDocHarvester> _harvesters;
+    private readonly IDocHarvester[] _harvesters;
     private readonly string _repositoryRoot;
     private readonly IMemo _memo;
     private readonly IRazorDocsHtmlSanitizer _sanitizer;
@@ -424,7 +424,11 @@ public class DocAggregator
     public async Task<DocHarvestHealthSnapshot> GetHarvestHealthAsync(CancellationToken cancellationToken = default)
     {
         var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
-        return snapshot.HarvestHealth;
+        return snapshot.HarvestHealth with
+        {
+            Harvesters = snapshot.HarvestHealth.Harvesters.ToArray(),
+            Diagnostics = snapshot.HarvestHealth.Diagnostics.ToArray()
+        };
     }
 
     /// <summary>
@@ -675,18 +679,17 @@ public class DocAggregator
     }
 
     private static async Task<IReadOnlyList<HarvesterRunResult>> RunHarvestersAsync(
-        IEnumerable<IDocHarvester> harvesters,
+        IReadOnlyList<IDocHarvester> harvesters,
         string repositoryRoot,
         TimeSpan harvesterTimeout,
         ILogger logger)
     {
-        var harvesterArray = harvesters.ToArray();
-        if (harvesterArray.Length == 0)
+        if (harvesters.Count == 0)
         {
             return [];
         }
 
-        var tasks = harvesterArray.Select(
+        var tasks = harvesters.Select(
             harvester => RunHarvesterAsync(harvester, repositoryRoot, harvesterTimeout, logger));
         return await Task.WhenAll(tasks);
     }
@@ -721,7 +724,7 @@ public class DocAggregator
                 DocHarvesterHealthStatus.TimedOut,
                 [],
                 new DocHarvestDiagnostic(
-                    "razordocs.harvest.harvester_timed_out",
+                    DocHarvestDiagnosticCodes.HarvesterTimedOut,
                     DocHarvestDiagnosticSeverity.Warning,
                     harvesterType,
                     "A RazorDocs harvester timed out.",
@@ -741,7 +744,7 @@ public class DocAggregator
                 DocHarvesterHealthStatus.Canceled,
                 [],
                 new DocHarvestDiagnostic(
-                    "razordocs.harvest.harvester_canceled",
+                    DocHarvestDiagnosticCodes.HarvesterCanceled,
                     DocHarvestDiagnosticSeverity.Warning,
                     harvesterType,
                     "A RazorDocs harvester canceled.",
@@ -761,7 +764,7 @@ public class DocAggregator
                 DocHarvesterHealthStatus.Failed,
                 [],
                 new DocHarvestDiagnostic(
-                    "razordocs.harvest.harvester_failed",
+                    DocHarvestDiagnosticCodes.HarvesterFailed,
                     DocHarvestDiagnosticSeverity.Error,
                     harvesterType,
                     "A RazorDocs harvester failed.",
@@ -794,7 +797,7 @@ public class DocAggregator
         {
             diagnostics.Add(
                 new DocHarvestDiagnostic(
-                    "razordocs.harvest.no_harvesters",
+                    DocHarvestDiagnosticCodes.NoHarvesters,
                     DocHarvestDiagnosticSeverity.Information,
                     HarvesterType: null,
                     "No RazorDocs harvesters are registered.",
@@ -809,7 +812,7 @@ public class DocAggregator
         if (status == DocHarvestHealthStatus.Failed)
         {
             var aggregateDiagnostic = new DocHarvestDiagnostic(
-                "razordocs.harvest.all_failed",
+                DocHarvestDiagnosticCodes.AllFailed,
                 DocHarvestDiagnosticSeverity.Critical,
                 HarvesterType: null,
                 "All RazorDocs harvesters failed.",
