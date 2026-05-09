@@ -1,3 +1,6 @@
+using System.Collections;
+using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 using FakeItEasy;
 using ForgeTrust.Runnable.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +36,61 @@ public class ConfigAuditReporterTests
         public int Port { get; set; }
 
         public int TimeoutSeconds { get; set; }
+    }
+
+    [ConfigKey("Short.Name", root: true)]
+    [ConfigValueMinLength(3)]
+    private sealed class ShortNameConfig : Config<string>
+    {
+    }
+
+    [ConfigKey("Throwing.Name", root: true)]
+    private sealed class ThrowingNameConfig : Config<string>
+    {
+        protected override IEnumerable<ValidationResult>? ValidateValue(
+            string value,
+            ValidationContext validationContext) =>
+            throw new InvalidOperationException("string validator failed");
+    }
+
+    [ConfigKey("Throwing.Count", root: true)]
+    private sealed class ThrowingCountConfig : ConfigStruct<int>
+    {
+        protected override IEnumerable<ValidationResult>? ValidateValue(
+            int value,
+            ValidationContext validationContext) =>
+            throw new InvalidOperationException("int validator failed");
+    }
+
+    [ConfigKey("Default.Port", root: true)]
+    private sealed class DefaultPortConfig : ConfigStruct<int>
+    {
+        public override int? DefaultValue => 8080;
+    }
+
+    private sealed class UnconstructableConfig : Config<string>
+    {
+        public UnconstructableConfig(IMissingDependency dependency)
+        {
+            ArgumentNullException.ThrowIfNull(dependency);
+        }
+    }
+
+    private interface IMissingDependency
+    {
+    }
+
+    private sealed class OddShape
+    {
+        public readonly string ReadOnlyField = "ignored";
+
+        public string MutableField = "field-value";
+
+        public string this[int index] => index.ToString();
+
+        public string BadProperty => throw new JsonException("bad getter");
+
+        public string GoodProperty => "property-value";
     }
 
     [Fact]
@@ -201,6 +259,125 @@ public class ConfigAuditReporterTests
         Assert.Equal("[redacted]", redacted.DisplayValue);
     }
 
+    [Fact]
+    public void GetReport_ReportsWrapperInspectionFailuresAndProviderFallbackShapes()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Short.Name"] = "no",
+                    ["Throwing.Name"] = "valid-name",
+                    ["Throwing.Count"] = 7,
+                    ["Object.String"] = "plain",
+                    ["Odd.Shape"] = new OddShape()
+                }));
+        services.AddSingleton(new ConfigAuditKnownEntry("Short.Name", typeof(ShortNameConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry("Throwing.Name", typeof(ThrowingNameConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry("Throwing.Count", typeof(ThrowingCountConfig), typeof(int)));
+        services.AddSingleton(new ConfigAuditKnownEntry("Default.Port", typeof(DefaultPortConfig), typeof(int)));
+        services.AddSingleton(new ConfigAuditKnownEntry("Broken.Wrapper", typeof(UnconstructableConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry("Plain.Wrapper", typeof(object), typeof(string)));
+        services.AddConfigAuditKey<object>("Object.String");
+        services.AddConfigAuditKey<OddShape>("Odd.Shape");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        Assert.Contains(
+            AssertEntry(report, "Short.Name", ConfigAuditEntryState.Invalid, "no").Diagnostics,
+            diagnostic => diagnostic.Code == "config-validation-failed");
+        Assert.Contains(
+            AssertEntry(report, "Throwing.Name", ConfigAuditEntryState.Invalid, "valid-name").Diagnostics,
+            diagnostic => diagnostic.Code == "config-validation-threw");
+        Assert.Contains(
+            AssertEntry(report, "Throwing.Count", ConfigAuditEntryState.Invalid, "7").Diagnostics,
+            diagnostic => diagnostic.Code == "config-validation-threw");
+        Assert.Contains(
+            AssertEntry(report, "Default.Port", ConfigAuditEntryState.Defaulted, "8080").Sources,
+            source => source.Kind == ConfigAuditSourceKind.Default);
+        Assert.Contains(
+            AssertEntry(report, "Broken.Wrapper", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            diagnostic => diagnostic.Code == "config-wrapper-create-failed");
+        AssertEntry(report, "Plain.Wrapper", ConfigAuditEntryState.Missing, null);
+
+        var stringObject = AssertEntry(report, "Object.String", ConfigAuditEntryState.Resolved, "plain");
+        Assert.Empty(stringObject.Children);
+
+        var oddShape = AssertEntry(report, "Odd.Shape", ConfigAuditEntryState.Resolved, null);
+        Assert.Contains(oddShape.Children, child => child.Key == "Odd.Shape.GoodProperty");
+        Assert.Contains(oddShape.Children, child => child.Key == "Odd.Shape.MutableField");
+        Assert.DoesNotContain(oddShape.Children, child => child.Key == "Odd.Shape.BadProperty");
+        Assert.DoesNotContain(oddShape.Children, child => child.Key == "Odd.Shape.ReadOnlyField");
+
+        var rendered = new ConfigAuditTextRenderer().Render(
+            new ConfigAuditReport
+            {
+                Environment = "Production",
+                GeneratedAt = DateTimeOffset.UtcNow,
+                Providers = [],
+                Entries =
+                [
+                    new ConfigAuditEntry
+                    {
+                        Key = "Provider.Source",
+                        State = ConfigAuditEntryState.Resolved,
+                        Sources =
+                        [
+                            new ConfigAuditSourceRecord
+                            {
+                                Kind = ConfigAuditSourceKind.Provider,
+                                ProviderName = "CustomProvider",
+                                ConfigPath = "Provider.Source",
+                                AppliedToPath = "Provider.Source",
+                                Role = ConfigAuditSourceRole.Base
+                            }
+                        ]
+                    }
+                ],
+                Redaction = new ConfigAuditRedaction
+                {
+                    Enabled = true,
+                    MatchedFragments = [],
+                    Placeholder = "[redacted]"
+                }
+            });
+        Assert.Contains("CustomProvider", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_TreatsNullFromGenericProviderAsMissing()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new MissingStringProvider());
+        services.AddConfigAuditKey<string>("Provider.Missing");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        AssertEntry(report, "Provider.Missing", ConfigAuditEntryState.Missing, null);
+    }
+
+    [Fact]
+    public void Redactor_FallsBackWhenEnumerableCannotSerialize()
+    {
+        var redactor = new ConfigAuditRedactor();
+
+        var formatted = redactor.FormatValue("Values", new ThrowingEnumerable(), []);
+
+        Assert.Equal(nameof(ThrowingEnumerable), formatted.DisplayValue);
+        Assert.False(formatted.IsRedacted);
+    }
+
     private static ServiceCollection CreateServices(string configDirectory, IEnvironmentProvider environment)
     {
         var services = new ServiceCollection();
@@ -254,5 +431,69 @@ public class ConfigAuditReporterTests
 
             return (T)_value;
         }
+    }
+
+    private sealed class DictionaryConfigProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        private readonly IReadOnlyDictionary<string, object?> _values;
+
+        public DictionaryConfigProvider(IReadOnlyDictionary<string, object?> values)
+        {
+            _values = values;
+        }
+
+        public int Priority => 20;
+
+        public string Name => nameof(DictionaryConfigProvider);
+
+        public T? GetValue<T>(string environment, string key) =>
+            _values.TryGetValue(key, out var value) ? (T?)value : default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!_values.TryGetValue(key, out var value))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                value,
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.Provider,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        ConfigPath = key,
+                        AppliedToPath = key,
+                        Role = role
+                    }
+                ],
+                []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
+    private sealed class MissingStringProvider : IConfigProvider
+    {
+        public int Priority => 10;
+
+        public string Name => nameof(MissingStringProvider);
+
+        public T? GetValue<T>(string environment, string key) => default;
+    }
+
+    private sealed class ThrowingEnumerable : IEnumerable
+    {
+        public IEnumerator GetEnumerator() => throw new NotSupportedException();
+
+        public override string ToString() => nameof(ThrowingEnumerable);
     }
 }

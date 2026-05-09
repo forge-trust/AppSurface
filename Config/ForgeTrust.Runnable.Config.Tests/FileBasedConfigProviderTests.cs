@@ -524,4 +524,60 @@ public class FileBasedConfigProviderTests
 
         Assert.Null(result);
     }
+
+    [Fact]
+    public void Resolve_ReportsConversionDiagnosticsForFileValues()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), """{"Feature":{"Count":"not-a-number"}}""");
+
+            var locationProvider = A.Fake<IConfigFileLocationProvider>();
+            A.CallTo(() => locationProvider.Directory).Returns(tempDir);
+            var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
+
+            var provider = new FileBasedConfigProvider(locationProvider, logger);
+
+            var resolution = ((IConfigDiagnosticProvider)provider)
+                .Resolve("Production", "Feature.Count", typeof(int), ConfigAuditSourceRole.Base);
+
+            Assert.Equal(ConfigAuditEntryState.Invalid, resolution.State);
+            Assert.Contains(resolution.Sources, source => source.Kind == ConfigAuditSourceKind.File);
+            Assert.Contains(resolution.Diagnostics, diagnostic => diagnostic.Code == "config-file-conversion-failed");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Initialize_RemovesDescendantOriginsWhenParentIsReplacedByScalar()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), """{"Shape":{"Nested":"base"}}""");
+            File.WriteAllText(Path.Combine(tempDir, "config_override.json"), """{"Shape":"scalar"}""");
+
+            var locationProvider = A.Fake<IConfigFileLocationProvider>();
+            A.CallTo(() => locationProvider.Directory).Returns(tempDir);
+            var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
+
+            var provider = new FileBasedConfigProvider(locationProvider, logger);
+
+            Assert.Equal("scalar", provider.GetValue<string>("Production", "Shape"));
+            var staleChild = ((IConfigDiagnosticProvider)provider)
+                .Resolve("Production", "Shape.Nested", typeof(string), ConfigAuditSourceRole.Base);
+            Assert.Equal(ConfigAuditEntryState.Missing, staleChild.State);
+            Assert.Contains(staleChild.Sources, source => source.Kind == ConfigAuditSourceKind.Missing);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
 }

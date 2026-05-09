@@ -891,6 +891,154 @@ public class EnvironmentConfigProviderTests
         Assert.Equal(5432, current.Database.Port);
     }
 
+    [Fact]
+    public void Resolve_ReturnsInvalidDiagnosticWhenDirectValueCannotConvert()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("PORT", A<string?>._))
+            .Returns("not-a-port");
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var resolution = ((IConfigDiagnosticProvider)provider)
+            .Resolve("Production", "Port", typeof(int), ConfigAuditSourceRole.Override);
+
+        Assert.Equal(ConfigAuditEntryState.Invalid, resolution.State);
+        Assert.Contains(resolution.Diagnostics, diagnostic => diagnostic.Code == "config-environment-conversion-failed");
+        Assert.DoesNotContain("not-a-port", resolution.Diagnostics.Single().Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_ReadsIndexedCollectionsWithSourceDiagnostics()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__ITEMS__0", A<string?>._))
+            .Returns("first");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__ITEMS__1", A<string?>._))
+            .Returns("second");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("FALLBACKITEMS__0", A<string?>._))
+            .Returns("fallback");
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var resolution = ((IConfigDiagnosticProvider)provider)
+            .Resolve("Production", "Items", typeof(string[]), ConfigAuditSourceRole.Override);
+
+        var values = Assert.IsType<string[]>(resolution.Value);
+        Assert.Equal(["first", "second"], values);
+        Assert.Equal(ConfigAuditEntryState.Resolved, resolution.State);
+        Assert.All(resolution.Sources, source => Assert.Equal(ConfigAuditSourceKind.EnvironmentVariable, source.Kind));
+
+        var fallbackResolution = ((IConfigDiagnosticProvider)provider)
+            .Resolve("Production", "FallbackItems", typeof(List<string>), ConfigAuditSourceRole.Override);
+        var fallbackValues = Assert.IsType<List<string>>(fallbackResolution.Value);
+        Assert.Equal(["fallback"], fallbackValues);
+    }
+
+    [Fact]
+    public void Resolve_ReturnsInvalidWhenIndexedCollectionElementCannotConvert()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("ITEMS__0", A<string?>._))
+            .Returns("not-a-number");
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var resolution = ((IConfigDiagnosticProvider)provider)
+            .Resolve("Production", "Items", typeof(List<int>), ConfigAuditSourceRole.Override);
+
+        Assert.Equal(ConfigAuditEntryState.Invalid, resolution.State);
+        Assert.Contains(resolution.Diagnostics, diagnostic => diagnostic.ConfigPath == "Items.0");
+    }
+
+    [Fact]
+    public void TracePatch_CoversDiagnosticPatchBranchesWithoutMutatingInputs()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
+            .Returns("6543");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__MODE", A<string?>._))
+            .Returns("environment");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__CHILD__VALUE", A<string?>._))
+            .Returns("environment-child");
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var simpleNull = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(string));
+        Assert.False(simpleNull.Patched);
+
+        var scalarRuntime = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", 42, typeof(object));
+        Assert.False(scalarRuntime.Patched);
+
+        var abstractType = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(AbstractPatchOptions));
+        Assert.False(abstractType.Patched);
+
+        var created = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(AppSettings));
+        var createdValue = Assert.IsType<AppSettings>(created.Value);
+        Assert.True(created.Patched);
+        Assert.Equal(["https://one.example", "https://two.example"], createdValue.Endpoints);
+        Assert.Equal(6543, createdValue.Database.Port);
+
+        var getterOnly = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(GetterOnlyAppSettings));
+        var getterOnlyValue = Assert.IsType<GetterOnlyAppSettings>(getterOnly.Value);
+        Assert.True(getterOnly.Patched);
+        Assert.Equal(["https://one.example", "https://two.example"], getterOnlyValue.Endpoints);
+
+        var readOnlyCollection = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(GetterOnlyReadOnlyCollectionOptions));
+        Assert.False(readOnlyCollection.Patched);
+
+        var indexed = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(IndexedOptions));
+        Assert.False(indexed.Patched);
+
+        var fieldBacked = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(FieldBackedOptions));
+        var fieldBackedValue = Assert.IsType<FieldBackedOptions>(fieldBacked.Value);
+        Assert.True(fieldBacked.Patched);
+        Assert.Equal("environment", fieldBackedValue.Mode);
+        Assert.Equal("file-readonly", fieldBackedValue.ReadOnlyMode);
+        Assert.Equal(6543, fieldBackedValue.Database.Port);
+
+        var nullableField = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(NullableFieldBackedOptions));
+        var nullableFieldValue = Assert.IsType<NullableFieldBackedOptions>(nullableField.Value);
+        Assert.True(nullableField.Patched);
+        Assert.NotNull(nullableFieldValue.Database);
+        Assert.Equal(6543, nullableFieldValue.Database.Port);
+
+        var interfaceChild = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(InterfaceChildOptions));
+        Assert.False(interfaceChild.Patched);
+
+        var throwingChild = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(ThrowingChildOptions));
+        Assert.False(throwingChild.Patched);
+
+        var createdCycle = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(CyclicOptions));
+        Assert.False(createdCycle.Patched);
+
+        var cyclic = new CyclicOptions();
+        var cloneFailure = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", cyclic, typeof(CyclicOptions));
+        Assert.False(cloneFailure.Patched);
+        Assert.Contains(cloneFailure.Diagnostics, diagnostic => diagnostic.Code == "config-patch-clone-failed");
+    }
+
     private sealed class AppSettings
     {
         public string? Mode { get; set; }
@@ -1004,5 +1152,10 @@ public class EnvironmentConfigProviderTests
         public string? Host { get; set; }
 
         public int Port { get; set; }
+    }
+
+    private abstract class AbstractPatchOptions
+    {
+        public string? Value { get; set; }
     }
 }
