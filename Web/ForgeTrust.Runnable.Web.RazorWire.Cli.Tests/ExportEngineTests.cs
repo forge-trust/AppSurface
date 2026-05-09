@@ -804,17 +804,26 @@ public class ExportEngineTests
     [Fact]
     public void ExtractReferences_Should_Preserve_Raw_Resolved_Path_Query_Fragment_And_Provenance()
     {
-        var html = """<a href="details/page?tab=api#usage">API</a>""";
+        var html = """
+            <a href="details/page?tab=api#usage">API</a>
+            <a href="details/page#usage?expanded=true">Fragment Query Text</a>
+            """;
 
-        var reference = Assert.Single(_sut.ExtractReferences(html, "/docs/start", htmlScope: true));
+        var references = _sut.ExtractReferences(html, "/docs/start", htmlScope: true);
+        var queryThenFragment = references[0];
+        var fragmentWithQuestionMark = references[1];
 
-        Assert.Equal("/docs/start", reference.SourceRoute);
-        Assert.Equal(ExportReferenceKind.AnchorHref, reference.Kind);
-        Assert.Equal("details/page?tab=api#usage", reference.RawValue);
-        Assert.Equal("/docs/details/page?tab=api#usage", reference.ResolvedUrl);
-        Assert.Equal("/docs/details/page", reference.Path);
-        Assert.Equal("?tab=api", reference.Query);
-        Assert.Equal("#usage", reference.Fragment);
+        Assert.Equal("/docs/start", queryThenFragment.SourceRoute);
+        Assert.Equal(ExportReferenceKind.AnchorHref, queryThenFragment.Kind);
+        Assert.Equal("details/page?tab=api#usage", queryThenFragment.RawValue);
+        Assert.Equal("/docs/details/page?tab=api#usage", queryThenFragment.ResolvedUrl);
+        Assert.Equal("/docs/details/page", queryThenFragment.Path);
+        Assert.Equal("?tab=api", queryThenFragment.Query);
+        Assert.Equal("#usage", queryThenFragment.Fragment);
+
+        Assert.Equal("/docs/details/page", fragmentWithQuestionMark.Path);
+        Assert.Equal(string.Empty, fragmentWithQuestionMark.Query);
+        Assert.Equal("#usage?expanded=true", fragmentWithQuestionMark.Fragment);
     }
 
     [Fact]

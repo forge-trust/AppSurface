@@ -1132,8 +1132,9 @@ public class ExportEngine
         var pathEnd = rawRef.Length;
         var queryStart = rawRef.IndexOf('?');
         var fragmentStart = rawRef.IndexOf('#');
+        var hasQuery = queryStart >= 0 && (fragmentStart < 0 || queryStart < fragmentStart);
 
-        if (queryStart >= 0)
+        if (hasQuery)
         {
             pathEnd = Math.Min(pathEnd, queryStart);
         }
@@ -1149,9 +1150,9 @@ public class ExportEngine
             return false;
         }
 
-        if (queryStart >= 0)
+        if (hasQuery)
         {
-            var queryEnd = fragmentStart >= 0 && fragmentStart > queryStart ? fragmentStart : rawRef.Length;
+            var queryEnd = fragmentStart >= 0 ? fragmentStart : rawRef.Length;
             query = rawRef[queryStart..queryEnd];
         }
 
