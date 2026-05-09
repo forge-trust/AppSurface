@@ -434,7 +434,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             """
             () => {
               window.setTimeout(() => {
-                document.getElementById('main-content')?.scrollTo(0, 100000);
+                const main = document.getElementById('main-content');
+                main?.scrollTo(0, main.scrollHeight);
               }, 60);
             }
             """);
@@ -739,7 +740,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
           }
 
           main.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true }));
-          main.scrollTo(0, 100000);
+          main.scrollTo(0, main.scrollHeight);
         }
         """;
 }
