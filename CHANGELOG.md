@@ -32,6 +32,7 @@ This changelog is the compact release ledger for Runnable. The monorepo ships in
 - Pull requests are expected to use Conventional Commits titles and to update `releases/unreleased.md` unless maintainers explicitly opt out.
 - Markdown-only changes on `main` now trigger the build-and-export workflow so release-note and policy updates publish with the docs surface.
 - RazorWire CLI validation errors now include a concrete next command and `razorwire export --help` hint so failed exports are easier to recover from.
+- RazorWire CLI export now defaults to CDN-safe output: managed internal links, frames, scripts, stylesheets, images, `<img>` and `<source>` `srcset`, conventional `404.html`, and CSS `url(...)` references rewrite to emitted static artifacts, with `--mode hybrid` available for extensionless server-routed deployments.
 - Tailwind development watch mode now logs a warning, not a startup error, when the standalone CLI is unavailable and the app can continue serving existing CSS.
 - RazorDocs search now keeps failure recovery markup out of the active search shell until the index actually fails to load.
 - The RazorWire MVC sample counter button now has an accessible name while preserving the compact icon-only UI.
@@ -48,6 +49,7 @@ This changelog is the compact release ledger for Runnable. The monorepo ships in
 - Runnable has not cut `v0.1.0` yet, so there is no tagged migration guide today.
 - Before `v0.1.0`, any breaking or behavior-changing update should record provisional guidance in [`releases/unreleased.md`](./releases/unreleased.md) and move finalized steps into the tagged release note once the version ships.
 - Existing `rw-active` forms opt into failed-form request markers and automatic fallback UI by default. Set `options.Forms.EnableFailureUx = false`, `options.Forms.FailureMode = RazorWireFormFailureMode.Manual`, or per-form `data-rw-form-failure="off"` if an app already owns all failure rendering.
+- Existing RazorWire CLI export users who depended on extensionless internal URLs should pass `--mode hybrid`; the default now rewrites exporter-managed URLs for plain static/CDN hosting and fails CDN validation when required frame or asset artifacts cannot be emitted.
 - RazorDocs authors using `featured_pages` should migrate to `featured_page_groups`; the old flat field now logs a warning and no longer renders.
 - Code that expected custom Runnable labels from `IHostEnvironment.ApplicationName` should use `StartupContext.ApplicationName`; host environment application names now remain tied to assembly identity so ASP.NET static web assets continue to resolve.
 - Web apps with custom conventional 404 overrides should replace `NotFoundPageModel` with `BrowserStatusPageModel`. The old `ConventionalNotFoundPageMode`, `NotFoundPageMode`, `UseConventionalNotFoundPage()`, and `DisableNotFoundPage()` API names have moved to the `BrowserStatusPage*` naming surface before the first public tag.

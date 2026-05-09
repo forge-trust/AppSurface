@@ -8,6 +8,14 @@ namespace ForgeTrust.Runnable.Web.RazorWire.Cli.Tests;
 public class ExportCommandTests
 {
     [Fact]
+    public void Mode_Should_Default_To_Cdn()
+    {
+        var command = CreateCommand("http://localhost:5001", null, null);
+
+        Assert.Equal(ExportMode.Cdn, command.Mode);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_Should_Export_When_Url_Source_Is_Provided()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
