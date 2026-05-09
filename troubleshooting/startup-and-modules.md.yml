@@ -1,0 +1,19 @@
+title: Troubleshoot Startup and Modules
+summary: Diagnose first-run module registration, dependency, configuration, route, static asset, docs surface, and package-choice failures.
+page_type: troubleshooting
+nav_group: Troubleshooting
+order: 10
+aliases:
+  - module did not run
+  - dependency module
+  - config failed
+  - wrong package
+keywords:
+  - StartupContext
+  - IRunnableModule
+  - dependency
+  - configuration
+related_pages:
+  - examples/config-validation/README.md
+  - ForgeTrust.Runnable.Core/README.md
+  - packages/README.md

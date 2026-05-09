@@ -1,0 +1,18 @@
+title: Runnable Glossary
+summary: Define the core Runnable terms used by package docs, examples, and the evaluator path.
+page_type: glossary
+nav_group: Concepts
+order: 40
+aliases:
+  - RunnableStartup
+  - root module
+  - StartupContext
+  - host module
+keywords:
+  - IRunnableModule
+  - IRunnableHostModule
+  - WebApp
+  - package chooser
+related_pages:
+  - ForgeTrust.Runnable.Core/README.md
+  - Web/ForgeTrust.Runnable.Web/README.md

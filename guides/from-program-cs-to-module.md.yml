@@ -1,0 +1,20 @@
+title: From Program.cs to a Runnable Module
+summary: See browser status pages and production error pages move from local startup policy to a named Runnable Web behavior contract.
+page_type: guide
+nav_group: How-to Guides
+sequence_key: runnable-evaluator
+order: 40
+aliases:
+  - Program.cs
+  - error pages
+  - status pages
+  - module extraction
+keywords:
+  - UseConventionalBrowserStatusPages
+  - UseConventionalExceptionPage
+  - WebOptions.Errors
+  - BrowserStatusPageMode
+related_pages:
+  - Web/ForgeTrust.Runnable.Web/README.md
+  - ForgeTrust.Runnable.Core/README.md
+  - start-here/should-i-use-runnable.md
