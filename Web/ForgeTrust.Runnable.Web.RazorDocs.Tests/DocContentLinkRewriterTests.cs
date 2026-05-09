@@ -318,6 +318,58 @@ public sealed class DocContentLinkRewriterTests
     }
 
     [Fact]
+    public void PrefixPathBaseForDocsUrls_ShouldPrefixCustomRouteRootArchiveAndExactLinks()
+    {
+        var html = """
+            <p>
+              <a href="/foo/bar/next/guides/quickstart">Preview guide</a>
+              <a href="/foo/bar">Stable docs</a>
+              <a href="/foo/bar/versions">Archive</a>
+              <a href="/foo/bar/v/1.2.3/guides/quickstart">Exact release</a>
+              <a href="/privacy.html">Privacy</a>
+            </p>
+            """;
+
+        var rewritten = DocContentLinkRewriter.PrefixPathBaseForDocsUrls(
+            html,
+            "/foo/bar/next",
+            "/some-base",
+            "/foo/bar");
+
+        Assert.Contains("href=\"/some-base/foo/bar/next/guides/quickstart\"", rewritten);
+        Assert.Contains("href=\"/some-base/foo/bar\"", rewritten);
+        Assert.Contains("href=\"/some-base/foo/bar/versions\"", rewritten);
+        Assert.Contains("href=\"/some-base/foo/bar/v/1.2.3/guides/quickstart\"", rewritten);
+        Assert.Contains("href=\"/privacy.html\"", rewritten);
+    }
+
+    [Fact]
+    public void PrefixPathBaseForDocsUrls_ShouldPrefixRootMountedStableRoutes_WhenLiveDocsRootIsChild()
+    {
+        var html = """
+            <p>
+              <a href="/next/guides/quickstart">Preview guide</a>
+              <a href="/">Stable docs</a>
+              <a href="/versions">Archive</a>
+              <a href="/v/1.2.3/guides/quickstart">Exact release</a>
+              <a href="/privacy.html">Privacy</a>
+            </p>
+            """;
+
+        var rewritten = DocContentLinkRewriter.PrefixPathBaseForDocsUrls(
+            html,
+            "/next",
+            "/some-base",
+            "/");
+
+        Assert.Contains("href=\"/some-base/next/guides/quickstart\"", rewritten);
+        Assert.Contains("href=\"/some-base/\"", rewritten);
+        Assert.Contains("href=\"/some-base/versions\"", rewritten);
+        Assert.Contains("href=\"/some-base/v/1.2.3/guides/quickstart\"", rewritten);
+        Assert.Contains("href=\"/privacy.html\"", rewritten);
+    }
+
+    [Fact]
     public void PrefixPathBaseForDocsUrls_ShouldLeaveHtmlUnchanged_WhenPathBaseIsMissing()
     {
         var html = "<p><a href=\"/docs/guides/quickstart\">Quickstart</a></p>";

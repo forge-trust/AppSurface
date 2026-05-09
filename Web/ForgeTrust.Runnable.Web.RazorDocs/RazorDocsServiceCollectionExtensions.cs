@@ -29,13 +29,26 @@ public static class RazorDocsServiceCollectionExtensions
     /// <para>
     /// During post-configuration this method rehydrates null nested option blocks with defaults, trims nullable string
     /// settings such as repository roots and contributor URL templates, normalizes
+    /// <see cref="RazorDocsRoutingOptions.RouteRootPath"/> and
     /// <see cref="RazorDocsRoutingOptions.DocsRootPath"/> through
+    /// <see cref="DocsUrlBuilder.NormalizeRouteRootPath(string?, string, bool)"/> and
     /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/>, trims
     /// <see cref="RazorDocsVersioningOptions.CatalogPath"/>, and removes blank or duplicate sidebar namespace
     /// prefixes. Callers that omit <see cref="RazorDocsOptions.Routing"/> or
     /// <see cref="RazorDocsOptions.Versioning"/> can therefore still rely on a fully populated options object after
     /// registration. When <see cref="RazorDocsHarvestOptions.FailOnFailure"/> is enabled, the registered startup
     /// preflight fails the host only when the aggregate harvest health is failed.
+    /// </para>
+    /// <para>
+    /// When <see cref="RazorDocsRoutingOptions.DocsRootPath"/> is omitted or whitespace, the live docs root is derived
+    /// from the normalized <see cref="RazorDocsRoutingOptions.RouteRootPath"/> through
+    /// <see cref="DocsUrlBuilder.ResolveDefaultDocsRootPath(string, bool)"/>. For example,
+    /// <c>RazorDocs:Routing:RouteRootPath=/foo/bar</c> with versioning enabled produces <c>/foo/bar/next</c> as the
+    /// default live root. Callers that set both <see cref="RazorDocsRoutingOptions.RouteRootPath"/> and
+    /// <see cref="RazorDocsRoutingOptions.DocsRootPath"/> should keep the pair coherent so stable entry, archive,
+    /// exact-version, and live preview routes compose predictably after
+    /// <see cref="DocsUrlBuilder.NormalizeRouteRootPath(string?, string, bool)"/> and
+    /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/> run.
     /// </para>
     /// <para>
     /// The method also registers <see cref="DocsUrlBuilder"/> and <see cref="RazorDocsVersionCatalogService"/> as
@@ -74,9 +87,17 @@ public static class RazorDocsServiceCollectionExtensions
                     options.Contributor.DefaultBranch = NormalizeOrNull(options.Contributor.DefaultBranch);
                     options.Contributor.SourceUrlTemplate = NormalizeOrNull(options.Contributor.SourceUrlTemplate);
                     options.Contributor.EditUrlTemplate = NormalizeOrNull(options.Contributor.EditUrlTemplate);
-                    options.Routing.DocsRootPath = DocsUrlBuilder.NormalizeDocsRootPath(
-                        options.Routing.DocsRootPath,
+                    var configuredDocsRootPath = options.Routing.DocsRootPath;
+                    var normalizedDocsRootPath = DocsUrlBuilder.NormalizeDocsRootPath(
+                        configuredDocsRootPath,
                         options.Versioning.Enabled);
+                    options.Routing.RouteRootPath = DocsUrlBuilder.NormalizeRouteRootPath(
+                        options.Routing.RouteRootPath,
+                        normalizedDocsRootPath,
+                        options.Versioning.Enabled);
+                    options.Routing.DocsRootPath = string.IsNullOrWhiteSpace(configuredDocsRootPath)
+                        ? DocsUrlBuilder.ResolveDefaultDocsRootPath(options.Routing.RouteRootPath, options.Versioning.Enabled)
+                        : normalizedDocsRootPath;
                     options.Versioning.CatalogPath = NormalizeOrNull(options.Versioning.CatalogPath);
                     options.Contributor.SymbolSourceUrlTemplate = NormalizeOrNull(options.Contributor.SymbolSourceUrlTemplate);
                     options.Contributor.SourceRef = NormalizeOrNull(options.Contributor.SourceRef);
@@ -116,4 +137,5 @@ public static class RazorDocsServiceCollectionExtensions
 
         return value.Trim();
     }
+
 }

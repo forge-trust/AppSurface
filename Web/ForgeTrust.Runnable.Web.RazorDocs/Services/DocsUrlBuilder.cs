@@ -3,13 +3,14 @@ using ForgeTrust.Runnable.Web.RazorDocs.Models;
 namespace ForgeTrust.Runnable.Web.RazorDocs.Services;
 
 /// <summary>
-/// Builds canonical RazorDocs URLs for the live source-backed docs surface and the version archive shell.
+/// Builds canonical RazorDocs URLs for one RazorDocs route family.
 /// </summary>
 /// <remarks>
 /// This builder centralizes the route contract so controllers, view components, views, and client scripts do not
-/// each guess how the current docs surface is rooted. The live source-backed docs surface moves between
-/// <c>/docs</c> and <c>/docs/next</c> depending on versioning settings, while historical versions always live under
-/// <c>/docs/v/{version}</c> and the public archive stays at <c>/docs/versions</c>.
+/// each guess how the docs surface is rooted. <see cref="RouteRootPath"/> is the stable route-family root used for
+/// archive and exact-version routes. <see cref="CurrentDocsRootPath"/> is the live source-backed docs root used for
+/// current docs, search, and current search-index routes. Most consumers should copy <see cref="Routes"/> rather than
+/// assembling route strings or calling lower-level builder methods directly.
 /// </remarks>
 public sealed class DocsUrlBuilder
 {
@@ -29,16 +30,29 @@ public sealed class DocsUrlBuilder
     public const string DocsVersionsPath = "/docs/versions";
 
     private readonly string _currentDocsRootPath;
+    private readonly string _routeRootPath;
+    private readonly string _docsVersionPrefixPath;
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocsUrlBuilder"/> from typed RazorDocs options.
     /// </summary>
-    /// <param name="options">Typed RazorDocs options that provide the normalized current docs root path.</param>
+    /// <param name="options">Typed RazorDocs options that provide the normalized route root and current docs root paths.</param>
     public DocsUrlBuilder(RazorDocsOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         VersioningEnabled = options.Versioning?.Enabled == true;
-        _currentDocsRootPath = NormalizeDocsRootPath(options.Routing?.DocsRootPath, VersioningEnabled);
+        var normalizedDocsRootPath = NormalizeDocsRootPath(options.Routing?.DocsRootPath, VersioningEnabled);
+        _routeRootPath = NormalizeRouteRootPath(options.Routing?.RouteRootPath, normalizedDocsRootPath, VersioningEnabled);
+        _currentDocsRootPath = string.IsNullOrWhiteSpace(options.Routing?.DocsRootPath)
+            ? ResolveDefaultDocsRootPath(_routeRootPath, VersioningEnabled)
+            : normalizedDocsRootPath;
+        _docsVersionPrefixPath = JoinPath(_routeRootPath, "v");
+        Routes = new RazorDocsRouteReferences(
+            BuildHomeUrl(),
+            BuildSearchUrl(),
+            BuildSearchIndexUrl(),
+            BuildSearchIndexRefreshUrl(),
+            BuildVersionsUrl());
     }
 
     /// <summary>
@@ -52,14 +66,36 @@ public sealed class DocsUrlBuilder
     public string CurrentDocsRootPath => _currentDocsRootPath;
 
     /// <summary>
-    /// Gets the docs entry path used as the stable public landing alias.
+    /// Gets the stable route-family root for this RazorDocs instance.
     /// </summary>
-    public string DocsEntryRootPath => DocsEntryPath;
+    /// <remarks>
+    /// The route root is the parent for the stable entry alias, version archive, and exact-version release trees. It is
+    /// the same as <see cref="CurrentDocsRootPath"/> when versioning is disabled, and commonly the parent of the live
+    /// preview root when versioning is enabled. For example, <c>RouteRootPath=/foo/bar</c> with
+    /// <c>DocsRootPath=/foo/bar/next</c> keeps the archive at <c>/foo/bar/versions</c> while the live preview stays at
+    /// <c>/foo/bar/next</c>.
+    /// </remarks>
+    public string RouteRootPath => _routeRootPath;
 
     /// <summary>
-    /// Gets the stable archive path.
+    /// Gets the docs entry path used as the stable public landing alias.
     /// </summary>
-    public string DocsVersionsRootPath => DocsVersionsPath;
+    public string DocsEntryRootPath => _routeRootPath;
+
+    /// <summary>
+    /// Gets the stable exact-version prefix for this route family.
+    /// </summary>
+    public string DocsVersionPrefixPath => _docsVersionPrefixPath;
+
+    /// <summary>
+    /// Gets the stable archive path for this route family.
+    /// </summary>
+    public string DocsVersionsRootPath => BuildVersionsUrl();
+
+    /// <summary>
+    /// Gets named RazorDocs routes that consumers should prefer over hardcoded route strings.
+    /// </summary>
+    public RazorDocsRouteReferences Routes { get; }
 
     /// <summary>
     /// Builds the current live docs home URL.
@@ -86,6 +122,15 @@ public sealed class DocsUrlBuilder
     public string BuildSearchIndexUrl()
     {
         return JoinPath(_currentDocsRootPath, "search-index.json");
+    }
+
+    /// <summary>
+    /// Builds the current live docs search-index refresh URL.
+    /// </summary>
+    /// <returns>The app-relative authenticated refresh URL for the current docs search index.</returns>
+    public string BuildSearchIndexRefreshUrl()
+    {
+        return BuildSearchIndexUrl() + "?refresh=1";
     }
 
     /// <summary>
@@ -127,7 +172,7 @@ public sealed class DocsUrlBuilder
     public string BuildVersionRootUrl(string version)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
-        return $"{DocsVersionPrefix}/{Uri.EscapeDataString(version.Trim())}";
+        return $"{_docsVersionPrefixPath}/{Uri.EscapeDataString(version.Trim())}";
     }
 
     /// <summary>
@@ -147,7 +192,7 @@ public sealed class DocsUrlBuilder
     /// <returns>The stable archive URL.</returns>
     public string BuildVersionsUrl()
     {
-        return DocsVersionsPath;
+        return JoinPath(_routeRootPath, "versions");
     }
 
     /// <summary>
@@ -299,4 +344,53 @@ public sealed class DocsUrlBuilder
         normalized = normalized.TrimEnd('/');
         return string.IsNullOrEmpty(normalized) ? "/" : normalized;
     }
+
+    /// <summary>
+    /// Normalizes a configured route-family root into the app-relative route contract RazorDocs uses at runtime.
+    /// </summary>
+    /// <param name="routeRootPath">The configured route root, which may be null, relative-looking, or already normalized.</param>
+    /// <param name="docsRootPath">The normalized live docs root used when versioning is disabled and no route root is configured.</param>
+    /// <param name="versioningEnabled">Whether versioning is enabled and the default route family should remain <c>/docs</c>.</param>
+    /// <returns>The normalized app-relative route-family root path.</returns>
+    internal static string NormalizeRouteRootPath(string? routeRootPath, string docsRootPath, bool versioningEnabled)
+    {
+        if (string.IsNullOrWhiteSpace(routeRootPath))
+        {
+            return versioningEnabled ? DocsEntryPath : docsRootPath;
+        }
+
+        var normalized = routeRootPath.Trim();
+        if (!normalized.StartsWith('/'))
+        {
+            normalized = "/" + normalized;
+        }
+
+        normalized = normalized.TrimEnd('/');
+        return string.IsNullOrEmpty(normalized) ? "/" : normalized;
+    }
+
+    internal static string ResolveDefaultDocsRootPath(string routeRootPath, bool versioningEnabled)
+    {
+        return versioningEnabled ? JoinPath(routeRootPath, "next") : routeRootPath;
+    }
 }
+
+/// <summary>
+/// Named RazorDocs routes for one configured route family.
+/// </summary>
+/// <param name="Home">The current live docs home route.</param>
+/// <param name="Search">The current live docs search workspace route.</param>
+/// <param name="SearchIndex">The current live docs search-index JSON route.</param>
+/// <param name="SearchIndexRefresh">The authenticated search-index refresh route.</param>
+/// <param name="Versions">The route-family archive route, whether or not versioning endpoints are currently enabled.</param>
+/// <remarks>
+/// Consumers should prefer this record when they need well-known RazorDocs destinations in host code, operator guidance,
+/// generated configuration, or documentation. The values are app-relative. Views and other presentation boundaries apply
+/// request <c>PathBase</c> separately before sending browser-facing URLs.
+/// </remarks>
+public sealed record RazorDocsRouteReferences(
+    string Home,
+    string Search,
+    string SearchIndex,
+    string SearchIndexRefresh,
+    string Versions);

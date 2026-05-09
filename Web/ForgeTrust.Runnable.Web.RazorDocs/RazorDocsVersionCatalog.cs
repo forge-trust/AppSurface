@@ -12,7 +12,7 @@ namespace ForgeTrust.Runnable.Web.RazorDocs;
 public sealed class RazorDocsVersionCatalog
 {
     /// <summary>
-    /// Gets or sets the exact version that should also be exposed through the stable <c>/docs</c> alias.
+    /// Gets or sets the exact version that should also be exposed through the configured route-family root alias.
     /// </summary>
     public string? RecommendedVersion { get; set; }
 
@@ -46,10 +46,10 @@ public sealed class RazorDocsPublishedVersion
     /// Gets or sets the path to the exported exact-version docs subtree.
     /// </summary>
     /// <remarks>
-    /// The directory should contain the static files exported from the stable <c>/docs</c> surface for one exact
-    /// release, such as <c>index.html</c>, <c>search-index.json</c>, section routes, and detail pages. RazorDocs can
-    /// then mount that same artifact at either <c>/docs</c> or <c>/docs/v/{version}</c> by rebasing stable-root
-    /// links at response time. Relative paths resolve from the directory containing the version catalog file.
+    /// The directory should contain the static files exported from the stable docs surface for one exact release, such as
+    /// <c>index.html</c>, <c>search-index.json</c>, section routes, and detail pages. RazorDocs can then mount that same
+    /// artifact at either <c>RouteRootPath</c> or <c>{RouteRootPath}/v/{version}</c> by rebasing stable-root links at
+    /// response time. Relative paths resolve from the directory containing the version catalog file.
     /// </remarks>
     public string? ExactTreePath { get; set; }
 

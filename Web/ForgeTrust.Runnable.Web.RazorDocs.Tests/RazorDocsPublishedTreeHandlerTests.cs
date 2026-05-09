@@ -240,6 +240,39 @@ public sealed class RazorDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldBypassStableAliasForCustomRouteRootReservedPaths()
+    {
+        var tree = CreatePublishedTree("custom-route-release");
+        var handler = CreateHandler(
+            tree,
+            "/foo/bar",
+            previewRootPath: "/foo/bar/next",
+            routeRootPath: "/foo/bar");
+
+        var previewRequest = CreateContext(HttpMethods.Get, "/foo/bar/next/search.css");
+        var archiveRequest = CreateContext(HttpMethods.Get, "/foo/bar/versions");
+        var reservedVersionPrefixRequest = CreateContext(HttpMethods.Get, "/foo/bar/v");
+        var reservedVersionRequest = CreateContext(HttpMethods.Get, "/foo/bar/v/1.2.3");
+
+        Assert.False(await handler.TryHandleAsync(previewRequest));
+        Assert.False(await handler.TryHandleAsync(archiveRequest));
+        Assert.False(await handler.TryHandleAsync(reservedVersionPrefixRequest));
+        Assert.False(await handler.TryHandleAsync(reservedVersionRequest));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldServeRootMountedPublishedTreeChildren()
+    {
+        var tree = CreatePublishedTree("root-mounted-release");
+        var handler = CreateHandler(tree, "/", previewRootPath: "/next", routeRootPath: "/");
+        var request = CreateContext(HttpMethods.Get, "/guide");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal("text/html", request.Response.ContentType);
+        Assert.Contains("guide-index", ReadBody(request));
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldPreserveConfiguredPreviewRoot_WhenRewritingMountedHtml()
     {
         var tree = CreatePublishedTree("custom-preview-root");
@@ -471,18 +504,24 @@ public sealed class RazorDocsPublishedTreeHandlerTests : IDisposable
         }
     }
 
-    private RazorDocsPublishedTreeHandler CreateHandler(string treePath, string mountRootPath, string previewRootPath = "/docs/next")
+    private RazorDocsPublishedTreeHandler CreateHandler(
+        string treePath,
+        string mountRootPath,
+        string previewRootPath = "/docs/next",
+        string routeRootPath = DocsUrlBuilder.DocsEntryPath)
     {
         return CreateHandler(
             [new RazorDocsPublishedTreeMount(mountRootPath, new PhysicalFileProvider(treePath))],
-            previewRootPath);
+            previewRootPath,
+            routeRootPath);
     }
 
     private RazorDocsPublishedTreeHandler CreateHandler(
         IReadOnlyList<RazorDocsPublishedTreeMount> mounts,
-        string previewRootPath = "/docs/next")
+        string previewRootPath = "/docs/next",
+        string routeRootPath = DocsUrlBuilder.DocsEntryPath)
     {
-        return new RazorDocsPublishedTreeHandler(mounts, previewRootPath);
+        return new RazorDocsPublishedTreeHandler(mounts, previewRootPath, routeRootPath);
     }
 
     private string CreatePublishedTree(string name)

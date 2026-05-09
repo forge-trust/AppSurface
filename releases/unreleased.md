@@ -85,10 +85,12 @@ Runnable is putting the release contract in place before `v0.1.0`. This slice is
 
 - Runnable's own release pages now double as a working RazorDocs example for consumers who want better release notes.
 - RazorDocs now supports a static-first versioned docs surface: `/docs` can point at the recommended released tree, `/docs/next` can stay on the live preview, `/docs/v/{version}` can serve exact historical releases, and `/docs/versions` can act as the public archive.
+- RazorDocs route families can now be mounted away from `/docs` with `RazorDocs:Routing:RouteRootPath`, so consumers can host docs under paths such as `/foo/bar` while archive, exact-version, search, metadata, and static export URLs stay aligned.
 - Published RazorDocs release trees are now catalog-driven and validated before they are mounted, so broken historical exports stay unavailable instead of half-rendering with cross-version search or asset leakage.
 - RazorDocs pages can now expose typed `On this page` outlines, explicit proof-path previous/next links, related-page cards, and sidebar anchor navigation from harvested metadata instead of scraping rendered HTML.
 - RazorDocs details pages now render those `On this page` outlines as a page-local navigation surface, using a sticky desktop rail, a compact narrow-viewport drawer, and active-section state that keeps the reader oriented without competing with the global sidebar.
 - RazorDocs details pages now emit the outline client as a normal deferred script asset, so static exports publish `/docs/outline-client.js` through the existing asset crawler instead of depending on an inline loader.
+- RazorDocs detail-page outlines now keep long-section active states and the desktop right rail aligned, including the full-height rail rule, active-item visibility on long pages, and animated section jumps.
 - Public docs navigation now groups pages by intent-first sections, preserves authored editorial breadcrumbs, and keeps Start Here recovery links hidden when that section is unavailable.
 - RazorDocs landing curation now uses `featured_page_groups`, so root and section landing pages can organize next-step links by reader intent instead of rendering one flat list.
 - RazorDocs now exposes structured harvest health through `DocAggregator.GetHarvestHealthAsync(...)`, letting hosts distinguish healthy, valid-empty, degraded, and all-failed source-backed docs snapshots while keeping raw exception details in logs.
