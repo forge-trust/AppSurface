@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Primitives;
@@ -2277,6 +2278,136 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestHealthJson_ShouldReturnOkTrueAndNoStore_WhenHarvestIsHealthy()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+        var (controller, cache, memo) = CreateController(new RazorDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
+            var response = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Value);
+
+            Assert.Equal(StatusCodes.Status200OK, result.StatusCode);
+            Assert.True(response.Verification.Ok);
+            Assert.Equal("Healthy", response.Status);
+            Assert.Equal("no-store, no-cache", controller.Response.Headers.CacheControl.ToString());
+        }
+    }
+
+    [Fact]
+    public async Task HarvestHealthJson_ShouldTreatEmptyHarvestAsOk()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([]);
+        var (controller, cache, memo) = CreateController(new RazorDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
+            var response = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Value);
+
+            Assert.Equal(StatusCodes.Status200OK, result.StatusCode);
+            Assert.True(response.Verification.Ok);
+            Assert.Equal("Empty", response.Status);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestHealthJson_ShouldReturnServiceUnavailableAndRedactedResponse_WhenHarvestFails()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new InvalidOperationException("boom at /tmp/secret/root"));
+        var options = new RazorDocsOptions
+        {
+            Source = new RazorDocsSourceOptions
+            {
+                RepositoryRoot = "/tmp/secret/root"
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
+            var response = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Value);
+            var serialized = JsonSerializer.Serialize(response);
+
+            Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
+            Assert.False(response.Verification.Ok);
+            Assert.Equal("Failed", response.Status);
+            Assert.DoesNotContain("RepositoryRoot", serialized, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("/tmp/secret/root", serialized, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Cause", serialized, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("boom", serialized, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestHealthJson_ShouldReturnServiceUnavailable_WhenHarvestIsDegraded()
+    {
+        var failingHarvester = A.Fake<IDocHarvester>();
+        var workingHarvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => failingHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new InvalidOperationException("boom"));
+        A.CallTo(() => workingHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Recovered", "recovered.md", "<p>Recovered</p>")]);
+        var (controller, cache, memo) = CreateController(new RazorDocsOptions(), [failingHarvester, workingHarvester]);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
+            var response = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Value);
+
+            Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
+            Assert.False(response.Verification.Ok);
+            Assert.Equal("Degraded", response.Status);
+            Assert.Equal(1, response.SuccessfulHarvesters);
+            Assert.Equal(1, response.FailedHarvesters);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestHealth_ShouldRenderViewWithServiceUnavailableStatus_WhenHarvestFails()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new InvalidOperationException("boom"));
+        var (controller, cache, memo) = CreateController(new RazorDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<ViewResult>(await controller.HarvestHealth());
+            var model = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Model);
+
+            Assert.Equal("HarvestHealth", result.ViewName);
+            Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
+            Assert.False(model.Verification.Ok);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestHealthJson_ShouldReturnNotFound_WhenRoutesAreNotExposedForEnvironment()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+        var options = new RazorDocsOptions();
+        var (controller, cache, memo) = CreateController(options, harvester, Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var result = await controller.HarvestHealthJson();
+
+            Assert.IsType<NotFoundResult>(result);
+        }
+    }
+
+    [Fact]
     public async Task SearchIndex_ShouldRefreshCache_WhenAuthenticatedRefreshRequested()
     {
         var docs = new List<DocNode>
@@ -2897,6 +3028,22 @@ public class DocsControllerTests : IDisposable
         RazorDocsOptions options,
         IDocHarvester harvester)
     {
+        return CreateController(options, [harvester]);
+    }
+
+    private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(
+        RazorDocsOptions options,
+        IDocHarvester harvester,
+        string environmentName)
+    {
+        return CreateController(options, [harvester], environmentName);
+    }
+
+    private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(
+        RazorDocsOptions options,
+        IReadOnlyList<IDocHarvester> harvesters,
+        string? environmentName = null)
+    {
         var cache = new MemoryCache(new MemoryCacheOptions());
         var memo = new Memo(cache);
         var environment = A.Fake<IWebHostEnvironment>();
@@ -2905,10 +3052,11 @@ public class DocsControllerTests : IDisposable
         var controllerLogger = A.Fake<ILogger<DocsController>>();
 
         A.CallTo(() => environment.ContentRootPath).Returns(Path.GetTempPath());
+        A.CallTo(() => environment.EnvironmentName).Returns(environmentName ?? Environments.Development);
         A.CallTo(() => sanitizer.Sanitize(A<string>._)).ReturnsLazily((string input) => input);
 
         var aggregator = new DocAggregator(
-            [harvester],
+            harvesters,
             options,
             environment,
             memo,
@@ -2917,7 +3065,14 @@ public class DocsControllerTests : IDisposable
         var docsUrlBuilder = new DocsUrlBuilder(options);
         var versionCatalogService = CreateDefaultVersionCatalogService(options);
 
-        var controller = new DocsController(aggregator, docsUrlBuilder, versionCatalogService, controllerLogger)
+        var controller = new DocsController(
+            aggregator,
+            docsUrlBuilder,
+            versionCatalogService,
+            new DocFeaturedPageResolver(_featuredPageResolverLoggerFake, docsUrlBuilder),
+            options,
+            environment,
+            controllerLogger)
         {
             ControllerContext = CreateControllerContext(new DefaultHttpContext())
         };

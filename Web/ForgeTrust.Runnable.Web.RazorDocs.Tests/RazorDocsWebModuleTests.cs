@@ -176,6 +176,7 @@ public class RazorDocsWebModuleTests
         var context = CreateStartupContext();
         var builder = WebApplication.CreateBuilder();
         builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
         using var app = builder.Build();
         var routeBuilder = (IEndpointRouteBuilder)app;
 
@@ -191,6 +192,8 @@ public class RazorDocsWebModuleTests
         Assert.Contains("docs", routePatterns);
         Assert.Contains("docs/search", routePatterns);
         Assert.Contains("docs/search-index.json", routePatterns);
+        Assert.Contains("docs/_health", routePatterns);
+        Assert.Contains("docs/_health.json", routePatterns);
         Assert.Contains("docs/{*path}", routePatterns);
         Assert.Contains("{controller=Docs}/{action=Index}/{path?}", routePatterns);
 
@@ -204,10 +207,83 @@ public class RazorDocsWebModuleTests
             .ToList();
 
         var searchIndex = prioritizedPatterns.IndexOf("docs/search");
+        var healthIndex = prioritizedPatterns.IndexOf("docs/_health");
+        var healthJsonIndex = prioritizedPatterns.IndexOf("docs/_health.json");
         var catchAllIndex = prioritizedPatterns.IndexOf("docs/{*path}");
         Assert.True(searchIndex >= 0, "Expected docs/search route declaration.");
+        Assert.True(healthIndex >= 0, "Expected docs/_health route declaration.");
+        Assert.True(healthJsonIndex >= 0, "Expected docs/_health.json route declaration.");
         Assert.True(catchAllIndex >= 0, "Expected docs/{*path} route declaration.");
         Assert.True(searchIndex < catchAllIndex, "docs/search must be prioritized before docs/{*path}.");
+        Assert.True(healthIndex < catchAllIndex, "docs/_health must be prioritized before docs/{*path}.");
+        Assert.True(healthJsonIndex < catchAllIndex, "docs/_health.json must be prioritized before docs/{*path}.");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotMapHealthRoutes_InProductionByDefault()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(
+            new TestWebHostEnvironment
+            {
+                EnvironmentName = Environments.Production
+            });
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var routePatterns = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .Where(pattern => !string.IsNullOrEmpty(pattern))
+            .ToList();
+
+        Assert.DoesNotContain("docs/_health", routePatterns);
+        Assert.DoesNotContain("docs/_health.json", routePatterns);
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldMapHealthRoutes_InProductionWhenExplicitlyEnabled()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(
+            new TestWebHostEnvironment
+            {
+                EnvironmentName = Environments.Production
+            });
+        var options = new RazorDocsOptions
+        {
+            Harvest = new RazorDocsHarvestOptions
+            {
+                Health = new RazorDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = RazorDocsHarvestHealthExposure.Always
+                }
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<RazorDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var routePatterns = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .Where(pattern => !string.IsNullOrEmpty(pattern))
+            .ToList();
+
+        Assert.Contains("docs/_health", routePatterns);
+        Assert.Contains("docs/_health.json", routePatterns);
     }
 
     [Fact]
@@ -216,6 +292,7 @@ public class RazorDocsWebModuleTests
         var context = CreateStartupContext();
         var builder = WebApplication.CreateBuilder();
         builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
         var options = new RazorDocsOptions
         {
             Routing = new RazorDocsRoutingOptions
@@ -248,6 +325,8 @@ public class RazorDocsWebModuleTests
         Assert.Contains("docs/next", routePatterns);
         Assert.Contains("docs/next/search", routePatterns);
         Assert.Contains("docs/next/search-index.json", routePatterns);
+        Assert.Contains("docs/next/_health", routePatterns);
+        Assert.Contains("docs/next/_health.json", routePatterns);
         Assert.Contains("docs/next/{*path}", routePatterns);
     }
 
@@ -257,6 +336,7 @@ public class RazorDocsWebModuleTests
         var context = CreateStartupContext();
         var builder = WebApplication.CreateBuilder();
         builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
         var options = new RazorDocsOptions
         {
             Routing = new RazorDocsRoutingOptions
@@ -281,6 +361,8 @@ public class RazorDocsWebModuleTests
 
         Assert.Contains("search", routePatterns);
         Assert.Contains("search-index.json", routePatterns);
+        Assert.Contains("_health", routePatterns);
+        Assert.Contains("_health.json", routePatterns);
         Assert.Contains("sections/{sectionSlug}", routePatterns);
         Assert.Contains("{*path}", routePatterns);
         Assert.DoesNotContain("/sections/{sectionSlug}", routePatterns);

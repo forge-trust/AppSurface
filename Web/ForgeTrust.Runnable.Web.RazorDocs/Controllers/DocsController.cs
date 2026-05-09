@@ -29,6 +29,8 @@ public class DocsController : Controller
     private readonly DocsUrlBuilder _docsUrlBuilder;
     private readonly RazorDocsVersionCatalogService _versionCatalogService;
     private readonly DocFeaturedPageResolver _featuredPageResolver;
+    private readonly RazorDocsOptions _options;
+    private readonly IWebHostEnvironment _environment;
     private readonly ILogger<DocsController> _logger;
 
     /// <summary>
@@ -52,6 +54,8 @@ public class DocsController : Controller
             new DocFeaturedPageResolver(
                 NullLogger<DocFeaturedPageResolver>.Instance,
                 new DocsUrlBuilder(new RazorDocsOptions())),
+            new RazorDocsOptions(),
+            new DefaultWebHostEnvironment(),
             logger)
     {
     }
@@ -79,6 +83,8 @@ public class DocsController : Controller
             new DocsUrlBuilder(new RazorDocsOptions()),
             CreateDefaultVersionCatalogService(),
             featuredPageResolver,
+            new RazorDocsOptions(),
+            new DefaultWebHostEnvironment(),
             logger)
     {
     }
@@ -100,6 +106,8 @@ public class DocsController : Controller
             docsUrlBuilder,
             versionCatalogService,
             new DocFeaturedPageResolver(NullLogger<DocFeaturedPageResolver>.Instance, docsUrlBuilder),
+            new RazorDocsOptions(),
+            new DefaultWebHostEnvironment(),
             logger)
     {
     }
@@ -111,6 +119,8 @@ public class DocsController : Controller
     /// <param name="docsUrlBuilder">Shared URL builder for the live source-backed docs surface.</param>
     /// <param name="versionCatalogService">Resolved catalog service for published docs versions.</param>
     /// <param name="featuredPageResolver">Service used to resolve grouped landing curation metadata.</param>
+    /// <param name="options">Typed RazorDocs options used for operator health visibility.</param>
+    /// <param name="environment">Host environment used for development-default health visibility.</param>
     /// <param name="logger">Logger used for search index diagnostics.</param>
     [ActivatorUtilitiesConstructor]
     public DocsController(
@@ -118,12 +128,16 @@ public class DocsController : Controller
         DocsUrlBuilder docsUrlBuilder,
         RazorDocsVersionCatalogService versionCatalogService,
         DocFeaturedPageResolver featuredPageResolver,
+        RazorDocsOptions options,
+        IWebHostEnvironment environment,
         ILogger<DocsController> logger)
     {
         _aggregator = aggregator ?? throw new ArgumentNullException(nameof(aggregator));
         _docsUrlBuilder = docsUrlBuilder ?? throw new ArgumentNullException(nameof(docsUrlBuilder));
         _versionCatalogService = versionCatalogService ?? throw new ArgumentNullException(nameof(versionCatalogService));
         _featuredPageResolver = featuredPageResolver ?? throw new ArgumentNullException(nameof(featuredPageResolver));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -371,6 +385,57 @@ public class DocsController : Controller
     }
 
     /// <summary>
+    /// Displays the redacted operator-facing harvest health page for the current live docs surface.
+    /// </summary>
+    /// <returns>
+    /// A health page when health routes are exposed for the current environment; otherwise <see cref="NotFoundResult"/>.
+    /// Healthy and empty snapshots return HTTP 200. Degraded and failed snapshots render the same page with HTTP 503 so
+    /// local verification and CI checks can fail quickly.
+    /// </returns>
+    [HttpGet]
+    public async Task<IActionResult> HarvestHealth()
+    {
+        if (!RazorDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
+        {
+            return NotFound();
+        }
+
+        SetNoStoreCacheControl();
+        var response = await BuildHarvestHealthResponseAsync();
+        ViewData["Title"] = "Harvest Health";
+
+        var result = View("HarvestHealth", response);
+        result.StatusCode = response.Verification.HttpStatusCode;
+        return result;
+    }
+
+    /// <summary>
+    /// Returns redacted machine-readable harvest health for the current live docs surface.
+    /// </summary>
+    /// <returns>
+    /// A JSON health response when health routes are exposed for the current environment; otherwise
+    /// <see cref="NotFoundResult"/>. Healthy and empty snapshots return HTTP 200 with
+    /// <c>verification.ok=true</c>. Degraded and failed snapshots return HTTP 503 with
+    /// <c>verification.ok=false</c>.
+    /// </returns>
+    [HttpGet]
+    public async Task<IActionResult> HarvestHealthJson()
+    {
+        if (!RazorDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
+        {
+            return NotFound();
+        }
+
+        SetNoStoreCacheControl();
+        var response = await BuildHarvestHealthResponseAsync();
+
+        return new JsonResult(response)
+        {
+            StatusCode = response.Verification.HttpStatusCode
+        };
+    }
+
+    /// <summary>
     /// Determines whether the search index cache should be refreshed based on the presence of a "refresh" query parameter.
     /// </summary>
     /// <param name="query">The collection of query parameters from the HTTP request.</param>
@@ -394,6 +459,17 @@ public class DocsController : Controller
     internal bool CanRefreshCache()
     {
         return User?.Identity?.IsAuthenticated == true;
+    }
+
+    private async Task<RazorDocsHarvestHealthResponse> BuildHarvestHealthResponseAsync()
+    {
+        var health = await _aggregator.GetHarvestHealthAsync(HttpContext.RequestAborted);
+        return RazorDocsHarvestHealthResponse.FromSnapshot(health);
+    }
+
+    private void SetNoStoreCacheControl()
+    {
+        Response.Headers.CacheControl = "no-store, no-cache";
     }
 
     /// <summary>

@@ -47,12 +47,16 @@ public sealed class DocsUrlBuilder
             ? ResolveDefaultDocsRootPath(_routeRootPath, VersioningEnabled)
             : normalizedDocsRootPath;
         _docsVersionPrefixPath = JoinPath(_routeRootPath, "v");
-        Routes = new RazorDocsRouteReferences(
-            BuildHomeUrl(),
-            BuildSearchUrl(),
-            BuildSearchIndexUrl(),
-            BuildSearchIndexRefreshUrl(),
-            BuildVersionsUrl());
+        Routes = new RazorDocsRouteReferences
+        {
+            Home = BuildHomeUrl(),
+            Search = BuildSearchUrl(),
+            SearchIndex = BuildSearchIndexUrl(),
+            SearchIndexRefresh = BuildSearchIndexRefreshUrl(),
+            Versions = BuildVersionsUrl(),
+            Health = BuildHealthUrl(),
+            HealthJson = BuildHealthJsonUrl()
+        };
     }
 
     /// <summary>
@@ -131,6 +135,24 @@ public sealed class DocsUrlBuilder
     public string BuildSearchIndexRefreshUrl()
     {
         return BuildSearchIndexUrl() + "?refresh=1";
+    }
+
+    /// <summary>
+    /// Builds the current live docs harvest health HTML URL.
+    /// </summary>
+    /// <returns>The app-relative health page URL for the current docs surface.</returns>
+    public string BuildHealthUrl()
+    {
+        return JoinPath(_currentDocsRootPath, "_health");
+    }
+
+    /// <summary>
+    /// Builds the current live docs harvest health JSON URL.
+    /// </summary>
+    /// <returns>The app-relative machine-readable health URL for the current docs surface.</returns>
+    public string BuildHealthJsonUrl()
+    {
+        return JoinPath(_currentDocsRootPath, "_health.json");
     }
 
     /// <summary>
@@ -311,6 +333,8 @@ public sealed class DocsUrlBuilder
         return string.Equals(path, "/", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search-index.json", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/_health", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/_health.json", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search.css", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search-client.js", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/outline-client.js", StringComparison.OrdinalIgnoreCase)
@@ -378,19 +402,45 @@ public sealed class DocsUrlBuilder
 /// <summary>
 /// Named RazorDocs routes for one configured route family.
 /// </summary>
-/// <param name="Home">The current live docs home route.</param>
-/// <param name="Search">The current live docs search workspace route.</param>
-/// <param name="SearchIndex">The current live docs search-index JSON route.</param>
-/// <param name="SearchIndexRefresh">The authenticated search-index refresh route.</param>
-/// <param name="Versions">The route-family archive route, whether or not versioning endpoints are currently enabled.</param>
 /// <remarks>
 /// Consumers should prefer this record when they need well-known RazorDocs destinations in host code, operator guidance,
 /// generated configuration, or documentation. The values are app-relative. Views and other presentation boundaries apply
 /// request <c>PathBase</c> separately before sending browser-facing URLs.
 /// </remarks>
-public sealed record RazorDocsRouteReferences(
-    string Home,
-    string Search,
-    string SearchIndex,
-    string SearchIndexRefresh,
-    string Versions);
+public sealed record RazorDocsRouteReferences
+{
+    /// <summary>
+    /// Gets the current live docs home route.
+    /// </summary>
+    public string Home { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the current live docs search workspace route.
+    /// </summary>
+    public string Search { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the current live docs search-index JSON route.
+    /// </summary>
+    public string SearchIndex { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the authenticated search-index refresh route.
+    /// </summary>
+    public string SearchIndexRefresh { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the route-family archive route, whether or not versioning endpoints are currently enabled.
+    /// </summary>
+    public string Versions { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the current live docs harvest health HTML route.
+    /// </summary>
+    public string Health { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the current live docs harvest health JSON route.
+    /// </summary>
+    public string HealthJson { get; init; } = string.Empty;
+}

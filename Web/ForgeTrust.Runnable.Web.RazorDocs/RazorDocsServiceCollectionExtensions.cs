@@ -67,6 +67,7 @@ public static class RazorDocsServiceCollectionExtensions
                 {
                     options.Source ??= new RazorDocsSourceOptions();
                     options.Harvest ??= new RazorDocsHarvestOptions();
+                    options.Harvest.Health ??= new RazorDocsHarvestHealthOptions();
                     options.Bundle ??= new RazorDocsBundleOptions();
                     options.Sidebar ??= new RazorDocsSidebarOptions();
                     options.Contributor ??= new RazorDocsContributorOptions();

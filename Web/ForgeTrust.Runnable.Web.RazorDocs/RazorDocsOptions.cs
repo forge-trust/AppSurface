@@ -144,6 +144,71 @@ public sealed class RazorDocsHarvestOptions
     /// non-fatal in this slice because they can represent intentional empty repositories or still-usable partial docs.
     /// </remarks>
     public bool FailOnFailure { get; set; }
+
+    /// <summary>
+    /// Gets health-surface settings for the operator-facing RazorDocs harvest health routes and sidebar chrome.
+    /// </summary>
+    public RazorDocsHarvestHealthOptions Health { get; set; } = new();
+}
+
+/// <summary>
+/// Operator-facing harvest health settings for RazorDocs.
+/// </summary>
+/// <remarks>
+/// The health surface exposes the same cached harvest state returned by
+/// <see cref="ForgeTrust.Runnable.Web.RazorDocs.Services.DocAggregator.GetHarvestHealthAsync(System.Threading.CancellationToken)"/>.
+/// Development hosts show the route and sidebar chrome by default so local failures are visible immediately. Other
+/// environments must opt in explicitly before RazorDocs maps the health routes or displays sidebar chrome.
+/// </remarks>
+public sealed class RazorDocsHarvestHealthOptions
+{
+    /// <summary>
+    /// Gets or sets when RazorDocs should map <c>{DocsRootPath}/_health</c> and
+    /// <c>{DocsRootPath}/_health.json</c>.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see cref="RazorDocsHarvestHealthExposure.DevelopmentOnly"/>. Setting this to
+    /// <see cref="RazorDocsHarvestHealthExposure.Always"/> creates an operator-facing route in non-development hosts;
+    /// protect that route with host-owned authentication, authorization, or network controls when it is reachable by
+    /// untrusted users.
+    /// </remarks>
+    public RazorDocsHarvestHealthExposure ExposeRoutes { get; set; } = RazorDocsHarvestHealthExposure.DevelopmentOnly;
+
+    /// <summary>
+    /// Gets or sets when RazorDocs should show the harvest health entry in the built-in docs sidebar.
+    /// </summary>
+    /// <remarks>
+    /// This option is intentionally independent from <see cref="ExposeRoutes"/> so hosts can expose a machine-readable
+    /// endpoint without advertising it in the docs chrome, or show local-development chrome without changing
+    /// non-development route behavior.
+    /// </remarks>
+    public RazorDocsHarvestHealthExposure ShowChrome { get; set; } = RazorDocsHarvestHealthExposure.DevelopmentOnly;
+}
+
+/// <summary>
+/// Enumerates environment-aware exposure policies for RazorDocs harvest health surfaces.
+/// </summary>
+/// <remarks>
+/// Numeric values are part of the public configuration and serialization contract. Do not reorder or renumber existing
+/// members; changing these assignments can break persisted configuration, serialized payloads, and consumers. Add new
+/// modes by appending members with new explicit values.
+/// </remarks>
+public enum RazorDocsHarvestHealthExposure
+{
+    /// <summary>
+    /// Expose the surface only when the host environment is Development.
+    /// </summary>
+    DevelopmentOnly = 0,
+
+    /// <summary>
+    /// Always expose the surface in every host environment.
+    /// </summary>
+    Always = 1,
+
+    /// <summary>
+    /// Never expose the surface.
+    /// </summary>
+    Never = 2
 }
 
 /// <summary>
@@ -374,6 +439,25 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         if (harvest is null)
         {
             failures.Add("RazorDocs:Harvest must not be null.");
+        }
+        else
+        {
+            if (harvest.Health is null)
+            {
+                failures.Add("RazorDocs:Harvest:Health must not be null.");
+            }
+            else
+            {
+                if (!Enum.IsDefined(harvest.Health.ExposeRoutes))
+                {
+                    failures.Add($"Unsupported RazorDocs harvest health route exposure mode '{harvest.Health.ExposeRoutes}'.");
+                }
+
+                if (!Enum.IsDefined(harvest.Health.ShowChrome))
+                {
+                    failures.Add($"Unsupported RazorDocs harvest health chrome exposure mode '{harvest.Health.ShowChrome}'.");
+                }
+            }
         }
 
         if (bundle is null)

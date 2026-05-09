@@ -13,6 +13,9 @@ public sealed class RazorDocsOptionsTests
     {
         Assert.Equal(0, (int)RazorDocsMode.Source);
         Assert.Equal(1, (int)RazorDocsMode.Bundle);
+        Assert.Equal(0, (int)RazorDocsHarvestHealthExposure.DevelopmentOnly);
+        Assert.Equal(1, (int)RazorDocsHarvestHealthExposure.Always);
+        Assert.Equal(2, (int)RazorDocsHarvestHealthExposure.Never);
         Assert.Equal(0, (int)RazorDocsLastUpdatedMode.None);
         Assert.Equal(1, (int)RazorDocsLastUpdatedMode.Git);
         Assert.Equal(0, (int)RazorDocsVersionSupportState.Current);
@@ -90,6 +93,16 @@ public sealed class RazorDocsOptionsTests
     }
 
     [Fact]
+    public void RazorDocsOptions_ShouldDefaultHarvestHealthToDevelopmentOnly()
+    {
+        var options = new RazorDocsOptions();
+
+        Assert.NotNull(options.Harvest.Health);
+        Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
+        Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
+    }
+
+    [Fact]
     public void AddRazorDocs_ShouldBindConfiguredHarvestFailOnFailure()
     {
         var services = new ServiceCollection();
@@ -108,6 +121,29 @@ public sealed class RazorDocsOptionsTests
         var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
 
         Assert.True(options.Harvest.FailOnFailure);
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldBindConfiguredHarvestHealthOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Harvest:Health:ExposeRoutes"] = "Always",
+                        ["RazorDocs:Harvest:Health:ShowChrome"] = "Never"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
+
+        Assert.Equal(RazorDocsHarvestHealthExposure.Always, options.Harvest.Health.ExposeRoutes);
+        Assert.Equal(RazorDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
     }
 
     [Fact]
@@ -444,10 +480,13 @@ public sealed class RazorDocsOptionsTests
 
         Assert.NotNull(options.Source);
         Assert.NotNull(options.Harvest);
+        Assert.NotNull(options.Harvest.Health);
         Assert.NotNull(options.Bundle);
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Contributor);
         Assert.False(options.Harvest.FailOnFailure);
+        Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
+        Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
     }
@@ -467,6 +506,7 @@ public sealed class RazorDocsOptionsTests
 
         var source = new RazorDocsSourceOptions { RepositoryRoot = " /tmp/configured-root " };
         var harvest = new RazorDocsHarvestOptions { FailOnFailure = true };
+        harvest.Health.ShowChrome = RazorDocsHarvestHealthExposure.Never;
         var bundle = new RazorDocsBundleOptions { Path = " /tmp/docs.bundle.json " };
         var sidebar = new RazorDocsSidebarOptions
         {
@@ -503,6 +543,7 @@ public sealed class RazorDocsOptionsTests
         Assert.Same(contributor, options.Contributor);
         Assert.Equal("/tmp/configured-root", options.Source.RepositoryRoot);
         Assert.True(options.Harvest.FailOnFailure);
+        Assert.Equal(RazorDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
         Assert.Equal("/tmp/docs.bundle.json", options.Bundle.Path);
         Assert.Equal(["Contoso.Product."], options.Sidebar.NamespacePrefixes);
         Assert.Equal("main", options.Contributor.DefaultBranch);
@@ -534,10 +575,13 @@ public sealed class RazorDocsOptionsTests
 
         Assert.NotNull(options.Source);
         Assert.NotNull(options.Harvest);
+        Assert.NotNull(options.Harvest.Health);
         Assert.NotNull(options.Bundle);
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Contributor);
         Assert.False(options.Harvest.FailOnFailure);
+        Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
+        Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
     }
@@ -603,6 +647,54 @@ public sealed class RazorDocsOptionsTests
 
         Assert.True(result.Failed);
         Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Harvest must not be null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNullHarvestHealthOptions()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Harvest = new RazorDocsHarvestOptions
+            {
+                Health = null!
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Harvest:Health must not be null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Validator_ShouldRejectUnsupportedHarvestHealthExposureValues(bool invalidRoutes)
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Harvest = new RazorDocsHarvestOptions
+            {
+                Health = new RazorDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = invalidRoutes
+                        ? (RazorDocsHarvestHealthExposure)999
+                        : RazorDocsHarvestHealthExposure.DevelopmentOnly,
+                    ShowChrome = invalidRoutes
+                        ? RazorDocsHarvestHealthExposure.DevelopmentOnly
+                        : (RazorDocsHarvestHealthExposure)999
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("Unsupported RazorDocs harvest health", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

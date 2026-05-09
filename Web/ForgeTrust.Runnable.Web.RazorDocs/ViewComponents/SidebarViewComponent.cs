@@ -1,7 +1,10 @@
 using ForgeTrust.Runnable.Web.RazorDocs.Models;
 using ForgeTrust.Runnable.Web.RazorDocs.Services;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs.ViewComponents;
 
@@ -11,7 +14,9 @@ namespace ForgeTrust.Runnable.Web.RazorDocs.ViewComponents;
 public class SidebarViewComponent : ViewComponent
 {
     private readonly DocAggregator _aggregator;
+    private readonly RazorDocsOptions _options;
     private readonly DocsUrlBuilder _docsUrlBuilder;
+    private readonly IWebHostEnvironment _environment;
     private readonly string[] _namespacePrefixes;
 
     /// <summary>
@@ -26,7 +31,7 @@ public class SidebarViewComponent : ViewComponent
     /// <param name="aggregator">The documentation aggregator used to retrieve document nodes.</param>
     /// <param name="options">Typed RazorDocs options used for optional namespace prefix simplification settings.</param>
     public SidebarViewComponent(DocAggregator aggregator, RazorDocsOptions options)
-        : this(aggregator, options, new DocsUrlBuilder(options))
+        : this(aggregator, options, new DocsUrlBuilder(options), new DefaultWebHostEnvironment())
     {
     }
 
@@ -42,17 +47,25 @@ public class SidebarViewComponent : ViewComponent
     /// <param name="aggregator">The documentation aggregator used to retrieve document nodes.</param>
     /// <param name="options">Typed RazorDocs options used for optional namespace prefix simplification settings.</param>
     /// <param name="docsUrlBuilder">Shared URL builder for the live source-backed docs surface.</param>
+    /// <param name="environment">Host environment used for development-default health chrome visibility.</param>
     [ActivatorUtilitiesConstructor]
-    public SidebarViewComponent(DocAggregator aggregator, RazorDocsOptions options, DocsUrlBuilder docsUrlBuilder)
+    public SidebarViewComponent(
+        DocAggregator aggregator,
+        RazorDocsOptions options,
+        DocsUrlBuilder docsUrlBuilder,
+        IWebHostEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(aggregator);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(options.Sidebar);
         ArgumentNullException.ThrowIfNull(options.Sidebar.NamespacePrefixes);
         ArgumentNullException.ThrowIfNull(docsUrlBuilder);
+        ArgumentNullException.ThrowIfNull(environment);
 
         _aggregator = aggregator;
+        _options = options;
         _docsUrlBuilder = docsUrlBuilder;
+        _environment = environment;
         _namespacePrefixes = options.Sidebar.NamespacePrefixes
             .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
             .Select(prefix => prefix.Trim())
@@ -67,6 +80,7 @@ public class SidebarViewComponent : ViewComponent
     {
         var sections = await _aggregator.GetPublicSectionsAsync();
         var currentContext = await ResolveCurrentContextAsync();
+        var harvestHealth = await ResolveHarvestHealthAsync();
         var sidebarSections = sections
             .Select(
                 snapshot => new DocSidebarSectionViewModel
@@ -85,7 +99,23 @@ public class SidebarViewComponent : ViewComponent
                 })
             .ToList();
 
-        return View(new DocSidebarViewModel { Sections = sidebarSections });
+        return View(new DocSidebarViewModel { Sections = sidebarSections, HarvestHealth = harvestHealth });
+    }
+
+    private async Task<DocSidebarHarvestHealthViewModel?> ResolveHarvestHealthAsync()
+    {
+        if (!RazorDocsHarvestHealthVisibility.ShouldShowChrome(_options, _environment))
+        {
+            return null;
+        }
+
+        var health = await _aggregator.GetHarvestHealthAsync();
+        return new DocSidebarHarvestHealthViewModel
+        {
+            Status = health.Status.ToString(),
+            Ok = RazorDocsHarvestHealthResponse.IsOk(health.Status),
+            Href = _docsUrlBuilder.BuildHealthUrl()
+        };
     }
 
     private async Task<(DocPublicSection? Section, string? CurrentHref)> ResolveCurrentContextAsync()
@@ -147,5 +177,20 @@ public class SidebarViewComponent : ViewComponent
         return requestPath.Length > 1
             ? requestPath.TrimEnd('/')
             : requestPath;
+    }
+
+    private sealed class DefaultWebHostEnvironment : IWebHostEnvironment
+    {
+        public string ApplicationName { get; set; } = typeof(SidebarViewComponent).Assembly.GetName().Name ?? "RazorDocs";
+
+        public IFileProvider WebRootFileProvider { get; set; } = null!;
+
+        public string WebRootPath { get; set; } = AppContext.BaseDirectory;
+
+        public string EnvironmentName { get; set; } = Environments.Development;
+
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+
+        public IFileProvider ContentRootFileProvider { get; set; } = null!;
     }
 }

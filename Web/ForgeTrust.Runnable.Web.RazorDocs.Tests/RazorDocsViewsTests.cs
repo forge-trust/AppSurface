@@ -906,6 +906,83 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task SidebarView_ShouldRenderHarvestHealthLink_WhenModelProvidesHealth()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new DocSidebarViewModel
+        {
+            HarvestHealth = new DocSidebarHarvestHealthViewModel
+            {
+                Status = "Degraded",
+                Ok = false,
+                Href = "/docs/_health"
+            }
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Shared/Components/Sidebar/Default.cshtml",
+            model,
+            pathBase: "/some-base");
+
+        Assert.Contains("href=\"/some-base/docs/_health\"", html);
+        Assert.Contains("Harvest Degraded", html);
+        Assert.Contains("Health", html);
+        Assert.Contains("text-rose-200", html);
+    }
+
+    [Fact]
+    public async Task HarvestHealthView_ShouldRenderRedactedSummaryAndDiagnostics()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new RazorDocsHarvestHealthResponse
+        {
+            Status = "Failed",
+            GeneratedUtc = new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero),
+            Verification = new RazorDocsHarvestHealthVerification
+            {
+                Ok = false,
+                HttpStatusCode = StatusCodes.Status503ServiceUnavailable
+            },
+            TotalHarvesters = 1,
+            FailedHarvesters = 1,
+            Harvesters =
+            [
+                new RazorDocsHarvesterHealthResponse
+                {
+                    HarvesterType = "MarkdownHarvester",
+                    Status = "Failed",
+                    DocCount = 0
+                }
+            ],
+            Diagnostics =
+            [
+                new RazorDocsHarvestDiagnosticResponse
+                {
+                    Code = DocHarvestDiagnosticCodes.HarvesterFailed,
+                    Severity = "Error",
+                    HarvesterType = "MarkdownHarvester",
+                    Problem = "A RazorDocs harvester failed.",
+                    Fix = "Check the docs source."
+                }
+            ]
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/HarvestHealth.cshtml",
+            model);
+
+        Assert.Contains("Harvest Health", html);
+        Assert.Contains("Failed", html);
+        Assert.Contains("failing", html);
+        Assert.Contains("MarkdownHarvester", html);
+        Assert.Contains(DocHarvestDiagnosticCodes.HarvesterFailed, html);
+        Assert.DoesNotContain("RepositoryRoot", html);
+        Assert.DoesNotContain("Cause", html);
+    }
+
+    [Fact]
     public async Task SidebarView_ShouldRenderBlankAndRelativeLinks_WithoutPathBaseRewriting()
     {
         using var services = CreateServiceProvider(CreateDocs());

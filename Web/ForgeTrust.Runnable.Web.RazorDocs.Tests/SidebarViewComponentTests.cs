@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.ViewComponents;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs.Tests;
@@ -80,6 +81,72 @@ public sealed class SidebarViewComponentTests
             Assert.Equal(
                 new[] { "Start Here", "Concepts", "API Reference" },
                 model.Sections.Select(section => section.Label).ToArray());
+        }
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldShowHarvestHealthChrome_ByDefaultInDevelopment()
+    {
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Quickstart", "guides/start.md", "Start Here")
+            ]);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            Assert.NotNull(model.HarvestHealth);
+            Assert.Equal("Healthy", model.HarvestHealth.Status);
+            Assert.True(model.HarvestHealth.Ok);
+            Assert.Equal("/docs/_health", model.HarvestHealth.Href);
+        }
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldHideHarvestHealthChrome_ByDefaultOutsideDevelopment()
+    {
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Quickstart", "guides/start.md", "Start Here")
+            ],
+            environmentName: Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            Assert.Null(model.HarvestHealth);
+        }
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldRespectShowChromeIndependentlyFromExposeRoutes()
+    {
+        var options = new RazorDocsOptions
+        {
+            Harvest = new RazorDocsHarvestOptions
+            {
+                Health = new RazorDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = RazorDocsHarvestHealthExposure.Never,
+                    ShowChrome = RazorDocsHarvestHealthExposure.Always
+                }
+            }
+        };
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Quickstart", "guides/start.md", "Start Here")
+            ],
+            options,
+            Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            Assert.NotNull(model.HarvestHealth);
+            Assert.Equal("/docs/_health", model.HarvestHealth.Href);
         }
     }
 
@@ -681,7 +748,8 @@ public sealed class SidebarViewComponentTests
 
     private static (SidebarViewComponent Component, MemoryCache Cache, Memo Memo) CreateComponent(
         IEnumerable<DocNode> docs,
-        RazorDocsOptions? options = null)
+        RazorDocsOptions? options = null,
+        string? environmentName = null)
     {
         var harvester = A.Fake<IDocHarvester>();
         var env = A.Fake<IWebHostEnvironment>();
@@ -692,6 +760,7 @@ public sealed class SidebarViewComponentTests
         var docsOptions = options ?? new RazorDocsOptions();
 
         A.CallTo(() => env.ContentRootPath).Returns(Path.GetTempPath());
+        A.CallTo(() => env.EnvironmentName).Returns(environmentName ?? Environments.Development);
         A.CallTo(() => sanitizer.Sanitize(A<string>._))
             .ReturnsLazily((string html) => html);
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
@@ -705,7 +774,7 @@ public sealed class SidebarViewComponentTests
             sanitizer,
             logger);
 
-        var component = new SidebarViewComponent(aggregator, docsOptions);
+        var component = new SidebarViewComponent(aggregator, docsOptions, new DocsUrlBuilder(docsOptions), env);
         return (component, cache, memo);
     }
 }

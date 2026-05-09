@@ -3,9 +3,11 @@ using ForgeTrust.Runnable.Caching;
 using ForgeTrust.Runnable.Core;
 using ForgeTrust.Runnable.Web.RazorDocs.Services;
 using ForgeTrust.Runnable.Web.RazorWire;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs;
@@ -253,6 +255,8 @@ public class RazorDocsWebModule : IRunnableWebModule
         var docsOptions = ResolveOptions(endpoints.ServiceProvider);
         var docsUrlBuilder = endpoints.ServiceProvider.GetService(typeof(DocsUrlBuilder)) as DocsUrlBuilder
                              ?? new DocsUrlBuilder(docsOptions);
+        var environment = endpoints.ServiceProvider.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment
+                          ?? new DefaultWebHostEnvironment();
 
         if (ShouldPreserveRootStylesheetPath(context))
         {
@@ -305,6 +309,8 @@ public class RazorDocsWebModule : IRunnableWebModule
         var currentRootPattern = docsUrlBuilder.CurrentDocsRootPath.TrimStart('/');
         var currentSearchPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchUrl());
         var currentSearchIndexPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexUrl());
+        var currentHealthPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthUrl());
+        var currentHealthJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthJsonUrl());
         var currentSectionPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "sections/{sectionSlug}"));
         var currentDetailsPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "{*path}"));
 
@@ -335,6 +341,27 @@ public class RazorDocsWebModule : IRunnableWebModule
                 controller = "Docs",
                 action = "SearchIndex"
             });
+
+        if (RazorDocsHarvestHealthVisibility.AreRoutesExposed(docsOptions, environment))
+        {
+            endpoints.MapControllerRoute(
+                name: "razordocs_harvest_health",
+                pattern: currentHealthPattern,
+                defaults: new
+                {
+                    controller = "Docs",
+                    action = "HarvestHealth"
+                });
+
+            endpoints.MapControllerRoute(
+                name: "razordocs_harvest_health_json",
+                pattern: currentHealthJsonPattern,
+                defaults: new
+                {
+                    controller = "Docs",
+                    action = "HarvestHealthJson"
+                });
+        }
 
         endpoints.MapControllerRoute(
             name: "razordocs_section",
@@ -451,5 +478,20 @@ public class RazorDocsWebModule : IRunnableWebModule
     private static string TrimLeadingSlash(string route)
     {
         return route.TrimStart('/');
+    }
+
+    private sealed class DefaultWebHostEnvironment : IWebHostEnvironment
+    {
+        public string ApplicationName { get; set; } = typeof(RazorDocsWebModule).Assembly.GetName().Name ?? "RazorDocs";
+
+        public IFileProvider WebRootFileProvider { get; set; } = null!;
+
+        public string WebRootPath { get; set; } = AppContext.BaseDirectory;
+
+        public string EnvironmentName { get; set; } = Environments.Development;
+
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+
+        public IFileProvider ContentRootFileProvider { get; set; } = null!;
     }
 }
