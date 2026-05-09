@@ -247,7 +247,7 @@ public class ExportEngine
                     if (TryGetNormalizedRoute(path, out var normalized))
                     {
                         added = true;
-                        context.Queue.Enqueue(normalized);
+                        EnqueueRoute(context, normalized);
                     }
                 }
 
@@ -261,13 +261,13 @@ public class ExportEngine
             {
                 _logger.LogWarning(
                     "Seed file provided but no valid routes were found. Falling back to default root path.");
-                context.Queue.Enqueue("/");
+                EnqueueRoute(context, "/");
             }
 
             return;
         }
 
-        context.Queue.Enqueue("/");
+        EnqueueRoute(context, "/");
     }
 
     private async Task MaterializeTextRoutesAsync(ExportContext context, CancellationToken cancellationToken)
@@ -875,11 +875,18 @@ public class ExportEngine
         {
             context.References.Add(reference);
             if (!context.Visited.Contains(reference.Path)
-                && !context.Queue.Contains(reference.Path)
                 && !context.RouteOutcomes.ContainsKey(reference.Path))
             {
-                context.Queue.Enqueue(reference.Path);
+                EnqueueRoute(context, reference.Path);
             }
+        }
+    }
+
+    private static void EnqueueRoute(ExportContext context, string route)
+    {
+        if (context.Enqueued.Add(route))
+        {
+            context.Queue.Enqueue(route);
         }
     }
 
@@ -1024,7 +1031,11 @@ public class ExportEngine
             return match.Value;
         }
 
-        return match.Value.Replace(rawValue, artifactUrl, StringComparison.Ordinal);
+        var valueGroup = match.Groups[2];
+        var valueStart = valueGroup.Index - match.Index;
+        var prefix = match.Value[..valueStart];
+        var suffix = match.Value[(valueStart + valueGroup.Length)..];
+        return prefix + artifactUrl + suffix;
     }
 
     private static bool TryResolveReferenceArtifactUrl(

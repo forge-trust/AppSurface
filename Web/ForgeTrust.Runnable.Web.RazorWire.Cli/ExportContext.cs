@@ -23,6 +23,13 @@ public class ExportContext
     /// <summary>
     /// Gets the export mode that controls URL rewriting and validation behavior.
     /// </summary>
+    /// <remarks>
+    /// <see cref="ExportMode.Cdn"/> is the default and rewrites exporter-managed internal URLs to emitted artifacts while validating
+    /// that those managed dependencies can be served by a static host. <see cref="ExportMode.Hybrid"/> preserves application-style
+    /// internal URLs for server-backed deployments that still provide routing and dynamic behavior. CDN validation and rewriting only
+    /// apply to exporter-managed URLs discovered in markup and CSS; unmanaged external, JavaScript, mailto, hash-only, and data URLs
+    /// are intentionally ignored rather than validated or rewritten.
+    /// </remarks>
     public ExportMode Mode { get; }
 
     /// <summary>
@@ -34,6 +41,16 @@ public class ExportContext
     /// Gets the queue of URLs pending processing.
     /// </summary>
     public Queue<string> Queue { get; } = new();
+
+    /// <summary>
+    /// Gets the normalized routes that have already been scheduled for crawl processing.
+    /// </summary>
+    /// <remarks>
+    /// This set mirrors <see cref="Queue"/> membership over the lifetime of an export so duplicate reference discovery can perform
+    /// O(1) scheduling checks without scanning the pending queue. Routes remain in this set after dequeue because <see cref="Visited"/>
+    /// and <see cref="RouteOutcomes"/> record their terminal crawl state.
+    /// </remarks>
+    internal HashSet<string> Enqueued { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Gets route fetch outcomes keyed by normalized root-relative route.
@@ -66,7 +83,15 @@ public class ExportContext
     /// <param name="outputPath">The target directory for export.</param>
     /// <param name="seedRoutesPath">The path to initial seed routes, if any.</param>
     /// <param name="baseUrl">The base URL of the site to export.</param>
-    /// <param name="mode">The export mode. CDN mode is the default and validates static-host-safe output.</param>
+    /// <param name="mode">
+    /// The export mode. <see cref="ExportMode.Cdn"/> is the default and validates plus rewrites exporter-managed URLs for static
+    /// hosting. Use <see cref="ExportMode.Hybrid"/> when the exported output will still be served by application-aware routing.
+    /// </param>
+    /// <remarks>
+    /// The context tracks crawl state across a staged pipeline: seed routes are scheduled first, references discovered from fetched
+    /// markup and CSS can enqueue more managed routes, and CDN validation runs only after the artifact map is complete. Unmanaged URLs
+    /// are outside that pipeline and are not validated or rewritten by <see cref="ExportMode.Cdn"/>.
+    /// </remarks>
     public ExportContext(
         string outputPath,
         string? seedRoutesPath,

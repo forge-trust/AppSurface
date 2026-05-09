@@ -615,6 +615,7 @@ public class ExportEngineTests
 
             var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
             Assert.Contains("href=\"/about.html\"", indexHtml);
+            Assert.Contains("data-copy=\"/about\" href=\"/about.html\"", indexHtml);
             Assert.Contains("href=\"/docs/start.html#intro\"", indexHtml);
             Assert.Contains("src=\"/docs/start.partial.html\"", indexHtml);
             Assert.Contains("src=\"/_content/pkg/app.js?v=abc123\"", indexHtml);
@@ -1084,7 +1085,7 @@ public class ExportEngineTests
                         <style>.hero { background: url('/img/inline.png'); }</style>
                       </head>
                       <body style="background: url('/img/attr.png')">
-                        <a href="/about">About</a>
+                        <a data-copy="/about" href="/about">About</a>
                         <a href="/docs/start#intro">Docs</a>
                         <turbo-frame id="doc-content" src="/docs/start"></turbo-frame>
                         <script src="/_content/pkg/app.js?v=abc123"></script>

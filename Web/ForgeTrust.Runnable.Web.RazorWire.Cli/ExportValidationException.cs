@@ -7,14 +7,14 @@ namespace ForgeTrust.Runnable.Web.RazorWire.Cli;
 /// The export engine throws this exception without depending on CLI infrastructure. Command handlers should translate
 /// it into the appropriate command-line failure type for their host.
 /// </remarks>
-internal sealed class ExportValidationException : Exception
+public sealed class ExportValidationException : Exception
 {
     /// <summary>
     /// Initializes a new instance of <see cref="ExportValidationException"/>.
     /// </summary>
     /// <param name="diagnostics">The validation diagnostics that describe why the export is unsafe.</param>
     public ExportValidationException(IReadOnlyList<ExportDiagnostic> diagnostics)
-        : base(CreateMessage(diagnostics))
+        : base(CreateMessage(ValidateDiagnostics(diagnostics)))
     {
         Diagnostics = diagnostics;
     }
@@ -22,7 +22,13 @@ internal sealed class ExportValidationException : Exception
     /// <summary>
     /// Gets the diagnostics that describe why CDN export validation failed.
     /// </summary>
-    internal IReadOnlyList<ExportDiagnostic> Diagnostics { get; }
+    public IReadOnlyList<ExportDiagnostic> Diagnostics { get; }
+
+    private static IReadOnlyList<ExportDiagnostic> ValidateDiagnostics(IReadOnlyList<ExportDiagnostic>? diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(diagnostics);
+        return diagnostics;
+    }
 
     private static string CreateMessage(IReadOnlyList<ExportDiagnostic> diagnostics)
     {
