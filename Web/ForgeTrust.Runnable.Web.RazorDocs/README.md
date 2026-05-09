@@ -277,7 +277,8 @@ var searchIndexRefresh = routes.SearchIndexRefresh;
   - When omitted, RazorDocs falls back to repository discovery from the content root.
 - `RazorDocs:Harvest:FailOnFailure`
   - Defaults to `false`.
-  - When `true`, `AddRazorDocs()` registers a startup preflight that fails the host with `RazorDocsHarvestFailedException` only when aggregate harvest health is `Failed`.
+  - `AddRazorDocs()` always registers `RazorDocsHarvestFailurePreflightService`; this flag controls whether that preflight can fail startup.
+  - When `true`, the preflight fails the host with `RazorDocsHarvestFailedException` only when aggregate harvest health is `Failed`.
   - Use this for release publishing, static export, and CI smoke hosts where publishing empty or untrustworthy docs is worse than a failed build.
   - Do not use this expecting `Empty` or `Degraded` to fail in v1. Empty docs can be intentional, and degraded docs can still be usable.
 - `RazorDocs:Routing:RouteRootPath`

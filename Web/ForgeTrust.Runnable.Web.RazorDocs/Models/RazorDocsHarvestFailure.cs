@@ -45,10 +45,11 @@ public sealed class RazorDocsHarvestFailedException : InvalidOperationException
         builder.Append(
             $" Status={summary.Status}; SuccessfulHarvesters={summary.SuccessfulHarvesters}/{summary.TotalHarvesters}; FailedHarvesters={summary.FailedHarvesters}; TotalDocs={summary.TotalDocs}.");
 
-        if (summary.Diagnostics.Count > 0)
+        var diagnostics = summary.Diagnostics ?? [];
+        if (diagnostics.Count > 0)
         {
             builder.Append(" Diagnostics:");
-            foreach (var diagnostic in summary.Diagnostics)
+            foreach (var diagnostic in diagnostics)
             {
                 builder.Append(' ');
                 builder.Append(diagnostic.Code);

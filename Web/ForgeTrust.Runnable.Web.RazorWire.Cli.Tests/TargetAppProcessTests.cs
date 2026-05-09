@@ -27,40 +27,29 @@ public class TargetAppProcessTests
     [Fact]
     public void Constructor_Should_Inherit_Parent_Environment_And_Apply_Overrides()
     {
-        const string inheritedKey = "RazorDocs__Harvest__FailOnFailure";
+        const string inheritedKey = "PATH";
         const string overriddenKey = "DOTNET_ENVIRONMENT";
-        var originalInherited = Environment.GetEnvironmentVariable(inheritedKey);
-        var originalOverridden = Environment.GetEnvironmentVariable(overriddenKey);
+        var inheritedValue = Environment.GetEnvironmentVariable(inheritedKey);
+        Assert.False(string.IsNullOrWhiteSpace(inheritedValue));
+        var rawProcess = new Process();
 
-        try
-        {
-            Environment.SetEnvironmentVariable(inheritedKey, "true");
-            Environment.SetEnvironmentVariable(overriddenKey, "Development");
-            var rawProcess = new Process();
-
-            _ = new TargetAppProcess(
-                new ProcessLaunchSpec
+        _ = new TargetAppProcess(
+            new ProcessLaunchSpec
+            {
+                FileName = "dotnet",
+                Arguments = ["--version"],
+                WorkingDirectory = Directory.GetCurrentDirectory(),
+                EnvironmentOverrides = new Dictionary<string, string>
                 {
-                    FileName = "dotnet",
-                    Arguments = ["--version"],
-                    WorkingDirectory = Directory.GetCurrentDirectory(),
-                    EnvironmentOverrides = new Dictionary<string, string>
-                    {
-                        [overriddenKey] = "Production"
-                    }
-                },
-                hooks: null,
-                process: rawProcess,
-                started: false);
+                    [overriddenKey] = "Production"
+                }
+            },
+            hooks: null,
+            process: rawProcess,
+            started: false);
 
-            Assert.Equal("true", rawProcess.StartInfo.Environment[inheritedKey]);
-            Assert.Equal("Production", rawProcess.StartInfo.Environment[overriddenKey]);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(inheritedKey, originalInherited);
-            Environment.SetEnvironmentVariable(overriddenKey, originalOverridden);
-        }
+        Assert.Equal(inheritedValue, rawProcess.StartInfo.Environment[inheritedKey]);
+        Assert.Equal("Production", rawProcess.StartInfo.Environment[overriddenKey]);
     }
 
     [Fact]

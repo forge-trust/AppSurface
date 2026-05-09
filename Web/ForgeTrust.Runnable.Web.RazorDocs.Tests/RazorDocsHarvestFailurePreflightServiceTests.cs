@@ -27,11 +27,44 @@ public sealed class RazorDocsHarvestFailurePreflightServiceTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_ShouldRejectNullDependencies()
+    {
+        var aggregator = CreateAggregator([]);
+        var options = new RazorDocsOptions();
+
+        Assert.Throws<ArgumentNullException>(
+            "options",
+            () => new RazorDocsHarvestFailurePreflightService(null!, aggregator, _preflightLogger));
+        Assert.Throws<ArgumentNullException>(
+            "aggregator",
+            () => new RazorDocsHarvestFailurePreflightService(options, null!, _preflightLogger));
+        Assert.Throws<ArgumentNullException>(
+            "logger",
+            () => new RazorDocsHarvestFailurePreflightService(options, aggregator, null!));
+    }
+
+    [Fact]
     public async Task StartAsync_ShouldNotHarvest_WhenStrictModeIsDisabled()
     {
         var harvester = A.Fake<IDocHarvester>();
         var aggregator = CreateAggregator([harvester]);
         var service = CreateService(aggregator, failOnFailure: false);
+
+        await service.StartAsync(CancellationToken.None);
+
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldNotHarvest_WhenHarvestOptionsAreNull()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        var aggregator = CreateAggregator([harvester]);
+        var service = new RazorDocsHarvestFailurePreflightService(
+            new RazorDocsOptions { Harvest = null! },
+            aggregator,
+            _preflightLogger);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -102,6 +135,7 @@ public sealed class RazorDocsHarvestFailurePreflightServiceTests : IDisposable
             async () => await service.StartAsync(CancellationToken.None));
 
         Assert.Equal(DocHarvestHealthStatus.Failed, exception.Summary.Status);
+        Assert.NotEqual(default, exception.Summary.GeneratedUtc);
         Assert.Equal(1, exception.Summary.TotalHarvesters);
         Assert.Equal(1, exception.Summary.FailedHarvesters);
         Assert.DoesNotContain("/tmp/private-repo", exception.Message, StringComparison.Ordinal);
@@ -192,6 +226,23 @@ public sealed class RazorDocsHarvestFailurePreflightServiceTests : IDisposable
         Assert.DoesNotContain("stack trace", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("SecretHarvester", Assert.Single(exception.Summary.Diagnostics).HarvesterType);
         Assert.Contains(DocHarvestDiagnosticCodes.HarvesterFailed, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RazorDocsHarvestFailedException_ShouldTolerateNullSummaryDiagnostics()
+    {
+        var summary = new DocHarvestFailureSummary(
+            DocHarvestHealthStatus.Failed,
+            new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero),
+            TotalHarvesters: 1,
+            SuccessfulHarvesters: 0,
+            FailedHarvesters: 1,
+            TotalDocs: 0,
+            Diagnostics: null!);
+
+        var exception = new RazorDocsHarvestFailedException(summary);
+
+        Assert.DoesNotContain("Diagnostics:", exception.Message, StringComparison.Ordinal);
     }
 
     public void Dispose()
