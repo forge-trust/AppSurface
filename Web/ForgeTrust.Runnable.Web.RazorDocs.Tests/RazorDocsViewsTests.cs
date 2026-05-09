@@ -1068,6 +1068,59 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public void BuildGroups_ShouldNestDeepApiNamespacesUnderNearestParent_WithLeafLabels()
+    {
+        var snapshot = new DocSectionSnapshot
+        {
+            Section = DocPublicSection.ApiReference,
+            Label = "API Reference",
+            Slug = "api-reference",
+            VisiblePages =
+            [
+                new("Core", "Namespaces/ForgeTrust.Runnable.Core", "<p>Core namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.html"),
+                new("Defaults", "Namespaces/ForgeTrust.Runnable.Core.Defaults", "<p>Defaults namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.Defaults.html"),
+                new("Extensions", "Namespaces/ForgeTrust.Runnable.Core.Extensions", "<p>Extensions namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.Extensions.html"),
+                new("Aspire", "Namespaces/ForgeTrust.Runnable.Aspire", "<p>Aspire namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Aspire.html"),
+                new("Configuration", "Namespaces/Microsoft.Extensions.Configuration", "<p>Configuration namespace</p>", CanonicalPath: "Namespaces/Microsoft.Extensions.Configuration.html")
+            ]
+        };
+
+        var groups = DocSectionDisplayBuilder.BuildGroups(snapshot);
+        var links = groups.SelectMany(group => group.Links).ToList();
+        var coreLink = Assert.Single(links, link => string.Equals(link.Title, "Runnable.Core", StringComparison.Ordinal));
+
+        Assert.Equal(["Defaults", "Extensions"], coreLink.Children.Select(child => child.Title).ToArray());
+        Assert.Equal("Runnable.Aspire", Assert.Single(links, link => string.Equals(link.Title, "Runnable.Aspire", StringComparison.Ordinal)).Title);
+        Assert.DoesNotContain(links, link => string.Equals(link.Title, "Runnable.Core.Defaults", StringComparison.Ordinal));
+        Assert.DoesNotContain(links, link => string.Equals(link.Title, "Runnable.Core.Extensions", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildGroups_ShouldKeepRecursiveNestedApiNamespacesReachable()
+    {
+        var snapshot = new DocSectionSnapshot
+        {
+            Section = DocPublicSection.ApiReference,
+            Label = "API Reference",
+            Slug = "api-reference",
+            VisiblePages =
+            [
+                new("Core", "Namespaces/ForgeTrust.Runnable.Core", "<p>Core namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.html"),
+                new("Defaults", "Namespaces/ForgeTrust.Runnable.Core.Defaults", "<p>Defaults namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.Defaults.html"),
+                new("Internal", "Namespaces/ForgeTrust.Runnable.Core.Defaults.Internal", "<p>Internal namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.Defaults.Internal.html")
+            ]
+        };
+
+        var groups = DocSectionDisplayBuilder.BuildGroups(snapshot, namespacePrefixes: ["ForgeTrust."]);
+        var coreLink = Assert.Single(groups.SelectMany(group => group.Links));
+        var defaultsLink = Assert.Single(coreLink.Children);
+        var internalLink = Assert.Single(defaultsLink.Children);
+
+        Assert.Equal("Defaults", defaultsLink.Title);
+        Assert.Equal("Internal", internalLink.Title);
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldRenderNamespaceBreadcrumbLinks()
     {
         using var services = CreateServiceProvider(CreateDocs());

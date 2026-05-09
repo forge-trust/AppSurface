@@ -24,9 +24,10 @@ internal static class DocSectionDisplayBuilder
     /// <remarks>
     /// Editorial sections stay flat and task-oriented, while <see cref="DocPublicSection.ApiReference"/> delegates to the
     /// namespace-aware grouping path so API reference content stays organized by family. API-reference groups intentionally
-    /// omit generated type-anchor children from these global navigation models; readers reach type and member anchors
-    /// from the namespace page's local outline, source links, or search instead of loading every symbol into the primary
-    /// sidebar.
+    /// omit generated type-anchor children from these global navigation models, and deeper namespace children are nested
+    /// under their nearest useful parent so repeated namespace prefixes do not dominate the primary sidebar. Readers
+    /// reach type and member anchors from the namespace page's local outline, source links, or search instead of loading
+    /// every symbol into the primary sidebar.
     /// </remarks>
     internal static IReadOnlyList<DocSectionGroupViewModel> BuildGroups(
         DocSectionSnapshot snapshot,
@@ -99,9 +100,31 @@ internal static class DocSectionDisplayBuilder
         var namespaceNodes = rootItems
             .Where(doc => doc.Path.Trim(' ', '/').StartsWith("Namespaces/", StringComparison.OrdinalIgnoreCase))
             .ToList();
+        var namespaceNodesByName = namespaceNodes
+            .GroupBy(SidebarDisplayHelper.GetFullNamespaceName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var nestedNamespaceNodesByParent = namespaceNodes
+            .Select(
+                doc => new
+                {
+                    Doc = doc,
+                    FullNamespace = SidebarDisplayHelper.GetFullNamespaceName(doc)
+                })
+            .Where(item => TryGetParentNamespace(item.FullNamespace, out var parentNamespace)
+                && ShouldNestApiNamespaceChild(parentNamespace)
+                && namespaceNodesByName.ContainsKey(parentNamespace))
+            .GroupBy(item => GetParentNamespace(item.FullNamespace), item => item.Doc, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+        var nestedNamespacePaths = nestedNamespaceNodesByParent.Values
+            .SelectMany(docs => docs)
+            .Select(doc => NormalizePath(doc.Path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var topLevelNamespaceNodes = namespaceNodes
+            .Where(doc => !nestedNamespacePaths.Contains(NormalizePath(doc.Path)))
+            .ToList();
 
         groups.AddRange(
-            namespaceNodes
+            topLevelNamespaceNodes
                 .GroupBy(
                     doc => SidebarDisplayHelper.GetNamespaceFamily(
                         SidebarDisplayHelper.GetFullNamespaceName(doc),
@@ -120,7 +143,12 @@ internal static class DocSectionDisplayBuilder
                                 currentHref,
                                 docsRootPath,
                                 namespacePrefixes,
-                                includeTypeAnchorChildren: false))
+                                includeTypeAnchorChildren: false,
+                                childrenOverride: BuildApiNamespaceChildren(
+                                    doc,
+                                    nestedNamespaceNodesByParent,
+                                    currentHref,
+                                    docsRootPath)))
                             .ToList()
                     }));
 
@@ -133,14 +161,15 @@ internal static class DocSectionDisplayBuilder
         string? currentHref,
         string docsRootPath,
         IReadOnlyList<string>? namespacePrefixes = null,
-        bool includeTypeAnchorChildren = true)
+        bool includeTypeAnchorChildren = true,
+        IReadOnlyList<DocSectionLinkViewModel>? childrenOverride = null)
     {
         var normalizedDocPath = NormalizePath(doc.Path);
         var href = DocsUrlBuilder.BuildDocUrl(docsRootPath, GetCanonicalPath(doc));
         var badge = DocMetadataPresentation.ResolvePageTypeBadge(doc.Metadata?.PageType);
-        IReadOnlyList<DocSectionLinkViewModel> children = includeTypeAnchorChildren
+        IReadOnlyList<DocSectionLinkViewModel> children = childrenOverride ?? (includeTypeAnchorChildren
             ? BuildTypeAnchorChildren(sectionDocs, normalizedDocPath, currentHref, docsRootPath)
-            : [];
+            : []);
 
         var title = namespacePrefixes is not null
             ? SidebarDisplayHelper.GetNamespaceDisplayName(
@@ -158,6 +187,41 @@ internal static class DocSectionDisplayBuilder
             UseAnchorNavigation = true,
             IsCurrent = IsCurrentLink(currentHref, href)
         };
+    }
+
+    private static IReadOnlyList<DocSectionLinkViewModel> BuildApiNamespaceChildren(
+        DocNode parentDoc,
+        IReadOnlyDictionary<string, List<DocNode>> nestedNamespaceNodesByParent,
+        string? currentHref,
+        string docsRootPath)
+    {
+        var fullNamespace = SidebarDisplayHelper.GetFullNamespaceName(parentDoc);
+        if (!nestedNamespaceNodesByParent.TryGetValue(fullNamespace, out var childDocs))
+        {
+            return [];
+        }
+
+        return childDocs
+            .OrderBy(doc => doc.Metadata?.Order ?? int.MaxValue)
+            .ThenBy(doc => SidebarDisplayHelper.GetFullNamespaceName(doc), StringComparer.OrdinalIgnoreCase)
+            .Select(
+                doc =>
+                {
+                    var href = DocsUrlBuilder.BuildDocUrl(docsRootPath, GetCanonicalPath(doc));
+                    return new DocSectionLinkViewModel
+                    {
+                        Title = GetNamespaceLeafLabel(SidebarDisplayHelper.GetFullNamespaceName(doc)),
+                        Href = href,
+                        Children = BuildApiNamespaceChildren(
+                            doc,
+                            nestedNamespaceNodesByParent,
+                            currentHref,
+                            docsRootPath),
+                        UseAnchorNavigation = true,
+                        IsCurrent = IsCurrentLink(currentHref, href)
+                    };
+                })
+            .ToList();
     }
 
     private static IReadOnlyList<DocSectionLinkViewModel> BuildTypeAnchorChildren(
@@ -184,6 +248,39 @@ internal static class DocSectionDisplayBuilder
                     };
                 })
             .ToList();
+    }
+
+    private static bool TryGetParentNamespace(string fullNamespace, out string parentNamespace)
+    {
+        parentNamespace = GetParentNamespace(fullNamespace);
+        return !string.IsNullOrWhiteSpace(parentNamespace);
+    }
+
+    private static string GetParentNamespace(string fullNamespace)
+    {
+        if (string.IsNullOrWhiteSpace(fullNamespace))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = fullNamespace.LastIndexOf('.');
+        return separatorIndex <= 0 ? string.Empty : fullNamespace[..separatorIndex];
+    }
+
+    private static bool ShouldNestApiNamespaceChild(string parentNamespace)
+    {
+        return parentNamespace.Split('.', StringSplitOptions.RemoveEmptyEntries).Length >= 3;
+    }
+
+    private static string GetNamespaceLeafLabel(string fullNamespace)
+    {
+        if (string.IsNullOrWhiteSpace(fullNamespace))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = fullNamespace.LastIndexOf('.');
+        return separatorIndex < 0 ? fullNamespace : fullNamespace[(separatorIndex + 1)..];
     }
 
     private static bool IsCurrentLink(string? currentHref, string href)
