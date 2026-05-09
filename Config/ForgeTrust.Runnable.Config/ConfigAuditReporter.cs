@@ -353,11 +353,6 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             return [];
         }
 
-        if (value is string)
-        {
-            return [];
-        }
-
         if (!visited.Add(value))
         {
             return [];

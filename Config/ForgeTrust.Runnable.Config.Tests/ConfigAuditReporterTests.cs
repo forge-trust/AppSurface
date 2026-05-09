@@ -416,6 +416,7 @@ public class ConfigAuditReporterTests
         services.AddSingleton<IConfigProvider>(new ThrowingDiagnosticProvider("Diagnostic.Throws"));
         services.AddConfigAuditKey<string>("Provider.Throws");
         services.AddConfigAuditKey<string>("Diagnostic.Throws");
+        services.AddSingleton(new ConfigAuditKnownEntry("Provider.BadType", null, typeof(void)));
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
@@ -428,6 +429,9 @@ public class ConfigAuditReporterTests
         Assert.Contains(
             AssertEntry(report, "Diagnostic.Throws", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-provider-resolve-threw");
+        Assert.Contains(
+            AssertEntry(report, "Provider.BadType", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            diagnostic => diagnostic.Code == "config-provider-get-value-threw");
     }
 
     [Fact]
@@ -452,15 +456,35 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_MarksResolvedEntryPartialWhenChildSourcesContainPatch()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new PatchSourceProvider());
+        services.AddConfigAuditKey<AppSettings>("Patch.Source");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        AssertEntry(report, "Patch.Source", ConfigAuditEntryState.PartiallyResolved, null);
+    }
+
+    [Fact]
     public void Redactor_FallsBackWhenEnumerableCannotSerialize()
     {
         var redactor = new ConfigAuditRedactor();
 
         var formatted = redactor.FormatValue("Values", new ThrowingEnumerable(), []);
+        var json = redactor.FormatValue("Values", new JsonExceptionEnumerable(), []);
         var invalidOperation = redactor.FormatValue("Values", new InvalidOperationEnumerable(), []);
 
         Assert.Equal(nameof(ThrowingEnumerable), formatted.DisplayValue);
         Assert.False(formatted.IsRedacted);
+        Assert.Equal(nameof(JsonExceptionEnumerable), json.DisplayValue);
+        Assert.False(json.IsRedacted);
         Assert.Equal(nameof(InvalidOperationEnumerable), invalidOperation.DisplayValue);
         Assert.False(invalidOperation.IsRedacted);
     }
@@ -706,11 +730,61 @@ public class ConfigAuditReporterTests
             throw new InvalidOperationException("provider diagnostics failed");
     }
 
+    private sealed class PatchSourceProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        public int Priority => 35;
+
+        public string Name => nameof(PatchSourceProvider);
+
+        public T? GetValue<T>(string environment, string key) => default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(key, "Patch.Source", StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                new AppSettings
+                {
+                    Mode = "patched"
+                },
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.Provider,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        ConfigPath = "Patch.Source.Mode",
+                        AppliedToPath = "Patch.Source.Mode",
+                        Role = ConfigAuditSourceRole.Patch
+                    }
+                ],
+                []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
     private sealed class ThrowingEnumerable : IEnumerable
     {
         public IEnumerator GetEnumerator() => throw new NotSupportedException();
 
         public override string ToString() => nameof(ThrowingEnumerable);
+    }
+
+    private sealed class JsonExceptionEnumerable : IEnumerable
+    {
+        public IEnumerator GetEnumerator() => throw new JsonException();
+
+        public override string ToString() => nameof(JsonExceptionEnumerable);
     }
 
     private sealed class InvalidOperationEnumerable : IEnumerable
