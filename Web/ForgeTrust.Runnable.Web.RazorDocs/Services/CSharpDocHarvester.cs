@@ -17,6 +17,15 @@ public class CSharpDocHarvester : IDocHarvester
 {
     private readonly ILogger<CSharpDocHarvester> _logger;
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
+    private static readonly HashSet<string> SourceExcludedDirectories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "node_modules",
+        "bin",
+        "obj",
+        "Test",
+        "Tests",
+        "examples"
+    };
 
     /// <summary>
     /// Initializes a new instance of <see cref="CSharpDocHarvester"/> with the provided logger.
@@ -33,7 +42,7 @@ public class CSharpDocHarvester : IDocHarvester
     /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
     /// <returns>A collection of DocNode objects; each contains a title, a relative file path including a fragment anchor, and the extracted HTML documentation.</returns>
     /// <remarks>
-    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", and "Tests") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included.
+    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", "Tests", and "examples") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included.
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(
         string rootPath,
@@ -50,7 +59,10 @@ public class CSharpDocHarvester : IDocHarvester
 
             var relativePath = Path.GetRelativePath(rootPath, file)
                 .Replace('\\', '/'); // Normalize to forward slashes for URLs
-            if (HarvestPathExclusions.ShouldExcludeFilePath(relativePath))
+            if (HarvestPathExclusions.ShouldExcludeFilePath(
+                    relativePath,
+                    SourceExcludedDirectories,
+                    excludeTestProjectDirectories: true))
             {
                 continue;
             }

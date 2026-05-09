@@ -18,6 +18,9 @@ public class HarvestPathExclusionsTests
     [InlineData("src/bin/file.cs")]
     [InlineData("src/obj/file.cs")]
     [InlineData("src/Tests/file.cs")]
+    [InlineData("src/Test/file.cs")]
+    [InlineData("Web/ForgeTrust.Runnable.Web.Tests/README.md")]
+    [InlineData("Web/ForgeTrust.Runnable.Web.UnitTests/Fixture.cs")]
     [InlineData("node_modules/pkg/readme.md")]
     public void ShouldExcludeFilePath_WhenPathContainsExplicitExcludedDirectory(string filePath)
     {

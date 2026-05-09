@@ -672,18 +672,15 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
-    public async Task HarvestAsync_ShouldHideInternalMarkdownFromPublicNavigationOnlyByDefault()
+    public async Task HarvestAsync_ShouldIgnoreTestProjectReadmesByDefault()
     {
         var testsDir = Path.Combine(_testRoot, "docs", "ForgeTrust.Runnable.Web.Tests");
         Directory.CreateDirectory(testsDir);
         await File.WriteAllTextAsync(Path.Combine(testsDir, "README.md"), "# Internal Guide");
 
         var results = (await _harvester.HarvestAsync(_testRoot)).ToList();
-        var doc = Assert.Single(results);
 
-        Assert.True(doc.Metadata?.HideFromPublicNav);
-        Assert.Null(doc.Metadata?.HideFromSearch);
-        Assert.Equal("internals", doc.Metadata?.PageType);
+        Assert.Empty(results);
     }
 
     [Fact]

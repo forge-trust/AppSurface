@@ -8,6 +8,7 @@ internal static class HarvestPathExclusions
         "node_modules",
         "bin",
         "obj",
+        "Test",
         "Tests"
     };
 
@@ -23,7 +24,7 @@ internal static class HarvestPathExclusions
     /// <param name="filePath">The relative file path to check.</param>
     /// <returns><c>true</c> if the file should be excluded; otherwise, <c>false</c>.</returns>
     public static bool ShouldExcludeFilePath(string filePath)
-        => ShouldExcludeFilePath(filePath, ExcludedDirectories);
+        => ShouldExcludeFilePath(filePath, ExcludedDirectories, excludeTestProjectDirectories: true);
 
     /// <summary>
     /// Determines whether a file should be excluded based on shared hidden-directory rules and a caller-supplied
@@ -33,8 +34,14 @@ internal static class HarvestPathExclusions
     /// <param name="excludedDirectories">
     /// Directory names that should always be excluded in addition to the shared hidden-directory behavior.
     /// </param>
+    /// <param name="excludeTestProjectDirectories">
+    /// When <c>true</c>, also excludes project-style test directory names such as <c>*.Tests</c> and <c>*Tests</c>.
+    /// </param>
     /// <returns><c>true</c> if the file should be excluded; otherwise, <c>false</c>.</returns>
-    internal static bool ShouldExcludeFilePath(string filePath, IReadOnlySet<string> excludedDirectories)
+    internal static bool ShouldExcludeFilePath(
+        string filePath,
+        IReadOnlySet<string> excludedDirectories,
+        bool excludeTestProjectDirectories = false)
     {
         ArgumentNullException.ThrowIfNull(filePath);
         ArgumentNullException.ThrowIfNull(excludedDirectories);
@@ -55,6 +62,11 @@ internal static class HarvestPathExclusions
                 return true;
             }
 
+            if (excludeTestProjectDirectories && IsTestProjectDirectorySegment(directorySegment))
+            {
+                return true;
+            }
+
             if (directorySegment.StartsWith('.') && !AllowedHiddenDirectories.Contains(directorySegment))
             {
                 return true;
@@ -62,5 +74,13 @@ internal static class HarvestPathExclusions
         }
 
         return false;
+    }
+
+    private static bool IsTestProjectDirectorySegment(string segment)
+    {
+        return segment.Equals("Test", StringComparison.OrdinalIgnoreCase)
+               || segment.Equals("Tests", StringComparison.OrdinalIgnoreCase)
+               || segment.Contains(".Tests", StringComparison.OrdinalIgnoreCase)
+               || segment.EndsWith("Tests", StringComparison.OrdinalIgnoreCase);
     }
 }

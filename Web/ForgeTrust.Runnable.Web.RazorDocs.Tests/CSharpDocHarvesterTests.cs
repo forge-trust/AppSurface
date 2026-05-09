@@ -46,6 +46,57 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldIgnoreExampleApplicationSource()
+    {
+        var exampleDir = Path.Combine(_testRoot, "examples", "web-app");
+        Directory.CreateDirectory(exampleDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(exampleDir, "ExampleService.cs"),
+            """
+            namespace WebAppExample.Services;
+
+            /// <summary>Example app service docs.</summary>
+            public class ExampleService {}
+            """);
+
+        var srcDir = Path.Combine(_testRoot, "src");
+        Directory.CreateDirectory(srcDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(srcDir, "Included.cs"),
+            """
+            namespace ForgeTrust.Runnable.Web;
+
+            /// <summary>Product docs.</summary>
+            public class Included {}
+            """);
+
+        var results = (await _harvester.HarvestAsync(_testRoot)).ToList();
+
+        Assert.Contains(results, n => n.Path == "Namespaces/ForgeTrust.Runnable.Web");
+        Assert.DoesNotContain(results, n => n.Path.Contains("WebAppExample", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(results, n => n.Title == "ExampleService");
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldIgnoreTestProjectSource()
+    {
+        var testsDir = Path.Combine(_testRoot, "Web", "ForgeTrust.Runnable.Web.Tests");
+        Directory.CreateDirectory(testsDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(testsDir, "Fixture.cs"),
+            """
+            namespace ForgeTrust.Runnable.Web.Tests;
+
+            /// <summary>Test fixture docs.</summary>
+            public class Fixture {}
+            """);
+
+        var results = (await _harvester.HarvestAsync(_testRoot)).ToList();
+
+        Assert.Empty(results);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldIgnoreCommonAgentDirectories()
     {
         // Arrange

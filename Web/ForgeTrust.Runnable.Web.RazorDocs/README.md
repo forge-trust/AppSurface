@@ -690,6 +690,7 @@ Field behavior and pitfalls:
 - If multiple docs in one section set `section_landing: true`, RazorDocs keeps the lowest `order` value, then the lowest canonical path, and logs a warning for the others.
 - A section landing doc can also author `featured_page_groups`; RazorDocs uses those reader-intent groups for section-level “next steps” on the detail page and collapses the first resolved rows into section preview links surfaced on the current docs home.
 - `HideFromPublicNav = true` always wins for navigation. Hidden pages do not appear in section routes, the sidebar, or the docs home even if they declare a section or landing status. They may still enter the search index with an `Internals` or `Generated Reference` search mode unless `HideFromSearch = true` is also set.
+- Default harvesting excludes test-project directories such as `Tests`, `Test`, `*.Tests`, and `*Tests`. The C# harvester also skips `examples` directories so example README walkthroughs can stay public without publishing generated API reference for example application internals.
 
 ## Docs Link Authoring
 
@@ -892,7 +893,8 @@ Each outline entry should provide the rendered fragment `Id`, the reader-facing 
 Public visibility note:
 
 - `HideFromSearch = true` removes a page from the search payload directly.
-- `HideFromPublicNav = true` removes a page from section routes, the sidebar, and the docs home. If `HideFromSearch` is not true, the page stays in the search payload under either `internals` or `generated-reference` so the default public search remains focused while explicit discovery modes can still find contributor, benchmark, test, and generated example-reference material.
+- `HideFromPublicNav = true` removes a page from section routes, the sidebar, and the docs home. If `HideFromSearch` is not true, the page stays in the search payload under either `internals` or `generated-reference` so the default public search remains focused while explicit discovery modes can still find intentional contributor, benchmark, or generated-reference material.
+- Default path exclusions run before metadata is assigned. Test-project README files and C# source under test-project directories are not harvested, and C# source under `examples` is skipped so generated API-reference pages for example apps do not enter navigation, search, or direct docs routing.
 
 ## Trust Metadata For Release Notes And Policy Pages
 
