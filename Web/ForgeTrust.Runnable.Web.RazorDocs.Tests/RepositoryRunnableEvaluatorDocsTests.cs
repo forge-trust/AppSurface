@@ -71,6 +71,7 @@ public sealed class RepositoryRunnableEvaluatorDocsTests
         var docs = await HarvestRepositoryDocsAsync();
         var aggregator = CreateAggregator(docs);
 
+        await AssertStartHereLandingAndOrderAsync(aggregator);
         await AssertSequenceAsync(aggregator);
         await AssertRelatedPagesAsync(aggregator);
 
@@ -151,6 +152,34 @@ public sealed class RepositoryRunnableEvaluatorDocsTests
 
         Assert.Null(SingleDoc(docs, "troubleshooting/startup-and-modules.md").Metadata?.SequenceKey);
         Assert.Null(SingleDoc(docs, "concepts/glossary.md").Metadata?.SequenceKey);
+    }
+
+    private static async Task AssertStartHereLandingAndOrderAsync(DocAggregator aggregator)
+    {
+        var sections = await aggregator.GetPublicSectionsAsync();
+        var startHere = Assert.Single(
+            sections,
+            section => section.Section == DocPublicSection.StartHere);
+
+        Assert.Equal("start-here/runnable-evaluator.md", startHere.LandingDoc?.Path);
+        Assert.Equal(
+            [
+                "start-here/runnable-evaluator.md",
+                "start-here/should-i-use-runnable.md",
+                "start-here/first-success-path.md",
+                "packages/README.md",
+                "Web/ForgeTrust.Runnable.Web.RazorDocs/use-razordocs.md"
+            ],
+            startHere.VisiblePages
+                .Where(doc =>
+                    doc.Path.StartsWith("start-here/", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(doc.Path, "packages/README.md", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(
+                        doc.Path,
+                        "Web/ForgeTrust.Runnable.Web.RazorDocs/use-razordocs.md",
+                        StringComparison.OrdinalIgnoreCase))
+                .Select(doc => doc.Path)
+                .ToArray());
     }
 
     private static void AssertIntentOrder(

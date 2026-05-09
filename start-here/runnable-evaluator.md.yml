@@ -3,6 +3,7 @@ summary: Follow the shortest path for deciding whether Runnable fits an ASP.NET 
 page_type: guide
 nav_group: Start Here
 sequence_key: runnable-evaluator
+section_landing: true
 order: 10
 aliases:
   - Runnable evaluator
