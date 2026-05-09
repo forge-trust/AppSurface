@@ -90,9 +90,19 @@ internal sealed class ExportRouteOutcome
     /// <returns>
     /// An outcome with <see cref="Succeeded"/> set to <see langword="false"/>, <see cref="StatusCode"/> populated, and no artifact or exception fields.
     /// </returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="route"/> is null, empty, or whitespace.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="statusCode"/> is a successful 2xx HTTP status code.
+    /// </exception>
     public static ExportRouteOutcome NonSuccess(string route, HttpStatusCode statusCode)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(route);
+        if ((int)statusCode is >= 200 and <= 299)
+        {
+            throw new ArgumentOutOfRangeException(nameof(statusCode), statusCode, "A non-success route outcome requires a non-2xx HTTP status code.");
+        }
 
         return new ExportRouteOutcome(route, false, null, statusCode, null, null, null, null);
     }

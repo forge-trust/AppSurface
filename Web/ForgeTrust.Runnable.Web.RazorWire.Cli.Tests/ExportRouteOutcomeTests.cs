@@ -92,14 +92,18 @@ public class ExportRouteOutcomeTests
         Assert.Equal(expectedParamName, ex.ParamName);
     }
 
-    [Fact]
-    public void NonSuccess_Should_Populate_Status_State()
+    [Theory]
+    [InlineData(HttpStatusCode.Continue)]
+    [InlineData(HttpStatusCode.MultipleChoices)]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public void NonSuccess_Should_Populate_Status_State(HttpStatusCode statusCode)
     {
-        var outcome = ExportRouteOutcome.NonSuccess("/missing", HttpStatusCode.NotFound);
+        var outcome = ExportRouteOutcome.NonSuccess("/missing", statusCode);
 
         Assert.Equal("/missing", outcome.Route);
         Assert.False(outcome.Succeeded);
-        Assert.Equal(HttpStatusCode.NotFound, outcome.StatusCode);
+        Assert.Equal(statusCode, outcome.StatusCode);
         Assert.Null(outcome.ContentType);
         Assert.Null(outcome.ArtifactPath);
         Assert.Null(outcome.ArtifactUrl);
@@ -116,6 +120,18 @@ public class ExportRouteOutcomeTests
         var ex = Assert.ThrowsAny<ArgumentException>(() => ExportRouteOutcome.NonSuccess(route!, HttpStatusCode.NotFound));
 
         Assert.Equal("route", ex.ParamName);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.OK)]
+    [InlineData(HttpStatusCode.Created)]
+    [InlineData(HttpStatusCode.NoContent)]
+    public void NonSuccess_Should_Throw_When_Status_Code_Is_Successful(HttpStatusCode statusCode)
+    {
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => ExportRouteOutcome.NonSuccess("/ok", statusCode));
+
+        Assert.Equal("statusCode", ex.ParamName);
+        Assert.Equal(statusCode, ex.ActualValue);
     }
 
     [Fact]
