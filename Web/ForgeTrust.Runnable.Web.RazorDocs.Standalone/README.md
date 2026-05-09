@@ -24,6 +24,17 @@ Do not duplicate standalone setup in test fixtures. If a scenario needs differen
 `CreateBuilder` is lower level than `RunAsync`: callers that build and start the host themselves should pass `--urls`, `--port`, or configure the web host before `Build()` instead of relying on the executable startup path's development-port fallback.
 The builder pins this standalone assembly as the host entry point identity so in-process callers, including xUnit, resolve the same static web asset manifest as the executable.
 
+## Strict Harvest Failure
+
+Use `RazorDocs:Harvest:FailOnFailure=true` when the standalone host is acting as an export or CI publish target and an all-failed harvest should stop the run before the app starts listening.
+
+```bash
+RazorDocs__Harvest__FailOnFailure=true \
+dotnet run --project Web/ForgeTrust.Runnable.Web.RazorDocs.Standalone -- --urls http://127.0.0.1:5189
+```
+
+Strict mode fails only when every configured harvester fails, times out, or cancels. Empty docs and partially degraded docs still start. The thrown `RazorDocsHarvestFailedException` uses a redacted summary suitable for CI output; raw exception details and repository paths remain in host logs for operators.
+
 ## Local URL Behavior
 
 When you run this host in `Development` without explicit endpoint configuration, Runnable Web assigns a deterministic localhost-only development URL from the current workspace path. That keeps sibling worktrees from colliding on the same default localhost URL.

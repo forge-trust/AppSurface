@@ -380,7 +380,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        await page.EvaluateAsync("() => document.getElementById('main-content')?.scrollTo(0, 100000)");
+        await page.EvaluateAsync(ScrollMainContentToBottomScript);
         var scrollState = await page.EvaluateAsync<DetailsScrollState>(
             """
             () => {
@@ -429,7 +429,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             "() => getComputedStyle(document.getElementById('main-content')).overflowAnchor");
         Assert.Equal("none", overflowAnchor);
 
-        await page.EvaluateAsync("() => document.getElementById('main-content')?.scrollTo(0, 100000)");
+        await page.EvaluateAsync(ScrollMainContentToBottomScript);
         await page.EvaluateAsync(
             """
             () => {
@@ -470,7 +470,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        await page.EvaluateAsync("() => document.getElementById('main-content')?.scrollTo(0, 100000)");
+        await page.EvaluateAsync(ScrollMainContentToBottomScript);
         var scrollState = await page.EvaluateAsync<DetailsScrollState>(
             """
             () => {
@@ -729,4 +729,17 @@ public sealed class RazorDocsWayfindingPlaywrightTests
 
         public int DocumentScrollTop { get; init; }
     }
+
+    private const string ScrollMainContentToBottomScript =
+        """
+        () => {
+          const main = document.getElementById('main-content');
+          if (!main) {
+            return;
+          }
+
+          main.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true }));
+          main.scrollTo(0, 100000);
+        }
+        """;
 }

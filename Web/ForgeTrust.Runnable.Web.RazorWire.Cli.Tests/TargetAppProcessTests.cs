@@ -25,6 +25,34 @@ public class TargetAppProcessTests
     }
 
     [Fact]
+    public void Constructor_Should_Inherit_Parent_Environment_And_Apply_Overrides()
+    {
+        const string inheritedKey = "PATH";
+        const string overriddenKey = "DOTNET_ENVIRONMENT";
+        var inheritedValue = Environment.GetEnvironmentVariable(inheritedKey);
+        Assert.False(string.IsNullOrWhiteSpace(inheritedValue));
+        var rawProcess = new Process();
+
+        _ = new TargetAppProcess(
+            new ProcessLaunchSpec
+            {
+                FileName = "dotnet",
+                Arguments = ["--version"],
+                WorkingDirectory = Directory.GetCurrentDirectory(),
+                EnvironmentOverrides = new Dictionary<string, string>
+                {
+                    [overriddenKey] = "Production"
+                }
+            },
+            hooks: null,
+            process: rawProcess,
+            started: false);
+
+        Assert.Equal(inheritedValue, rawProcess.StartInfo.Environment[inheritedKey]);
+        Assert.Equal("Production", rawProcess.StartInfo.Environment[overriddenKey]);
+    }
+
+    [Fact]
     public async Task Start_And_DisposeAsync_Should_Work_For_Real_Process()
     {
         var outputLines = new System.Collections.Concurrent.ConcurrentQueue<string>();
