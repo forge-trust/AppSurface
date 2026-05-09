@@ -89,6 +89,9 @@ public class RazorDocsWebModuleTests
             services,
             s => s.ServiceType == typeof(IRazorDocsHtmlSanitizer) && s.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, s => s.ServiceType == typeof(RazorDocsAssetPathResolver));
+        Assert.Contains(
+            services,
+            s => s.ServiceType == typeof(IHostedService) && s.ImplementationType == typeof(RazorDocsHarvestFailurePreflightService));
         Assert.DoesNotContain(services, s => s.ServiceType == typeof(TailwindCliManager));
         Assert.DoesNotContain(
             services,

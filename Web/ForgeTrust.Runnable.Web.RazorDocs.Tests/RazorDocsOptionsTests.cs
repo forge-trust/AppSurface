@@ -81,6 +81,36 @@ public sealed class RazorDocsOptionsTests
     }
 
     [Fact]
+    public void RazorDocsOptions_ShouldDefaultHarvestFailOnFailureToFalse()
+    {
+        var options = new RazorDocsOptions();
+
+        Assert.NotNull(options.Harvest);
+        Assert.False(options.Harvest.FailOnFailure);
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldBindConfiguredHarvestFailOnFailure()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Harvest:FailOnFailure"] = "true"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
+
+        Assert.True(options.Harvest.FailOnFailure);
+    }
+
+    [Fact]
     public void AddRazorDocs_ShouldBindConfiguredCacheExpirationMinutes()
     {
         var services = new ServiceCollection();
@@ -322,6 +352,7 @@ public sealed class RazorDocsOptionsTests
                 {
                   "RazorDocs": {
                     "Source": null,
+                    "Harvest": null,
                     "Bundle": null,
                     "Sidebar": null,
                     "Contributor": null
@@ -339,9 +370,11 @@ public sealed class RazorDocsOptionsTests
         var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
 
         Assert.NotNull(options.Source);
+        Assert.NotNull(options.Harvest);
         Assert.NotNull(options.Bundle);
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Contributor);
+        Assert.False(options.Harvest.FailOnFailure);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
     }
@@ -360,6 +393,7 @@ public sealed class RazorDocsOptionsTests
                 .Build());
 
         var source = new RazorDocsSourceOptions { RepositoryRoot = " /tmp/configured-root " };
+        var harvest = new RazorDocsHarvestOptions { FailOnFailure = true };
         var bundle = new RazorDocsBundleOptions { Path = " /tmp/docs.bundle.json " };
         var sidebar = new RazorDocsSidebarOptions
         {
@@ -378,6 +412,7 @@ public sealed class RazorDocsOptionsTests
             options =>
             {
                 options.Source = source;
+                options.Harvest = harvest;
                 options.Bundle = bundle;
                 options.Sidebar = sidebar;
                 options.Contributor = contributor;
@@ -389,10 +424,12 @@ public sealed class RazorDocsOptionsTests
         var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
 
         Assert.Same(source, options.Source);
+        Assert.Same(harvest, options.Harvest);
         Assert.Same(bundle, options.Bundle);
         Assert.Same(sidebar, options.Sidebar);
         Assert.Same(contributor, options.Contributor);
         Assert.Equal("/tmp/configured-root", options.Source.RepositoryRoot);
+        Assert.True(options.Harvest.FailOnFailure);
         Assert.Equal("/tmp/docs.bundle.json", options.Bundle.Path);
         Assert.Equal(["Contoso.Product."], options.Sidebar.NamespacePrefixes);
         Assert.Equal("main", options.Contributor.DefaultBranch);
@@ -413,6 +450,7 @@ public sealed class RazorDocsOptionsTests
             options =>
             {
                 options.Source = null!;
+                options.Harvest = null!;
                 options.Bundle = null!;
                 options.Sidebar = null!;
                 options.Contributor = null!;
@@ -422,9 +460,11 @@ public sealed class RazorDocsOptionsTests
         var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
 
         Assert.NotNull(options.Source);
+        Assert.NotNull(options.Harvest);
         Assert.NotNull(options.Bundle);
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Contributor);
+        Assert.False(options.Harvest.FailOnFailure);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
     }
@@ -474,6 +514,21 @@ public sealed class RazorDocsOptionsTests
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNullHarvestOptions()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Harvest = null!
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Harvest must not be null", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

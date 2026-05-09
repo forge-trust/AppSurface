@@ -153,7 +153,26 @@ Health and docs are computed from the same cached snapshot. This is deliberate: 
 - Do not treat `Empty` as a failure. It means RazorDocs found no docs without a failed harvester.
 - Do not expect raw exception details in public diagnostics. Use host logs for stack traces and exception messages.
 - Do not assume this API exposes visible operator UI or an ASP.NET Core `IHealthCheck`. The first harvest-health slice is API and documentation only; operator UI is tracked in issue #238.
-- Do not depend on fail-closed behavior for all-failed harvests yet. Strict failure mode is tracked in issue #237.
+
+### Strict Startup Failure
+
+Set `RazorDocs:Harvest:FailOnFailure` to `true` when a host should fail during startup if the cached harvest-health snapshot is `DocHarvestHealthStatus.Failed`.
+
+```json
+{
+  "RazorDocs": {
+    "Harvest": {
+      "FailOnFailure": true
+    }
+  }
+}
+```
+
+Strict mode is built for CI and export hosts that publish docs artifacts. It prevents an all-failed harvest from becoming an empty or untrustworthy release tree. Leave it off for general public runtime hosts unless failing the whole application is the right operational posture for that host.
+
+The startup preflight calls `DocAggregator.GetHarvestHealthAsync(CancellationToken)` and reuses the normal cached docs snapshot. It does not run a second harvester pipeline. `Healthy`, `Empty`, and `Degraded` snapshots continue startup; only aggregate `Failed` throws `RazorDocsHarvestFailedException`.
+
+`RazorDocsHarvestFailedException` exposes a redacted `DocHarvestFailureSummary` with status, counts, timestamp, and diagnostic code/severity/problem/fix fields. It omits `RepositoryRoot`, raw exception messages, stack traces, and diagnostic `Cause` text. Host logs can still contain lower-level harvester diagnostics because those logs are operator data, not public exception payload.
 
 ## Configuration
 
@@ -216,6 +235,11 @@ Enable versioning when you want the host to keep serving the live unreleased sna
 - `RazorDocs:Source:RepositoryRoot`
   - Optional absolute or app-relative repository root for source harvesting.
   - When omitted, RazorDocs falls back to repository discovery from the content root.
+- `RazorDocs:Harvest:FailOnFailure`
+  - Defaults to `false`.
+  - When `true`, `AddRazorDocs()` registers a startup preflight that fails the host with `RazorDocsHarvestFailedException` only when aggregate harvest health is `Failed`.
+  - Use this for release publishing, static export, and CI smoke hosts where publishing empty or untrustworthy docs is worse than a failed build.
+  - Do not use this expecting `Empty` or `Degraded` to fail in v1. Empty docs can be intentional, and degraded docs can still be usable.
 - `RazorDocs:CacheExpirationMinutes`
   - Controls the absolute lifetime of the shared docs snapshot that backs docs pages, public-section data, and `{DocsRootPath}/search-index.json`; for example, `/docs/search-index.json` by default or `/docs/next/search-index.json` when `RazorDocs:Routing:DocsRootPath` is `/docs/next`.
   - Defaults to `5` minutes.

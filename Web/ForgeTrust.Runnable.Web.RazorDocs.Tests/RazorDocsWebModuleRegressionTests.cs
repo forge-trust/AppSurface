@@ -5,12 +5,15 @@ using FakeItEasy;
 using ForgeTrust.Runnable.Core;
 using ForgeTrust.Runnable.Web;
 using ForgeTrust.Runnable.Web.RazorDocs.Controllers;
+using ForgeTrust.Runnable.Web.RazorDocs.Models;
+using ForgeTrust.Runnable.Web.RazorDocs.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs.Tests;
@@ -25,6 +28,70 @@ public class RazorDocsWebModuleRegressionTests
     private const string PackagedStylesheetPath = "/_content/ForgeTrust.Runnable.Web.RazorDocs/css/site.gen.css";
     private const string RootStylesheetPath = "/css/site.gen.css";
     private const string ReferencedRazorWireScriptPath = "/_content/ForgeTrust.Runnable.Web.RazorWire/razorwire/razorwire.js";
+
+    [Fact]
+    public async Task ConfigureWebOptions_ShouldStart_WhenHarvestFailsAndStrictModeIsDisabled()
+    {
+        var module = new RazorDocsWebModule();
+        var startup = new TestRazorDocsStartup(module);
+        var context = CreatePackagedModuleStartupContext(module);
+        var builder = ((IRunnableStartup)startup).CreateHostBuilder(context);
+
+        builder.ConfigureServices(
+            services =>
+            {
+                services.RemoveAll<IDocHarvester>();
+                services.AddSingleton<IDocHarvester, FailingHarvester>();
+            });
+        builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
+
+        using var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var server = host.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            Assert.NotNull(addresses);
+            Assert.NotEmpty(addresses!.Addresses);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureWebOptions_ShouldFailStartup_WhenHarvestFailsAndStrictModeIsEnabled()
+    {
+        var module = new RazorDocsWebModule();
+        var startup = new TestRazorDocsStartup(module);
+        var context = CreatePackagedModuleStartupContext(module);
+        var builder = ((IRunnableStartup)startup).CreateHostBuilder(context);
+
+        builder.ConfigureAppConfiguration(
+            (_, configuration) =>
+            {
+                configuration.AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Harvest:FailOnFailure"] = "true"
+                    });
+            });
+        builder.ConfigureServices(
+            services =>
+            {
+                services.RemoveAll<IDocHarvester>();
+                services.AddSingleton<IDocHarvester, FailingHarvester>();
+            });
+        builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
+
+        using var host = builder.Build();
+        var exception = await Assert.ThrowsAsync<RazorDocsHarvestFailedException>(async () => await host.StartAsync());
+
+        Assert.Contains(DocHarvestDiagnosticCodes.HarvesterFailed, exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(FailingHarvester.RawFailureMessage, exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
 
     [Fact]
     public void ConfigureWebOptions_Issue001_EnablesStaticWebAssets()
@@ -1112,6 +1179,16 @@ public class RazorDocsWebModuleRegressionTests
         }
 
         protected override RazorDocsWebModule CreateRootModule() => _module;
+    }
+
+    private sealed class FailingHarvester : IDocHarvester
+    {
+        public const string RawFailureMessage = "raw failing harvester message";
+
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException(RawFailureMessage);
+        }
     }
 
     private sealed record BuildCoordinates(string Configuration, string TargetFramework);

@@ -90,6 +90,7 @@ When `--dll` is used:
 
 For both `--project` and `--dll`:
 - If you do not pass `--urls` via `--app-args`, the CLI appends `--urls http://127.0.0.1:0`.
+- The launched app inherits the parent process environment, while the CLI forces `ASPNETCORE_ENVIRONMENT=Production` and `DOTNET_ENVIRONMENT=Production` for deployed-runtime semantics.
 - The CLI waits for startup, crawls the app, then shuts the process down automatically.
 
 ### RazorDocs versioned export notes
@@ -100,6 +101,7 @@ When the target app hosts RazorDocs:
 - Export exact published release trees as standalone static subtrees that already contain their own `index.html`, `search.html`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, section routes, and detail pages.
 - Treat those exact release trees as immutable publish artifacts. The RazorDocs runtime mounts them later under `/docs/v/{version}` and may also mount the recommended one at `/docs`.
 - Use `--seeds` when you want deterministic seeds for docs-specific surfaces instead of relying only on crawl discovery.
+- For release publishing, set `RazorDocs__Harvest__FailOnFailure=true` in the parent environment before `razorwire export --project` or `razorwire export --dll`. The launched target app inherits that setting, fails before listening when aggregate harvest health is `Failed`, and the export command surfaces the target app's startup output. The strict exception summary is redacted, but ordinary target host logs may still contain operator diagnostics such as repository paths or raw exception messages.
 
 **Example:**
 

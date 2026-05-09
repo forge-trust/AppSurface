@@ -2,6 +2,7 @@ using ForgeTrust.Runnable.Caching;
 using ForgeTrust.Runnable.Web.RazorDocs.Models;
 using ForgeTrust.Runnable.Web.RazorDocs.Services;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs;
@@ -11,7 +12,8 @@ namespace ForgeTrust.Runnable.Web.RazorDocs;
 /// </summary>
 /// <remarks>
 /// This extension binds <see cref="RazorDocsOptions"/> from configuration, rehydrates omitted nested option objects
-/// such as <see cref="RazorDocsOptions.Routing"/> and <see cref="RazorDocsOptions.Versioning"/> with their default
+/// such as <see cref="RazorDocsOptions.Harvest"/>, <see cref="RazorDocsOptions.Routing"/>, and
+/// <see cref="RazorDocsOptions.Versioning"/> with their default
 /// containers, normalizes caller-provided string settings, and validates the final shape on startup. Callers should
 /// use this once per application when they want the standard RazorDocs harvesting, routing, preview, and versioned
 /// published-release services to be available to downstream modules and controllers.
@@ -32,7 +34,8 @@ public static class RazorDocsServiceCollectionExtensions
     /// <see cref="RazorDocsVersioningOptions.CatalogPath"/>, and removes blank or duplicate sidebar namespace
     /// prefixes. Callers that omit <see cref="RazorDocsOptions.Routing"/> or
     /// <see cref="RazorDocsOptions.Versioning"/> can therefore still rely on a fully populated options object after
-    /// registration.
+    /// registration. When <see cref="RazorDocsHarvestOptions.FailOnFailure"/> is enabled, the registered startup
+    /// preflight fails the host only when the aggregate harvest health is failed.
     /// </para>
     /// <para>
     /// The method also registers <see cref="DocsUrlBuilder"/> and <see cref="RazorDocsVersionCatalogService"/> as
@@ -50,6 +53,7 @@ public static class RazorDocsServiceCollectionExtensions
                 (options, configuration) =>
                 {
                     options.Source ??= new RazorDocsSourceOptions();
+                    options.Harvest ??= new RazorDocsHarvestOptions();
                     options.Bundle ??= new RazorDocsBundleOptions();
                     options.Sidebar ??= new RazorDocsSidebarOptions();
                     options.Contributor ??= new RazorDocsContributorOptions();
@@ -97,6 +101,8 @@ public static class RazorDocsServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IDocHarvester, CSharpDocHarvester>());
         services.TryAddSingleton<DocFeaturedPageResolver>();
         services.TryAddSingleton<DocAggregator>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, RazorDocsHarvestFailurePreflightService>());
 
         return services;
     }
