@@ -738,6 +738,71 @@ public sealed class RazorDocsOptionsTests
     }
 
     [Fact]
+    public void Validator_ShouldRequireBundlePath_WhenBundleModeBundleOptionsAreMissing()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Mode = RazorDocsMode.Bundle,
+            Bundle = null!
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Bundle must not be null", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("requires RazorDocs:Bundle:Path", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("not implemented", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldStillReportVersioningFailures_WhenRoutingCannotNormalize()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Routing = new RazorDocsRoutingOptions
+            {
+                RouteRootPath = "foo/bar"
+            },
+            Versioning = new RazorDocsVersioningOptions
+            {
+                Enabled = true,
+                CatalogPath = "catalog.json"
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("RouteRootPath", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Failures, failure => failure.Contains("cannot use the route-family root", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Failures, failure => failure.Contains("reserved archive or exact-version child", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldNormalizeRoutingBeforeReportingMissingVersioningOptions()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Routing = new RazorDocsRoutingOptions
+            {
+                RouteRootPath = "/foo/bar",
+                DocsRootPath = "/foo/bar/next"
+            },
+            Versioning = null!
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Versioning must not be null", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Failures, failure => failure.Contains("RouteRootPath", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Failures, failure => failure.Contains("DocsRootPath", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Validator_ShouldRejectDocsRootAtDocs_WhenVersioningIsEnabled()
     {
         var validator = new RazorDocsOptionsValidator();

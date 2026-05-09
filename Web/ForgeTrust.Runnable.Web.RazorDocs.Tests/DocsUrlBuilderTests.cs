@@ -48,6 +48,20 @@ public sealed class DocsUrlBuilderTests
     }
 
     [Fact]
+    public void Constructor_ShouldDefaultRoots_WhenRoutingOptionsAreMissing()
+    {
+        var builder = new DocsUrlBuilder(
+            new RazorDocsOptions
+            {
+                Routing = null!
+            });
+
+        Assert.Equal("/docs", builder.RouteRootPath);
+        Assert.Equal("/docs", builder.CurrentDocsRootPath);
+        Assert.Equal("/docs/v", builder.DocsVersionPrefixPath);
+    }
+
+    [Fact]
     public void Constructor_ShouldDefaultLiveRootFromCustomRouteRoot()
     {
         var disabledBuilder = new DocsUrlBuilder(
@@ -279,6 +293,8 @@ public sealed class DocsUrlBuilderTests
     [InlineData("/", null, "/")]
     [InlineData("/", " ", "/")]
     [InlineData("/", "\t", "/")]
+    [InlineData("/docs", "///", "/docs")]
+    [InlineData("/", "///", "/")]
     public void JoinPath_ShouldReturnDocsRoot_WhenRelativePathIsBlank(string docsRootPath, string? relativePath, string expected)
     {
         var href = DocsUrlBuilder.JoinPath(docsRootPath, relativePath!);
