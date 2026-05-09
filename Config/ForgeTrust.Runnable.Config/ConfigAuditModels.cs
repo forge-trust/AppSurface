@@ -222,19 +222,19 @@ public sealed class ConfigAuditRedaction
 public enum ConfigAuditEntryState
 {
     /// <summary>A provider supplied the value without member-level mixed provenance.</summary>
-    Resolved,
+    Resolved = 0,
 
     /// <summary>An object value has a base source plus one or more member-level patches.</summary>
-    PartiallyResolved,
+    PartiallyResolved = 1,
 
     /// <summary>No provider supplied a value, but the wrapper default supplied one.</summary>
-    Defaulted,
+    Defaulted = 2,
 
     /// <summary>No provider value and no default resolved for the known entry.</summary>
-    Missing,
+    Missing = 3,
 
     /// <summary>Resolution found a value or validation result that was invalid.</summary>
-    Invalid
+    Invalid = 4
 }
 
 /// <summary>
@@ -243,19 +243,19 @@ public enum ConfigAuditEntryState
 public enum ConfigAuditSourceKind
 {
     /// <summary>A generic configuration provider.</summary>
-    Provider,
+    Provider = 0,
 
     /// <summary>A file-based source.</summary>
-    File,
+    File = 1,
 
     /// <summary>An environment variable source.</summary>
-    EnvironmentVariable,
+    EnvironmentVariable = 2,
 
     /// <summary>A config wrapper default value.</summary>
-    Default,
+    Default = 3,
 
     /// <summary>No source supplied a value.</summary>
-    Missing
+    Missing = 4
 }
 
 /// <summary>
@@ -264,16 +264,16 @@ public enum ConfigAuditSourceKind
 public enum ConfigAuditSourceRole
 {
     /// <summary>The source supplied the base value.</summary>
-    Base,
+    Base = 0,
 
     /// <summary>The source overrode lower-priority sources.</summary>
-    Override,
+    Override = 1,
 
     /// <summary>The source patched one or more child values.</summary>
-    Patch,
+    Patch = 2,
 
     /// <summary>The source supplied a fallback value.</summary>
-    Fallback
+    Fallback = 3
 }
 
 /// <summary>
@@ -282,13 +282,13 @@ public enum ConfigAuditSourceRole
 public enum ConfigAuditSensitivity
 {
     /// <summary>Sensitivity is unknown.</summary>
-    Unknown,
+    Unknown = 0,
 
     /// <summary>The source or value is not sensitive.</summary>
-    NonSensitive,
+    NonSensitive = 1,
 
     /// <summary>The source or value should be treated as sensitive.</summary>
-    Sensitive
+    Sensitive = 2
 }
 
 /// <summary>
@@ -297,11 +297,11 @@ public enum ConfigAuditSensitivity
 public enum ConfigAuditDiagnosticSeverity
 {
     /// <summary>Informational diagnostic.</summary>
-    Info,
+    Info = 0,
 
     /// <summary>Warning diagnostic.</summary>
-    Warning,
+    Warning = 1,
 
     /// <summary>Error diagnostic.</summary>
-    Error
+    Error = 2
 }

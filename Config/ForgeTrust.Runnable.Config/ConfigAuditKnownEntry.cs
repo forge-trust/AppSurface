@@ -44,6 +44,14 @@ public static class ConfigAuditServiceCollectionExtensions
     /// <summary>
     /// Registers an additional configuration key for audit reports.
     /// </summary>
+    /// <remarks>
+    /// Use this method for values that should appear in audit reports but are not backed by an <see cref="IConfig"/>
+    /// or <see cref="Config{T}"/> wrapper discovered by assembly scanning. Prefer wrapper discovery when a typed
+    /// wrapper already exists, because the wrapper can contribute defaults and validation diagnostics. Manual
+    /// registration creates a <see cref="ConfigAuditKnownEntry"/> with <see cref="ConfigAuditKnownEntry.ConfigType"/>
+    /// set to <see langword="null"/> and <typeparamref name="T"/> as the expected value type; for example,
+    /// <c>AddConfigAuditKey&lt;Uri&gt;("Billing.Endpoint")</c> includes a provider-only key in reports.
+    /// </remarks>
     /// <typeparam name="T">The expected value type.</typeparam>
     /// <param name="services">The service collection.</param>
     /// <param name="key">The configuration key.</param>

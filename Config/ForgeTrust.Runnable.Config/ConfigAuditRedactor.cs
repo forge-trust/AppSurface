@@ -28,7 +28,7 @@ internal sealed class ConfigAuditRedactor
         new()
         {
             Enabled = true,
-            MatchedFragments = SensitiveFragments,
+            MatchedFragments = SensitiveFragments.ToArray(),
             Placeholder = Placeholder
         };
 
@@ -81,6 +81,14 @@ internal sealed class ConfigAuditRedactor
                 return JsonSerializer.Serialize(value);
             }
             catch (NotSupportedException)
+            {
+                return value.ToString();
+            }
+            catch (JsonException)
+            {
+                return value.ToString();
+            }
+            catch (InvalidOperationException)
             {
                 return value.ToString();
             }

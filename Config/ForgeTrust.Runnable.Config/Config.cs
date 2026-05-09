@@ -102,26 +102,28 @@ public class Config<T> : IConfig, IConfigInspectable
         object? rawValue,
         ConfigAuditEntryState resolutionState)
     {
-        var value = (T?)rawValue ?? DefaultValue;
-        var hasValue = value != null;
+        T? value = default;
         var diagnostics = new List<ConfigAuditDiagnostic>();
         ConfigAuditSourceRecord? defaultSource = null;
         var state = resolutionState;
-        if (rawValue == null && value != null)
-        {
-            state = ConfigAuditEntryState.Defaulted;
-            defaultSource = new ConfigAuditSourceRecord
-            {
-                Kind = ConfigAuditSourceKind.Default,
-                ProviderName = GetType().Name,
-                ConfigPath = key,
-                AppliedToPath = key,
-                Role = ConfigAuditSourceRole.Fallback
-            };
-        }
 
         try
         {
+            value = rawValue == null ? DefaultValue : (T)rawValue;
+            var hasValue = value != null;
+            if (rawValue == null && value != null)
+            {
+                state = ConfigAuditEntryState.Defaulted;
+                defaultSource = new ConfigAuditSourceRecord
+                {
+                    Kind = ConfigAuditSourceKind.Default,
+                    ProviderName = GetType().Name,
+                    ConfigPath = key,
+                    AppliedToPath = key,
+                    Role = ConfigAuditSourceRole.Fallback
+                };
+            }
+
             ConfigPresenceValidator.Validate(
                 key,
                 GetType(),
@@ -138,6 +140,18 @@ public class Config<T> : IConfig, IConfigInspectable
                 typeof(T),
                 value,
                 (currentValue, validationContext) => ValidateValue((T)currentValue, validationContext));
+        }
+        catch (InvalidCastException ex)
+        {
+            state = ConfigAuditEntryState.Invalid;
+            diagnostics.Add(new ConfigAuditDiagnostic
+            {
+                Severity = ConfigAuditDiagnosticSeverity.Error,
+                Code = "config-value-type-mismatch",
+                Key = key,
+                ConfigPath = key,
+                Message = $"Resolved value for {key} could not be cast to {typeof(T).FullName}: {ex.Message}"
+            });
         }
         catch (ConfigurationValidationException ex)
         {

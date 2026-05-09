@@ -93,6 +93,13 @@ public class ConfigAuditReporterTests
         public string GoodProperty => "property-value";
     }
 
+    private sealed class CyclicOptions
+    {
+        public string Name { get; set; } = "root";
+
+        public CyclicOptions? Self { get; set; }
+    }
+
     [Fact]
     public void GetReport_WithContractFixture_ReportsStatesSourcesPatchesAndRedaction()
     {
@@ -154,6 +161,7 @@ public class ConfigAuditReporterTests
             services.AddConfigAuditKey<string>("Billing.Endpoint");
             services.AddConfigAuditKey<AppSettings>("MyApp.Settings");
             services.AddSingleton(new ConfigAuditKnownEntry("Region", typeof(RegionConfig), typeof(string)));
+            services.AddConfigAuditKey<string>("Region");
             services.AddConfigAuditKey<string>("Missing.RequiredApiUrl");
             services.AddConfigAuditKey<string>("Payment.ApiKey");
             services.AddSingleton(new ConfigAuditKnownEntry("Retry.Count", typeof(RetryCountConfig), typeof(int)));
@@ -273,12 +281,16 @@ public class ConfigAuditReporterTests
                     ["Short.Name"] = "no",
                     ["Throwing.Name"] = "valid-name",
                     ["Throwing.Count"] = 7,
+                    ["Mismatched.Name"] = 5,
+                    ["Mismatched.Count"] = "seven",
                     ["Object.String"] = "plain",
                     ["Odd.Shape"] = new OddShape()
                 }));
         services.AddSingleton(new ConfigAuditKnownEntry("Short.Name", typeof(ShortNameConfig), typeof(string)));
         services.AddSingleton(new ConfigAuditKnownEntry("Throwing.Name", typeof(ThrowingNameConfig), typeof(string)));
         services.AddSingleton(new ConfigAuditKnownEntry("Throwing.Count", typeof(ThrowingCountConfig), typeof(int)));
+        services.AddSingleton(new ConfigAuditKnownEntry("Mismatched.Name", typeof(ShortNameConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry("Mismatched.Count", typeof(RetryCountConfig), typeof(int)));
         services.AddSingleton(new ConfigAuditKnownEntry("Default.Port", typeof(DefaultPortConfig), typeof(int)));
         services.AddSingleton(new ConfigAuditKnownEntry("Broken.Wrapper", typeof(UnconstructableConfig), typeof(string)));
         services.AddSingleton(new ConfigAuditKnownEntry("Plain.Wrapper", typeof(object), typeof(string)));
@@ -298,6 +310,12 @@ public class ConfigAuditReporterTests
         Assert.Contains(
             AssertEntry(report, "Throwing.Count", ConfigAuditEntryState.Invalid, "7").Diagnostics,
             diagnostic => diagnostic.Code == "config-validation-threw");
+        Assert.Contains(
+            AssertEntry(report, "Mismatched.Name", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            diagnostic => diagnostic.Code == "config-value-type-mismatch");
+        Assert.Contains(
+            AssertEntry(report, "Mismatched.Count", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            diagnostic => diagnostic.Code == "config-value-type-mismatch");
         Assert.Contains(
             AssertEntry(report, "Default.Port", ConfigAuditEntryState.Defaulted, "8080").Sources,
             source => source.Kind == ConfigAuditSourceKind.Default);
@@ -388,14 +406,78 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_ConvertsProviderExceptionsToDiagnostics()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new ThrowingConfigProvider("Provider.Throws"));
+        services.AddSingleton<IConfigProvider>(new ThrowingDiagnosticProvider("Diagnostic.Throws"));
+        services.AddConfigAuditKey<string>("Provider.Throws");
+        services.AddConfigAuditKey<string>("Diagnostic.Throws");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "config-provider-diagnostics-threw");
+        Assert.Contains(
+            AssertEntry(report, "Provider.Throws", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            diagnostic => diagnostic.Code == "config-provider-get-value-threw");
+        Assert.Contains(
+            AssertEntry(report, "Diagnostic.Throws", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            diagnostic => diagnostic.Code == "config-provider-resolve-threw");
+    }
+
+    [Fact]
+    public void GetReport_DoesNotExpandCyclesIndefinitely()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var options = new CyclicOptions { Name = "root" };
+        options.Self = options;
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Cycle.Options", options));
+        services.AddConfigAuditKey<CyclicOptions>("Cycle.Options");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Cycle.Options", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal("root", entry.Children.Single(child => child.Key == "Cycle.Options.Name").DisplayValue);
+        Assert.Empty(entry.Children.Single(child => child.Key == "Cycle.Options.Self").Children);
+    }
+
+    [Fact]
     public void Redactor_FallsBackWhenEnumerableCannotSerialize()
     {
         var redactor = new ConfigAuditRedactor();
 
         var formatted = redactor.FormatValue("Values", new ThrowingEnumerable(), []);
+        var invalidOperation = redactor.FormatValue("Values", new InvalidOperationEnumerable(), []);
 
         Assert.Equal(nameof(ThrowingEnumerable), formatted.DisplayValue);
         Assert.False(formatted.IsRedacted);
+        Assert.Equal(nameof(InvalidOperationEnumerable), invalidOperation.DisplayValue);
+        Assert.False(invalidOperation.IsRedacted);
+    }
+
+    [Fact]
+    public void Redactor_CreatePolicyReturnsFragmentSnapshot()
+    {
+        var redactor = new ConfigAuditRedactor();
+
+        var first = redactor.CreatePolicy();
+        var fragments = Assert.IsType<string[]>(first.MatchedFragments);
+        fragments[0] = "not-password";
+
+        var second = redactor.CreatePolicy();
+
+        Assert.Contains("password", second.MatchedFragments);
+        Assert.DoesNotContain("not-password", second.MatchedFragments);
     }
 
     private static ServiceCollection CreateServices(string configDirectory, IEnvironmentProvider environment)
@@ -567,10 +649,74 @@ public class ConfigAuditReporterTests
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
     }
 
+    private sealed class ThrowingConfigProvider : IConfigProvider
+    {
+        private readonly string _key;
+
+        public ThrowingConfigProvider(string key)
+        {
+            _key = key;
+        }
+
+        public int Priority => 30;
+
+        public string Name => nameof(ThrowingConfigProvider);
+
+        public T? GetValue<T>(string environment, string key)
+        {
+            if (string.Equals(_key, key, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("provider value failed");
+            }
+
+            return default;
+        }
+    }
+
+    private sealed class ThrowingDiagnosticProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        private readonly string _key;
+
+        public ThrowingDiagnosticProvider(string key)
+        {
+            _key = key;
+        }
+
+        public int Priority => 25;
+
+        public string Name => nameof(ThrowingDiagnosticProvider);
+
+        public T? GetValue<T>(string environment, string key) => default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (string.Equals(_key, key, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("provider resolve failed");
+            }
+
+            return ConfigValueResolution.Missing(key);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) =>
+            throw new InvalidOperationException("provider diagnostics failed");
+    }
+
     private sealed class ThrowingEnumerable : IEnumerable
     {
         public IEnumerator GetEnumerator() => throw new NotSupportedException();
 
         public override string ToString() => nameof(ThrowingEnumerable);
+    }
+
+    private sealed class InvalidOperationEnumerable : IEnumerable
+    {
+        public IEnumerator GetEnumerator() => throw new InvalidOperationException();
+
+        public override string ToString() => nameof(InvalidOperationEnumerable);
     }
 }
