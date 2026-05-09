@@ -477,7 +477,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             Key = key,
             ConfigPath = configPath,
             Source = source,
-            Message = $"Configuration provider {provider.Name} threw {ex.GetType().Name}: {ex.Message}"
+            Message = $"Configuration provider {provider.Name} threw {ex.GetType().Name}."
         };
 }
 

@@ -452,6 +452,9 @@ public class ConfigAuditReporterTests
             .GetReport("Production");
 
         Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "config-provider-diagnostics-threw");
+        Assert.DoesNotContain(
+            report.Diagnostics.Concat(report.Entries.SelectMany(entry => entry.Diagnostics)),
+            diagnostic => diagnostic.Message.Contains("super-secret", StringComparison.Ordinal));
         Assert.Contains(
             AssertEntry(report, "Provider.Throws", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-provider-get-value-threw");
@@ -722,7 +725,7 @@ public class ConfigAuditReporterTests
         {
             if (string.Equals(_key, key, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("provider value failed");
+                throw new InvalidOperationException("provider value failed with super-secret");
             }
 
             return default;
@@ -752,14 +755,14 @@ public class ConfigAuditReporterTests
         {
             if (string.Equals(_key, key, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("provider resolve failed");
+                throw new InvalidOperationException("provider resolve failed with super-secret");
             }
 
             return ConfigValueResolution.Missing(key);
         }
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) =>
-            throw new InvalidOperationException("provider diagnostics failed");
+            throw new InvalidOperationException("provider diagnostics failed with super-secret");
     }
 
     private sealed class PatchSourceProvider : IConfigProvider, IConfigDiagnosticProvider
