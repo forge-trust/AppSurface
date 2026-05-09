@@ -12,7 +12,7 @@ If you are evaluating RazorDocs for your own repository, start with [Use RazorDo
 
 - `RazorDocsWebModule` for wiring the docs UI into a Runnable web host
 - `AddRazorDocs()` for typed options binding and core service registration
-- `DocAggregator` plus the built-in Markdown and C# harvesters
+- `DocAggregator` plus the built-in Markdown and C# harvesters, including structured harvest health diagnostics
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by RazorDocs consumers
 - `DocsUrlBuilder` plus the MVC surface used by RazorDocs consumers so the live docs root, search shell, and archive routes stay in one shared contract
 - `RazorDocsVersionCatalog` plus `RazorDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
@@ -45,6 +45,7 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 - New reusable badge, metadata chip, page metadata row, trust/provenance surface, or page-local outline state: add or extend a semantic component class in `wwwroot/css/app.css`, then use utilities around it only when they are purely local.
 - For `Views/Docs/Search.cshtml`, keep the stateful search container or interactive hook semantic, but use local utilities for one-off header copy, helper layout, and fallback-link chrome inside that view.
 - Restyling paragraphs, headings, or code blocks inside `.docs-content`: update wrapper-scoped CSS instead of pushing utility classes into harvested HTML.
+- Markdown pages with long-form prose use `.docs-content--markdown` for prose measure, paragraph rhythm, list spacing, links, blockquotes, and inline code. Generated non-Markdown docs and docs marked with `page_type: api` or `page_type: api-reference` use `.docs-content--api` so signatures and reference tables keep the wider base content measure.
 - New search filter pill, active-filter surface, or other stateful search UI: use a semantic hook class because CSS and JavaScript both need to recognize it.
 
 ### Stylesheet Responsibilities
@@ -56,6 +57,7 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 
 - **Package chrome**: one-off layout and presentation markup that RazorDocs owns directly, such as page shells, spacing, and framing.
 - **Harvested content**: nested documentation HTML that RazorDocs renders but does not fully author element by element, such as the body inside `.docs-content`.
+- **Markdown prose surface**: authored Markdown rendered with `.docs-content--markdown`; it optimizes for reading dense release notes, guides, and README-style pages rather than for wide API signatures in generated reference docs.
 - **Stable selector / hook**: a semantic class or required unique `id` that Razor, CSS, accessibility wiring, and sometimes JavaScript rely on consistently across files.
 
 ### Pitfalls
@@ -105,6 +107,93 @@ Supported normalized languages render highlighted output when the bundled TextMa
 - Do not assume every language alias supports custom semantics beyond normalization.
 - Do not use Shiki or Expressive Code line-marker syntax yet. V1 ignores code-fence metadata after the language.
 - Do not style highlighter output outside the RazorDocs package stylesheet. Code block styling belongs under `.docs-content` in `wwwroot/css/app.css`.
+
+## Harvest Health
+
+`DocAggregator.GetHarvestHealthAsync(CancellationToken)` returns structured health for the same cached harvest snapshot used by docs pages, public sections, and the search index. Hosts should use this API when they need to report whether source-backed docs are healthy, empty by configuration, partially degraded, or unavailable because every harvester failed.
+
+```csharp
+var health = await docAggregator.GetHarvestHealthAsync(ct);
+
+if (health.Status is DocHarvestHealthStatus.Failed or DocHarvestHealthStatus.Degraded)
+{
+    foreach (var diagnostic in health.Diagnostics)
+    {
+        var logLevel = diagnostic.Severity switch
+        {
+            DocHarvestDiagnosticSeverity.Information => LogLevel.Information,
+            DocHarvestDiagnosticSeverity.Warning => LogLevel.Warning,
+            DocHarvestDiagnosticSeverity.Error => LogLevel.Error,
+            DocHarvestDiagnosticSeverity.Critical => LogLevel.Critical,
+            _ => LogLevel.Warning
+        };
+
+        logger.Log(
+            logLevel,
+            "RazorDocs harvest diagnostic {Code}: {Problem} {Fix}",
+            diagnostic.Code,
+            diagnostic.Problem,
+            diagnostic.Fix);
+    }
+}
+```
+
+The returned `DocHarvestHealthSnapshot` includes:
+
+- `Status`: the aggregate `DocHarvestHealthStatus`.
+- `GeneratedUtc`: the timestamp for the cached snapshot generation.
+- `RepositoryRoot`: the resolved source root passed to harvesters. Treat this as server-only operational data; redact or omit it before forwarding harvest health to client-visible UI or public APIs.
+- `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for the configured harvesters.
+- `TotalDocs`: the number of documentation nodes in the final cached docs snapshot after RazorDocs post-processing.
+- `Harvesters`: one `DocHarvesterHealth` entry per configured harvester, including its concrete type name, `DocHarvesterHealthStatus`, raw returned doc count, and optional diagnostic.
+- `Diagnostics`: structured `DocHarvestDiagnostic` entries for harvester-level and aggregate states. RazorDocs-created snapshots never expose raw exception messages in diagnostics; exception details stay in host logs.
+
+### Status Contract
+
+`DocHarvestHealthStatus` is intentionally distinct from HTTP or process health:
+
+- `Healthy`: at least one configured harvester returned documentation and no harvester failed.
+- `Empty`: harvesting completed without failures, but the final docs corpus is empty. This can be valid for an empty repository, a disabled source set, or a host with no registered harvesters.
+- `Degraded`: at least one harvester succeeded or returned a valid empty result while another failed, timed out, or canceled. Docs remain usable, but the corpus may be incomplete.
+- `Failed`: every configured harvester failed, timed out, or canceled. RazorDocs returns an empty corpus for compatibility, but the snapshot should be treated as an operational failure.
+
+`DocHarvesterHealthStatus` describes each source contribution:
+
+- `Succeeded`: the harvester returned one or more docs.
+- `ReturnedEmpty`: the harvester completed without error and returned no docs.
+- `Failed`: the harvester threw while scanning.
+- `TimedOut`: the harvester exceeded RazorDocs' per-harvester timeout budget.
+- `Canceled`: the harvester observed cancellation outside RazorDocs' timeout budget.
+
+The public enum numeric values are stable compatibility contracts for consumers that persist, serialize, bind, or compare them. New members may be added later, but existing values must not be reordered or renumbered.
+
+### Diagnostics
+
+Each `DocHarvestDiagnostic` has a stable `Code`, `Severity`, optional `HarvesterType`, operator-facing `Problem`, likely `Cause`, and suggested `Fix`. Use diagnostic codes for tests, dashboards, and host UI branching instead of parsing log messages.
+
+RazorDocs currently emits these codes:
+
+- `DocHarvestDiagnosticCodes.HarvesterTimedOut` (`razordocs.harvest.harvester_timed_out`)
+- `DocHarvestDiagnosticCodes.HarvesterCanceled` (`razordocs.harvest.harvester_canceled`)
+- `DocHarvestDiagnosticCodes.HarvesterFailed` (`razordocs.harvest.harvester_failed`)
+- `DocHarvestDiagnosticCodes.NoHarvesters` (`razordocs.harvest.no_harvesters`)
+- `DocHarvestDiagnosticCodes.AllFailed` (`razordocs.harvest.all_failed`)
+
+An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
+
+### Cancellation and Caching
+
+`GetHarvestHealthAsync(cancellationToken)` observes caller cancellation only while the caller waits for the memoized snapshot. Canceling that wait does not cancel, poison, or evict the shared snapshot computation. A later caller can still receive the completed snapshot.
+
+Health and docs are computed from the same cached snapshot. This is deliberate: a host that reads `GetDocsAsync()` and then `GetHarvestHealthAsync()` sees health for the docs it is serving, not a second harvest with different timing or failures. Use `InvalidateCache()` when an operator explicitly asks RazorDocs to refresh source-backed docs.
+
+### Pitfalls
+
+- Do not parse logs to infer harvest health. Use `GetHarvestHealthAsync()` and diagnostic codes.
+- Do not treat `Empty` as a failure. It means RazorDocs found no docs without a failed harvester.
+- Do not expect raw exception details in public diagnostics. Use host logs for stack traces and exception messages.
+- Do not assume this API exposes visible operator UI or an ASP.NET Core `IHealthCheck`. The first harvest-health slice is API and documentation only; operator UI is tracked in issue #238.
+- Do not depend on fail-closed behavior for all-failed harvests yet. Strict failure mode is tracked in issue #237.
 
 ## Configuration
 
@@ -656,6 +745,9 @@ The outline client enhances the server-rendered links by:
 
 - using `#main-content` as the scroll root for `IntersectionObserver`
 - marking the current section with `aria-current="location"`
+- refreshing the active section from the scroll position on scroll, throttled through `requestAnimationFrame`, so long sections do not stay pinned to the previous outline item until the next heading enters the observer band
+- keeping the active outline link visible inside the sticky desktop rail when the page-local outline is taller than the viewport
+- easing outline-link clicks to the target section over 620 ms, while preserving instant jumps for readers who prefer reduced motion and canceling the animation when the reader manually wheels or touches the scroll root
 - initializing from the current URL hash
 - rebinding after RazorWire/Turbo frame navigation replaces `rw:island id="doc-content"`
 - collapsing the mobile outline after an outline link is chosen

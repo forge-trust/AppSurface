@@ -1,4 +1,3 @@
-@using System.Text.Json
 @model ForgeTrust.Runnable.Web.RazorDocs.Models.DocDetailsViewModel
 @inject ForgeTrust.Runnable.Web.RazorDocs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
@@ -388,7 +387,7 @@
             </section>
         }
 
-        <div class="docs-content">
+        <div class="docs-content @(Model.IsApiSurfaceDoc ? "docs-content--api" : "docs-content--markdown")">
             @* Safe: Content is sanitized by DocAggregator before caching. *@
             @Html.Raw(ResolveGeneratedContentHrefs(Model.Document.Content))
         </div>
@@ -513,29 +512,5 @@
 
 @if (hasOutline)
 {
-    <script data-doc-outline-client-loader="true">
-        (() => {
-            const outlineClientUrl = @Html.Raw(JsonSerializer.Serialize(docsOutlineClientUrl));
-            const outlineClientKey = "__razorDocsOutlineClient";
-            const initOutlineClient = () => window[outlineClientKey]?.init?.();
-
-            if (window[outlineClientKey]?.init) {
-                initOutlineClient();
-                return;
-            }
-
-            const existingScript = document.querySelector("script[data-doc-outline-client='true']");
-            if (existingScript) {
-                existingScript.addEventListener("load", initOutlineClient, { once: true });
-                return;
-            }
-
-            const script = document.createElement("script");
-            script.src = outlineClientUrl;
-            script.async = false;
-            script.dataset.docOutlineClient = "true";
-            script.addEventListener("load", initOutlineClient, { once: true });
-            document.head.append(script);
-        })();
-    </script>
+    <script src="@docsOutlineClientUrl" defer data-doc-outline-client="true"></script>
 }

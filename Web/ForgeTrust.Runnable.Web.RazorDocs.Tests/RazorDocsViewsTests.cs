@@ -181,6 +181,22 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public void Stylesheets_ShouldDefineMarkdownProseReadabilityRules()
+    {
+        var tailwindEntryStylesheet = ReadTailwindEntryStylesheetMarkup();
+
+        Assert.Contains(".docs-content--markdown", tailwindEntryStylesheet);
+        Assert.Contains("max-width: 70ch;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown p", tailwindEntryStylesheet);
+        Assert.Contains("margin: 0 0 1.08rem;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown ul,", tailwindEntryStylesheet);
+        Assert.Contains("list-style: disc;", tailwindEntryStylesheet);
+        Assert.Contains("list-style: decimal;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown blockquote", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown :not(pre) > code", tailwindEntryStylesheet);
+    }
+
+    [Fact]
     public void Layout_ShouldKeepSidebarVisibleByDefault_ForNoScriptFallback()
     {
         var layout = ReadLayoutMarkup();
@@ -1437,6 +1453,62 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task DetailsView_ShouldMarkMarkdownAndApiContent_ForSurfaceSpecificProseStyling()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+
+        var markdownHtml = await RenderDocsViewAsync(
+            services,
+            "Details",
+            c => c.Details("guides/intro.md"));
+        var apiHtml = await RenderDocsViewAsync(
+            services,
+            "Details",
+            c => c.Details("src/Example.cs"));
+
+        Assert.Contains("class=\"docs-content docs-content--markdown\"", markdownHtml);
+        Assert.Contains("class=\"docs-content docs-content--api\"", apiHtml);
+    }
+
+    [Theory]
+    [InlineData("api")]
+    [InlineData("api-reference")]
+    public async Task DetailsView_ShouldUseApiContentSurface_ForApiPageTypeMarkdown(string pageType)
+    {
+        var doc = new DocNode(
+            "API Guide",
+            "guides/api-reference.md",
+            "<p>Reference body</p>",
+            Metadata: new DocMetadata
+            {
+                PageType = pageType
+            });
+
+        var html = await RenderDetailsViewAsync(doc);
+
+        Assert.Contains("class=\"docs-content docs-content--api\"", html);
+        Assert.DoesNotContain("class=\"docs-content docs-content--markdown\"", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldUseApiContentSurface_ForGeneratedExtensionlessDocs()
+    {
+        var doc = new DocNode(
+            "Namespaces",
+            "Namespaces",
+            "<p>Namespace body</p>",
+            Metadata: new DocMetadata
+            {
+                NavGroup = "API Reference"
+            });
+
+        var html = await RenderDetailsViewAsync(doc);
+
+        Assert.Contains("class=\"docs-content docs-content--api\"", html);
+        Assert.DoesNotContain("class=\"docs-content docs-content--markdown\"", html);
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldHandleNamespacesRootPath()
     {
         using var services = CreateServiceProvider(CreateDocs());
@@ -1901,9 +1973,8 @@ public class RazorDocsViewsTests
         Assert.True(
             document.QuerySelector(".docs-detail-primary")!.CompareDocumentPosition(document.QuerySelector("#docs-page-outline")!)
                 .HasFlag(DocumentPositions.Following));
-        Assert.Contains("/docs/outline-client.js", html);
-        Assert.Contains("data-doc-outline-client-loader=\"true\"", html);
-        Assert.Contains("script.dataset.docOutlineClient = \"true\"", html);
+        Assert.NotNull(document.QuerySelector("script[src='/docs/outline-client.js'][data-doc-outline-client='true']"));
+        Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", html);
         Assert.DoesNotContain("rounded-2xl border border-slate-800 bg-slate-900/60", html);
 
         var tenantHtml = await RenderViewAsync(
@@ -1911,9 +1982,10 @@ public class RazorDocsViewsTests
             "/Views/Docs/Details.cshtml",
             model,
             pathBase: "/tenant");
+        var tenantDocument = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(tenantHtml);
 
-        Assert.Contains("/tenant/docs/outline-client.js", tenantHtml);
-        Assert.Contains("data-doc-outline-client-loader=\"true\"", tenantHtml);
+        Assert.NotNull(tenantDocument.QuerySelector("script[src='/tenant/docs/outline-client.js'][data-doc-outline-client='true']"));
+        Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", tenantHtml);
     }
 
     [Fact]
@@ -3486,6 +3558,8 @@ public class RazorDocsViewsTests
             Summary = metadata?.Summary,
             ShowSummary = !string.IsNullOrWhiteSpace(metadata?.Summary) && metadata?.SummaryIsDerived != true,
             IsCSharpApiDoc = doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
+            IsApiSurfaceDoc = !IsMarkdownDoc(doc.Path)
+                              || IsApiSurfacePageType(metadata?.PageType),
             PageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge(metadata?.PageType),
             Component = metadata?.ComponentIsDerived == true || string.IsNullOrWhiteSpace(metadata?.Component)
                 ? null
@@ -3501,6 +3575,19 @@ public class RazorDocsViewsTests
             ContributorSourceUsesTurbo = contributorSourceUsesTurbo,
             ContributorEditUsesTurbo = contributorEditUsesTurbo
         };
+    }
+
+    private static bool IsApiSurfacePageType(string? pageType)
+    {
+        var normalizedPageType = DocMetadataPresentation.NormalizeToken(pageType);
+
+        return normalizedPageType is "api" or "api-reference";
+    }
+
+    private static bool IsMarkdownDoc(string path)
+    {
+        return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase);
     }
 
     private static DocSidebarViewModel CreateSidebarViewModel(
