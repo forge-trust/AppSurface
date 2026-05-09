@@ -347,7 +347,7 @@ public class DocsController : Controller
     [HttpGet]
     public async Task<IActionResult> SearchIndex()
     {
-        // Manual invalidation hook for operators: /docs/search-index.json?refresh=1|true
+        // Manual invalidation hook for operators: use DocsUrlBuilder.Routes.SearchIndexRefresh for the configured root.
         if (ShouldRefreshCache(Request.Query))
         {
             if (CanRefreshCache())
@@ -673,7 +673,8 @@ public class DocsController : Controller
             Content = DocContentLinkRewriter.PrefixPathBaseForDocsUrls(
                 doc.Content,
                 _docsUrlBuilder.CurrentDocsRootPath,
-                HttpContext.Request.PathBase.Value)
+                HttpContext.Request.PathBase.Value,
+                _docsUrlBuilder.RouteRootPath)
         };
         var metadata = doc.Metadata;
         var resolvedTitle = ResolveDisplayTitle(doc);
@@ -1014,7 +1015,7 @@ public class DocsController : Controller
                 ? "The stable docs entry is waiting for a healthy recommended release tree. You can keep reading the preview surface or open an exact published version below."
                 : "Choose the exact release you want to read, or keep using the current preview surface for unreleased work.",
             AvailabilityMessage = entryFallback
-                ? $"No healthy recommended release tree is currently mounted at {PathBaseAware(DocsUrlBuilder.DocsEntryPath)}."
+                ? $"No healthy recommended release tree is currently mounted at {PathBaseAware(_docsUrlBuilder.DocsEntryRootPath)}."
                 : null,
             PreviewHref = _docsUrlBuilder.BuildHomeUrl(),
             VersionsHref = _docsUrlBuilder.BuildVersionsUrl(),

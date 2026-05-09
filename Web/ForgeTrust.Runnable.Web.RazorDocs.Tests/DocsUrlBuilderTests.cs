@@ -35,9 +35,112 @@ public sealed class DocsUrlBuilderTests
             });
 
         Assert.Equal("/docs", disabledBuilder.CurrentDocsRootPath);
+        Assert.Equal("/docs", disabledBuilder.RouteRootPath);
         Assert.Equal("/docs", disabledBuilder.DocsEntryRootPath);
         Assert.Equal("/docs/versions", disabledBuilder.DocsVersionsRootPath);
+        Assert.Equal("/docs/search", disabledBuilder.Routes.Search);
+        Assert.Equal("/docs/search-index.json?refresh=1", disabledBuilder.Routes.SearchIndexRefresh);
+        Assert.Equal("/docs/versions", disabledBuilder.Routes.Versions);
+        Assert.Equal("/docs", enabledBuilder.RouteRootPath);
         Assert.Equal("/docs/next", enabledBuilder.CurrentDocsRootPath);
+        Assert.Equal("/docs/versions", enabledBuilder.BuildVersionsUrl());
+        Assert.Equal("/docs/v/1.2.3", enabledBuilder.BuildVersionRootUrl("1.2.3"));
+    }
+
+    [Fact]
+    public void Constructor_ShouldDefaultRoots_WhenRoutingOptionsAreMissing()
+    {
+        var builder = new DocsUrlBuilder(
+            new RazorDocsOptions
+            {
+                Routing = null!
+            });
+
+        Assert.Equal("/docs", builder.RouteRootPath);
+        Assert.Equal("/docs", builder.CurrentDocsRootPath);
+        Assert.Equal("/docs/v", builder.DocsVersionPrefixPath);
+    }
+
+    [Fact]
+    public void Constructor_ShouldDefaultLiveRootFromCustomRouteRoot()
+    {
+        var disabledBuilder = new DocsUrlBuilder(
+            new RazorDocsOptions
+            {
+                Routing = new RazorDocsRoutingOptions
+                {
+                    RouteRootPath = "/foo/bar"
+                }
+            });
+        var enabledBuilder = new DocsUrlBuilder(
+            new RazorDocsOptions
+            {
+                Routing = new RazorDocsRoutingOptions
+                {
+                    RouteRootPath = "/foo/bar"
+                },
+                Versioning = new RazorDocsVersioningOptions
+                {
+                    Enabled = true,
+                    CatalogPath = "catalog.json"
+                }
+            });
+
+        Assert.Equal("/foo/bar", disabledBuilder.RouteRootPath);
+        Assert.Equal("/foo/bar", disabledBuilder.CurrentDocsRootPath);
+        Assert.Equal("/foo/bar/search", disabledBuilder.Routes.Search);
+        Assert.Equal("/foo/bar/versions", disabledBuilder.Routes.Versions);
+        Assert.Equal("/foo/bar", enabledBuilder.RouteRootPath);
+        Assert.Equal("/foo/bar/next", enabledBuilder.CurrentDocsRootPath);
+        Assert.Equal("/foo/bar/versions", enabledBuilder.BuildVersionsUrl());
+        Assert.Equal("/foo/bar/v/1.2.3", enabledBuilder.BuildVersionRootUrl("1.2.3"));
+    }
+
+    [Fact]
+    public void Constructor_ShouldNotInferRouteRootFromConfiguredVersionedDocsRoot()
+    {
+        var builder = new DocsUrlBuilder(
+            new RazorDocsOptions
+            {
+                Routing = new RazorDocsRoutingOptions
+                {
+                    DocsRootPath = "/foo/bar/next"
+                },
+                Versioning = new RazorDocsVersioningOptions
+                {
+                    Enabled = true,
+                    CatalogPath = "catalog.json"
+                }
+            });
+
+        Assert.Equal("/docs", builder.RouteRootPath);
+        Assert.Equal("/foo/bar/next", builder.CurrentDocsRootPath);
+        Assert.Equal("/docs/versions", builder.Routes.Versions);
+        Assert.Equal("/docs/v/1.2.3", builder.BuildVersionRootUrl("1.2.3"));
+    }
+
+    [Fact]
+    public void Constructor_ShouldSupportRootRouteFamilyWithVersioning()
+    {
+        var builder = new DocsUrlBuilder(
+            new RazorDocsOptions
+            {
+                Routing = new RazorDocsRoutingOptions
+                {
+                    RouteRootPath = "/"
+                },
+                Versioning = new RazorDocsVersioningOptions
+                {
+                    Enabled = true,
+                    CatalogPath = "catalog.json"
+                }
+            });
+
+        Assert.Equal("/", builder.RouteRootPath);
+        Assert.Equal("/next", builder.CurrentDocsRootPath);
+        Assert.Equal("/versions", builder.BuildVersionsUrl());
+        Assert.Equal("/v/1.2.3", builder.BuildVersionRootUrl("1.2.3"));
+        Assert.Equal("/next/search-index.json?refresh=1", builder.Routes.SearchIndexRefresh);
     }
 
     [Fact]
@@ -190,6 +293,8 @@ public sealed class DocsUrlBuilderTests
     [InlineData("/", null, "/")]
     [InlineData("/", " ", "/")]
     [InlineData("/", "\t", "/")]
+    [InlineData("/docs", "///", "/docs")]
+    [InlineData("/", "///", "/")]
     public void JoinPath_ShouldReturnDocsRoot_WhenRelativePathIsBlank(string docsRootPath, string? relativePath, string expected)
     {
         var href = DocsUrlBuilder.JoinPath(docsRootPath, relativePath!);

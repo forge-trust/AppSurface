@@ -950,7 +950,7 @@ public class CSharpDocHarvester : IDocHarvester
                     var childTitle = GetNamespaceTitle(child);
 
                     return
-                        $@"<li><a href=""/docs/{WebUtility.HtmlEncode(childPath)}.html"">{WebUtility.HtmlEncode(childTitle)}</a></li>";
+                        $@"<li><a href=""/{WebUtility.HtmlEncode(childPath)}.html"">{WebUtility.HtmlEncode(childTitle)}</a></li>";
                 });
 
             var childSection = new StringBuilder();

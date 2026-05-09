@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ForgeTrust.Runnable.Web.RazorDocs.Services;
 using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs;
@@ -231,36 +232,38 @@ public enum RazorDocsLastUpdatedMode
 }
 
 /// <summary>
-/// Routing settings for the live RazorDocs source surface.
+/// Routing settings for the RazorDocs route family and live source surface.
 /// </summary>
 /// <remarks>
-/// The live source-backed surface always stays under the <c>/docs</c> URL family. RazorDocs normalizes configured
-/// values into app-relative paths before validation, so hosts may provide <c>docs/preview</c> and still get the
-/// canonical <c>/docs/preview</c> route contract. The one supported exception is <c>/</c>, which mounts the live
-/// docs surface at the application root for single-purpose docs hosts. When versioning is off the live surface
-/// defaults to <c>/docs</c>. When versioning is on the live surface defaults to <c>/docs/next</c> so the stable
-/// <c>/docs</c> alias can point at the recommended published release instead. These defaults are applied by
-/// <c>AddRazorDocs()</c> during options binding, so callers can omit <see cref="DocsRootPath"/> when the standard
-/// route contract is acceptable.
+/// RazorDocs separates the route-family root from the live docs root. <see cref="RouteRootPath"/> owns stable entry,
+/// archive, and exact-version routes. <see cref="DocsRootPath"/> owns the live source-backed surface used for current
+/// docs, search, and the current search-index payload. For a custom versioned host, use values such as
+/// <c>RouteRootPath=/foo/bar</c> and <c>DocsRootPath=/foo/bar/next</c>. Both values are normalized into app-relative
+/// paths during <c>AddRazorDocs()</c> post-configuration.
 /// </remarks>
 public sealed class RazorDocsRoutingOptions
 {
     /// <summary>
+    /// Gets or sets the app-relative route-family root for this RazorDocs instance.
+    /// </summary>
+    /// <remarks>
+    /// The route root is the parent for stable entry, archive, and exact-version routes. When omitted, it defaults to the
+    /// live docs root with versioning disabled and to <c>/docs</c> with versioning enabled. Relative-looking values are
+    /// normalized into app-relative paths. For example, <c>foo/bar</c> becomes <c>/foo/bar</c>. Use <c>/</c> for a
+    /// single-purpose root-mounted docs host. The normalized path must not end with <c>/</c>, include query or fragment
+    /// segments, or target reserved child routes such as <c>/foo/bar/versions</c> or <c>/foo/bar/v</c>.
+    /// </remarks>
+    public string? RouteRootPath { get; set; }
+
+    /// <summary>
     /// Gets or sets the app-relative root path for the live source-backed docs surface.
     /// </summary>
     /// <remarks>
-    /// Relative-looking values are normalized into app-relative paths. For example, <c>docs/live</c> becomes
-    /// <c>/docs/live</c> during options binding. The normalized path must either be exactly <c>/</c> for a
-    /// root-mounted docs host or start with <c>/docs</c>; it must not end with <c>/</c> and cannot include query or
-    /// fragment segments.
-    /// When versioning is disabled the default path is <c>/docs</c>. When versioning is enabled the default path
-    /// becomes <c>/docs/next</c> so the current unreleased snapshot does not collide with the recommended released
-    /// docs alias at <c>/docs</c>.
-    /// Avoid reserved versioning paths such as <c>/docs</c>, <c>/docs/versions</c>, <c>/docs/v</c>, and any
-    /// <c>/docs/v/{version}</c> route when versioning is enabled unless you intentionally use the root-mounted
-    /// <c>/</c> special case. Hosts that customize this root should configure it before any generated links or
-    /// exported trees are produced so server-rendered pages, search assets, and static export output all agree on the
-    /// same live preview root.
+    /// The live root serves current source-backed docs, search, and the current search index. Relative-looking values
+    /// are normalized into app-relative paths. For example, <c>foo/bar/next</c> becomes <c>/foo/bar/next</c>. When
+    /// versioning is disabled the default path is the route root. When versioning is enabled the default path is
+    /// <c>{RouteRootPath}/next</c>, or <c>/docs/next</c> for the default route family. The live root must not collide
+    /// with the route-family root or its reserved archive/exact-version children when versioning is enabled.
     /// </remarks>
     public string? DocsRootPath { get; set; }
 }
@@ -270,8 +273,9 @@ public sealed class RazorDocsRoutingOptions
 /// </summary>
 /// <remarks>
 /// Enabling versioning turns on the published-release route contract:
-/// <c>/docs</c> for the recommended release alias, <c>/docs/v/{version}</c> for immutable exact trees,
-/// <c>/docs/versions</c> for the archive, and a live preview surface rooted at <see cref="RazorDocsRoutingOptions.DocsRootPath"/>.
+/// <see cref="RazorDocsRoutingOptions.RouteRootPath"/> for the recommended release alias,
+/// <c>{RouteRootPath}/v/{version}</c> for immutable exact trees, <c>{RouteRootPath}/versions</c> for the archive, and
+/// a live preview surface rooted at <see cref="RazorDocsRoutingOptions.DocsRootPath"/>.
 /// The catalog stays file-based in this slice: runtime consumes a JSON manifest plus prebuilt exact release trees and
 /// does not perform Git or bundle resolution at request time. The catalog must describe the recommended version
 /// alias plus one or more exact release trees whose exported contents satisfy the exact-tree contract documented in
@@ -321,6 +325,8 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         var contributor = options.Contributor;
         var routing = options.Routing;
         var versioning = options.Versioning;
+        string? normalizedRouteRootPath = null;
+        string? normalizedDocsRootPath = null;
 
         if (!Enum.IsDefined(options.Mode))
         {
@@ -365,6 +371,45 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         {
             failures.Add("RazorDocs:Routing must not be null.");
         }
+        else
+        {
+            var routeRootPathIsValid = true;
+            var docsRootPathIsValid = true;
+
+            if (routing.RouteRootPath is not null)
+            {
+                if (!IsValidAppRelativeRootPath(routing.RouteRootPath))
+                {
+                    failures.Add(
+                        "RazorDocs:Routing:RouteRootPath must be an app-relative path such as '/docs', 'docs', '/foo/bar', or 'foo/bar'. It must not end with '/', include a query or fragment, or use an absolute URL.");
+                    routeRootPathIsValid = false;
+                }
+                else if (IsReservedRouteFamilyChildPath(routing.RouteRootPath))
+                {
+                    failures.Add(
+                        "RazorDocs:Routing:RouteRootPath cannot target a reserved archive or exact-version child route such as '/foo/bar/versions' or '/foo/bar/v'. Use the parent route root, for example '/foo/bar'.");
+                    routeRootPathIsValid = false;
+                }
+            }
+
+            if (routing.DocsRootPath is not null && !IsValidAppRelativeRootPath(routing.DocsRootPath))
+            {
+                failures.Add(
+                    "RazorDocs:Routing:DocsRootPath must be an app-relative path such as '/docs/next', 'docs/next', '/foo/bar/next', or 'foo/bar/next'. It must not end with '/', include a query or fragment, or use an absolute URL.");
+                docsRootPathIsValid = false;
+            }
+
+            if (routeRootPathIsValid && docsRootPathIsValid)
+            {
+                normalizedDocsRootPath = DocsUrlBuilder.NormalizeDocsRootPath(
+                    routing.DocsRootPath,
+                    versioning?.Enabled == true);
+                normalizedRouteRootPath = DocsUrlBuilder.NormalizeRouteRootPath(
+                    routing.RouteRootPath,
+                    normalizedDocsRootPath,
+                    versioning?.Enabled == true);
+            }
+        }
 
         if (versioning is null)
         {
@@ -388,16 +433,6 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
             failures.Add("RazorDocs:Source:RepositoryRoot cannot be whitespace.");
         }
 
-        if (routing?.DocsRootPath is null)
-        {
-            failures.Add("RazorDocs:Routing:DocsRootPath must not be null.");
-        }
-        else if (!IsValidDocsRootPath(routing.DocsRootPath))
-        {
-            failures.Add(
-                "RazorDocs:Routing:DocsRootPath must be exactly '/' or start with '/docs', must not end with '/', and cannot contain query or fragment segments.");
-        }
-
         if (versioning?.Enabled == true)
         {
             if (string.IsNullOrWhiteSpace(versioning.CatalogPath))
@@ -405,17 +440,19 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
                 failures.Add("RazorDocs versioning requires RazorDocs:Versioning:CatalogPath.");
             }
 
-            if (string.Equals(routing?.DocsRootPath, "/docs", StringComparison.OrdinalIgnoreCase))
+            if (normalizedRouteRootPath is not null
+                && string.Equals(normalizedDocsRootPath, normalizedRouteRootPath, StringComparison.OrdinalIgnoreCase))
             {
                 failures.Add(
-                    "RazorDocs versioning cannot use '/docs' as the live source docs root. Use '/docs/next' or another '/docs/*' preview path.");
+                    "RazorDocs versioning cannot use the route-family root as the live source docs root. The live preview would collide with stable entry, archive, and exact-version routes. Use '/next' for root-mounted docs or a child such as '/foo/bar/next'.");
             }
 
-            if (routing?.DocsRootPath is not null
-                && IsReservedVersioningPath(routing.DocsRootPath))
+            if (normalizedRouteRootPath is not null
+                && normalizedDocsRootPath is not null
+                && IsReservedRouteFamilyChildPath(normalizedDocsRootPath, normalizedRouteRootPath))
             {
                 failures.Add(
-                    "RazorDocs:Routing:DocsRootPath cannot use a reserved versioning path such as '/docs/versions', '/docs/v', or '/docs/v/...'.");
+                    "RazorDocs:Routing:DocsRootPath cannot use a reserved archive or exact-version child of the same route root, such as '/foo/bar/versions' or '/foo/bar/v'. Use a live preview child such as '/foo/bar/next'.");
             }
         }
 
@@ -515,32 +552,41 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         return cacheDuration.Ticks % TimeSpan.TicksPerSecond == 0;
     }
 
-    private static bool IsValidDocsRootPath(string docsRootPath)
+    private static bool IsValidAppRelativeRootPath(string path)
     {
-        if (string.IsNullOrWhiteSpace(docsRootPath))
+        if (string.IsNullOrWhiteSpace(path))
         {
             return false;
         }
 
-        if (!string.Equals(docsRootPath, "/", StringComparison.Ordinal)
-            && !string.Equals(docsRootPath, "/docs", StringComparison.OrdinalIgnoreCase)
-            && !docsRootPath.StartsWith("/docs/", StringComparison.OrdinalIgnoreCase))
+        var trimmedPath = path.Trim();
+        if (trimmedPath.Contains("://", StringComparison.Ordinal)
+            || trimmedPath.StartsWith("//", StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (docsRootPath.Length > 1 && docsRootPath[^1] == '/')
+        if (trimmedPath.Length > 1 && trimmedPath[^1] == '/')
         {
             return false;
         }
 
-        return docsRootPath.IndexOfAny(['?', '#']) < 0;
+        return trimmedPath.IndexOfAny(['?', '#']) < 0;
     }
 
-    private static bool IsReservedVersioningPath(string docsRootPath)
+    private static bool IsReservedRouteFamilyChildPath(string path)
     {
-        return string.Equals(docsRootPath, "/docs/v", StringComparison.OrdinalIgnoreCase)
-               || docsRootPath.StartsWith("/docs/v/", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(docsRootPath, "/docs/versions", StringComparison.OrdinalIgnoreCase);
+        var normalizedPath = DocsUrlBuilder.NormalizeRouteRootPath(path, DocsUrlBuilder.DocsEntryPath, versioningEnabled: false);
+        return normalizedPath.EndsWith("/versions", StringComparison.OrdinalIgnoreCase)
+               || normalizedPath.EndsWith("/v", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsReservedRouteFamilyChildPath(string docsRootPath, string routeRootPath)
+    {
+        var versionsRoot = DocsUrlBuilder.JoinPath(routeRootPath, "versions");
+        var versionPrefix = DocsUrlBuilder.JoinPath(routeRootPath, "v");
+        return string.Equals(docsRootPath, versionsRoot, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(docsRootPath, versionPrefix, StringComparison.OrdinalIgnoreCase)
+               || docsRootPath.StartsWith(versionPrefix + "/", StringComparison.OrdinalIgnoreCase);
     }
 }

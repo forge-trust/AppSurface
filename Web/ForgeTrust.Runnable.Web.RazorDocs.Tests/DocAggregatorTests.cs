@@ -1290,6 +1290,59 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDocDetailsAsync_ShouldResolveRelatedPagesWithConfiguredRouteRootPrefixedCanonicalPaths()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Current",
+                "guides/current.md",
+                "<p>Current</p>",
+                Metadata: new DocMetadata
+                {
+                    RelatedPages = ["/foo/bar/guides/related.md.html"]
+                }),
+            new(
+                "Related",
+                "guides/related.md",
+                "<p>Related</p>",
+                Metadata: new DocMetadata
+                {
+                    Summary = "Follow the mounted docs step."
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        using var memo = new Memo(cache);
+        var aggregator = new DocAggregator(
+            [_harvesterFake],
+            new RazorDocsOptions
+            {
+                Routing = new RazorDocsRoutingOptions
+                {
+                    RouteRootPath = "/foo/bar",
+                    DocsRootPath = "/foo/bar/next"
+                },
+                Versioning = new RazorDocsVersioningOptions
+                {
+                    Enabled = true
+                }
+            },
+            _envFake,
+            memo,
+            _sanitizerFake,
+            _loggerFake);
+
+        var details = await aggregator.GetDocDetailsAsync("guides/current.md");
+
+        var relatedPage = Assert.Single(details!.RelatedPages);
+        Assert.Equal("Related", relatedPage.Title);
+        Assert.Equal("/foo/bar/next/guides/related.md.html", relatedPage.Href);
+        Assert.Equal("Follow the mounted docs step.", relatedPage.Summary);
+    }
+
+    [Fact]
     public async Task GetDocDetailsAsync_ShouldResolveRelatedPagesWithMissingMetadata()
     {
         var harvestedDocs = new List<DocNode>

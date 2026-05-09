@@ -317,6 +317,43 @@ public sealed class DocFeaturedPageResolverTests
         Assert.Equal("/docs/next/guides/intro.md.html", page.Href);
     }
 
+    [Theory]
+    [InlineData("/foo/bar/guides/intro.md.html")]
+    [InlineData("foo/bar/guides/intro.md.html")]
+    [InlineData("/foo/bar/next/guides/intro.md.html")]
+    [InlineData("/docs/guides/intro.md.html")]
+    [InlineData("docs/guides/intro.md.html")]
+    public void ResolveGroups_ShouldResolveConfiguredRouteRootCanonicalDestinationPaths(string authoredPath)
+    {
+        var resolver = new DocFeaturedPageResolver(
+            A.Fake<ILogger<DocFeaturedPageResolver>>(),
+            new DocsUrlBuilder(
+                new RazorDocsOptions
+                {
+                    Routing = new RazorDocsRoutingOptions
+                    {
+                        RouteRootPath = "/foo/bar",
+                        DocsRootPath = "/foo/bar/next"
+                    },
+                    Versioning = new RazorDocsVersioningOptions
+                    {
+                        Enabled = true
+                    }
+                }));
+        var landing = Landing(
+            new DocFeaturedPageDefinition
+            {
+                Path = authoredPath
+            });
+        var intro = Doc("Intro", "guides/intro.md");
+
+        var groups = resolver.ResolveGroups(landing, [landing, intro]);
+
+        var page = Assert.Single(Assert.Single(groups).Pages);
+        Assert.Equal("Intro", page.Title);
+        Assert.Equal("/foo/bar/next/guides/intro.md.html", page.Href);
+    }
+
     [Fact]
     public void ResolveGroups_ShouldResolveStableRoutePrefixedPaths_WhenCurrentDocsRootIsRootMounted()
     {

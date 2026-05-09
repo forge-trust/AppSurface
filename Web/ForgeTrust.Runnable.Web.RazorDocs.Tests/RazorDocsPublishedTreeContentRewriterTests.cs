@@ -40,6 +40,40 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
     }
 
     [Fact]
+    public void RewriteHtml_ShouldRebaseStableDocsLinksToCustomRouteRoot()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <link rel="stylesheet" href="/docs/search.css" />
+              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body>
+              <a href="/docs/guide.html">Guide</a>
+              <a href="/docs/versions">Archive</a>
+              <a href="/docs/v/9.9.9/guide.html">Exact</a>
+              <a href="/foo/bar/next/search">Preview</a>
+            </body>
+            </html>
+            """;
+
+        var rewritten = RazorDocsPublishedTreeContentRewriter.RewriteHtml(
+            html,
+            "/foo/bar/v/1.2.3",
+            previewRootPath: "/foo/bar/next",
+            routeRootPath: "/foo/bar");
+
+        Assert.Contains("href=\"/foo/bar/v/1.2.3/guide.html\"", rewritten);
+        Assert.Contains("href=\"/foo/bar/versions\"", rewritten);
+        Assert.Contains("href=\"/foo/bar/v/9.9.9/guide.html\"", rewritten);
+        Assert.Contains("href=\"/foo/bar/next/search\"", rewritten);
+        Assert.Contains("\"docsRootPath\":\"/foo/bar/v/1.2.3\"", rewritten);
+        Assert.Contains("\"docsSearchUrl\":\"/foo/bar/v/1.2.3/search\"", rewritten);
+    }
+
+    [Fact]
     public void RewriteSearchIndexJson_ShouldRebaseDocumentPaths()
     {
         const string json = "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}";
@@ -49,6 +83,32 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
 
         Assert.Contains("\"path\":\"/docs/v/1.2.3/guide.html\"", rewritten);
         Assert.Equal(json, unchanged);
+    }
+
+    [Fact]
+    public void RewriteSearchIndexJson_ShouldRebaseDocumentPathsToCustomRouteRoot()
+    {
+        const string json = """
+                            {
+                              "documents": [
+                                { "path": "/docs/guide.html", "title": "Guide" },
+                                { "path": "/docs/versions", "title": "Archive" },
+                                { "path": "/docs/v/9.9.9/guide.html", "title": "Exact" },
+                                { "path": "/foo/bar/next/search", "title": "Preview" }
+                              ]
+                            }
+                            """;
+
+        var rewritten = RazorDocsPublishedTreeContentRewriter.RewriteSearchIndexJson(
+            json,
+            "/foo/bar/v/1.2.3",
+            previewRootPath: "/foo/bar/next",
+            routeRootPath: "/foo/bar");
+
+        Assert.Contains("\"path\":\"/foo/bar/v/1.2.3/guide.html\"", rewritten);
+        Assert.Contains("\"path\":\"/foo/bar/versions\"", rewritten);
+        Assert.Contains("\"path\":\"/foo/bar/v/9.9.9/guide.html\"", rewritten);
+        Assert.Contains("\"path\":\"/foo/bar/next/search\"", rewritten);
     }
 
     [Fact]
