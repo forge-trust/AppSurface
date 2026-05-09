@@ -9,6 +9,7 @@
   const fetchTimeoutMs = 10000;
   const docsFrameId = 'doc-content';
   const searchInputHash = '#docs-search-page-input';
+  const defaultSearchMode = 'public';
   const enableDocsPartialRewrite = Boolean(
     document.querySelector('meta[name="rw-docs-static-partials"][content="1"]')
   );
@@ -18,6 +19,7 @@
     boost: { title: 6, aliases: 4, headings: 3, keywords: 2, summary: 2, bodyText: 1 }
   };
   const facetDefinitions = [
+    { key: 'searchMode', label: 'Search Mode', kind: 'chips' },
     { key: 'pageType', label: 'Page Type', kind: 'chips' },
     { key: 'component', label: 'Component', kind: 'select' },
     { key: 'audience', label: 'Audience', kind: 'chips' },
@@ -46,6 +48,11 @@
     ['experimental', 3],
     ['deprecated', 4]
   ]);
+  const searchModeSort = new Map([
+    ['public', 0],
+    ['internals', 1],
+    ['generated-reference', 2]
+  ]);
   const searchData = {
     index: null,
     docs: [],
@@ -57,6 +64,7 @@
   };
   const searchPageState = {
     q: '',
+    searchMode: '',
     pageType: '',
     component: '',
     audience: '',
@@ -67,6 +75,7 @@
 
   function createEmptyFacetValues() {
     return {
+      searchMode: [],
       pageType: [],
       component: [],
       audience: [],
@@ -542,6 +551,10 @@
       return 'API Reference';
     }
 
+    if (lower === 'public') {
+      return 'Public Docs';
+    }
+
     return normalized
       .split(/[-_\s]+/)
       .filter(Boolean)
@@ -582,6 +595,8 @@
       aliases: toStringArray(doc?.aliases),
       keywords: toStringArray(doc?.keywords),
       status: normalizeFacetValue(doc?.status),
+      searchMode: normalizeFacetValue(doc?.searchMode) || defaultSearchMode,
+      searchModeLabel: String(doc?.searchModeLabel ?? '').trim(),
       navGroup: String(doc?.navGroup ?? '').trim(),
       order: Number.isFinite(orderValue) ? orderValue : null,
       relatedPages: toStringArray(doc?.relatedPages),
@@ -597,6 +612,10 @@
 
     if (key === 'status') {
       return list.sort((a, b) => (statusSort.get(a.toLowerCase()) ?? 100) - (statusSort.get(b.toLowerCase()) ?? 100) || a.localeCompare(b));
+    }
+
+    if (key === 'searchMode') {
+      return list.sort((a, b) => (searchModeSort.get(a.toLowerCase()) ?? 100) - (searchModeSort.get(b.toLowerCase()) ?? 100) || a.localeCompare(b));
     }
 
     return list.sort((a, b) => a.localeCompare(b));
@@ -622,6 +641,7 @@
 
   function getSearchFilters(state) {
     return {
+      searchMode: normalizeFacetValue(state.searchMode),
       pageType: normalizeFacetValue(state.pageType),
       component: normalizeFacetValue(state.component),
       audience: normalizeFacetValue(state.audience),
@@ -633,10 +653,24 @@
     return facetKeys.some((key) => Boolean(filters[key]));
   }
 
-  function matchesFilters(doc, filters, skipKey = null) {
+  function matchesSearchMode(value, expected, includeAllSearchModes) {
+    const searchMode = normalizeFacetValue(value) || defaultSearchMode;
+    const selectedSearchMode = normalizeFacetValue(expected);
+    if (selectedSearchMode) {
+      return searchMode === selectedSearchMode;
+    }
+
+    return includeAllSearchModes || searchMode === defaultSearchMode;
+  }
+
+  function matchesFilters(doc, filters, skipKey = null, includeAllSearchModes = false) {
     return facetKeys.every((key) => {
       if (key === skipKey) {
         return true;
+      }
+
+      if (key === 'searchMode') {
+        return matchesSearchMode(doc.searchMode, filters[key], includeAllSearchModes);
       }
 
       const expected = normalizeFacetValue(filters[key]);
@@ -648,8 +682,12 @@
     });
   }
 
-  function matchesStoredResult(result, filters) {
+  function matchesStoredResult(result, filters, includeAllSearchModes = false) {
     return facetKeys.every((key) => {
+      if (key === 'searchMode') {
+        return matchesSearchMode(result?.[key], filters[key], includeAllSearchModes);
+      }
+
       const expected = normalizeFacetValue(filters[key]);
       if (!expected) {
         return true;
@@ -684,6 +722,7 @@
     const params = new URLSearchParams(window.location.search);
     return {
       q: normalizeQuery(params.get('q')),
+      searchMode: normalizeFacetValue(params.get('searchMode')),
       pageType: normalizeFacetValue(params.get('pageType')),
       component: normalizeFacetValue(params.get('component')),
       audience: normalizeFacetValue(params.get('audience')),
@@ -953,6 +992,10 @@
       badgeRow.append(createSearchResultBadge(formatFacetValue(doc.status), true));
     }
 
+    if (doc.searchMode && doc.searchMode !== defaultSearchMode) {
+      badgeRow.append(createSearchResultBadge(formatFacetValue(doc.searchMode), true));
+    }
+
     if (badgeRow.childNodes.length > 0) {
       article.append(badgeRow);
     }
@@ -1129,15 +1172,13 @@
       .filter(Boolean);
   }
 
-  function runRankedSearch(query, filters, maxResults = null) {
+  function runRankedSearch(query, filters, maxResults = null, includeAllSearchModes = false) {
     if (!searchData.index) {
       return [];
     }
 
     const normalizedQuery = normalizeQuery(query);
-    const filterFn = hasActiveFilters(filters)
-      ? (result) => matchesStoredResult(result, filters)
-      : undefined;
+    const filterFn = (result) => matchesStoredResult(result, filters, includeAllSearchModes);
 
     let results;
     if (normalizedQuery) {
@@ -1146,7 +1187,7 @@
         filter: filterFn
       });
     } else if (hasActiveFilters(filters)) {
-      results = sortDocsForBrowse(searchData.docs.filter((doc) => matchesFilters(doc, filters)))
+      results = sortDocsForBrowse(searchData.docs.filter((doc) => matchesFilters(doc, filters, null, includeAllSearchModes)))
         .map((doc) => ({ id: doc.id }));
     } else {
       results = [];
@@ -1179,15 +1220,13 @@
     const normalizedQuery = normalizeQuery(searchPageState.q);
     const isStarter = !normalizedQuery && activeFilters.length === 0;
     const baseResults = normalizedQuery
-      ? runRankedSearch(normalizedQuery, createEmptyFacetValues())
+      ? runRankedSearch(normalizedQuery, createEmptyFacetValues(), null, true)
       : [];
     const baseDocs = normalizedQuery
       ? baseResults.map((result) => searchData.docsById.get(result.id)).filter(Boolean)
       : sortDocsForBrowse(searchData.docs);
     const resultDocs = normalizedQuery
-      ? (activeFilters.length > 0
-          ? baseDocs.filter((doc) => matchesFilters(doc, filters))
-          : baseDocs)
+      ? baseDocs.filter((doc) => matchesFilters(doc, filters))
       : (activeFilters.length > 0
           ? sortDocsForBrowse(searchData.docs.filter((doc) => matchesFilters(doc, filters)))
           : []);
@@ -1357,7 +1396,7 @@
     const MiniSearch = window.MiniSearch;
     const index = new MiniSearch({
       fields: ['title', 'aliases', 'keywords', 'summary', 'headings', 'bodyText'],
-      storeFields: ['id', 'path', 'title', 'snippet', 'summary', 'pageType', 'pageTypeLabel', 'pageTypeVariant', 'component', 'audience', 'status', 'navGroup'],
+      storeFields: ['id', 'path', 'title', 'snippet', 'summary', 'pageType', 'pageTypeLabel', 'pageTypeVariant', 'component', 'audience', 'status', 'searchMode', 'navGroup'],
       searchOptions: defaultSearchOptions
     });
 
@@ -1377,6 +1416,7 @@
       component: doc.component,
       audience: doc.audience,
       status: doc.status,
+      searchMode: doc.searchMode,
       navGroup: doc.navGroup
     })));
 

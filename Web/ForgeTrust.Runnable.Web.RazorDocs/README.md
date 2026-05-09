@@ -689,7 +689,7 @@ Field behavior and pitfalls:
 - The page must still belong to a valid built-in public section through explicit or derived `nav_group`.
 - If multiple docs in one section set `section_landing: true`, RazorDocs keeps the lowest `order` value, then the lowest canonical path, and logs a warning for the others.
 - A section landing doc can also author `featured_page_groups`; RazorDocs uses those reader-intent groups for section-level “next steps” on the detail page and collapses the first resolved rows into section preview links surfaced on the current docs home.
-- `HideFromPublicNav = true` always wins. Hidden pages do not appear in section routes, the sidebar, the docs home, or the public search index even if they declare a section or landing status.
+- `HideFromPublicNav = true` always wins for navigation. Hidden pages do not appear in section routes, the sidebar, or the docs home even if they declare a section or landing status. They may still enter the search index with an `Internals` or `Generated Reference` search mode unless `HideFromSearch = true` is also set.
 
 ## Docs Link Authoring
 
@@ -875,6 +875,7 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `publicSection` for the normalized built-in section slug when the page is publicly visible
 - `publicSectionLabel` for the reader-facing section label
 - `isSectionLanding` for authored section landing entry points
+- `searchMode` and `searchModeLabel` for client-side discovery modes. The built-in client treats `public` as the default, while `internals` and `generated-reference` require an explicit mode filter before hidden-from-navigation pages appear.
 
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
@@ -891,7 +892,7 @@ Each outline entry should provide the rendered fragment `Id`, the reader-facing 
 Public visibility note:
 
 - `HideFromSearch = true` removes a page from the search payload directly.
-- `HideFromPublicNav = true` also removes the page from the search payload because the public shell treats hidden pages as fully non-public.
+- `HideFromPublicNav = true` removes a page from section routes, the sidebar, and the docs home. If `HideFromSearch` is not true, the page stays in the search payload under either `internals` or `generated-reference` so the default public search remains focused while explicit discovery modes can still find contributor, benchmark, test, and generated example-reference material.
 
 ## Trust Metadata For Release Notes And Policy Pages
 

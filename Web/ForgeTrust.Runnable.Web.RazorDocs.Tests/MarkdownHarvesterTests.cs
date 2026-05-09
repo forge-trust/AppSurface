@@ -672,7 +672,7 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
-    public async Task HarvestAsync_ShouldHideInternalMarkdownFromSearchByDefault()
+    public async Task HarvestAsync_ShouldHideInternalMarkdownFromPublicNavigationOnlyByDefault()
     {
         var testsDir = Path.Combine(_testRoot, "docs", "ForgeTrust.Runnable.Web.Tests");
         Directory.CreateDirectory(testsDir);
@@ -682,7 +682,7 @@ public class MarkdownHarvesterTests : IDisposable
         var doc = Assert.Single(results);
 
         Assert.True(doc.Metadata?.HideFromPublicNav);
-        Assert.True(doc.Metadata?.HideFromSearch);
+        Assert.Null(doc.Metadata?.HideFromSearch);
         Assert.Equal("internals", doc.Metadata?.PageType);
     }
 
