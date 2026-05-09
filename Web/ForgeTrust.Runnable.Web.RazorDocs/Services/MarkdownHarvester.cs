@@ -3,6 +3,7 @@ using Markdig;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
+using Microsoft.Extensions.Logging.Abstractions;
 using YamlDotNet.Core;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs.Services;
@@ -29,6 +30,21 @@ public class MarkdownHarvester : IDocHarvester
     }
 
     /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> with observable diagnostics for the default code highlighter.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="loggerFactory">Logger factory used to create the TextMate grammar-load and highlighting fallback logger.</param>
+    public MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        ILoggerFactory loggerFactory)
+        : this(
+            logger,
+            File.ReadAllTextAsync,
+            CreateDefaultHighlighter(loggerFactory))
+    {
+    }
+
+    /// <summary>
     /// Initializes a new instance of <see cref="MarkdownHarvester"/> for testing or internal use with a custom file reader.
     /// </summary>
     /// <param name="logger">Logger used for recording harvesting events and errors.</param>
@@ -36,15 +52,43 @@ public class MarkdownHarvester : IDocHarvester
     internal MarkdownHarvester(
         ILogger<MarkdownHarvester> logger,
         Func<string, CancellationToken, Task<string>> readAllTextAsync)
+        : this(
+            logger,
+            readAllTextAsync,
+            RazorDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
+                NullLogger<TextMateSharpRazorDocsCodeHighlighter>.Instance))
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> for testing or internal use with a custom file reader and code highlighter.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read file contents.</param>
+    /// <param name="codeHighlighter">Highlighter used when Markdown fenced code blocks are rendered to HTML.</param>
+    internal MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        Func<string, CancellationToken, Task<string>> readAllTextAsync,
+        IRazorDocsCodeHighlighter codeHighlighter)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(readAllTextAsync);
+        ArgumentNullException.ThrowIfNull(codeHighlighter);
 
         _logger = logger;
         _readAllTextAsync = readAllTextAsync;
         _pipeline = new MarkdownPipelineBuilder()
             .UseAdvancedExtensions()
+            .Use(new RazorDocsCodeBlockMarkdownExtension(codeHighlighter))
             .Build();
+    }
+
+    private static IRazorDocsCodeHighlighter CreateDefaultHighlighter(ILoggerFactory loggerFactory)
+    {
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+
+        return RazorDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
+            loggerFactory.CreateLogger<TextMateSharpRazorDocsCodeHighlighter>());
     }
 
     /// <summary>

@@ -258,6 +258,33 @@ public class ExportSourceResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_Should_Surface_Strict_RazorDocs_Harvest_Summary_When_Process_Exits_Early()
+    {
+        var fakeProcess = new FakeTargetAppProcess();
+        var factory = new FakeTargetAppProcessFactory(_ => fakeProcess);
+        var resolver = CreateResolver(
+            factory,
+            new TestHttpHelpers.Factory(TestHttpHelpers.FixedStatus(System.Net.HttpStatusCode.OK)));
+        resolver.ListeningUrlTimeout = TimeSpan.FromSeconds(1);
+
+        var request = new ExportSourceRequest(ExportSourceKind.Dll, "/tmp/app.dll", null, [], false);
+        fakeProcess.OnStart = () =>
+        {
+            fakeProcess.EmitError("Harvester MarkdownHarvester failed at /tmp/private-repo");
+            fakeProcess.EmitError(
+                "RazorDocs strict harvest failed because every configured harvester failed, timed out, or canceled. Diagnostics: razordocs.harvest.all_failed (Critical): All RazorDocs harvesters failed.");
+            fakeProcess.TriggerExit();
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await resolver.ResolveAsync(request));
+
+        Assert.Contains("RazorDocs strict harvest failed", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("razordocs.harvest.all_failed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Harvester MarkdownHarvester failed at /tmp/private-repo", ex.Message, StringComparison.Ordinal);
+        Assert.True(fakeProcess.Disposed);
+    }
+
+    [Fact]
     public async Task ResolveAsync_Should_Dispose_Process_When_Readiness_Times_Out()
     {
         var fakeProcess = new FakeTargetAppProcess();

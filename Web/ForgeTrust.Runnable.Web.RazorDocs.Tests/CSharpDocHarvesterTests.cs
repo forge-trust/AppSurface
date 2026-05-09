@@ -839,8 +839,8 @@ public class GenericThing<TItem> {}
         var leafNode = results.Single(n => n.Path == "Namespaces/Root.Middle.Leaf");
 
         // Assert
-        Assert.Contains("/docs/Namespaces/Root.Middle.html", rootNode.Content);
-        Assert.Contains("/docs/Namespaces/Root.Middle.Leaf.html", middleNode.Content);
+        Assert.Contains("/Namespaces/Root.Middle.html", rootNode.Content);
+        Assert.Contains("/Namespaces/Root.Middle.Leaf.html", middleNode.Content);
         Assert.Contains("<h2>GenericThing&lt;TItem&gt;</h2>", leafNode.Content);
     }
 

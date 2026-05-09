@@ -113,7 +113,7 @@ Important behavior:
 
 - Only empty `401`, `403`, and `404` responses from `GET` or `HEAD` requests that accept `text/html` or `application/xhtml+xml` are re-executed.
 - JSON, non-HTML, non-empty, and non-GET/HEAD responses keep their original API-friendly behavior.
-- Missing `/docs/...` `404` routes include a documentation search recovery link because stale docs links are the most common browser miss.
+- Missing default documentation `404` routes include a documentation search recovery link because stale docs links are the most common browser miss. The default RazorDocs route family is `/docs`, so the default recovery target is `/docs/search`. Apps that set `RazorDocs:Routing:RouteRootPath` should derive the search target from that root, for example `RazorDocs:Routing:RouteRootPath=/foo/bar` points stale-docs recovery links at `/foo/bar/search`.
 - Static export remains conservative: RazorWire CLI probes `/_runnable/errors/404` and writes only `404.html`; it does not emit `401.html` or `403.html`. In CDN mode, that `404.html` page is validated and rewritten with the rest of the static output.
 - Production `500` exception pages are intentionally separate from browser status pages and must be enabled with `UseConventionalExceptionPage()`.
 

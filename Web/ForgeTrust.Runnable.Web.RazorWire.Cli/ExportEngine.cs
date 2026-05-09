@@ -62,6 +62,7 @@ public class ExportEngine
 
     private const string DocsStaticPartialsMetaName = "rw-docs-static-partials";
     private const string DocsStaticPartialsMetaTag = "<meta name=\"rw-docs-static-partials\" content=\"1\" />";
+    private const string RazorDocsClientConfigMarker = "window.__razorDocsConfig";
 
     private static readonly Regex TurboFrameOpenTagRegex = new(
         @"<turbo-frame\b[^>]*>",
@@ -178,9 +179,10 @@ public class ExportEngine
             if (isHtml)
             {
                 var html = await response.Content.ReadAsStringAsync(cancellationToken);
+                var docContentFrame = ExtractDocContentFrame(html);
                 context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, html);
 
-                if (IsDocsRoute(route) && !string.IsNullOrWhiteSpace(ExtractDocContentFrame(html)))
+                if (IsDocsExportPage(route, html, docContentFrame) && !string.IsNullOrWhiteSpace(docContentFrame))
                 {
                     context.PartialArtifactUrls[route] = MapHtmlArtifactUrlToPartialUrl(artifactUrl);
                 }
@@ -283,14 +285,19 @@ public class ExportEngine
             var body = outcome.TextBody!;
             if (outcome.IsHtml)
             {
-                var htmlForWrite = IsDocsRoute(outcome.Route)
+                var docContentFrame = ExtractDocContentFrame(body);
+                var isDocsPage = IsDocsExportPage(outcome.Route, body, docContentFrame);
+                var htmlForWrite = isDocsPage
                     ? AddDocsStaticPartialsMarker(body)
                     : body;
                 htmlForWrite = context.Mode == ExportMode.Cdn
                     ? RewriteManagedReferences(htmlForWrite, outcome.Route, htmlScope: true, context)
                     : htmlForWrite;
                 await File.WriteAllTextAsync(outcome.ArtifactPath, htmlForWrite, cancellationToken);
-                await TryWriteDocsPartialAsync(outcome.Route, outcome.ArtifactPath, htmlForWrite, cancellationToken);
+                await TryWriteDocsPartialAsync(
+                    outcome.ArtifactPath,
+                    ExtractDocContentFrame(htmlForWrite),
+                    cancellationToken);
             }
             else if (outcome.IsCss)
             {
@@ -453,6 +460,31 @@ public class ExportEngine
                || route.StartsWith("/docs/", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Determines whether an exported HTML page should receive RazorDocs static partial support.
+    /// </summary>
+    /// <param name="route">The root-relative route being exported.</param>
+    /// <param name="html">The fetched HTML document.</param>
+    /// <param name="docContentFrame">The extracted <c>doc-content</c> frame, when the caller has already parsed it.</param>
+    /// <returns>
+    /// <c>true</c> for the legacy <c>/docs</c> route family or HTML that carries RazorDocs runtime markers; otherwise
+    /// <c>false</c>.
+    /// </returns>
+    /// <remarks>
+    /// Custom RazorDocs hosts can mount under route families such as <c>/foo/bar</c>, so export detection cannot rely
+    /// only on path prefixes. The client config marker covers search and shell pages, while the content frame covers
+    /// document detail pages.
+    /// </remarks>
+    internal static bool IsDocsExportPage(string route, string html, string? docContentFrame = null)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+        ArgumentNullException.ThrowIfNull(html);
+
+        return IsDocsRoute(route)
+               || !string.IsNullOrWhiteSpace(docContentFrame)
+               || html.Contains(RazorDocsClientConfigMarker, StringComparison.Ordinal);
+    }
+
     internal static string MapHtmlFilePathToPartialPath(string htmlFilePath)
     {
         if (htmlFilePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
@@ -570,24 +602,17 @@ public class ExportEngine
     }
 
     private async Task TryWriteDocsPartialAsync(
-        string route,
         string htmlFilePath,
-        string html,
+        string? docContentFrame,
         CancellationToken cancellationToken)
     {
-        if (!IsDocsRoute(route))
-        {
-            return;
-        }
-
-        var frameHtml = ExtractDocContentFrame(html);
-        if (string.IsNullOrWhiteSpace(frameHtml))
+        if (string.IsNullOrWhiteSpace(docContentFrame))
         {
             return;
         }
 
         var partialPath = MapHtmlFilePathToPartialPath(htmlFilePath);
-        await File.WriteAllTextAsync(partialPath, frameHtml, cancellationToken);
+        await File.WriteAllTextAsync(partialPath, docContentFrame, cancellationToken);
     }
 
     /// <summary>

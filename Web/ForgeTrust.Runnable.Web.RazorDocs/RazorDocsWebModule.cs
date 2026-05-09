@@ -22,10 +22,10 @@ namespace ForgeTrust.Runnable.Web.RazorDocs;
 /// </remarks>
 /// <remarks>
 /// When versioning is enabled and the resolved catalog exposes available published trees, the module can mount those
-/// exact-version exports into the request pipeline, reserve the stable entry surface at <c>/docs</c> for the
-/// recommended release alias, short-circuit matching requests through <see cref="RazorDocsPublishedTreeHandler" />,
-/// and register disposal for any mounted <see cref="PhysicalFileProvider" /> instances when the host stops. Hosts that
-/// leave versioning disabled, omit the catalog service, or resolve an empty/unavailable catalog skip those mounts and
+/// exact-version exports into the request pipeline, reserve the configured route-family root for the recommended
+/// release alias, short-circuit matching requests through <see cref="RazorDocsPublishedTreeHandler" />, and register
+/// disposal for any mounted <see cref="PhysicalFileProvider" /> instances when the host stops. Hosts that leave
+/// versioning disabled, omit the catalog service, or resolve an empty/unavailable catalog skip those mounts and
 /// continue serving only the live source-backed preview surface.
 /// </remarks>
 public class RazorDocsWebModule : IRunnableWebModule
@@ -93,8 +93,8 @@ public class RazorDocsWebModule : IRunnableWebModule
     /// <remarks>
     /// This hook only mutates the pipeline when versioning is enabled and the resolved
     /// <see cref="RazorDocsVersionCatalogService" /> yields at least one available published tree. In that case the
-    /// module mounts exact-version exports, optionally adds the stable <c>/docs</c> alias for the recommended release,
-    /// and inserts a short-circuiting middleware branch that lets <see cref="RazorDocsPublishedTreeHandler" /> serve
+    /// module mounts exact-version exports, optionally adds the configured route-family root alias for the recommended
+    /// release, and inserts a short-circuiting middleware branch that lets <see cref="RazorDocsPublishedTreeHandler" /> serve
     /// matching requests before the live preview surface sees them.
     /// </remarks>
     /// <remarks>
@@ -123,7 +123,7 @@ public class RazorDocsWebModule : IRunnableWebModule
         var docsUrlBuilder = app.ApplicationServices.GetService(typeof(DocsUrlBuilder)) as DocsUrlBuilder
                              ?? new DocsUrlBuilder(options);
         var catalog = catalogService.GetCatalog();
-        var (mounts, mountedProviders) = BuildPublishedTreeMounts(catalog);
+        var (mounts, mountedProviders) = BuildPublishedTreeMounts(catalog, docsUrlBuilder);
 
         if (mounts.Count == 0)
         {
@@ -132,7 +132,10 @@ public class RazorDocsWebModule : IRunnableWebModule
 
         RegisterMountedProviderDisposal(app.ApplicationServices, mountedProviders);
 
-        var publishedTreeHandler = new RazorDocsPublishedTreeHandler(mounts, docsUrlBuilder.CurrentDocsRootPath);
+        var publishedTreeHandler = new RazorDocsPublishedTreeHandler(
+            mounts,
+            docsUrlBuilder.CurrentDocsRootPath,
+            docsUrlBuilder.RouteRootPath);
         app.Use(
             async (httpContext, next) =>
             {
@@ -150,17 +153,20 @@ public class RazorDocsWebModule : IRunnableWebModule
     /// </summary>
     /// <remarks>
     /// Public exact-version mounts always preserve the authored catalog order. When the recommended release points at a
-    /// public exact tree, this helper adds the stable <c>/docs</c> alias as an extra mount root that reuses the same
-    /// <see cref="PhysicalFileProvider" /> instance instead of duplicating file watchers for the same export path.
+    /// public exact tree, this helper adds the configured route-family root alias as an extra mount root that reuses the
+    /// same <see cref="PhysicalFileProvider" /> instance instead of duplicating file watchers for the same export path.
     /// </remarks>
     /// <param name="catalog">The resolved version catalog that describes available published trees.</param>
+    /// <param name="docsUrlBuilder">The configured URL builder that supplies the route-family alias root.</param>
     /// <returns>
     /// The ordered mount list plus the unique provider instances that should be disposed with the host lifetime.
     /// </returns>
     internal static (IReadOnlyList<RazorDocsPublishedTreeMount> Mounts, IReadOnlyList<PhysicalFileProvider> Providers) BuildPublishedTreeMounts(
-        RazorDocsResolvedVersionCatalog catalog)
+        RazorDocsResolvedVersionCatalog catalog,
+        DocsUrlBuilder docsUrlBuilder)
     {
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(docsUrlBuilder);
 
         var providersByPath = new Dictionary<string, PhysicalFileProvider>(StringComparer.OrdinalIgnoreCase);
         var mounts = new List<RazorDocsPublishedTreeMount>();
@@ -174,7 +180,7 @@ public class RazorDocsWebModule : IRunnableWebModule
         if (catalog.RecommendedVersion is { IsAvailable: true, ExactTreePath: not null } recommendedVersion)
         {
             var provider = GetOrCreateProvider(recommendedVersion.ExactTreePath, providersByPath);
-            mounts.Add(new RazorDocsPublishedTreeMount(DocsUrlBuilder.DocsEntryPath, provider));
+            mounts.Add(new RazorDocsPublishedTreeMount(docsUrlBuilder.DocsEntryRootPath, provider));
         }
 
         return (mounts, providersByPath.Values.ToList());
@@ -229,9 +235,9 @@ public class RazorDocsWebModule : IRunnableWebModule
     /// <see cref="HttpRequest.PathBase"/> and query string so legacy links continue to work behind a virtual path.
     /// </remarks>
     /// <remarks>
-    /// When versioning is enabled, this hook also reserves the stable version entry route at <c>/docs</c>, adds the
-    /// archive surface at <c>/docs/versions</c>, and serves preview-surface assets from either the live web root or the
-    /// packaged Razor Class Library depending on whether published-tree mounts can shadow the stable docs root.
+    /// When versioning is enabled, this hook also reserves the stable version entry route at the configured route-family
+    /// root, adds the archive surface below that route root, and serves preview-surface assets from either the live web
+    /// root or the packaged Razor Class Library depending on whether published-tree mounts can shadow the stable docs root.
     /// Asset routes are built with <see cref="DocsUrlBuilder.BuildAssetUrl(string)"/> for <c>search.css</c>,
     /// <c>minisearch.min.js</c>, <c>search-client.js</c>, and the page-local <c>outline-client.js</c>. Preview hosts can
     /// serve those files directly from the web root; otherwise the current-surface URLs redirect through
@@ -279,7 +285,7 @@ public class RazorDocsWebModule : IRunnableWebModule
         {
             endpoints.MapControllerRoute(
                 name: "razordocs_version_entry",
-                pattern: "docs",
+                pattern: TrimLeadingSlash(docsUrlBuilder.DocsEntryRootPath),
                 defaults: new
                 {
                     controller = "Docs",
@@ -288,7 +294,7 @@ public class RazorDocsWebModule : IRunnableWebModule
 
             endpoints.MapControllerRoute(
                 name: "razordocs_versions",
-                pattern: "docs/versions",
+                pattern: TrimLeadingSlash(docsUrlBuilder.BuildVersionsUrl()),
                 defaults: new
                 {
                     controller = "Docs",

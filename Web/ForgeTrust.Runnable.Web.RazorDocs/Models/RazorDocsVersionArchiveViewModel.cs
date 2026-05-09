@@ -4,8 +4,8 @@ namespace ForgeTrust.Runnable.Web.RazorDocs.Models;
 /// View model for the public RazorDocs version archive and degraded entry surface.
 /// </summary>
 /// <remarks>
-/// The same model drives both the dedicated <c>/docs/versions</c> archive page and the degraded <c>/docs</c>
-/// recovery surface when no healthy recommended release can be mounted at the stable entry alias.
+/// The same model drives both the dedicated archive page and the degraded route-root recovery surface when no healthy
+/// recommended release can be mounted at the stable entry alias.
 /// <see cref="PreviewHref"/> always points at the current source-backed preview surface, while
 /// <see cref="VersionsHref"/> stays on the stable archive URL. <see cref="Versions"/> preserves the authored
 /// catalog order and should be treated as a read-only projection of the resolved catalog state.
@@ -23,11 +23,11 @@ public sealed record RazorDocsVersionArchiveViewModel
     public string Description { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets optional explanatory copy shown when the stable docs alias cannot mount a recommended released tree.
+    /// Gets optional explanatory copy shown when the stable route-root alias cannot mount a recommended released tree.
     /// </summary>
     /// <remarks>
     /// This is typically <see langword="null"/> on the dedicated archive page and populated only for the degraded
-    /// <c>/docs</c> recovery experience.
+    /// route-root recovery experience.
     /// </remarks>
     public string? AvailabilityMessage { get; init; }
 
@@ -35,8 +35,8 @@ public sealed record RazorDocsVersionArchiveViewModel
     /// Gets the live preview docs URL.
     /// </summary>
     /// <remarks>
-    /// This points at the source-backed preview surface such as <c>/docs/next</c> or another configured
-    /// <c>/docs/*</c> preview root.
+    /// This points at the configured source-backed preview surface, such as <c>/docs/next</c> for the default route
+    /// family or <c>/foo/bar/next</c> for a custom one.
     /// </remarks>
     public string PreviewHref { get; init; } = string.Empty;
 
@@ -57,7 +57,7 @@ public sealed record RazorDocsVersionArchiveViewModel
 /// <remarks>
 /// Entries may describe either a healthy exact-version tree with an <see cref="Href"/> target or an unavailable
 /// release that should remain visible in the archive with an explanatory availability message.
-/// <see cref="IsRecommended"/> identifies the exact release currently mirrored at the stable <c>/docs</c> alias,
+/// <see cref="IsRecommended"/> identifies the exact release currently mirrored at the stable route-root alias,
 /// while <see cref="IsAvailable"/> controls whether the entry can link directly to that exact version.
 /// Advisory and support labels are independent: an unavailable or deprecated release may still surface an advisory,
 /// and a recommended release may still carry a warning label when the catalog says readers should see one.

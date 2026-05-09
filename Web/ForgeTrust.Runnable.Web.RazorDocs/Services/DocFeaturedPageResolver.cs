@@ -60,7 +60,8 @@ public sealed class DocFeaturedPageResolver
     /// resolved earlier in authored order will not appear again later in the landing. Browser-facing
     /// <see cref="DocLandingFeaturedPageViewModel.Href"/> values are rooted at the current live docs surface from
     /// <see cref="DocsUrlBuilder"/>, not hardcoded to <c>/docs</c>, and authored canonical input paths are matched
-    /// against that same configured live docs root before the legacy stable <c>/docs</c> prefix fallback is considered.
+    /// against that same configured live docs root before the configured route-family root and legacy stable
+    /// <c>/docs</c> prefix fallback are considered.
     /// </returns>
     /// <exception cref="InvalidOperationException">
     /// Thrown when a resolved featured destination is missing <see cref="DocNode.CanonicalPath"/>.
@@ -186,6 +187,7 @@ public sealed class DocFeaturedPageResolver
         var destination = pathResolver.Resolve(
             definition.Path!,
             _docsUrlBuilder.CurrentDocsRootPath,
+            _docsUrlBuilder.RouteRootPath,
             DocsUrlBuilder.DocsEntryPath);
         if (destination is null)
         {

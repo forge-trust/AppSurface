@@ -13,32 +13,38 @@ namespace ForgeTrust.Runnable.Web.RazorDocs.Services;
 /// Serves one or more published RazorDocs trees from static export artifacts.
 /// </summary>
 /// <remarks>
-/// Published trees are exported from the stable <c>/docs</c> surface and then mounted later under either
-/// <c>/docs</c> or <c>/docs/v/{version}</c>. This handler resolves extensionless requests back to the exporter’s
-/// <c>.html</c> files and rewrites stable-root HTML or search-index payloads so the mounted tree stays version-local.
+/// Published trees are usually exported from the stable <c>/docs</c> surface and then mounted later under the configured
+/// route-family root or <c>{RouteRootPath}/v/{version}</c>. This handler resolves extensionless requests back to the
+/// exporter’s <c>.html</c> files and rewrites stable-root HTML or search-index payloads so the mounted tree stays
+/// version-local.
 /// </remarks>
 internal sealed class RazorDocsPublishedTreeHandler
 {
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
     private readonly IReadOnlyList<RazorDocsPublishedTreeMount> _mounts;
     private readonly string _previewRootPath;
+    private readonly string _routeRootPath;
 
     /// <summary>
     /// Initializes a new instance of <see cref="RazorDocsPublishedTreeHandler"/>.
     /// </summary>
     /// <param name="mounts">Published trees to expose, ordered arbitrarily.</param>
     /// <param name="previewRootPath">The live preview docs root that should bypass published-tree handling.</param>
+    /// <param name="routeRootPath">The route-family root that owns archive and exact-version routes.</param>
     internal RazorDocsPublishedTreeHandler(
         IEnumerable<RazorDocsPublishedTreeMount> mounts,
-        string previewRootPath)
+        string previewRootPath,
+        string routeRootPath = DocsUrlBuilder.DocsEntryPath)
     {
         ArgumentNullException.ThrowIfNull(mounts);
         ArgumentException.ThrowIfNullOrWhiteSpace(previewRootPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(routeRootPath);
 
         _mounts = mounts
             .OrderByDescending(mount => mount.MountRootPath.Length)
             .ToList();
         _previewRootPath = previewRootPath;
+        _routeRootPath = routeRootPath;
     }
 
     /// <summary>
@@ -74,7 +80,7 @@ internal sealed class RazorDocsPublishedTreeHandler
                 return false;
             }
 
-            await WriteResponseAsync(httpContext, mount, _previewRootPath, relativeFilePath, fileInfo);
+            await WriteResponseAsync(httpContext, mount, _previewRootPath, _routeRootPath, relativeFilePath, fileInfo);
             return true;
         }
 
@@ -83,18 +89,23 @@ internal sealed class RazorDocsPublishedTreeHandler
 
     private bool ShouldBypassStableAlias(string requestPath, string mountRootPath)
     {
-        if (!string.Equals(mountRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(mountRootPath, _routeRootPath, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
         return DocsUrlBuilder.IsUnderRoot(requestPath, _previewRootPath)
-               || DocsUrlBuilder.IsUnderRoot(requestPath, DocsUrlBuilder.DocsVersionsPath)
-               || DocsUrlBuilder.IsUnderRoot(requestPath, DocsUrlBuilder.DocsVersionPrefix);
+               || DocsUrlBuilder.IsUnderRoot(requestPath, DocsUrlBuilder.JoinPath(_routeRootPath, "versions"))
+               || DocsUrlBuilder.IsUnderRoot(requestPath, DocsUrlBuilder.JoinPath(_routeRootPath, "v"));
     }
 
     private static bool IsRequestForMount(string requestPath, string mountRootPath)
     {
+        if (string.Equals(mountRootPath, "/", StringComparison.Ordinal))
+        {
+            return requestPath.StartsWith("/", StringComparison.Ordinal);
+        }
+
         return string.Equals(requestPath, mountRootPath, StringComparison.OrdinalIgnoreCase)
                || requestPath.StartsWith(mountRootPath + "/", StringComparison.OrdinalIgnoreCase);
     }
@@ -225,6 +236,7 @@ internal sealed class RazorDocsPublishedTreeHandler
         HttpContext httpContext,
         RazorDocsPublishedTreeMount mount,
         string previewRootPath,
+        string routeRootPath,
         string relativeFilePath,
         IFileInfo fileInfo)
     {
@@ -243,6 +255,7 @@ internal sealed class RazorDocsPublishedTreeHandler
                 html,
                 mount.MountRootPath,
                 previewRootPath,
+                routeRootPath,
                 httpContext.Request.PathBase.Value);
             await WriteUtf8TextAsync(httpContext, rewrittenHtml, contentType);
             return;
@@ -255,6 +268,7 @@ internal sealed class RazorDocsPublishedTreeHandler
                 json,
                 mount.MountRootPath,
                 previewRootPath,
+                routeRootPath,
                 httpContext.Request.PathBase.Value);
             await WriteUtf8TextAsync(httpContext, rewrittenJson, "application/json; charset=utf-8");
             return;
@@ -327,9 +341,9 @@ internal sealed record RazorDocsPublishedTreeMount(
 /// <remarks>
 /// Rewrites are mount-aware rather than file-aware. The active <see cref="RazorDocsPublishedTreeMount" /> decides which
 /// root wins, and then the rewriter adjusts exported stable-root URLs so they point at that mounted surface. The
-/// stable <c>/docs</c> surface only needs HTML rewrites when the host adds a non-empty request <c>PathBase</c>; when
-/// the mount root is still <c>/docs</c> and no <c>PathBase</c> applies, the exported HTML is already correct and is
-/// returned unchanged.
+/// default stable <c>/docs</c> surface only needs HTML rewrites when the host adds a non-empty request
+/// <c>PathBase</c>; when the mount root and route root are still <c>/docs</c> and no <c>PathBase</c> applies, the
+/// exported HTML is already correct and is returned unchanged.
 /// </remarks>
 internal static class RazorDocsPublishedTreeContentRewriter
 {
@@ -344,6 +358,7 @@ internal static class RazorDocsPublishedTreeContentRewriter
     /// <param name="html">The exported HTML document.</param>
     /// <param name="mountRootPath">The request-path root where the tree is being served.</param>
     /// <param name="previewRootPath">The live preview docs root that should stay untouched when encountered.</param>
+    /// <param name="routeRootPath">The route-family root that owns archive and exact-version routes.</param>
     /// <param name="requestPathBase">The current host path base that should prefix rewritten app-relative docs URLs.</param>
     /// <returns>The rewritten HTML document.</returns>
     /// <remarks>
@@ -351,20 +366,24 @@ internal static class RazorDocsPublishedTreeContentRewriter
     /// <c>window.__razorDocsConfig</c> payload matched by <see cref="DocsClientConfigRegex" /> so the document behaves
     /// like it was originally emitted for <paramref name="mountRootPath" />. As part of that rewrite, the legacy
     /// <c>docsVersionsUrl</c> client field is removed because version archive navigation is rendered server-side. When
-    /// <paramref name="mountRootPath" /> is <c>/docs</c>, rewrites only occur if <paramref name="requestPathBase" /> is
-    /// non-empty so sub-path-hosted apps still emit <c>/some-base/docs/...</c> links.
+    /// <paramref name="mountRootPath" /> and <paramref name="routeRootPath" /> are both the default <c>/docs</c>,
+    /// rewrites only occur if <paramref name="requestPathBase" /> is non-empty so sub-path-hosted apps still emit
+    /// <c>/some-base/docs/...</c> links.
     /// </remarks>
     internal static string RewriteHtml(
         string html,
         string mountRootPath,
         string previewRootPath = "/docs/next",
+        string routeRootPath = DocsUrlBuilder.DocsEntryPath,
         string? requestPathBase = null)
     {
         ArgumentNullException.ThrowIfNull(html);
         ArgumentException.ThrowIfNullOrWhiteSpace(mountRootPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(previewRootPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(routeRootPath);
 
         if (string.Equals(mountRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(routeRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
             && !HasNonEmptyPathBase(requestPathBase))
         {
             return html;
@@ -373,12 +392,12 @@ internal static class RazorDocsPublishedTreeContentRewriter
         var document = HtmlParser.ParseDocument(html);
         foreach (var element in document.QuerySelectorAll("[href]"))
         {
-            RewriteAttributeValue(element, "href", mountRootPath, previewRootPath, requestPathBase);
+            RewriteAttributeValue(element, "href", mountRootPath, previewRootPath, routeRootPath, requestPathBase);
         }
 
         foreach (var element in document.QuerySelectorAll("[src]"))
         {
-            RewriteAttributeValue(element, "src", mountRootPath, previewRootPath, requestPathBase);
+            RewriteAttributeValue(element, "src", mountRootPath, previewRootPath, routeRootPath, requestPathBase);
         }
 
         foreach (var element in document.QuerySelectorAll("[srcset]"))
@@ -389,7 +408,7 @@ internal static class RazorDocsPublishedTreeContentRewriter
                 continue;
             }
 
-            var rewrittenValue = RewriteSrcSetValue(value, mountRootPath, previewRootPath, requestPathBase);
+            var rewrittenValue = RewriteSrcSetValue(value, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
             if (!string.Equals(value, rewrittenValue, StringComparison.Ordinal))
             {
                 element.SetAttribute("srcset", rewrittenValue);
@@ -424,19 +443,20 @@ internal static class RazorDocsPublishedTreeContentRewriter
     /// <param name="json">The exported search-index payload.</param>
     /// <param name="mountRootPath">The request-path root where the tree is being served.</param>
     /// <param name="previewRootPath">The live preview docs root that should stay untouched when encountered.</param>
+    /// <param name="routeRootPath">The route-family root that owns archive and exact-version routes.</param>
     /// <param name="requestPathBase">The current host path base that should prefix rewritten app-relative docs URLs.</param>
     /// <returns>
-    /// The original payload when the mount is the stable <c>/docs</c> surface without a non-empty path base, when the
-    /// payload is not a JSON object with a top-level <c>documents</c> array, or when no eligible
+    /// The original payload when the mount and route root are the default <c>/docs</c> surface without a non-empty path
+    /// base, when the payload is not a JSON object with a top-level <c>documents</c> array, or when no eligible
     /// <c>documents[*].path</c> values require rewriting; otherwise a payload whose rewritten document paths stay
     /// inside the mounted docs root.
     /// </returns>
     /// <remarks>
     /// Only <c>documents[*].path</c> values are rewritten. Other JSON fields, including titles, metadata, and facet
-    /// payloads, are preserved exactly as exported. Stable mounts rooted at <c>/docs</c> are a no-op unless
-    /// <paramref name="requestPathBase" /> is non-empty, because the exported payload already points at the stable
-    /// surface. Preview-root paths such as <c>/docs/next</c>, archive paths such as <c>/docs/versions</c>, and
-    /// already-versioned exact routes such as <c>/docs/v/1.2.3/guide.html</c> are preserved rather than rebased.
+    /// payloads, are preserved exactly as exported. Default stable mounts rooted at <c>/docs</c> are a no-op unless
+    /// <paramref name="requestPathBase" /> is non-empty, because the exported payload already points at the default
+    /// surface. Preview-root paths, archive paths such as <c>{RouteRootPath}/versions</c>, and already-versioned exact
+    /// routes such as <c>{RouteRootPath}/v/1.2.3/guide.html</c> are preserved rather than rebased.
     /// When a rewrite does occur, the helper prepends the normalized request path base to eligible app-relative URLs,
     /// so <c>/docs/guide.html</c> becomes <c>/some-base/docs/v/1.2.3/guide.html</c> for an exact mount at
     /// <c>/docs/v/1.2.3</c>. Callers should not expect other JSON fields to change, and they must supply a non-empty
@@ -446,13 +466,16 @@ internal static class RazorDocsPublishedTreeContentRewriter
         string json,
         string mountRootPath,
         string previewRootPath = "/docs/next",
+        string routeRootPath = DocsUrlBuilder.DocsEntryPath,
         string? requestPathBase = null)
     {
         ArgumentNullException.ThrowIfNull(json);
         ArgumentException.ThrowIfNullOrWhiteSpace(mountRootPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(previewRootPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(routeRootPath);
 
         if (string.Equals(mountRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(routeRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
             && !HasNonEmptyPathBase(requestPathBase))
         {
             return json;
@@ -473,7 +496,7 @@ internal static class RazorDocsPublishedTreeContentRewriter
                 continue;
             }
 
-            document["path"] = RewriteMountedDocsUrl(path, mountRootPath, previewRootPath, requestPathBase);
+            document["path"] = RewriteMountedDocsUrl(path, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
         }
 
         return node.ToJsonString();
@@ -484,6 +507,7 @@ internal static class RazorDocsPublishedTreeContentRewriter
         string attributeName,
         string mountRootPath,
         string previewRootPath,
+        string routeRootPath,
         string? requestPathBase)
     {
         var value = element.GetAttribute(attributeName);
@@ -492,7 +516,7 @@ internal static class RazorDocsPublishedTreeContentRewriter
             return;
         }
 
-        var rewrittenValue = RewriteMountedDocsUrl(value, mountRootPath, previewRootPath, requestPathBase);
+        var rewrittenValue = RewriteMountedDocsUrl(value, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
         if (!string.Equals(value, rewrittenValue, StringComparison.Ordinal))
         {
             element.SetAttribute(attributeName, rewrittenValue);
@@ -528,6 +552,7 @@ internal static class RazorDocsPublishedTreeContentRewriter
         string srcSetValue,
         string mountRootPath,
         string previewRootPath,
+        string routeRootPath,
         string? requestPathBase)
     {
         var rewrittenEntries = srcSetValue
@@ -543,12 +568,12 @@ internal static class RazorDocsPublishedTreeContentRewriter
                     var separatorIndex = entry.IndexOf(' ');
                     if (separatorIndex < 0)
                     {
-                        return RewriteMountedDocsUrl(entry, mountRootPath, previewRootPath, requestPathBase);
+                        return RewriteMountedDocsUrl(entry, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
                     }
 
                     var url = entry[..separatorIndex];
                     var descriptor = entry[separatorIndex..];
-                    return RewriteMountedDocsUrl(url, mountRootPath, previewRootPath, requestPathBase) + descriptor;
+                    return RewriteMountedDocsUrl(url, mountRootPath, previewRootPath, routeRootPath, requestPathBase) + descriptor;
                 });
 
         return string.Join(", ", rewrittenEntries);
@@ -558,13 +583,19 @@ internal static class RazorDocsPublishedTreeContentRewriter
         string value,
         string mountRootPath,
         string previewRootPath,
+        string routeRootPath,
         string? requestPathBase)
     {
         if (!value.StartsWith("/", StringComparison.Ordinal))
         {
             if (Uri.TryCreate(value, UriKind.Absolute, out var absoluteUri))
             {
-                var rewrittenPath = RewriteMountedDocsPath(absoluteUri.AbsolutePath, mountRootPath, previewRootPath, requestPathBase);
+                var rewrittenPath = RewriteMountedDocsPath(
+                    absoluteUri.AbsolutePath,
+                    mountRootPath,
+                    previewRootPath,
+                    routeRootPath,
+                    requestPathBase);
                 if (rewrittenPath is null)
                 {
                     return value;
@@ -579,7 +610,7 @@ internal static class RazorDocsPublishedTreeContentRewriter
         var suffixIndex = value.IndexOfAny(['?', '#']);
         var path = suffixIndex >= 0 ? value[..suffixIndex] : value;
         var suffix = suffixIndex >= 0 ? value[suffixIndex..] : string.Empty;
-        var rewrittenRelativePath = RewriteMountedDocsPath(path, mountRootPath, previewRootPath, requestPathBase);
+        var rewrittenRelativePath = RewriteMountedDocsPath(path, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
         return rewrittenRelativePath is null ? value : rewrittenRelativePath + suffix;
     }
 
@@ -587,14 +618,29 @@ internal static class RazorDocsPublishedTreeContentRewriter
         string path,
         string mountRootPath,
         string previewRootPath,
+        string routeRootPath,
         string? requestPathBase)
     {
+        var archivePath = DocsUrlBuilder.JoinPath(routeRootPath, "versions");
+        var versionPrefix = DocsUrlBuilder.JoinPath(routeRootPath, "v");
         if (DocsUrlBuilder.IsUnderRoot(path, mountRootPath)
-            || DocsUrlBuilder.IsUnderRoot(path, DocsUrlBuilder.DocsVersionsPath)
+            || DocsUrlBuilder.IsUnderRoot(path, archivePath)
             || DocsUrlBuilder.IsUnderRoot(path, previewRootPath)
-            || path.StartsWith(DocsUrlBuilder.DocsVersionPrefix + "/", StringComparison.OrdinalIgnoreCase))
+            || path.StartsWith(versionPrefix + "/", StringComparison.OrdinalIgnoreCase))
         {
             return PrefixPathBase(path, requestPathBase);
+        }
+
+        if (string.Equals(path, DocsUrlBuilder.DocsVersionsPath, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(DocsUrlBuilder.DocsVersionsPath + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            return PrefixPathBase(archivePath + path[DocsUrlBuilder.DocsVersionsPath.Length..], requestPathBase);
+        }
+
+        if (string.Equals(path, DocsUrlBuilder.DocsVersionPrefix, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(DocsUrlBuilder.DocsVersionPrefix + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            return PrefixPathBase(versionPrefix + path[DocsUrlBuilder.DocsVersionPrefix.Length..], requestPathBase);
         }
 
         if (string.Equals(path, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase))

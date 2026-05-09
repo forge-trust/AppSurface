@@ -117,7 +117,7 @@ internal static class DocPublicSectionCatalog
     /// Gets the canonical stable route slug for the specified public section.
     /// </summary>
     /// <param name="section">The section whose slug should be returned.</param>
-    /// <returns>A lower-case hyphenated slug suitable for <c>/docs/sections/{slug}</c> routes.</returns>
+    /// <returns>A lower-case hyphenated slug suitable for <c>{DocsRootPath}/sections/{slug}</c> routes.</returns>
     internal static string GetSlug(DocPublicSection section)
     {
         return BySection[section].Slug;
@@ -134,15 +134,14 @@ internal static class DocPublicSectionCatalog
     }
 
     /// <summary>
-    /// Gets the stable canonical public route for the specified section.
+    /// Gets the default stable public route for the specified section.
     /// </summary>
     /// <param name="section">The section whose href should be returned.</param>
-    /// <returns>The stable canonical <c>/docs/sections/{slug}</c> route for the section.</returns>
+    /// <returns>The default <c>/docs/sections/{slug}</c> route for the section.</returns>
     /// <remarks>
-    /// This overload always roots the returned href at the stable <c>/docs</c> alias, even when the current host is
-    /// serving the live docs surface somewhere else such as <c>/docs/next</c> or <c>/</c>. Callers that are rendering
-    /// links on the current live surface should prefer <see cref="GetHref(DocPublicSection, string)"/> so they do not
-    /// accidentally send readers back to the stable alias. The route slug is always produced by
+    /// This overload always roots the returned href at the default <c>/docs</c> surface. Callers that are rendering
+    /// links on the current live surface should prefer <see cref="GetHref(DocPublicSection, string)"/> so custom route
+    /// roots and preview roots are honored. The route slug is always produced by
     /// <see cref="GetSlug(DocPublicSection)"/>.
     /// </remarks>
     internal static string GetHref(DocPublicSection section)
