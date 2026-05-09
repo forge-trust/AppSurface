@@ -58,6 +58,7 @@ internal sealed class RazorDocsHarvestFailurePreflightService : IHostedService
 
         var exception = new RazorDocsHarvestFailedException(health);
         _logger.LogCritical(
+            exception,
             "RazorDocs strict harvest failed during startup. {Message}",
             exception.Message);
 

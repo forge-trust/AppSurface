@@ -5,7 +5,6 @@ using ForgeTrust.Runnable.Web.RazorDocs.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs.Tests;
 
@@ -14,8 +13,7 @@ public sealed class RazorDocsHarvestFailurePreflightServiceTests : IDisposable
     private readonly IWebHostEnvironment _environment = A.Fake<IWebHostEnvironment>();
     private readonly IRazorDocsHtmlSanitizer _sanitizer = A.Fake<IRazorDocsHtmlSanitizer>();
     private readonly ILogger<DocAggregator> _aggregatorLogger = A.Fake<ILogger<DocAggregator>>();
-    private readonly ILogger<RazorDocsHarvestFailurePreflightService> _preflightLogger =
-        NullLogger<RazorDocsHarvestFailurePreflightService>.Instance;
+    private readonly RecordingLogger<RazorDocsHarvestFailurePreflightService> _preflightLogger = new();
     private readonly MemoryCache _cache = new(new MemoryCacheOptions());
     private readonly Memo _memo;
 
@@ -143,6 +141,7 @@ public sealed class RazorDocsHarvestFailurePreflightServiceTests : IDisposable
         Assert.Contains(DocHarvestDiagnosticCodes.HarvesterFailed, exception.Message, StringComparison.Ordinal);
         Assert.Contains(DocHarvestDiagnosticCodes.AllFailed, exception.Message, StringComparison.Ordinal);
         Assert.All(exception.Summary.Diagnostics, diagnostic => Assert.False(string.IsNullOrWhiteSpace(diagnostic.Fix)));
+        AssertCriticalLogIncludesException(_preflightLogger, exception);
     }
 
     [Fact]
@@ -284,5 +283,58 @@ public sealed class RazorDocsHarvestFailurePreflightServiceTests : IDisposable
             },
             aggregator,
             _preflightLogger);
+    }
+
+    private static void AssertCriticalLogIncludesException(
+        RecordingLogger<RazorDocsHarvestFailurePreflightService> logger,
+        RazorDocsHarvestFailedException exception)
+    {
+        Assert.Contains(
+            logger.Entries,
+            entry =>
+                entry.Level == LogLevel.Critical
+                && ReferenceEquals(entry.Exception, exception)
+                && (entry.Message?.Contains(
+                    "RazorDocs strict harvest failed during startup.",
+                    StringComparison.Ordinal) ?? false));
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        private readonly List<LogEntry> _entries = [];
+
+        public IReadOnlyList<LogEntry> Entries => _entries;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return NullScope.Instance;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            _entries.Add(new LogEntry(logLevel, formatter(state, exception), exception));
+        }
+
+        public sealed record LogEntry(LogLevel Level, string Message, Exception? Exception);
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+
+            public void Dispose()
+            {
+            }
+        }
     }
 }
