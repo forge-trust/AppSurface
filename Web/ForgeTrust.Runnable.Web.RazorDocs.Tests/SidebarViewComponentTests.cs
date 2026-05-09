@@ -164,6 +164,31 @@ public sealed class SidebarViewComponentTests
     }
 
     [Fact]
+    public async Task InvokeAsync_ShouldKeepApiReferenceSidebarAtNamespaceLevel()
+    {
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Web", "Namespaces/ForgeTrust.Runnable.Web", "API Reference"),
+                new DocNode(
+                    "AspireApp",
+                    "Namespaces/ForgeTrust.Runnable.Web#AspireApp",
+                    string.Empty,
+                    ParentPath: "Namespaces/ForgeTrust.Runnable.Web",
+                    Metadata: new DocMetadata { NavGroup = "API Reference" })
+            ]);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            var section = Assert.Single(model.Sections);
+            var namespaceLink = Assert.Single(Assert.Single(section.Groups).Links);
+            Assert.Equal("Web", namespaceLink.Title);
+            Assert.Empty(namespaceLink.Children);
+        }
+    }
+
+    [Fact]
     public async Task InvokeAsync_ShouldExposeConfiguredNamespacePrefixes_WhenProvided()
     {
         var options = new RazorDocsOptions
