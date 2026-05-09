@@ -4,6 +4,15 @@ using System.Text.Json;
 
 namespace ForgeTrust.Runnable.Config;
 
+/// <summary>
+/// Applies the built-in audit redaction and value formatting policy.
+/// </summary>
+/// <remarks>
+/// Matching is fragment based and case-insensitive across keys, config paths, applied paths, and environment variable
+/// names. Sensitive values are replaced with a fixed placeholder before rendering. Non-sensitive complex objects may
+/// produce a <see langword="null"/> display value so callers can rely on child entries instead of an unsafe dump.
+/// Formatting failures are swallowed intentionally to keep audit generation best-effort.
+/// </remarks>
 internal sealed class ConfigAuditRedactor
 {
     private const string Placeholder = "[redacted]";
@@ -24,6 +33,10 @@ internal sealed class ConfigAuditRedactor
         "private"
     ];
 
+    /// <summary>
+    /// Creates a snapshot of the redaction policy applied to reports.
+    /// </summary>
+    /// <returns>A policy snapshot with a copy of the sensitive fragments and the placeholder text.</returns>
     public ConfigAuditRedaction CreatePolicy() =>
         new()
         {
@@ -32,6 +45,13 @@ internal sealed class ConfigAuditRedactor
             Placeholder = Placeholder
         };
 
+    /// <summary>
+    /// Formats <paramref name="value"/> for display and redacts it when the key or sources look sensitive.
+    /// </summary>
+    /// <param name="key">The configuration key being formatted.</param>
+    /// <param name="value">The resolved value, if any.</param>
+    /// <param name="sources">The sources that contributed to the value.</param>
+    /// <returns>The display value and whether it was replaced by the redaction placeholder.</returns>
     public RedactedValue FormatValue(
         string key,
         object? value,
@@ -82,15 +102,15 @@ internal sealed class ConfigAuditRedactor
             }
             catch (NotSupportedException)
             {
-                return value.ToString();
+                return SafeToString(value);
             }
             catch (JsonException)
             {
-                return value.ToString();
+                return SafeToString(value);
             }
             catch (InvalidOperationException)
             {
-                return value.ToString();
+                return SafeToString(value);
             }
         }
 
@@ -99,8 +119,32 @@ internal sealed class ConfigAuditRedactor
             return null;
         }
 
-        return Convert.ToString(value, CultureInfo.InvariantCulture);
+        try
+        {
+            return Convert.ToString(value, CultureInfo.InvariantCulture);
+        }
+        catch (Exception)
+        {
+            return SafeToString(value);
+        }
+    }
+
+    private static string SafeToString(object value)
+    {
+        try
+        {
+            return value.ToString() ?? value.GetType().Name;
+        }
+        catch (Exception)
+        {
+            return value.GetType().Name;
+        }
     }
 }
 
+/// <summary>
+/// Describes a formatted value after applying the redaction policy.
+/// </summary>
+/// <param name="DisplayValue">The safe display value, or <see langword="null"/> for non-scalar objects.</param>
+/// <param name="IsRedacted">A value indicating whether the placeholder replaced the original value.</param>
 internal sealed record RedactedValue(string? DisplayValue, bool IsRedacted);

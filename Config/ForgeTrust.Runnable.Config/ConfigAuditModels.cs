@@ -3,6 +3,11 @@ namespace ForgeTrust.Runnable.Config;
 /// <summary>
 /// Describes the resolved configuration state for a Runnable environment.
 /// </summary>
+/// <remarks>
+/// Reports are immutable snapshots from the caller's perspective: provider order, entries, diagnostics, and redaction
+/// policy describe one audit run and should not be treated as live configuration. Use <see cref="Entries"/> for
+/// machine inspection and <see cref="ConfigAuditTextRenderer"/> when operators need a deterministic text dump.
+/// </remarks>
 public sealed class ConfigAuditReport
 {
     /// <summary>
@@ -39,6 +44,10 @@ public sealed class ConfigAuditReport
 /// <summary>
 /// Describes one provider in the audit report precedence list.
 /// </summary>
+/// <remarks>
+/// <see cref="Precedence"/> is the display order used by audit reports. Environment providers are marked as
+/// overrides because they are checked before normal priority-ordered providers.
+/// </remarks>
 public sealed class ConfigAuditProvider
 {
     /// <summary>
@@ -65,6 +74,12 @@ public sealed class ConfigAuditProvider
 /// <summary>
 /// Describes one known configuration entry and its source records.
 /// </summary>
+/// <remarks>
+/// <see cref="State"/> summarizes the entry as a whole. Object entries can contain <see cref="Children"/> with more
+/// specific provenance, including nested <see cref="ConfigAuditEntryState.PartiallyResolved"/> states when descendants
+/// are patched. <see cref="DisplayValue"/> is already redacted and can be <see langword="null"/> for complex values;
+/// callers should inspect children instead of assuming a full object dump is available.
+/// </remarks>
 public sealed class ConfigAuditEntry
 {
     /// <summary>
@@ -111,6 +126,11 @@ public sealed class ConfigAuditEntry
 /// <summary>
 /// Describes one source that contributed to a configuration entry.
 /// </summary>
+/// <remarks>
+/// Source records identify where a value came from and how it was applied. File paths, environment variable names, and
+/// config paths are optional because not every provider exposes the same provenance. The source role is especially
+/// important for mixed values: a base source can be combined with patch sources from higher-priority providers.
+/// </remarks>
 public sealed class ConfigAuditSourceRecord
 {
     /// <summary>
@@ -162,6 +182,11 @@ public sealed class ConfigAuditSourceRecord
 /// <summary>
 /// Describes a diagnostic emitted while building a configuration audit report.
 /// </summary>
+/// <remarks>
+/// Diagnostic messages are intended to be display-safe and stable enough for operators. Use <see cref="Code"/> for
+/// programmatic handling, and use <see cref="Source"/> when a diagnostic can be tied to one provider, file, or
+/// environment variable.
+/// </remarks>
 public sealed class ConfigAuditDiagnostic
 {
     /// <summary>
@@ -198,6 +223,11 @@ public sealed class ConfigAuditDiagnostic
 /// <summary>
 /// Describes the redaction policy applied to a configuration audit report.
 /// </summary>
+/// <remarks>
+/// The built-in policy is always enabled and uses fragment matching before values are exposed through
+/// <see cref="ConfigAuditEntry.DisplayValue"/>. <see cref="MatchedFragments"/> is a snapshot for explanation, not a
+/// mutable policy hook.
+/// </remarks>
 public sealed class ConfigAuditRedaction
 {
     /// <summary>
@@ -219,6 +249,9 @@ public sealed class ConfigAuditRedaction
 /// <summary>
 /// Identifies the resolution state for an audited configuration entry.
 /// </summary>
+/// <remarks>
+/// Values are explicit and append-only so serialized reports remain stable across releases.
+/// </remarks>
 public enum ConfigAuditEntryState
 {
     /// <summary>A provider supplied the value without member-level mixed provenance.</summary>
@@ -240,6 +273,9 @@ public enum ConfigAuditEntryState
 /// <summary>
 /// Identifies the kind of configuration source.
 /// </summary>
+/// <remarks>
+/// Values are explicit and append-only so serialized reports remain stable across releases.
+/// </remarks>
 public enum ConfigAuditSourceKind
 {
     /// <summary>A generic configuration provider.</summary>
@@ -261,6 +297,9 @@ public enum ConfigAuditSourceKind
 /// <summary>
 /// Identifies how a source contributed to the final value.
 /// </summary>
+/// <remarks>
+/// Values are explicit and append-only so serialized reports remain stable across releases.
+/// </remarks>
 public enum ConfigAuditSourceRole
 {
     /// <summary>The source supplied the base value.</summary>
@@ -279,6 +318,9 @@ public enum ConfigAuditSourceRole
 /// <summary>
 /// Classifies source or value sensitivity.
 /// </summary>
+/// <remarks>
+/// Values are explicit and append-only so serialized reports remain stable across releases.
+/// </remarks>
 public enum ConfigAuditSensitivity
 {
     /// <summary>Sensitivity is unknown.</summary>
@@ -294,6 +336,9 @@ public enum ConfigAuditSensitivity
 /// <summary>
 /// Identifies diagnostic severity.
 /// </summary>
+/// <remarks>
+/// Values are explicit and append-only so serialized reports remain stable across releases.
+/// </remarks>
 public enum ConfigAuditDiagnosticSeverity
 {
     /// <summary>Informational diagnostic.</summary>

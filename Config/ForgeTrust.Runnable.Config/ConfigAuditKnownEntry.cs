@@ -15,6 +15,9 @@ public sealed class ConfigAuditKnownEntry
     /// <param name="valueType">The declared value type.</param>
     public ConfigAuditKnownEntry(string key, Type? configType, Type valueType)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(valueType);
+
         Key = key;
         ConfigType = configType;
         ValueType = valueType;

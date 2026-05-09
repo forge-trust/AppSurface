@@ -141,7 +141,7 @@ public class Config<T> : IConfig, IConfigInspectable
                 value,
                 (currentValue, validationContext) => ValidateValue((T)currentValue, validationContext));
         }
-        catch (InvalidCastException ex)
+        catch (InvalidCastException)
         {
             state = ConfigAuditEntryState.Invalid;
             diagnostics.Add(new ConfigAuditDiagnostic
@@ -150,7 +150,7 @@ public class Config<T> : IConfig, IConfigInspectable
                 Code = "config-value-type-mismatch",
                 Key = key,
                 ConfigPath = key,
-                Message = $"Resolved value for {key} could not be cast to {typeof(T).FullName}: {ex.Message}"
+                Message = $"Resolved value for {key} could not be cast to {typeof(T).FullName}."
             });
         }
         catch (ConfigurationValidationException ex)
@@ -162,7 +162,7 @@ public class Config<T> : IConfig, IConfigInspectable
                 Code = "config-validation-failed",
                 Key = key,
                 ConfigPath = failure.MemberNames.Count == 0 ? key : string.Join(".", failure.MemberNames),
-                Message = failure.Message
+                Message = "Configuration validation failed."
             }));
         }
         catch (Exception ex)
@@ -174,7 +174,7 @@ public class Config<T> : IConfig, IConfigInspectable
                 Code = "config-validation-threw",
                 Key = key,
                 ConfigPath = key,
-                Message = $"Configuration validation threw {ex.GetType().Name}: {ex.Message}"
+                Message = $"Configuration validation threw {ex.GetType().Name}."
             });
         }
 

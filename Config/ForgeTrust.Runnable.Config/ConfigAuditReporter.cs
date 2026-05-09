@@ -415,15 +415,20 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             .Cast<ConfigAuditSourceRecord>()
             .ToList();
         var redacted = _redactor.FormatValue(childKey, childValue, childSources);
+        var children = BuildChildren(childKey, childValue, parentSources, visited);
+        var state = children.Any(child => child.State == ConfigAuditEntryState.PartiallyResolved
+                                          || child.Sources.Any(source => source.Role == ConfigAuditSourceRole.Patch))
+            ? ConfigAuditEntryState.PartiallyResolved
+            : ConfigAuditEntryState.Resolved;
         return new ConfigAuditEntry
         {
             Key = childKey,
             DeclaredType = childValue?.GetType().FullName,
-            State = ConfigAuditEntryState.Resolved,
+            State = state,
             DisplayValue = redacted.DisplayValue,
             IsRedacted = redacted.IsRedacted,
             Sources = childSources,
-            Children = BuildChildren(childKey, childValue, parentSources, visited)
+            Children = children
         };
     }
 

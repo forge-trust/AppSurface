@@ -3,6 +3,13 @@ namespace ForgeTrust.Runnable.Config.Tests;
 public class ConfigAuditModelsTests
 {
     [Fact]
+    public void ConfigAuditKnownEntry_RejectsInvalidConstructorArguments()
+    {
+        Assert.Throws<ArgumentException>(() => new ConfigAuditKnownEntry("", null, typeof(string)));
+        Assert.Throws<ArgumentNullException>(() => new ConfigAuditKnownEntry("Valid.Key", null, null!));
+    }
+
+    [Fact]
     public void PublicEnums_KeepStableOrdinals()
     {
         Assert.Equal(0, (int)ConfigAuditEntryState.Resolved);

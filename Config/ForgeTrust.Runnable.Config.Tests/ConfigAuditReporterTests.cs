@@ -53,6 +53,24 @@ public class ConfigAuditReporterTests
             throw new InvalidOperationException("string validator failed");
     }
 
+    [ConfigKey("Leaky.Name", root: true)]
+    private sealed class LeakyNameConfig : Config<string>
+    {
+        protected override IEnumerable<ValidationResult>? ValidateValue(
+            string value,
+            ValidationContext validationContext) =>
+            [new ValidationResult($"do not leak {value}")];
+    }
+
+    [ConfigKey("Leaky.Throwing", root: true)]
+    private sealed class LeakyThrowingConfig : Config<string>
+    {
+        protected override IEnumerable<ValidationResult>? ValidateValue(
+            string value,
+            ValidationContext validationContext) =>
+            throw new InvalidOperationException($"do not leak {value}");
+    }
+
     [ConfigKey("Throwing.Count", root: true)]
     private sealed class ThrowingCountConfig : ConfigStruct<int>
     {
@@ -186,10 +204,11 @@ public class ConfigAuditReporterTests
             Assert.Contains(settings.Sources, source => source.EnvironmentVariableName == "MYAPP__SETTINGS__DATABASE__PORT");
             Assert.Contains(settings.Diagnostics, diagnostic => diagnostic.Message.Contains("MYAPP__SETTINGS__DATABASE__TIMEOUTSECONDS", StringComparison.Ordinal));
 
-            var port = settings.Children
-                .Single(child => child.Key == "MyApp.Settings.Database")
-                .Children
-                .Single(child => child.Key == "MyApp.Settings.Database.Port");
+            var database = settings.Children
+                .Single(child => child.Key == "MyApp.Settings.Database");
+            Assert.Equal(ConfigAuditEntryState.PartiallyResolved, database.State);
+
+            var port = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Port");
             Assert.Equal("6543", port.DisplayValue);
             Assert.Contains(port.Sources, source => source.EnvironmentVariableName == "MYAPP__SETTINGS__DATABASE__PORT");
 
@@ -281,6 +300,8 @@ public class ConfigAuditReporterTests
                     ["Short.Name"] = "no",
                     ["Throwing.Name"] = "valid-name",
                     ["Throwing.Count"] = 7,
+                    ["Leaky.Name"] = "super-secret",
+                    ["Leaky.Throwing"] = "super-secret",
                     ["Mismatched.Name"] = 5,
                     ["Mismatched.Count"] = "seven",
                     ["Object.String"] = "plain",
@@ -289,6 +310,8 @@ public class ConfigAuditReporterTests
         services.AddSingleton(new ConfigAuditKnownEntry("Short.Name", typeof(ShortNameConfig), typeof(string)));
         services.AddSingleton(new ConfigAuditKnownEntry("Throwing.Name", typeof(ThrowingNameConfig), typeof(string)));
         services.AddSingleton(new ConfigAuditKnownEntry("Throwing.Count", typeof(ThrowingCountConfig), typeof(int)));
+        services.AddSingleton(new ConfigAuditKnownEntry("Leaky.Name", typeof(LeakyNameConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry("Leaky.Throwing", typeof(LeakyThrowingConfig), typeof(string)));
         services.AddSingleton(new ConfigAuditKnownEntry("Mismatched.Name", typeof(ShortNameConfig), typeof(string)));
         services.AddSingleton(new ConfigAuditKnownEntry("Mismatched.Count", typeof(RetryCountConfig), typeof(int)));
         services.AddSingleton(new ConfigAuditKnownEntry("Default.Port", typeof(DefaultPortConfig), typeof(int)));
@@ -310,6 +333,12 @@ public class ConfigAuditReporterTests
         Assert.Contains(
             AssertEntry(report, "Throwing.Count", ConfigAuditEntryState.Invalid, "7").Diagnostics,
             diagnostic => diagnostic.Code == "config-validation-threw");
+        Assert.All(
+            AssertEntry(report, "Leaky.Name", ConfigAuditEntryState.Invalid, "super-secret").Diagnostics,
+            diagnostic => Assert.DoesNotContain("super-secret", diagnostic.Message, StringComparison.Ordinal));
+        Assert.All(
+            AssertEntry(report, "Leaky.Throwing", ConfigAuditEntryState.Invalid, "super-secret").Diagnostics,
+            diagnostic => Assert.DoesNotContain("super-secret", diagnostic.Message, StringComparison.Ordinal));
         Assert.Contains(
             AssertEntry(report, "Mismatched.Name", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-value-type-mismatch");
@@ -480,6 +509,7 @@ public class ConfigAuditReporterTests
         var formatted = redactor.FormatValue("Values", new ThrowingEnumerable(), []);
         var json = redactor.FormatValue("Values", new JsonExceptionEnumerable(), []);
         var invalidOperation = redactor.FormatValue("Values", new InvalidOperationEnumerable(), []);
+        var throwingToString = redactor.FormatValue("Values", new ThrowingToStringEnumerable(), []);
 
         Assert.Equal(nameof(ThrowingEnumerable), formatted.DisplayValue);
         Assert.False(formatted.IsRedacted);
@@ -487,6 +517,8 @@ public class ConfigAuditReporterTests
         Assert.False(json.IsRedacted);
         Assert.Equal(nameof(InvalidOperationEnumerable), invalidOperation.DisplayValue);
         Assert.False(invalidOperation.IsRedacted);
+        Assert.Equal(nameof(ThrowingToStringEnumerable), throwingToString.DisplayValue);
+        Assert.False(throwingToString.IsRedacted);
     }
 
     [Fact]
@@ -792,5 +824,12 @@ public class ConfigAuditReporterTests
         public IEnumerator GetEnumerator() => throw new InvalidOperationException();
 
         public override string ToString() => nameof(InvalidOperationEnumerable);
+    }
+
+    private sealed class ThrowingToStringEnumerable : IEnumerable
+    {
+        public IEnumerator GetEnumerator() => throw new JsonException();
+
+        public override string ToString() => throw new InvalidOperationException();
     }
 }
