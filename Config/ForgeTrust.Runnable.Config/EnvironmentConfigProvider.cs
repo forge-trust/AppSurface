@@ -9,7 +9,7 @@ namespace ForgeTrust.Runnable.Config;
 /// <summary>
 /// A configuration provider that retrieves values from environment variables.
 /// </summary>
-internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigValuePatcher
+internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigValuePatcher, IConfigDiagnosticProvider, IConfigDiagnosticPatcher
 {
     // Safety limit for indexed env-var collections (KEY__0, KEY__1, ...).
     // Prevents unbounded probing while still supporting large lists.
@@ -73,6 +73,69 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         return default;
     }
 
+    ConfigValueResolution IConfigDiagnosticProvider.Resolve(
+        string environment,
+        string key,
+        Type valueType,
+        ConfigAuditSourceRole role)
+    {
+        var envPrefix = NormalizeSegment(environment);
+        var legacyKey = NormalizeSegment(key);
+        var hierarchicalKey = NormalizeHierarchicalKey(key);
+        var diagnostics = new List<ConfigAuditDiagnostic>();
+
+        foreach (var candidate in BuildDirectCandidates(envPrefix, legacyKey, hierarchicalKey))
+        {
+            var rawValue = _environmentProvider.GetEnvironmentVariable(candidate);
+            if (rawValue == null)
+            {
+                continue;
+            }
+
+            var source = CreateEnvironmentSource(candidate, key, role);
+            if (TryConvertStringToType(rawValue, valueType, out var parsed))
+            {
+                return new ConfigValueResolution(
+                    key,
+                    ConfigAuditEntryState.Resolved,
+                    parsed,
+                    [source],
+                    diagnostics);
+            }
+
+            diagnostics.Add(CreateConversionDiagnostic(key, key, valueType, source));
+        }
+
+        if (TryReadIndexedCollectionDiagnostic(valueType, $"{envPrefix}__{hierarchicalKey}", key, role, diagnostics, out var envScopedCollection, out var envScopedSources))
+        {
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                envScopedCollection,
+                envScopedSources,
+                diagnostics);
+        }
+
+        if (TryReadIndexedCollectionDiagnostic(valueType, hierarchicalKey, key, role, diagnostics, out var collection, out var sources))
+        {
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                collection,
+                sources,
+                diagnostics);
+        }
+
+        if (diagnostics.Count > 0)
+        {
+            return new ConfigValueResolution(key, ConfigAuditEntryState.Invalid, null, [], diagnostics);
+        }
+
+        return ConfigValueResolution.Missing(key);
+    }
+
+    IReadOnlyList<ConfigAuditDiagnostic> IConfigDiagnosticProvider.GetReportDiagnostics(string environment) => [];
+
     /// <inheritdoc />
     public string Environment => _environmentProvider.Environment;
 
@@ -117,6 +180,62 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
 
         patchedValue = (T?)target!;
         return true;
+    }
+
+    ConfigPatchDiagnosticResult IConfigDiagnosticPatcher.TracePatch(
+        string environment,
+        string key,
+        object? currentValue,
+        Type valueType)
+    {
+        var diagnostics = new List<ConfigAuditDiagnostic>();
+        var sources = new List<ConfigAuditSourceRecord>();
+        if (!IsPatchableComplexType(valueType) && currentValue == null)
+        {
+            return new ConfigPatchDiagnosticResult(false, null, sources, diagnostics);
+        }
+
+        var runtimeType = currentValue?.GetType() ?? valueType;
+        if (!IsPatchableComplexType(runtimeType))
+        {
+            return new ConfigPatchDiagnosticResult(false, null, sources, diagnostics);
+        }
+
+        object? target;
+        if (currentValue == null)
+        {
+            if (!TryCreateInstance(runtimeType, out target))
+            {
+                return new ConfigPatchDiagnosticResult(false, null, sources, diagnostics);
+            }
+        }
+        else if (!TryClone(currentValue, runtimeType, out target))
+        {
+            diagnostics.Add(new ConfigAuditDiagnostic
+            {
+                Severity = ConfigAuditDiagnosticSeverity.Warning,
+                Code = "config-patch-clone-failed",
+                Key = key,
+                ConfigPath = key,
+                Message = $"Could not clone value for '{key}', so patch diagnostics were skipped to avoid mutating the original value."
+            });
+            return new ConfigPatchDiagnosticResult(false, null, sources, diagnostics);
+        }
+
+        var envPrefix = NormalizeSegment(environment);
+        var hierarchicalKey = NormalizeHierarchicalKey(key);
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var patched = TryPatchObjectDiagnostic(
+            target!,
+            runtimeType,
+            envPrefix,
+            hierarchicalKey,
+            key,
+            visited,
+            sources,
+            diagnostics);
+
+        return new ConfigPatchDiagnosticResult(patched, patched ? target : null, sources, diagnostics);
     }
 
     /// <summary>
@@ -221,6 +340,73 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         }
 
         parsed = typedList;
+        return true;
+    }
+
+    private bool TryReadIndexedCollectionDiagnostic(
+        Type targetType,
+        string keyPrefix,
+        string configPath,
+        ConfigAuditSourceRole role,
+        List<ConfigAuditDiagnostic> diagnostics,
+        out object? parsed,
+        out IReadOnlyList<ConfigAuditSourceRecord> sources)
+    {
+        parsed = default;
+        sources = [];
+        var elementType = GetCollectionElementType(targetType);
+        if (elementType == null)
+        {
+            return false;
+        }
+
+        var values = new List<object?>();
+        var sourceRecords = new List<ConfigAuditSourceRecord>();
+        for (var index = 0; index < MaxIndexedCollectionEntries; index++)
+        {
+            var variableName = $"{keyPrefix}__{index}";
+            var value = _environmentProvider.GetEnvironmentVariable(variableName);
+            if (value == null)
+            {
+                if (index == 0)
+                {
+                    return false;
+                }
+
+                break;
+            }
+
+            var source = CreateEnvironmentSource(variableName, $"{configPath}.{index}", role);
+            if (!TryConvertStringToType(value, elementType, out var element))
+            {
+                diagnostics.Add(CreateConversionDiagnostic(configPath, $"{configPath}.{index}", elementType, source));
+                parsed = default;
+                sources = sourceRecords;
+                return false;
+            }
+
+            values.Add(element);
+            sourceRecords.Add(source);
+        }
+
+        var typedList = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(elementType))!;
+        foreach (var value in values)
+        {
+            typedList.Add(value);
+        }
+
+        if (targetType.IsArray)
+        {
+            var array = Array.CreateInstance(elementType, typedList.Count);
+            typedList.CopyTo(array, 0);
+            parsed = array;
+        }
+        else
+        {
+            parsed = typedList;
+        }
+
+        sources = sourceRecords;
         return true;
     }
 
@@ -486,6 +672,163 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         return false;
     }
 
+    private bool TryReadMemberValueDiagnostic(
+        Type targetType,
+        string envPrefix,
+        string hierarchicalKey,
+        string configPath,
+        List<ConfigAuditDiagnostic> diagnostics,
+        out object? parsed,
+        out IReadOnlyList<ConfigAuditSourceRecord> sources)
+    {
+        sources = [];
+        var legacyKey = hierarchicalKey.Replace("__", "_", StringComparison.Ordinal);
+        foreach (var candidate in BuildDirectCandidates(envPrefix, legacyKey, hierarchicalKey))
+        {
+            var value = _environmentProvider.GetEnvironmentVariable(candidate);
+            if (value == null)
+            {
+                continue;
+            }
+
+            var source = CreateEnvironmentSource(candidate, configPath, ConfigAuditSourceRole.Patch);
+            if (TryConvertStringToType(value, targetType, out parsed))
+            {
+                sources = [source];
+                return true;
+            }
+
+            diagnostics.Add(CreateConversionDiagnostic(configPath, configPath, targetType, source));
+        }
+
+        if (TryReadIndexedCollectionDiagnostic(targetType, $"{envPrefix}__{hierarchicalKey}", configPath, ConfigAuditSourceRole.Patch, diagnostics, out parsed, out var envScopedSources))
+        {
+            sources = envScopedSources;
+            return true;
+        }
+
+        if (TryReadIndexedCollectionDiagnostic(targetType, hierarchicalKey, configPath, ConfigAuditSourceRole.Patch, diagnostics, out parsed, out var collectionSources))
+        {
+            sources = collectionSources;
+            return true;
+        }
+
+        parsed = default;
+        return false;
+    }
+
+    private bool TryPatchObjectDiagnostic(
+        object target,
+        Type targetType,
+        string envPrefix,
+        string hierarchicalKey,
+        string configPath,
+        HashSet<object> visited,
+        List<ConfigAuditSourceRecord> sources,
+        List<ConfigAuditDiagnostic> diagnostics)
+    {
+        if (!visited.Add(target))
+        {
+            return false;
+        }
+
+        var patched = false;
+        foreach (var property in targetType.GetProperties(BindingFlags.Instance | BindingFlags.Public))
+        {
+            if (property.GetIndexParameters().Length != 0)
+            {
+                continue;
+            }
+
+            var childKey = CombineHierarchicalKey(hierarchicalKey, property.Name);
+            var childPath = CombineConfigPath(configPath, property.Name);
+            if (TryReadMemberValueDiagnostic(property.PropertyType, envPrefix, childKey, childPath, diagnostics, out var propertyValue, out var propertySources))
+            {
+                if (HasPublicSetter(property))
+                {
+                    property.SetValue(target, propertyValue);
+                    sources.AddRange(propertySources);
+                    patched = true;
+                    continue;
+                }
+
+                if (property.GetMethod != null
+                    && TryPatchExistingCollection(property.GetValue(target), propertyValue))
+                {
+                    sources.AddRange(propertySources);
+                    patched = true;
+                    continue;
+                }
+
+                continue;
+            }
+
+            if (!IsPatchableComplexType(property.PropertyType))
+            {
+                continue;
+            }
+
+            object? child = property.GetMethod == null ? null : property.GetValue(target);
+            if (child == null)
+            {
+                if (!HasPublicSetter(property)
+                    || !TryCreateInstance(property.PropertyType, out child))
+                {
+                    continue;
+                }
+            }
+
+            var childToPatch = child!;
+            if (TryPatchObjectDiagnostic(childToPatch, childToPatch.GetType(), envPrefix, childKey, childPath, visited, sources, diagnostics))
+            {
+                if (HasPublicSetter(property))
+                {
+                    property.SetValue(target, childToPatch);
+                }
+
+                patched = true;
+            }
+        }
+
+        foreach (var field in targetType.GetFields(BindingFlags.Instance | BindingFlags.Public))
+        {
+            if (field.IsInitOnly)
+            {
+                continue;
+            }
+
+            var childKey = CombineHierarchicalKey(hierarchicalKey, field.Name);
+            var childPath = CombineConfigPath(configPath, field.Name);
+            if (TryReadMemberValueDiagnostic(field.FieldType, envPrefix, childKey, childPath, diagnostics, out var fieldValue, out var fieldSources))
+            {
+                field.SetValue(target, fieldValue);
+                sources.AddRange(fieldSources);
+                patched = true;
+                continue;
+            }
+
+            if (!IsPatchableComplexType(field.FieldType))
+            {
+                continue;
+            }
+
+            var child = field.GetValue(target);
+            if (child == null && !TryCreateInstance(field.FieldType, out child))
+            {
+                continue;
+            }
+
+            if (TryPatchObjectDiagnostic(child!, child!.GetType(), envPrefix, childKey, childPath, visited, sources, diagnostics))
+            {
+                field.SetValue(target, child);
+                patched = true;
+            }
+        }
+
+        visited.Remove(target);
+        return patched;
+    }
+
     private static bool TryPatchExistingCollection(object? targetCollection, object? replacement)
     {
         if (targetCollection is not IList targetList
@@ -513,6 +856,9 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         var memberKey = NormalizeHierarchicalKey(memberName);
         return string.IsNullOrEmpty(parentKey) ? memberKey : $"{parentKey}__{memberKey}";
     }
+
+    private static string CombineConfigPath(string parentPath, string memberName) =>
+        string.IsNullOrEmpty(parentPath) ? memberName : $"{parentPath}.{memberName}";
 
     private static bool IsPatchableComplexType(Type targetType)
     {
@@ -552,4 +898,49 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
             return false;
         }
     }
+
+    private static bool TryClone(object value, Type targetType, out object? clone)
+    {
+        clone = null;
+        try
+        {
+            var json = JsonSerializer.Serialize(value, targetType);
+            clone = JsonSerializer.Deserialize(json, targetType);
+            return clone != null;
+        }
+        catch (Exception ex) when (ex is NotSupportedException or JsonException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private ConfigAuditSourceRecord CreateEnvironmentSource(
+        string variableName,
+        string configPath,
+        ConfigAuditSourceRole role) =>
+        new()
+        {
+            Kind = ConfigAuditSourceKind.EnvironmentVariable,
+            ProviderName = Name,
+            ProviderPriority = Priority,
+            EnvironmentVariableName = variableName,
+            ConfigPath = configPath,
+            AppliedToPath = configPath,
+            Role = role
+        };
+
+    private static ConfigAuditDiagnostic CreateConversionDiagnostic(
+        string key,
+        string configPath,
+        Type targetType,
+        ConfigAuditSourceRecord source) =>
+        new()
+        {
+            Severity = ConfigAuditDiagnosticSeverity.Warning,
+            Code = "config-environment-conversion-failed",
+            Key = key,
+            ConfigPath = configPath,
+            Source = source,
+            Message = $"Ignored environment variable {source.EnvironmentVariableName} because its value could not be converted to {targetType.Name}."
+        };
 }

@@ -10,7 +10,7 @@ packages:
     classification: public
     order: 20
     use_when: Add this when your Runnable modules need strongly typed configuration primitives instead of ad hoc configuration lookups.
-    includes: RunnableConfigModule, typed config objects, configuration providers, and explicit configuration access patterns.
+    includes: RunnableConfigModule, typed config objects, configuration providers, source-aware audit reports, and explicit configuration access patterns.
     does_not_include: Web hosting, UI docs, caching, or a separate secret-management system.
     start_here_path: Config/ForgeTrust.Runnable.Config/README.md
   - project: Caching/ForgeTrust.Runnable.Caching/ForgeTrust.Runnable.Caching.csproj

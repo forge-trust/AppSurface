@@ -15,7 +15,7 @@ namespace ForgeTrust.Runnable.Config;
 /// Apply <see cref="ConfigKeyRequiredAttribute"/> to require resolved provider/default presence.
 /// </summary>
 /// <typeparam name="T">The type of the configuration value.</typeparam>
-public class Config<T> : IConfig
+public class Config<T> : IConfig, IConfigInspectable
     where T : class
 {
     /// <summary>
@@ -96,4 +96,88 @@ public class Config<T> : IConfig
         T value,
         ValidationContext validationContext) =>
         [];
+
+    ConfigWrapperInspection IConfigInspectable.Inspect(
+        string key,
+        object? rawValue,
+        ConfigAuditEntryState resolutionState)
+    {
+        T? value = default;
+        var diagnostics = new List<ConfigAuditDiagnostic>();
+        ConfigAuditSourceRecord? defaultSource = null;
+        var state = resolutionState;
+
+        try
+        {
+            value = rawValue == null ? DefaultValue : (T)rawValue;
+            var hasValue = value != null;
+            if (rawValue == null && value != null)
+            {
+                state = ConfigAuditEntryState.Defaulted;
+                defaultSource = new ConfigAuditSourceRecord
+                {
+                    Kind = ConfigAuditSourceKind.Default,
+                    ProviderName = GetType().Name,
+                    ConfigPath = key,
+                    AppliedToPath = key,
+                    Role = ConfigAuditSourceRole.Fallback
+                };
+            }
+
+            ConfigPresenceValidator.Validate(
+                key,
+                GetType(),
+                typeof(T),
+                hasValue);
+            ConfigDataAnnotationsValidator.Validate(
+                key,
+                GetType(),
+                typeof(T),
+                value);
+            ConfigScalarValueValidator.Validate(
+                key,
+                this,
+                typeof(T),
+                value,
+                (currentValue, validationContext) => ValidateValue((T)currentValue, validationContext));
+        }
+        catch (InvalidCastException)
+        {
+            state = ConfigAuditEntryState.Invalid;
+            diagnostics.Add(new ConfigAuditDiagnostic
+            {
+                Severity = ConfigAuditDiagnosticSeverity.Error,
+                Code = "config-value-type-mismatch",
+                Key = key,
+                ConfigPath = key,
+                Message = $"Resolved value for {key} could not be cast to {typeof(T).FullName}."
+            });
+        }
+        catch (ConfigurationValidationException ex)
+        {
+            state = ConfigAuditEntryState.Invalid;
+            diagnostics.AddRange(ex.Failures.Select(failure => new ConfigAuditDiagnostic
+            {
+                Severity = ConfigAuditDiagnosticSeverity.Error,
+                Code = "config-validation-failed",
+                Key = key,
+                ConfigPath = failure.MemberNames.Count == 0 ? key : string.Join(".", failure.MemberNames),
+                Message = "Configuration validation failed."
+            }));
+        }
+        catch (Exception ex)
+        {
+            state = ConfigAuditEntryState.Invalid;
+            diagnostics.Add(new ConfigAuditDiagnostic
+            {
+                Severity = ConfigAuditDiagnosticSeverity.Error,
+                Code = "config-validation-threw",
+                Key = key,
+                ConfigPath = key,
+                Message = $"Configuration validation threw {ex.GetType().Name}."
+            });
+        }
+
+        return new ConfigWrapperInspection(value, state, defaultSource, diagnostics);
+    }
 }

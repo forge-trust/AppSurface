@@ -13,6 +13,9 @@ public class RunnableConfigModule : IRunnableModule
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
         services.AddSingleton<IConfigManager, DefaultConfigManager>();
+        services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddSingleton<ConfigAuditRedactor>();
+        services.AddSingleton<ConfigAuditTextRenderer>();
         services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();
         services.AddSingleton<IConfigFileLocationProvider, DefaultConfigFileLocationProvider>();
         services.AddSingleton<IConfigProvider, FileBasedConfigProvider>();
@@ -58,7 +61,29 @@ public class RunnableConfigModule : IRunnableModule
 
                     return instance;
                 });
+            services.AddSingleton(new ConfigAuditKnownEntry(
+                ConfigKeyAttribute.GetKeyPath(type),
+                type,
+                GetConfigValueType(type)));
         }
+    }
+
+    private static Type GetConfigValueType(Type type)
+    {
+        var current = type;
+        while (current != null)
+        {
+            if (current.IsGenericType
+                && (current.GetGenericTypeDefinition() == typeof(Config<>)
+                    || current.GetGenericTypeDefinition() == typeof(ConfigStruct<>)))
+            {
+                return current.GetGenericArguments()[0];
+            }
+
+            current = current.BaseType;
+        }
+
+        return typeof(object);
     }
 
     /// <inheritdoc />

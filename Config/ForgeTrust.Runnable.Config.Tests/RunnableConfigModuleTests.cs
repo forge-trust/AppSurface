@@ -107,6 +107,12 @@ public class RunnableConfigModuleTests
         // Verify it registered TestConfig and TrackingTestConfig
         Assert.Contains(services, d => d.ServiceType == typeof(TestConfig));
         Assert.Contains(services, d => d.ServiceType == typeof(TrackingTestConfig));
+        Assert.Contains(
+            services,
+            d => d.ServiceType == typeof(ConfigAuditKnownEntry)
+                 && d.ImplementationInstance is ConfigAuditKnownEntry entry
+                 && entry.ConfigType == typeof(TrackingTestConfig)
+                 && entry.Key == nameof(TrackingTestConfig));
 
         // Test the factory activation
         var configManager = A.Fake<IConfigManager>();
