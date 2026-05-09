@@ -210,17 +210,34 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
         if (_environmentProvider is IConfigDiagnosticPatcher patcher)
         {
-            var patch = patcher.TracePatch(environment, knownEntry.Key, providerResolution.Value, knownEntry.ValueType);
-            diagnostics.AddRange(patch.Diagnostics);
-            if (patch.Patched)
+            ConfigPatchDiagnosticResult? patch = null;
+            try
             {
-                var sourceRecords = providerResolution.Sources.Concat(patch.Sources).ToList();
-                return new ConfigValueResolution(
+                patch = patcher.TracePatch(environment, knownEntry.Key, providerResolution.Value, knownEntry.ValueType);
+            }
+            catch (Exception ex)
+            {
+                diagnostics.Add(CreateProviderExceptionDiagnostic(
+                    _environmentProvider,
+                    "config-provider-patch-threw",
                     knownEntry.Key,
-                    ConfigAuditEntryState.PartiallyResolved,
-                    patch.Value,
-                    sourceRecords,
-                    diagnostics);
+                    knownEntry.Key,
+                    ex));
+            }
+
+            if (patch != null)
+            {
+                diagnostics.AddRange(patch.Diagnostics);
+                if (patch.Patched)
+                {
+                    var sourceRecords = providerResolution.Sources.Concat(patch.Sources).ToList();
+                    return new ConfigValueResolution(
+                        knownEntry.Key,
+                        ConfigAuditEntryState.PartiallyResolved,
+                        patch.Value,
+                        sourceRecords,
+                        diagnostics);
+                }
             }
         }
 
@@ -329,7 +346,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                         Severity = ConfigAuditDiagnosticSeverity.Error,
                         Code = "config-wrapper-create-failed",
                         Key = knownEntry.Key,
-                        Message = $"Could not create config wrapper {knownEntry.ConfigType.Name}: {ex.Message}"
+                        Message = $"Could not create config wrapper {knownEntry.ConfigType.Name}; constructor threw {ex.GetType().Name}."
                     }
                 ]);
         }
@@ -408,12 +425,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         IReadOnlyList<ConfigAuditSourceRecord> parentSources,
         HashSet<object> visited)
     {
-        var childSources = parentSources
-            .Where(source => IsSourceForChild(source, childKey))
-            .DefaultIfEmpty(parentSources.FirstOrDefault())
-            .Where(source => source != null)
-            .Cast<ConfigAuditSourceRecord>()
-            .ToList();
+        var childSources = SelectChildSources(parentSources, childKey);
         var redacted = _redactor.FormatValue(childKey, childValue, childSources);
         var children = BuildChildren(childKey, childValue, parentSources, visited);
         var state = children.Any(child => child.State == ConfigAuditEntryState.PartiallyResolved
@@ -432,12 +444,48 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         };
     }
 
-    private static bool IsSourceForChild(ConfigAuditSourceRecord source, string childKey) =>
-        string.Equals(source.AppliedToPath, childKey, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(source.ConfigPath, childKey, StringComparison.OrdinalIgnoreCase)
-        || (source.Role == ConfigAuditSourceRole.Base
-            && source.AppliedToPath != null
-            && childKey.StartsWith(source.AppliedToPath, StringComparison.OrdinalIgnoreCase));
+    private static IReadOnlyList<ConfigAuditSourceRecord> SelectChildSources(
+        IReadOnlyList<ConfigAuditSourceRecord> parentSources,
+        string childKey)
+    {
+        var matches = parentSources
+            .Select(source => new { Source = source, Specificity = GetSourceSpecificity(source, childKey) })
+            .Where(match => match.Specificity >= 0)
+            .ToList();
+        if (matches.Count == 0)
+        {
+            return parentSources.FirstOrDefault() is { } fallback ? [fallback] : [];
+        }
+
+        var maxSpecificity = matches.Max(match => match.Specificity);
+        return matches
+            .Where(match => match.Specificity == maxSpecificity)
+            .Select(match => match.Source)
+            .ToList();
+    }
+
+    private static int GetSourceSpecificity(ConfigAuditSourceRecord source, string childKey) =>
+        Math.Max(
+            GetPathSpecificity(source.AppliedToPath, childKey, allowDescendant: source.Role is ConfigAuditSourceRole.Base or ConfigAuditSourceRole.Patch),
+            GetPathSpecificity(source.ConfigPath, childKey, allowDescendant: false));
+
+    private static int GetPathSpecificity(string? sourcePath, string childKey, bool allowDescendant)
+    {
+        if (sourcePath == null)
+        {
+            return -1;
+        }
+
+        if (string.Equals(sourcePath, childKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return sourcePath.Length;
+        }
+
+        return allowDescendant
+               && childKey.StartsWith($"{sourcePath}.", StringComparison.OrdinalIgnoreCase)
+            ? sourcePath.Length
+            : -1;
+    }
 
     private static ConfigValueResolution CreateProviderExceptionResolution(
         IConfigProvider provider,

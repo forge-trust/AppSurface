@@ -94,6 +94,14 @@ public class ConfigAuditReporterTests
         }
     }
 
+    private sealed class ThrowingConstructorConfig : Config<string>
+    {
+        public ThrowingConstructorConfig()
+        {
+            throw new InvalidOperationException("constructor failed with super-secret");
+        }
+    }
+
     private interface IMissingDependency
     {
     }
@@ -273,6 +281,40 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_UsesPatchSourceForDescendantsWhenEnvironmentReplacesNestedObject()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE", A<string?>._))
+            .Returns("""{"Host":"db.from.env","Port":6543,"TimeoutSeconds":15}""");
+        var providerValue = new AppSettings
+        {
+            Mode = "file",
+            Database = new DatabaseOptions
+            {
+                Host = "db.from.file",
+                Port = 5432,
+                TimeoutSeconds = 30
+            }
+        };
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("MyApp.Settings", providerValue));
+        services.AddConfigAuditKey<AppSettings>("MyApp.Settings");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.PartiallyResolved, null);
+        var database = entry.Children.Single(child => child.Key == "MyApp.Settings.Database");
+        var host = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Host");
+        Assert.Equal("db.from.env", host.DisplayValue);
+        Assert.Contains(host.Sources, source => source.EnvironmentVariableName == "MYAPP__SETTINGS__DATABASE");
+        Assert.DoesNotContain(host.Sources, source => source.ProviderName == nameof(StaticConfigProvider));
+    }
+
+    [Fact]
     public void Redactor_RedactsSensitiveCollectionsWithoutLeakingCount()
     {
         var redactor = new ConfigAuditRedactor();
@@ -316,6 +358,7 @@ public class ConfigAuditReporterTests
         services.AddSingleton(new ConfigAuditKnownEntry("Mismatched.Count", typeof(RetryCountConfig), typeof(int)));
         services.AddSingleton(new ConfigAuditKnownEntry("Default.Port", typeof(DefaultPortConfig), typeof(int)));
         services.AddSingleton(new ConfigAuditKnownEntry("Broken.Wrapper", typeof(UnconstructableConfig), typeof(string)));
+        services.AddSingleton(new ConfigAuditKnownEntry("Throwing.Wrapper", typeof(ThrowingConstructorConfig), typeof(string)));
         services.AddSingleton(new ConfigAuditKnownEntry("Plain.Wrapper", typeof(object), typeof(string)));
         services.AddConfigAuditKey<object>("Object.String");
         services.AddConfigAuditKey<OddShape>("Odd.Shape");
@@ -351,6 +394,9 @@ public class ConfigAuditReporterTests
         Assert.Contains(
             AssertEntry(report, "Broken.Wrapper", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-wrapper-create-failed");
+        Assert.All(
+            AssertEntry(report, "Throwing.Wrapper", ConfigAuditEntryState.Invalid, null).Diagnostics,
+            diagnostic => Assert.DoesNotContain("super-secret", diagnostic.Message, StringComparison.Ordinal));
         AssertEntry(report, "Plain.Wrapper", ConfigAuditEntryState.Missing, null);
 
         var stringObject = AssertEntry(report, "Object.String", ConfigAuditEntryState.Resolved, "plain");
@@ -464,6 +510,32 @@ public class ConfigAuditReporterTests
         Assert.Contains(
             AssertEntry(report, "Provider.BadType", ConfigAuditEntryState.Invalid, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-provider-get-value-threw");
+    }
+
+    [Fact]
+    public void GetReport_ConvertsPatchExceptionsToDiagnostics()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IEnvironmentConfigProvider>(new ThrowingPatchEnvironmentProvider());
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider(
+            "MyApp.Settings",
+            new AppSettings
+            {
+                Mode = "file"
+            }));
+        services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddSingleton<ConfigAuditRedactor>();
+        services.AddConfigAuditKey<AppSettings>("MyApp.Settings");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null);
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-provider-patch-threw");
+        Assert.DoesNotContain(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Message.Contains("super-secret", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -806,6 +878,37 @@ public class ConfigAuditReporterTests
         }
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
+    private sealed class ThrowingPatchEnvironmentProvider : IEnvironmentConfigProvider, IConfigDiagnosticProvider, IConfigDiagnosticPatcher
+    {
+        public int Priority => -1;
+
+        public string Name => nameof(ThrowingPatchEnvironmentProvider);
+
+        public string Environment => "Production";
+
+        public bool IsDevelopment => false;
+
+        public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
+
+        public T? GetValue<T>(string environment, string key) => default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role) =>
+            ConfigValueResolution.Missing(key);
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+
+        public ConfigPatchDiagnosticResult TracePatch(
+            string environment,
+            string key,
+            object? currentValue,
+            Type valueType) =>
+            throw new InvalidOperationException("patch failed with super-secret");
     }
 
     private sealed class ThrowingEnumerable : IEnumerable
