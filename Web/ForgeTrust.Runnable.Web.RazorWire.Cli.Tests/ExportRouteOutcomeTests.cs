@@ -49,6 +49,50 @@ public class ExportRouteOutcomeTests
     }
 
     [Fact]
+    public void Success_Should_Populate_Binary_Asset_State()
+    {
+        var outcome = ExportRouteOutcome.Success(
+            "/img/logo.png",
+            "image/png",
+            "/tmp/export/img/logo.png",
+            "/img/logo.png",
+            textBody: null);
+
+        Assert.Equal("/img/logo.png", outcome.Route);
+        Assert.True(outcome.Succeeded);
+        Assert.False(outcome.IsHtml);
+        Assert.False(outcome.IsCss);
+        Assert.Equal("image/png", outcome.ContentType);
+        Assert.Equal("/tmp/export/img/logo.png", outcome.ArtifactPath);
+        Assert.Equal("/img/logo.png", outcome.ArtifactUrl);
+        Assert.Null(outcome.TextBody);
+        Assert.Null(outcome.StatusCode);
+        Assert.Null(outcome.Exception);
+    }
+
+    [Theory]
+    [InlineData(null, "/tmp/export/docs.html", "/docs.html", "route")]
+    [InlineData("", "/tmp/export/docs.html", "/docs.html", "route")]
+    [InlineData(" ", "/tmp/export/docs.html", "/docs.html", "route")]
+    [InlineData("/docs", null, "/docs.html", "artifactPath")]
+    [InlineData("/docs", "", "/docs.html", "artifactPath")]
+    [InlineData("/docs", " ", "/docs.html", "artifactPath")]
+    [InlineData("/docs", "/tmp/export/docs.html", null, "artifactUrl")]
+    [InlineData("/docs", "/tmp/export/docs.html", "", "artifactUrl")]
+    [InlineData("/docs", "/tmp/export/docs.html", " ", "artifactUrl")]
+    public void Success_Should_Throw_When_Required_Text_Is_Missing(
+        string? route,
+        string? artifactPath,
+        string? artifactUrl,
+        string expectedParamName)
+    {
+        var ex = Assert.ThrowsAny<ArgumentException>(
+            () => ExportRouteOutcome.Success(route!, "text/html", artifactPath!, artifactUrl!, "<html></html>"));
+
+        Assert.Equal(expectedParamName, ex.ParamName);
+    }
+
+    [Fact]
     public void NonSuccess_Should_Populate_Status_State()
     {
         var outcome = ExportRouteOutcome.NonSuccess("/missing", HttpStatusCode.NotFound);
@@ -61,6 +105,17 @@ public class ExportRouteOutcomeTests
         Assert.Null(outcome.ArtifactUrl);
         Assert.Null(outcome.TextBody);
         Assert.Null(outcome.Exception);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void NonSuccess_Should_Throw_When_Route_Is_Missing(string? route)
+    {
+        var ex = Assert.ThrowsAny<ArgumentException>(() => ExportRouteOutcome.NonSuccess(route!, HttpStatusCode.NotFound));
+
+        Assert.Equal("route", ex.ParamName);
     }
 
     [Fact]
@@ -78,5 +133,24 @@ public class ExportRouteOutcomeTests
         Assert.Null(outcome.ArtifactPath);
         Assert.Null(outcome.ArtifactUrl);
         Assert.Null(outcome.TextBody);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Failed_Should_Throw_When_Route_Is_Missing(string? route)
+    {
+        var ex = Assert.ThrowsAny<ArgumentException>(() => ExportRouteOutcome.Failed(route!, new InvalidOperationException("boom")));
+
+        Assert.Equal("route", ex.ParamName);
+    }
+
+    [Fact]
+    public void Failed_Should_Throw_When_Exception_Is_Null()
+    {
+        var ex = Assert.Throws<ArgumentNullException>(() => ExportRouteOutcome.Failed("/throws", null!));
+
+        Assert.Equal("exception", ex.ParamName);
     }
 }

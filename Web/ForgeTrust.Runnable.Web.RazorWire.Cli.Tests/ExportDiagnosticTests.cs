@@ -12,4 +12,25 @@ public class ExportDiagnosticTests
         Assert.Equal("/docs/start", diagnostic.Route);
         Assert.Null(diagnostic.Reference);
     }
+
+    [Theory]
+    [InlineData(null, "message", "/route", "code")]
+    [InlineData("", "message", "/route", "code")]
+    [InlineData(" ", "message", "/route", "code")]
+    [InlineData("RWEXPORT003", null, "/route", "message")]
+    [InlineData("RWEXPORT003", "", "/route", "message")]
+    [InlineData("RWEXPORT003", " ", "/route", "message")]
+    [InlineData("RWEXPORT003", "message", null, "route")]
+    [InlineData("RWEXPORT003", "message", "", "route")]
+    [InlineData("RWEXPORT003", "message", " ", "route")]
+    public void Constructor_Should_Throw_When_Required_Text_Is_Missing(
+        string? code,
+        string? message,
+        string? route,
+        string expectedParamName)
+    {
+        var ex = Assert.ThrowsAny<ArgumentException>(() => new ExportDiagnostic(code!, message!, route!));
+
+        Assert.Equal(expectedParamName, ex.ParamName);
+    }
 }

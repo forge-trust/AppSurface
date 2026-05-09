@@ -75,6 +75,10 @@ internal sealed class ExportRouteOutcome
         string artifactUrl,
         string? textBody)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(route);
+        ArgumentException.ThrowIfNullOrWhiteSpace(artifactPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(artifactUrl);
+
         return new ExportRouteOutcome(route, true, contentType, null, artifactPath, artifactUrl, textBody, null);
     }
 
@@ -88,6 +92,8 @@ internal sealed class ExportRouteOutcome
     /// </returns>
     public static ExportRouteOutcome NonSuccess(string route, HttpStatusCode statusCode)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(route);
+
         return new ExportRouteOutcome(route, false, null, statusCode, null, null, null, null);
     }
 
@@ -101,6 +107,9 @@ internal sealed class ExportRouteOutcome
     /// </returns>
     public static ExportRouteOutcome Failed(string route, Exception exception)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(route);
+        ArgumentNullException.ThrowIfNull(exception);
+
         return new ExportRouteOutcome(route, false, null, null, null, null, null, exception);
     }
 }
