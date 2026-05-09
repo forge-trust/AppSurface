@@ -860,6 +860,11 @@ public class ExportEngine
 
     private ExportReference? CreateReference(string rawValue, ExportReferenceKind kind, string currentRoute)
     {
+        if (IsHashOnlyReference(rawValue))
+        {
+            return null;
+        }
+
         var resolved = ResolveRelativeUrl(currentRoute, rawValue);
         if (!TrySplitManagedUrl(resolved, out var path, out var query, out var fragment))
         {
@@ -867,6 +872,11 @@ public class ExportEngine
         }
 
         return new ExportReference(currentRoute, kind, rawValue, resolved, path, query, fragment);
+    }
+
+    private static bool IsHashOnlyReference(string rawValue)
+    {
+        return rawValue.TrimStart().StartsWith('#');
     }
 
     private static void AddReferencesAndQueue(IEnumerable<ExportReference> references, ExportContext context)

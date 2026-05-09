@@ -818,6 +818,67 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractReferences_Should_Ignore_Hash_Only_Html_And_Css_References()
+    {
+        var content = """
+            <a href="#intro">Intro</a>
+            <style>.filter { filter: url(#svg-filter); }</style>
+            <div style="clip-path: url('#clip-path')"></div>
+            <a href="/docs#usage">Docs</a>
+            """;
+
+        var reference = Assert.Single(_sut.ExtractReferences(content, "/docs/start", htmlScope: true));
+
+        Assert.Equal("/docs", reference.Path);
+        Assert.Equal("#usage", reference.Fragment);
+    }
+
+    [Fact]
+    public void ExtractReferences_Should_Ignore_Hash_Only_Css_References()
+    {
+        var css = """
+            .filter { filter: url(#svg-filter); }
+            .clip { clip-path: url(" #clip-path"); }
+            .asset { background: url(images/bg.png); }
+            """;
+
+        var reference = Assert.Single(_sut.ExtractReferences(css, "/docs/start", htmlScope: false));
+
+        Assert.Equal("/docs/images/bg.png", reference.Path);
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Preserve_Hash_Only_References()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new HashOnlyReferenceHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            Assert.Contains("href=\"#intro\"", html, StringComparison.Ordinal);
+            Assert.Contains("url(#svg-filter)", html, StringComparison.Ordinal);
+            Assert.Contains("style=\"clip-path:url('#clip-path')\"", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("/index.html#intro", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("/index.html#svg-filter", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("/index.html#clip-path", html, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Record_Duplicate_Reference_Provenance_Without_Duplicate_Fetches()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -1197,6 +1258,30 @@ public class ExportEngineTests
             {
                 AboutRequestCount++;
                 return Html("<html><body><h1>About</h1></body></html>");
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class HashOnlyReferenceHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                    <head>
+                    <style>.filter{filter:url(#svg-filter)}</style>
+                    </head>
+                    <body>
+                    <a href="#intro">Intro</a>
+                    <div style="clip-path:url('#clip-path')"></div>
+                    </body>
+                    </html>
+                    """);
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
