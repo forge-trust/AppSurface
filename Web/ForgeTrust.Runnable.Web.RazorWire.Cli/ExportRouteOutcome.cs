@@ -33,7 +33,7 @@ internal sealed class ExportRouteOutcome
     /// <summary>Gets a value indicating whether the route fetched successfully.</summary>
     public bool Succeeded { get; }
 
-    /// <summary>Gets the response media type when one was available.</summary>
+    /// <summary>Gets the response media type when one was available, optionally including media-type parameters.</summary>
     public string? ContentType { get; }
 
     /// <summary>Gets the non-success response status code when the fetch failed at the HTTP layer.</summary>
@@ -52,10 +52,10 @@ internal sealed class ExportRouteOutcome
     public Exception? Exception { get; }
 
     /// <summary>Gets a value indicating whether the route was fetched as HTML.</summary>
-    public bool IsHtml => string.Equals(ContentType, "text/html", StringComparison.OrdinalIgnoreCase);
+    public bool IsHtml => MediaTypeEquals(ContentType, "text/html");
 
     /// <summary>Gets a value indicating whether the route was fetched as CSS.</summary>
-    public bool IsCss => string.Equals(ContentType, "text/css", StringComparison.OrdinalIgnoreCase);
+    public bool IsCss => MediaTypeEquals(ContentType, "text/css");
 
     /// <summary>
     /// Creates a successful route outcome with emitted artifact details.
@@ -121,5 +121,20 @@ internal sealed class ExportRouteOutcome
         ArgumentNullException.ThrowIfNull(exception);
 
         return new ExportRouteOutcome(route, false, null, null, null, null, null, exception);
+    }
+
+    private static bool MediaTypeEquals(string? contentType, string expectedMediaType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return false;
+        }
+
+        var parameterStart = contentType.IndexOf(';', StringComparison.Ordinal);
+        var mediaType = parameterStart >= 0
+            ? contentType.AsSpan(0, parameterStart)
+            : contentType.AsSpan();
+
+        return mediaType.Trim().Equals(expectedMediaType.AsSpan(), StringComparison.OrdinalIgnoreCase);
     }
 }

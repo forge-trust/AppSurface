@@ -49,6 +49,51 @@ public class ExportRouteOutcomeTests
     }
 
     [Fact]
+    public void Success_Should_Treat_Html_With_Charset_As_Html()
+    {
+        var outcome = ExportRouteOutcome.Success(
+            "/docs",
+            "text/html; charset=utf-8",
+            "/tmp/export/docs.html",
+            "/docs.html",
+            "<html></html>");
+
+        Assert.True(outcome.IsHtml);
+        Assert.False(outcome.IsCss);
+    }
+
+    [Fact]
+    public void Success_Should_Treat_Css_With_Charset_As_Css()
+    {
+        var outcome = ExportRouteOutcome.Success(
+            "/styles/site.css",
+            "text/css; charset=utf-8",
+            "/tmp/export/styles/site.css",
+            "/styles/site.css",
+            "body{color:black;}");
+
+        Assert.False(outcome.IsHtml);
+        Assert.True(outcome.IsCss);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Success_Should_Not_Treat_Missing_Content_Type_As_Text(string? contentType)
+    {
+        var outcome = ExportRouteOutcome.Success(
+            "/download",
+            contentType,
+            "/tmp/export/download",
+            "/download",
+            textBody: null);
+
+        Assert.False(outcome.IsHtml);
+        Assert.False(outcome.IsCss);
+    }
+
+    [Fact]
     public void Success_Should_Populate_Binary_Asset_State()
     {
         var outcome = ExportRouteOutcome.Success(
