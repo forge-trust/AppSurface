@@ -3,7 +3,6 @@ using Markdig.Helpers;
 using Markdig.Renderers;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs.Services;
 
@@ -39,11 +38,19 @@ internal sealed class RazorDocsCodeBlockMarkdownExtension : IMarkdownExtension
         }
     }
 
-    internal static IRazorDocsCodeHighlighter CreateDefaultHighlighter()
+    /// <summary>
+    /// Creates the default TextMateSharp-backed RazorDocs highlighter.
+    /// </summary>
+    /// <param name="logger">Logger used to emit diagnostics when grammar loading or highlighting falls back.</param>
+    /// <returns>The default RazorDocs code highlighter.</returns>
+    internal static IRazorDocsCodeHighlighter CreateDefaultHighlighter(
+        ILogger<TextMateSharpRazorDocsCodeHighlighter> logger)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         return new TextMateSharpRazorDocsCodeHighlighter(
             RazorDocsCodeLanguageCatalog.Shared,
-            NullLogger<TextMateSharpRazorDocsCodeHighlighter>.Instance);
+            logger);
     }
 }
 

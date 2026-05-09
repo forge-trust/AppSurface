@@ -3,12 +3,26 @@ using Ganss.Xss;
 namespace ForgeTrust.Runnable.Web.RazorDocs.Services;
 
 /// <summary>
-/// RazorDocs-specific HTML sanitizer configuration.
+/// Sanitizes harvested RazorDocs HTML with the package-owned allowlist for docs content and highlighted code blocks.
 /// </summary>
+/// <remarks>
+/// RazorDocs starts from the HtmlSanitizer defaults, adds the package-owned content tags <c>section</c>,
+/// <c>article</c>, <c>header</c>, <c>details</c>, <c>summary</c>, <c>pre</c>, <c>code</c>, and <c>span</c>, and
+/// allows the <c>class</c>, <c>id</c>, and <c>open</c> attributes. The sanitizer explicitly removes <c>style</c>
+/// from the default attribute set so harvested Markdown, generated API HTML, and server-side highlighted code can
+/// keep structural hooks while inline presentation and unsafe markup are stripped. Callers should pass already-rendered
+/// RazorDocs HTML through this sanitizer before display or export; supported semantic wrappers and token spans are
+/// preserved, while scripts, event handlers, inline styles, and unsupported attributes are discarded.
+/// </remarks>
 internal sealed class RazorDocsHtmlSanitizer : IRazorDocsHtmlSanitizer
 {
     internal HtmlSanitizer InnerSanitizer { get; } = CreateSanitizer();
 
+    /// <summary>
+    /// Sanitizes rendered documentation HTML using the RazorDocs allowlist.
+    /// </summary>
+    /// <param name="html">The rendered HTML to sanitize.</param>
+    /// <returns>Safe HTML that preserves RazorDocs structural markup and removes unsupported tags or attributes.</returns>
     public string Sanitize(string html)
     {
         ArgumentNullException.ThrowIfNull(html);

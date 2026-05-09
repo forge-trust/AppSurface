@@ -12,6 +12,7 @@ internal sealed class RazorDocsCodeLanguageCatalog
     private static readonly Dictionary<string, RazorDocsCodeLanguage> KnownLanguages = new(StringComparer.OrdinalIgnoreCase)
     {
         ["cs"] = Known("csharp", "csharp", "C#", "csharp"),
+        ["c#"] = Known("csharp", "csharp", "C#", "csharp"),
         ["csharp"] = Known("csharp", "csharp", "C#", "csharp"),
         ["razor"] = Known("razor", "razor", "Razor", "razor"),
         ["cshtml"] = Known("razor", "razor", "Razor", "razor"),

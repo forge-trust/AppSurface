@@ -86,7 +86,7 @@ RazorDocs uses the first whitespace-delimited code-fence info token as the langu
 
 | Authored token | Normalized language |
 | --- | --- |
-| `cs`, `csharp` | `csharp` |
+| `cs`, `c#`, `csharp` | `csharp` |
 | `razor`, `cshtml` | `razor` |
 | `xml` | `xml` |
 | `json` | `json` |

@@ -222,7 +222,7 @@ public class MarkdownHarvesterTests : IDisposable
         Assert.Contains("<pre class=\"doc-code test-code\"><code>public class Demo { }</code></pre>", doc.Content);
         var block = Assert.Single(highlighter.Blocks);
         Assert.Equal("csharp", block.Language);
-        Assert.Equal("public class Demo { }", block.Code.Trim());
+        Assert.Equal("public class Demo { }", Assert.IsType<string>(block.Code).Trim());
     }
 
     [Fact]
@@ -293,7 +293,7 @@ public class MarkdownHarvesterTests : IDisposable
         Assert.Contains("<pre class=\"doc-code test-code\"><code>dotnet test</code></pre>", doc.Content);
         var block = Assert.Single(highlighter.Blocks);
         Assert.Null(block.Language);
-        Assert.Equal("dotnet test", block.Code.Trim());
+        Assert.Equal("dotnet test", Assert.IsType<string>(block.Code).Trim());
     }
 
     [Fact]
@@ -759,7 +759,21 @@ public class MarkdownHarvesterTests : IDisposable
     [Fact]
     public void Constructor_ShouldThrow_WhenReadDelegateIsNull()
     {
-        Assert.Throws<ArgumentNullException>(() => new MarkdownHarvester(_loggerFake, null!));
+        Assert.Throws<ArgumentNullException>(
+            () => new MarkdownHarvester(_loggerFake, (Func<string, CancellationToken, Task<string>>)null!));
+    }
+
+    [Fact]
+    public void Constructor_ShouldThrow_WhenLoggerFactoryIsNull()
+    {
+        Assert.Throws<ArgumentNullException>(() => new MarkdownHarvester(_loggerFake, (ILoggerFactory)null!));
+    }
+
+    [Fact]
+    public void CreateDefaultHighlighter_ShouldThrow_WhenLoggerIsNull()
+    {
+        Assert.Throws<ArgumentNullException>(
+            () => RazorDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(null!));
     }
 
     [Fact]
@@ -855,8 +869,9 @@ public class MarkdownHarvesterTests : IDisposable
         public RazorDocsHighlightedCode Highlight(RazorDocsCodeBlock block)
         {
             Blocks.Add(block);
+            var code = Assert.IsType<string>(block.Code);
             return new RazorDocsHighlightedCode(
-                $"<pre class=\"doc-code test-code\"><code>{System.Net.WebUtility.HtmlEncode(block.Code.Trim())}</code></pre>",
+                $"<pre class=\"doc-code test-code\"><code>{System.Net.WebUtility.HtmlEncode(code.Trim())}</code></pre>",
                 block.Language ?? "plaintext",
                 IsHighlighted: true);
         }

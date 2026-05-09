@@ -105,6 +105,7 @@ public class RazorDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetRequiredService<IMemoryCache>());
         Assert.NotNull(serviceProvider.GetRequiredService<IMemo>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
+        Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is MarkdownHarvester);
         Assert.Equal(RazorDocsAssetPathResolver.PackagedStylesheetPath, assetPathResolver.StylesheetPath);
         Assert.Contains("section", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("article", sanitizer.InnerSanitizer.AllowedTags);

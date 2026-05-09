@@ -8,6 +8,7 @@ public class RazorDocsCodeLanguageCatalogTests
 
     [Theory]
     [InlineData("cs", "csharp", "csharp", "C#", "csharp", false)]
+    [InlineData("c#", "csharp", "csharp", "C#", "csharp", false)]
     [InlineData("csharp", "csharp", "csharp", "C#", "csharp", false)]
     [InlineData("sh", "bash", "bash", "Bash", "shellscript", false)]
     [InlineData("shell", "bash", "bash", "Bash", "shellscript", false)]

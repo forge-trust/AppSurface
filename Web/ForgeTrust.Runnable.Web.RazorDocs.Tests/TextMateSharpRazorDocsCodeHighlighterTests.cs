@@ -66,7 +66,7 @@ public class TextMateSharpRazorDocsCodeHighlighterTests
     [Fact]
     public void Highlight_ShouldTreatNullCodeAsEmptyPlainText()
     {
-        var result = _highlighter.Highlight(new RazorDocsCodeBlock(null!, "plaintext"));
+        var result = _highlighter.Highlight(new RazorDocsCodeBlock(null, "plaintext"));
 
         Assert.False(result.IsHighlighted);
         Assert.Equal("plaintext", result.NormalizedLanguage);
@@ -118,13 +118,19 @@ public class TextMateSharpRazorDocsCodeHighlighterTests
     [Fact]
     public void Highlight_ShouldApplyLineLimitWithoutDoubleCountingCrLf()
     {
-        var code = string.Join("\r\n", Enumerable.Repeat("x", TextMateSharpRazorDocsCodeHighlighter.MaxHighlightedCodeBlockLines + 1));
+        var atLimit = string.Join("\r\n", Enumerable.Repeat("x", TextMateSharpRazorDocsCodeHighlighter.MaxHighlightedCodeBlockLines));
+        var atLimitResult = _highlighter.Highlight(new RazorDocsCodeBlock(atLimit, "csharp"));
 
-        var result = _highlighter.Highlight(new RazorDocsCodeBlock(code, "csharp"));
+        Assert.True(atLimitResult.IsHighlighted);
+        Assert.Equal("csharp", atLimitResult.NormalizedLanguage);
+        Assert.Contains("x\nx", atLimitResult.Html);
 
-        Assert.False(result.IsHighlighted);
-        Assert.Equal("csharp", result.NormalizedLanguage);
-        Assert.Contains("x\nx", result.Html);
+        var overLimit = string.Join("\r\n", Enumerable.Repeat("x", TextMateSharpRazorDocsCodeHighlighter.MaxHighlightedCodeBlockLines + 1));
+        var overLimitResult = _highlighter.Highlight(new RazorDocsCodeBlock(overLimit, "csharp"));
+
+        Assert.False(overLimitResult.IsHighlighted);
+        Assert.Equal("csharp", overLimitResult.NormalizedLanguage);
+        Assert.Contains("x\nx", overLimitResult.Html);
     }
 
     [Fact]
