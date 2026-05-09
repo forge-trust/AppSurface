@@ -955,6 +955,29 @@ public class EnvironmentConfigProviderTests
     }
 
     [Fact]
+    public void TracePatch_DoesNotReportSourceForReadableButUnpatchableMembers()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__MODE", A<string?>._))
+            .Returns("environment");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__DATABASE__PORT", A<string?>._))
+            .Returns("6543");
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(GetterOnlyScalarWithWritableChildOptions));
+
+        var value = Assert.IsType<GetterOnlyScalarWithWritableChildOptions>(patch.Value);
+        Assert.True(patch.Patched);
+        Assert.Equal("file", value.Mode);
+        Assert.Equal(6543, value.Database.Port);
+        Assert.DoesNotContain(patch.Sources, source => source.ConfigPath == "MyApp.Settings.Mode");
+        Assert.Contains(patch.Sources, source => source.ConfigPath == "MyApp.Settings.Database.Port");
+    }
+
+    [Fact]
     public void TracePatch_CoversDiagnosticPatchBranchesWithoutMutatingInputs()
     {
         var innerProvider = A.Fake<IEnvironmentProvider>();
@@ -1074,6 +1097,13 @@ public class EnvironmentConfigProviderTests
     private sealed class GetterOnlyScalarOptions
     {
         public string Mode { get; } = "file";
+    }
+
+    private sealed class GetterOnlyScalarWithWritableChildOptions
+    {
+        public string Mode { get; } = "file";
+
+        public DatabaseOptions Database { get; set; } = new();
     }
 
     private sealed class PrivateSetterOptions

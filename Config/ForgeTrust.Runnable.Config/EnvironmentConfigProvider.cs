@@ -677,10 +677,11 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         string envPrefix,
         string hierarchicalKey,
         string configPath,
-        List<ConfigAuditSourceRecord> sources,
         List<ConfigAuditDiagnostic> diagnostics,
-        out object? parsed)
+        out object? parsed,
+        out IReadOnlyList<ConfigAuditSourceRecord> sources)
     {
+        sources = [];
         var legacyKey = hierarchicalKey.Replace("__", "_", StringComparison.Ordinal);
         foreach (var candidate in BuildDirectCandidates(envPrefix, legacyKey, hierarchicalKey))
         {
@@ -693,7 +694,7 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
             var source = CreateEnvironmentSource(candidate, configPath, ConfigAuditSourceRole.Patch);
             if (TryConvertStringToType(value, targetType, out parsed))
             {
-                sources.Add(source);
+                sources = [source];
                 return true;
             }
 
@@ -702,13 +703,13 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
 
         if (TryReadIndexedCollectionDiagnostic(targetType, $"{envPrefix}__{hierarchicalKey}", configPath, ConfigAuditSourceRole.Patch, diagnostics, out parsed, out var envScopedSources))
         {
-            sources.AddRange(envScopedSources);
+            sources = envScopedSources;
             return true;
         }
 
         if (TryReadIndexedCollectionDiagnostic(targetType, hierarchicalKey, configPath, ConfigAuditSourceRole.Patch, diagnostics, out parsed, out var collectionSources))
         {
-            sources.AddRange(collectionSources);
+            sources = collectionSources;
             return true;
         }
 
@@ -741,11 +742,12 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
 
             var childKey = CombineHierarchicalKey(hierarchicalKey, property.Name);
             var childPath = CombineConfigPath(configPath, property.Name);
-            if (TryReadMemberValueDiagnostic(property.PropertyType, envPrefix, childKey, childPath, sources, diagnostics, out var propertyValue))
+            if (TryReadMemberValueDiagnostic(property.PropertyType, envPrefix, childKey, childPath, diagnostics, out var propertyValue, out var propertySources))
             {
                 if (HasPublicSetter(property))
                 {
                     property.SetValue(target, propertyValue);
+                    sources.AddRange(propertySources);
                     patched = true;
                     continue;
                 }
@@ -753,6 +755,7 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
                 if (property.GetMethod != null
                     && TryPatchExistingCollection(property.GetValue(target), propertyValue))
                 {
+                    sources.AddRange(propertySources);
                     patched = true;
                     continue;
                 }
@@ -796,9 +799,10 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
 
             var childKey = CombineHierarchicalKey(hierarchicalKey, field.Name);
             var childPath = CombineConfigPath(configPath, field.Name);
-            if (TryReadMemberValueDiagnostic(field.FieldType, envPrefix, childKey, childPath, sources, diagnostics, out var fieldValue))
+            if (TryReadMemberValueDiagnostic(field.FieldType, envPrefix, childKey, childPath, diagnostics, out var fieldValue, out var fieldSources))
             {
                 field.SetValue(target, fieldValue);
+                sources.AddRange(fieldSources);
                 patched = true;
                 continue;
             }

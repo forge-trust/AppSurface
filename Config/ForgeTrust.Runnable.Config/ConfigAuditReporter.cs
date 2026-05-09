@@ -141,14 +141,20 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
         var diagnostics = envResolution.Diagnostics.ToList();
         ConfigValueResolution providerResolution = ConfigValueResolution.Missing(knownEntry.Key);
+        ConfigValueResolution? invalidProviderResolution = null;
         foreach (var provider in _otherProviders)
         {
             var current = ResolveProvider(provider, environment, knownEntry, ConfigAuditSourceRole.Base);
             diagnostics.AddRange(current.Diagnostics);
-            if (current.State == ConfigAuditEntryState.Resolved || current.State == ConfigAuditEntryState.Invalid)
+            if (current.State == ConfigAuditEntryState.Resolved)
             {
                 providerResolution = current;
                 break;
+            }
+
+            if (current.State == ConfigAuditEntryState.Invalid)
+            {
+                invalidProviderResolution ??= current;
             }
         }
 
@@ -168,7 +174,10 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             }
         }
 
-        return providerResolution with { Diagnostics = diagnostics };
+        var resolution = providerResolution.State == ConfigAuditEntryState.Resolved
+            ? providerResolution
+            : invalidProviderResolution ?? providerResolution;
+        return resolution with { Diagnostics = diagnostics };
     }
 
     private ConfigValueResolution ResolveProvider(

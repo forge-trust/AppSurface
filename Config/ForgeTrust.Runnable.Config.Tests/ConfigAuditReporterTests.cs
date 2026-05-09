@@ -368,6 +368,26 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_ContinuesAfterInvalidProviderWhenLowerPriorityProviderResolves()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("Fallback.Port", priority: 30));
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Fallback.Port", 443));
+        services.AddConfigAuditKey<int>("Fallback.Port");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Fallback.Port", ConfigAuditEntryState.Resolved, "443");
+        Assert.Contains(entry.Sources, source => source.ProviderName == nameof(StaticConfigProvider));
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-provider-invalid");
+    }
+
+    [Fact]
     public void Redactor_FallsBackWhenEnumerableCannotSerialize()
     {
         var redactor = new ConfigAuditRedactor();
@@ -488,6 +508,63 @@ public class ConfigAuditReporterTests
         public string Name => nameof(MissingStringProvider);
 
         public T? GetValue<T>(string environment, string key) => default;
+    }
+
+    private sealed class InvalidDiagnosticProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        private readonly string _key;
+
+        public InvalidDiagnosticProvider(string key, int priority)
+        {
+            _key = key;
+            Priority = priority;
+        }
+
+        public int Priority { get; }
+
+        public string Name => nameof(InvalidDiagnosticProvider);
+
+        public T? GetValue<T>(string environment, string key) => default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Invalid,
+                null,
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.Provider,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        ConfigPath = key,
+                        AppliedToPath = key,
+                        Role = role
+                    }
+                ],
+                [
+                    new ConfigAuditDiagnostic
+                    {
+                        Severity = ConfigAuditDiagnosticSeverity.Error,
+                        Code = "config-provider-invalid",
+                        Key = key,
+                        ConfigPath = key,
+                        Message = "The provider value was invalid."
+                    }
+                ]);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
     }
 
     private sealed class ThrowingEnumerable : IEnumerable
