@@ -23,7 +23,11 @@ public sealed class RazorDocsInProcessHostTests
 
             using var response = await client.GetAsync("/docs");
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadAsStringAsync();
+
+            Assert.True(
+                response.StatusCode == HttpStatusCode.OK,
+                $"Expected OK but received {response.StatusCode}.{Environment.NewLine}{body}");
         }
         finally
         {
