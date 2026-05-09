@@ -1,4 +1,5 @@
 using System.Text;
+using ForgeTrust.Runnable.Web.RazorDocs.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,29 @@ public sealed class RazorDocsOptionsTests
         Assert.Equal(0, (int)RazorDocsVersionAdvisoryState.None);
         Assert.Equal(1, (int)RazorDocsVersionAdvisoryState.Vulnerable);
         Assert.Equal(2, (int)RazorDocsVersionAdvisoryState.SecurityRisk);
+        Assert.Equal(0, (int)DocHarvestHealthStatus.Healthy);
+        Assert.Equal(1, (int)DocHarvestHealthStatus.Empty);
+        Assert.Equal(2, (int)DocHarvestHealthStatus.Degraded);
+        Assert.Equal(3, (int)DocHarvestHealthStatus.Failed);
+        Assert.Equal(0, (int)DocHarvesterHealthStatus.Succeeded);
+        Assert.Equal(1, (int)DocHarvesterHealthStatus.ReturnedEmpty);
+        Assert.Equal(2, (int)DocHarvesterHealthStatus.Failed);
+        Assert.Equal(3, (int)DocHarvesterHealthStatus.TimedOut);
+        Assert.Equal(4, (int)DocHarvesterHealthStatus.Canceled);
+        Assert.Equal(0, (int)DocHarvestDiagnosticSeverity.Information);
+        Assert.Equal(1, (int)DocHarvestDiagnosticSeverity.Warning);
+        Assert.Equal(2, (int)DocHarvestDiagnosticSeverity.Error);
+        Assert.Equal(3, (int)DocHarvestDiagnosticSeverity.Critical);
+    }
+
+    [Fact]
+    public void DocHarvestDiagnosticCodes_ShouldPreserveStringContracts()
+    {
+        Assert.Equal("razordocs.harvest.harvester_timed_out", DocHarvestDiagnosticCodes.HarvesterTimedOut);
+        Assert.Equal("razordocs.harvest.harvester_canceled", DocHarvestDiagnosticCodes.HarvesterCanceled);
+        Assert.Equal("razordocs.harvest.harvester_failed", DocHarvestDiagnosticCodes.HarvesterFailed);
+        Assert.Equal("razordocs.harvest.no_harvesters", DocHarvestDiagnosticCodes.NoHarvesters);
+        Assert.Equal("razordocs.harvest.all_failed", DocHarvestDiagnosticCodes.AllFailed);
     }
 
     [Fact]
@@ -44,6 +68,62 @@ public sealed class RazorDocsOptionsTests
         var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
 
         Assert.Equal("/tmp/repo-root", options.Source.RepositoryRoot);
+    }
+
+    [Fact]
+    public void RazorDocsOptions_ShouldDefaultCacheExpirationToFiveMinutes()
+    {
+        var options = new RazorDocsOptions();
+
+        Assert.Equal(5, options.CacheExpirationMinutes);
+        Assert.Equal(1d / 60d, RazorDocsOptions.MinCacheExpirationMinutes);
+        Assert.Equal((int.MaxValue - 1) / 60d, RazorDocsOptions.MaxCacheExpirationMinutes);
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldBindConfiguredCacheExpirationMinutes()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:CacheExpirationMinutes"] = "0.5"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
+
+        Assert.Equal(0.5, options.CacheExpirationMinutes);
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldRejectInvalidConfiguredCacheExpirationMinutes()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:CacheExpirationMinutes"] = "-1"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value);
+
+        Assert.Contains(
+            ex.Failures,
+            failure => failure.Contains("CacheExpirationMinutes", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -483,6 +563,88 @@ public sealed class RazorDocsOptionsTests
 
         Assert.True(result.Failed);
         Assert.Contains(result.Failures, failure => failure.Contains("Unsupported RazorDocs mode", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NaN)]
+    [InlineData(double.Epsilon)]
+    [InlineData(0.0001)]
+    [InlineData(0.333)]
+    [InlineData(double.MaxValue)]
+    [InlineData(35791395)]
+    public void Validator_ShouldRejectInvalidCacheExpirationMinutes(double cacheExpirationMinutes)
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            CacheExpirationMinutes = cacheExpirationMinutes
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains(
+                "CacheExpirationMinutes must be a finite number between",
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldAllowWholeSecondCacheExpirationMinutes()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            CacheExpirationMinutes = 0.1,
+            Routing = new RazorDocsRoutingOptions
+            {
+                DocsRootPath = "/docs"
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(result.Failed);
+    }
+
+    [Fact]
+    public void Validator_ShouldAllowMinimumCacheExpirationMinutes()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            CacheExpirationMinutes = RazorDocsOptions.MinCacheExpirationMinutes,
+            Routing = new RazorDocsRoutingOptions
+            {
+                DocsRootPath = "/docs"
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(result.Failed);
+    }
+
+    [Fact]
+    public void Validator_ShouldAllowMaximumCacheExpirationMinutes()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            CacheExpirationMinutes = RazorDocsOptions.MaxCacheExpirationMinutes,
+            Routing = new RazorDocsRoutingOptions
+            {
+                DocsRootPath = "/docs"
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(result.Failed);
     }
 
     [Fact]

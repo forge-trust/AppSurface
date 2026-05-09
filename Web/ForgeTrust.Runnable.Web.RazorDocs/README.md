@@ -6,11 +6,14 @@ Documentation site generation and hosting for Runnable web applications.
 
 `ForgeTrust.Runnable.Web.RazorDocs` is the reusable Razor Class Library package behind the RazorDocs experience. It aggregates Markdown and C# API documentation into a browsable docs UI, supports an optional version archive for published releases, and is intended to be embedded into Runnable web applications or used by the standalone RazorDocs host.
 
+If you are evaluating RazorDocs for your own repository, start with [Use RazorDocs in your repository](./use-razordocs.md). That page explains the consumer model, host shape, authoring metadata, and adoption checklist before you drill into this package reference.
+
 ## What It Provides
 
 - `RazorDocsWebModule` for wiring the docs UI into a Runnable web host
 - `AddRazorDocs()` for typed options binding and core service registration
-- `DocAggregator` plus the built-in Markdown and C# harvesters
+- `DocAggregator` plus the built-in Markdown and C# harvesters, including structured harvest health diagnostics
+- Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by RazorDocs consumers
 - `DocsUrlBuilder` plus the MVC surface used by RazorDocs consumers so the live docs root, search shell, and archive routes stay in one shared contract
 - `RazorDocsVersionCatalog` plus `RazorDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
 - Structured trust metadata plus a built-in trust bar for release notes, upgrade guides, and other pages that need status and provenance near the top
@@ -32,16 +35,17 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 | Surface | Default | Why | Real examples | Exception / note |
 | --- | --- | --- | --- | --- |
 | One-off owned package chrome in Razor views | Prefer Tailwind utility classes in markup | RazorDocs fully owns the markup, so local utility classes keep intent obvious where the change happens | docs landing shell in `Views/Docs/Index.cshtml`, sidebar shell and layout framing in `Views/Shared/_Layout.cshtml`, one-off page header spacing in `Views/Docs/Details.cshtml` | If the same styling contract repeats across package surfaces, promote it to a semantic component class instead of copying long utility strings |
-| Reusable owned package components or stable cross-file UI selectors | Use semantic component classes in the shared package stylesheet | Shared selectors keep repeated UI stable across Razor, CSS, and sometimes JavaScript | `docs-page-badge`, `docs-metadata-chip`, `docs-page-meta`, `docs-provenance-strip`, `docs-trust-bar` in `wwwroot/css/app.css` | Utilities can still handle surrounding layout and one-off placement |
+| Reusable owned package components or stable cross-file UI selectors | Use semantic component classes in the shared package stylesheet | Shared selectors keep repeated UI stable across Razor, CSS, and sometimes JavaScript | `docs-page-badge`, `docs-metadata-chip`, `docs-page-meta`, `docs-provenance-strip`, `docs-trust-bar`, and `docs-outline-*` in `wwwroot/css/app.css` | Utilities can still handle surrounding layout and one-off placement |
 | Harvested or generated document bodies that RazorDocs does not fully author element by element | Use wrapper-scoped semantic CSS such as `.docs-content ...` in the shared package stylesheet | RazorDocs cannot safely push utility classes into nested harvested HTML | headings, paragraphs, code blocks, overload groups, and namespace sections inside `.docs-content` in `Views/Docs/Details.cshtml` and `wwwroot/css/app.css` | Do not rewrite harvested nested HTML just to satisfy utility-class purity |
 | JavaScript-generated or stateful UI that needs CSS and JavaScript to share stable hooks | Use semantic hook classes, then style them in CSS | Runtime UI needs stable names both the stylesheet and script can rely on | search result rows, filter chips, active-filter pills, and state containers in `wwwroot/docs/search.css` and `wwwroot/docs/search-client.js` | Use `id` values where uniqueness or ARIA wiring require them, but keep reusable styling and state contracts on semantic classes |
 
 ### Common Calls
 
 - New one-off page header spacing or typography in owned Razor markup: use Tailwind utilities in the view.
-- New reusable badge, metadata chip, page metadata row, or trust/provenance surface: add or extend a semantic component class in `wwwroot/css/app.css`, then use utilities around it only when they are purely local.
+- New reusable badge, metadata chip, page metadata row, trust/provenance surface, or page-local outline state: add or extend a semantic component class in `wwwroot/css/app.css`, then use utilities around it only when they are purely local.
 - For `Views/Docs/Search.cshtml`, keep the stateful search container or interactive hook semantic, but use local utilities for one-off header copy, helper layout, and fallback-link chrome inside that view.
 - Restyling paragraphs, headings, or code blocks inside `.docs-content`: update wrapper-scoped CSS instead of pushing utility classes into harvested HTML.
+- Markdown pages with long-form prose use `.docs-content--markdown` for prose measure, paragraph rhythm, list spacing, links, blockquotes, and inline code. Generated non-Markdown docs and docs marked with `page_type: api` or `page_type: api-reference` use `.docs-content--api` so signatures and reference tables keep the wider base content measure.
 - New search filter pill, active-filter surface, or other stateful search UI: use a semantic hook class because CSS and JavaScript both need to recognize it.
 
 ### Stylesheet Responsibilities
@@ -53,6 +57,7 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 
 - **Package chrome**: one-off layout and presentation markup that RazorDocs owns directly, such as page shells, spacing, and framing.
 - **Harvested content**: nested documentation HTML that RazorDocs renders but does not fully author element by element, such as the body inside `.docs-content`.
+- **Markdown prose surface**: authored Markdown rendered with `.docs-content--markdown`; it optimizes for reading dense release notes, guides, and README-style pages rather than for wide API signatures in generated reference docs.
 - **Stable selector / hook**: a semantic class or required unique `id` that Razor, CSS, accessibility wiring, and sometimes JavaScript rely on consistently across files.
 
 ### Pitfalls
@@ -62,6 +67,93 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 - Do not assume every child inside a semantic search container needs its own semantic class; local typography and spacing inside one view can still stay inline.
 - Do not add semantic classes to static package chrome when plain utilities are clearer and the styling is truly local.
 - Do not place non-search primitives in `wwwroot/docs/search.css` just because the layout loads search assets globally today. Use `wwwroot/css/app.css` for shared components so future theming can target one stable package layer.
+
+## Harvest Health
+
+`DocAggregator.GetHarvestHealthAsync(CancellationToken)` returns structured health for the same cached harvest snapshot used by docs pages, public sections, and the search index. Hosts should use this API when they need to report whether source-backed docs are healthy, empty by configuration, partially degraded, or unavailable because every harvester failed.
+
+```csharp
+var health = await docAggregator.GetHarvestHealthAsync(ct);
+
+if (health.Status is DocHarvestHealthStatus.Failed or DocHarvestHealthStatus.Degraded)
+{
+    foreach (var diagnostic in health.Diagnostics)
+    {
+        var logLevel = diagnostic.Severity switch
+        {
+            DocHarvestDiagnosticSeverity.Information => LogLevel.Information,
+            DocHarvestDiagnosticSeverity.Warning => LogLevel.Warning,
+            DocHarvestDiagnosticSeverity.Error => LogLevel.Error,
+            DocHarvestDiagnosticSeverity.Critical => LogLevel.Critical,
+            _ => LogLevel.Warning
+        };
+
+        logger.Log(
+            logLevel,
+            "RazorDocs harvest diagnostic {Code}: {Problem} {Fix}",
+            diagnostic.Code,
+            diagnostic.Problem,
+            diagnostic.Fix);
+    }
+}
+```
+
+The returned `DocHarvestHealthSnapshot` includes:
+
+- `Status`: the aggregate `DocHarvestHealthStatus`.
+- `GeneratedUtc`: the timestamp for the cached snapshot generation.
+- `RepositoryRoot`: the resolved source root passed to harvesters. Treat this as server-only operational data; redact or omit it before forwarding harvest health to client-visible UI or public APIs.
+- `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for the configured harvesters.
+- `TotalDocs`: the number of documentation nodes in the final cached docs snapshot after RazorDocs post-processing.
+- `Harvesters`: one `DocHarvesterHealth` entry per configured harvester, including its concrete type name, `DocHarvesterHealthStatus`, raw returned doc count, and optional diagnostic.
+- `Diagnostics`: structured `DocHarvestDiagnostic` entries for harvester-level and aggregate states. RazorDocs-created snapshots never expose raw exception messages in diagnostics; exception details stay in host logs.
+
+### Status Contract
+
+`DocHarvestHealthStatus` is intentionally distinct from HTTP or process health:
+
+- `Healthy`: at least one configured harvester returned documentation and no harvester failed.
+- `Empty`: harvesting completed without failures, but the final docs corpus is empty. This can be valid for an empty repository, a disabled source set, or a host with no registered harvesters.
+- `Degraded`: at least one harvester succeeded or returned a valid empty result while another failed, timed out, or canceled. Docs remain usable, but the corpus may be incomplete.
+- `Failed`: every configured harvester failed, timed out, or canceled. RazorDocs returns an empty corpus for compatibility, but the snapshot should be treated as an operational failure.
+
+`DocHarvesterHealthStatus` describes each source contribution:
+
+- `Succeeded`: the harvester returned one or more docs.
+- `ReturnedEmpty`: the harvester completed without error and returned no docs.
+- `Failed`: the harvester threw while scanning.
+- `TimedOut`: the harvester exceeded RazorDocs' per-harvester timeout budget.
+- `Canceled`: the harvester observed cancellation outside RazorDocs' timeout budget.
+
+The public enum numeric values are stable compatibility contracts for consumers that persist, serialize, bind, or compare them. New members may be added later, but existing values must not be reordered or renumbered.
+
+### Diagnostics
+
+Each `DocHarvestDiagnostic` has a stable `Code`, `Severity`, optional `HarvesterType`, operator-facing `Problem`, likely `Cause`, and suggested `Fix`. Use diagnostic codes for tests, dashboards, and host UI branching instead of parsing log messages.
+
+RazorDocs currently emits these codes:
+
+- `DocHarvestDiagnosticCodes.HarvesterTimedOut` (`razordocs.harvest.harvester_timed_out`)
+- `DocHarvestDiagnosticCodes.HarvesterCanceled` (`razordocs.harvest.harvester_canceled`)
+- `DocHarvestDiagnosticCodes.HarvesterFailed` (`razordocs.harvest.harvester_failed`)
+- `DocHarvestDiagnosticCodes.NoHarvesters` (`razordocs.harvest.no_harvesters`)
+- `DocHarvestDiagnosticCodes.AllFailed` (`razordocs.harvest.all_failed`)
+
+An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
+
+### Cancellation and Caching
+
+`GetHarvestHealthAsync(cancellationToken)` observes caller cancellation only while the caller waits for the memoized snapshot. Canceling that wait does not cancel, poison, or evict the shared snapshot computation. A later caller can still receive the completed snapshot.
+
+Health and docs are computed from the same cached snapshot. This is deliberate: a host that reads `GetDocsAsync()` and then `GetHarvestHealthAsync()` sees health for the docs it is serving, not a second harvest with different timing or failures. Use `InvalidateCache()` when an operator explicitly asks RazorDocs to refresh source-backed docs.
+
+### Pitfalls
+
+- Do not parse logs to infer harvest health. Use `GetHarvestHealthAsync()` and diagnostic codes.
+- Do not treat `Empty` as a failure. It means RazorDocs found no docs without a failed harvester.
+- Do not expect raw exception details in public diagnostics. Use host logs for stack traces and exception messages.
+- Do not assume this API exposes visible operator UI or an ASP.NET Core `IHealthCheck`. The first harvest-health slice is API and documentation only; operator UI is tracked in issue #238.
+- Do not depend on fail-closed behavior for all-failed harvests yet. Strict failure mode is tracked in issue #237.
 
 ## Configuration
 
@@ -75,6 +167,7 @@ Use the default single-surface configuration when you want the live docs experie
 {
   "RazorDocs": {
     "Mode": "Source",
+    "CacheExpirationMinutes": 5,
     "Source": {
       "RepositoryRoot": "/path/to/repo"
     }
@@ -170,6 +263,12 @@ var searchIndexRefresh = routes.SearchIndexRefresh;
   - Relative-looking values such as `foo/bar` are normalized to app-relative paths like `/foo/bar` during `AddRazorDocs()` post-configuration.
   - `/` is supported for single-purpose root-mounted docs hosts.
   - The path must be app-relative, must not end with `/` except for `/`, cannot contain query or fragment segments, and cannot be a reserved child such as `/foo/bar/versions` or `/foo/bar/v`.
+- `RazorDocs:CacheExpirationMinutes`
+  - Controls the absolute lifetime of the shared docs snapshot that backs docs pages, public-section data, and `{DocsRootPath}/search-index.json`; for example, `/docs/search-index.json` by default or `/docs/next/search-index.json` when `RazorDocs:Routing:DocsRootPath` is `/docs/next`.
+  - Defaults to `5` minutes.
+  - Must be a finite positive number from `0.016666666666666666` through `35791394.1`, inclusive.
+  - Must map to a whole number of seconds, because `{DocsRootPath}/search-index.json` uses the same duration for its private `Cache-Control` `max-age` header.
+  - Do not use `0`, sub-second values, or extreme values such as `double.MaxValue`; RazorDocs rejects values outside the supported range during options validation.
 - `RazorDocs:Routing:DocsRootPath`
   - Controls the live source-backed docs root.
   - Defaults to the route root when versioning is off.
@@ -248,10 +347,11 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
   - Missing or blank `path`/`title` values cause RazorDocs to reject the published release tree during startup validation.
 - `search.css` at the tree root
 - `search-client.js` at the tree root
+- `outline-client.js` at the tree root for outline-aware exports whose HTML references the page-local outline runtime
 - `minisearch.min.js` at the tree root
 - any section, detail, partial, and asset routes that belong to the exported docs surface for that release
 
-RazorDocs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. Exporters should validate `search-index.json`, `search.css`, `search-client.js`, and `minisearch.min.js` before publishing because a missing runtime asset or a malformed search payload keeps that release unavailable until the artifact is fixed. Use the [RazorWire CLI](../ForgeTrust.Runnable.Web.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+RazorDocs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. Exporters should validate `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.Runnable.Web.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
 
 ### Archive ordering
 
@@ -272,6 +372,17 @@ RazorDocs does not regenerate these trees at request time. It resolves extension
 - Do not point `recommendedVersion` at a hidden or broken release tree.
 - Do not assume `RazorDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
+
+`RazorDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
+
+Pitfalls:
+
+- Do not set `CacheExpirationMinutes` to `0` to disable caching. RazorDocs rejects zero and negative values because every request would rebuild the docs snapshot and search index.
+- Do not set tiny positive values below `0.016666666666666666` minutes; the search-index `Cache-Control` `max-age` header cannot represent sub-second cache lifetimes.
+- Do not set fractional-second values such as `0.333` minutes. RazorDocs rejects values that cannot round-trip to a whole-second `max-age`.
+- Do not set huge finite values such as `double.MaxValue`. RazorDocs caps the value so the derived search-index `Cache-Control` `max-age` remains representable.
+- The search-index response uses the same duration for its private `Cache-Control` `max-age`, so client refresh behavior stays aligned with server-side snapshot reuse.
+- Manual refresh through `{DocsRootPath}/search-index.json?refresh=1` still invalidates the server snapshot generation immediately for authenticated users; it does not change the configured TTL for later entries. For example, when `RazorDocs:Routing:DocsRootPath` is `/docs/next`, use `/docs/next/search-index.json?refresh=1`.
 
 ## Contributor Provenance
 
@@ -628,6 +739,30 @@ RazorDocs can render two kinds of page-local wayfinding on details pages without
 - `On this page` links come from the harvested `DocNode.Outline` contract.
 - `Previous` and `Next` proof-path links come from explicit metadata, not folder inference.
 
+### Page-local outline behavior
+
+`On this page` is local navigation for the current detail page. It intentionally does not mirror the left sidebar, which remains global documentation navigation. This keeps the two maps separate: the sidebar answers "where am I in the docs product?" while the outline answers "where am I on this page?"
+
+When `DocDetailsViewModel.HasOutline` is true, RazorDocs renders one semantic outline nav:
+
+- wide desktop (`>=1280px`): a sticky right rail beside the article
+- narrower viewports: a closed-by-default `On this page` toggle above the article
+- all viewports: the same outline list, never separate desktop and mobile TOCs
+
+The outline client enhances the server-rendered links by:
+
+- using `#main-content` as the scroll root for `IntersectionObserver`
+- marking the current section with `aria-current="location"`
+- refreshing the active section from the scroll position on scroll, throttled through `requestAnimationFrame`, so long sections do not stay pinned to the previous outline item until the next heading enters the observer band
+- keeping the active outline link visible inside the sticky desktop rail when the page-local outline is taller than the viewport
+- easing outline-link clicks to the target section over 620 ms, while preserving instant jumps for readers who prefer reduced motion and canceling the animation when the reader manually wheels or touches the scroll root
+- initializing from the current URL hash
+- rebinding after RazorWire/Turbo frame navigation replaces `rw:island id="doc-content"`
+- collapsing the mobile outline after an outline link is chosen
+- skipping missing heading targets for active-state tracking while leaving their normal hash links intact instead of marking stale entries current or closing the drawer
+
+If JavaScript is unavailable, the server-rendered outline remains a normal list of hash links. If `IntersectionObserver` is unavailable, RazorDocs keeps static and hash-based behavior rather than adding a scroll polling fallback.
+
 ### Sequence contract
 
 Use `sequence_key` together with `order` when a set of pages should behave like one proof path:
@@ -686,7 +821,7 @@ The built-in Markdown and C# harvesters now populate `DocNode.Outline` directly 
 - heading metadata in the current-surface `search-index.json`
 - stable behavior without re-parsing rendered HTML later
 
-Each outline entry should provide the rendered fragment `Id`, the reader-facing `Title`, and the normalized heading `Level`. For visual parity with the built-in wayfinding UI, custom `IDocHarvester` implementations should populate `DocNode.Outline` only with entries that have a non-empty rendered fragment `Id` and non-empty `Title`; headings or generated sections missing either value are skipped by the built-ins. The Markdown harvester emits source-ordered H2-H3 headings by default, with titles normalized from inline heading text and IDs taken from the rendered heading fragment. The C# harvester emits level 2 entries for documented types and enums, and level 3 entries for method groups and properties. Matching those defaults keeps custom outlines aligned with the built-in `On this page` section and search heading metadata.
+Each outline entry should provide the rendered fragment `Id`, the reader-facing `Title`, and the normalized heading `Level`. For visual parity with the built-in wayfinding UI, custom `IDocHarvester` implementations should populate `DocNode.Outline` only with entries that have a non-empty rendered fragment `Id` and non-empty `Title`; headings or generated sections missing either value are skipped by the built-ins. The Markdown harvester emits source-ordered H2-H3 headings by default, with titles normalized from inline heading text and IDs taken from the rendered heading fragment. The C# harvester emits level 2 entries for documented types and enums, and level 3 entries for method groups and properties. Matching those defaults keeps custom outlines aligned with the built-in `On this page` rail, active-section behavior, and search heading metadata.
 
 Public visibility note:
 

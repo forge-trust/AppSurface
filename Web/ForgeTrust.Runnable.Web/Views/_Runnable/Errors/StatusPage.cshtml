@@ -1,19 +1,24 @@
 @using ForgeTrust.Runnable.Web
-@model ForgeTrust.Runnable.Web.NotFoundPageModel
+@using Microsoft.AspNetCore.Http
+@model ForgeTrust.Runnable.Web.BrowserStatusPageModel
 @{
     Layout = null;
-    var missingPath = string.IsNullOrWhiteSpace(Model.OriginalPath)
+    var descriptor = BrowserStatusPageDescriptor.TryGet(Model.StatusCode, out var resolvedDescriptor)
+        ? resolvedDescriptor
+        : BrowserStatusPageDescriptor.NotFound;
+    var requestPath = string.IsNullOrWhiteSpace(Model.OriginalPath)
         ? "the requested page"
         : Model.OriginalPath;
-    var isDocsPath = missingPath.Equals("/docs", StringComparison.OrdinalIgnoreCase)
-        || missingPath.StartsWith("/docs/", StringComparison.OrdinalIgnoreCase);
+    var isDocsPath = Model.StatusCode == StatusCodes.Status404NotFound
+        && (requestPath.Equals("/docs", StringComparison.OrdinalIgnoreCase)
+            || requestPath.StartsWith("/docs/", StringComparison.OrdinalIgnoreCase));
 }
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Page Not Found</title>
+    <title>@descriptor.Title</title>
     <style>
         :root {
             color-scheme: light;
@@ -95,17 +100,17 @@
 </head>
 <body>
 <main>
-    <p>Runnable default 404</p>
-    <h1>Page not found</h1>
-    <p>We couldn't find <code>@missingPath</code>. The route may have moved, the link may be stale, or this app may not expose that page.</p>
+    <p>@descriptor.Eyebrow</p>
+    <h1>@descriptor.Heading</h1>
+    <p>We couldn't open <code>@requestPath</code>. @descriptor.Description</p>
     <nav class="actions" aria-label="Recovery actions">
-        <a class="recovery-link" href="@Url.Content("~/")">Return home</a>
+        <a class="recovery-link" href="@Url.Content("~/")">@descriptor.PrimaryActionText</a>
         @if (isDocsPath)
         {
             <a class="recovery-link secondary" href="@Url.Content("~/docs/search")">Search documentation</a>
         }
     </nav>
-    <p class="developer-note">App owners can replace this fallback with <code>@ConventionalNotFoundPageDefaults.AppViewPath</code>. Keep the page useful for users first: show recovery links, explain what happened, and preserve the 404 status.</p>
+    <p class="developer-note">App owners can replace this fallback with <code>@descriptor.AppViewPath</code>. Keep the page useful for users first: show recovery links, explain what happened, and preserve the @Model.StatusCode status.</p>
 </main>
 </body>
 </html>

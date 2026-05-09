@@ -313,6 +313,7 @@ public sealed class DocsUrlBuilder
                || string.Equals(path, "/search-index.json", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search.css", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search-client.js", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/outline-client.js", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/minisearch.min.js", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/Namespaces.html", StringComparison.OrdinalIgnoreCase)
                || path.StartsWith("/sections/", StringComparison.OrdinalIgnoreCase)

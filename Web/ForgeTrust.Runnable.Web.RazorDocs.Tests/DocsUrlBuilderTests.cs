@@ -214,10 +214,12 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/search", builder.BuildSearchUrl());
         Assert.Equal("/search-index.json", builder.BuildSearchIndexUrl());
         Assert.Equal("/search.css", builder.BuildAssetUrl("search.css"));
+        Assert.Equal("/outline-client.js", builder.BuildAssetUrl("outline-client.js"));
         Assert.Equal("/guides/start.md", builder.BuildDocUrl("guides/start.md"));
         Assert.Equal("/sections/concepts", builder.BuildSectionUrl(DocPublicSection.Concepts));
         Assert.True(builder.IsCurrentDocsPath("/guides/start.md.html"));
         Assert.True(builder.IsCurrentDocsPath("/search"));
+        Assert.True(builder.IsCurrentDocsPath("/outline-client.js"));
         Assert.True(builder.IsCurrentDocsPath("/Namespaces/ForgeTrust.Runnable.Web.html"));
         Assert.False(builder.IsCurrentDocsPath("/privacy.html"));
         Assert.False(builder.IsCurrentDocsPath("guides/start.md.html"));

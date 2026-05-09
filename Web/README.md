@@ -6,7 +6,7 @@ Need install guidance first? Start with the [Runnable v0.1 package chooser](../p
 
 ## Contents
 
-- [**ForgeTrust.Runnable.Web**](./ForgeTrust.Runnable.Web/README.md) – The core web bootstrapping library.
+- [**ForgeTrust.Runnable.Web**](./ForgeTrust.Runnable.Web/README.md) – The core web bootstrapping library, including conventional browser status pages and opt-in production 500 pages.
 - [**ForgeTrust.Runnable.Web.OpenApi**](./ForgeTrust.Runnable.Web.OpenApi/README.md) – Modular OpenAPI generation.
 - [**ForgeTrust.Runnable.Web.RazorDocs**](./ForgeTrust.Runnable.Web.RazorDocs/README.md) – Reusable docs package for harvesting and serving repository documentation.
 - [**ForgeTrust.Runnable.Web.RazorDocs.Standalone**](./ForgeTrust.Runnable.Web.RazorDocs.Standalone/README.md) – Runnable host for exporting and serving RazorDocs.

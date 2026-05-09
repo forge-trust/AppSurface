@@ -393,6 +393,8 @@ public class ExportEngineTests
             var html = await File.ReadAllTextAsync(notFoundFile);
             Assert.Contains("Exported 404 page", html);
             Assert.False(File.Exists(Path.Combine(tempDir, "_runnable", "errors", "404.html")));
+            Assert.False(File.Exists(Path.Combine(tempDir, "401.html")));
+            Assert.False(File.Exists(Path.Combine(tempDir, "403.html")));
         }
         finally
         {
@@ -978,7 +980,7 @@ public class ExportEngineTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri?.AbsolutePath ?? "/";
-            if (path == ConventionalNotFoundPageDefaults.ReservedNotFoundRoute)
+            if (path == BrowserStatusPageDefaults.ReservedNotFoundRoute)
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -1003,7 +1005,7 @@ public class ExportEngineTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri?.AbsolutePath ?? "/";
-            if (path == ConventionalNotFoundPageDefaults.ReservedNotFoundRoute)
+            if (path == BrowserStatusPageDefaults.ReservedNotFoundRoute)
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {

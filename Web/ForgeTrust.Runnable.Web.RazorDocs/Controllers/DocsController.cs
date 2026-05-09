@@ -23,7 +23,6 @@ public class DocsController : Controller
     private const string CuratedLandingDescription = "Start with the proof path that answers the first evaluator questions, then move into the sections that fit your next decision.";
     private const string SectionUnavailableHeading = "Section unavailable";
     private static readonly string[] DefaultProofPathStageLabels = ["Understand", "See Proof", "Adopt Next"];
-    private static readonly TimeSpan SearchIndexCacheDuration = DocAggregator.SnapshotCacheDuration;
     private static readonly TimeSpan SearchShellFallbackBudget = TimeSpan.FromMilliseconds(500);
 
     private readonly DocAggregator _aggregator;
@@ -363,7 +362,7 @@ public class DocsController : Controller
         }
 
         // Keep response caching private by default; docs may be served behind auth.
-        Response.Headers.CacheControl = $"private,max-age={(int)SearchIndexCacheDuration.TotalSeconds}";
+        Response.Headers.CacheControl = $"private,max-age={(int)_aggregator.SnapshotCacheDuration.TotalSeconds}";
 
         var payload = await _aggregator.GetSearchIndexPayloadAsync(HttpContext.RequestAborted);
         var pathBaseAwarePayload = PrefixSearchIndexPathsForPathBase(payload, Request.PathBase.Value);
@@ -724,6 +723,7 @@ public class DocsController : Controller
             Summary = summary,
             ShowSummary = showSummary,
             IsCSharpApiDoc = doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
+            IsApiSurfaceDoc = IsApiSurfaceDoc(doc),
             PageTypeBadge = pageTypeBadge,
             Component = component,
             Audience = audience,
@@ -1221,6 +1221,49 @@ public class DocsController : Controller
         }
 
         return expectedTypes.Any(expected => string.Equals(pageType, expected, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Determines whether a documentation node should render with the API reference reading surface.
+    /// </summary>
+    /// <remarks>
+    /// Non-Markdown generated docs use the API surface by default because RazorDocs cannot assume extensionless
+    /// generated pages have authored prose rhythm. Markdown docs opt into the API surface only when
+    /// <c>page_type</c> normalizes to <c>api</c> or <c>api-reference</c>. Extensionless authored content is therefore
+    /// treated as generated API/reference content unless a future harvester exposes a stronger authorship signal.
+    /// </remarks>
+    private static bool IsApiSurfaceDoc(DocNode doc)
+    {
+        return !IsMarkdownDoc(doc.Path)
+               || IsApiSurfacePageType(doc.Metadata?.PageType);
+    }
+
+    /// <summary>
+    /// Determines whether raw page-type metadata explicitly requests the API reference reading surface.
+    /// </summary>
+    /// <remarks>
+    /// Values are normalized with <see cref="DocMetadataPresentation.NormalizeToken(string?)" /> before comparison,
+    /// so values such as <c>api_reference</c> and <c>API Reference</c> match <c>api-reference</c>. Null or blank
+    /// metadata does not opt a Markdown document into the API surface.
+    /// </remarks>
+    private static bool IsApiSurfacePageType(string? pageType)
+    {
+        var normalizedPageType = DocMetadataPresentation.NormalizeToken(pageType);
+
+        return normalizedPageType is "api" or "api-reference";
+    }
+
+    /// <summary>
+    /// Determines whether a source path represents authored Markdown by checking known Markdown filename suffixes.
+    /// </summary>
+    /// <remarks>
+    /// Matching is case-insensitive and currently recognizes <c>.md</c> and <c>.markdown</c>. Callers should pass a
+    /// non-null harvested path; extensionless paths are intentionally treated as non-Markdown generated docs.
+    /// </remarks>
+    private static bool IsMarkdownDoc(string path)
+    {
+        return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase);
     }
 
     private static RazorDocsVersionCatalogService CreateDefaultVersionCatalogService()

@@ -136,7 +136,8 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
 
         _configureOptions?.Invoke(_options);
 
-        if (_options.Errors.NotFoundPageMode == ConventionalNotFoundPageMode.Enabled
+        if ((_options.Errors.BrowserStatusPageMode == BrowserStatusPageMode.Enabled
+                || _options.Errors.ConventionalExceptionPageEnabled)
             && _options.Mvc.MvcSupportLevel < MvcSupport.ControllersWithViews)
         {
             _options.Mvc = _options.Mvc with { MvcSupportLevel = MvcSupport.ControllersWithViews };
@@ -190,15 +191,24 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
                 }
             }
 
-            if (_options.Errors.IsConventionalNotFoundPageEnabled(mvcOpts.MvcSupportLevel))
+            if (_options.Errors.AreConventionalBrowserStatusPagesEnabled(mvcOpts.MvcSupportLevel)
+                || _options.Errors.ConventionalExceptionPageEnabled)
             {
                 var frameworkAssembly = typeof(WebOptions).Assembly;
                 if (frameworkAssembly != context.EntryPointAssembly)
                 {
                     mvcBuilder.AddApplicationPart(frameworkAssembly);
                 }
+            }
 
-                services.TryAddSingleton<ConventionalNotFoundPageRenderer>();
+            if (_options.Errors.AreConventionalBrowserStatusPagesEnabled(mvcOpts.MvcSupportLevel))
+            {
+                services.TryAddSingleton<BrowserStatusPageRenderer>();
+            }
+
+            if (_options.Errors.ConventionalExceptionPageEnabled)
+            {
+                services.TryAddSingleton<ConventionalExceptionPageRenderer>();
             }
 
             mvcOpts.ConfigureMvc?.Invoke(mvcBuilder);
@@ -286,25 +296,52 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
     /// <param name="app">The application builder to configure (middleware, routing, CORS, endpoints, etc.).</param>
     private void InitializeWebApplication(StartupContext context, IApplicationBuilder app)
     {
-        if (_options.Errors.IsConventionalNotFoundPageEnabled(_options.Mvc.MvcSupportLevel))
+        if (_options.Errors.ConventionalExceptionPageEnabled && !context.IsDevelopment)
         {
             app.ApplicationServices
-                .GetRequiredService<ConventionalNotFoundPageRenderer>()
+                .GetRequiredService<ConventionalExceptionPageRenderer>()
+                .ValidateConfiguredViews();
+
+            app.UseExceptionHandler(exceptionHandlerApp =>
+            {
+                exceptionHandlerApp.Run(
+                    async httpContext =>
+                    {
+                        httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
+
+                        if (!ShouldApplyConventionalExceptionPage(httpContext))
+                        {
+                            return;
+                        }
+
+                        await httpContext.RequestServices
+                            .GetRequiredService<ConventionalExceptionPageRenderer>()
+                            .RenderAsync(httpContext);
+                    });
+            });
+        }
+
+        if (_options.Errors.AreConventionalBrowserStatusPagesEnabled(_options.Mvc.MvcSupportLevel))
+        {
+            app.ApplicationServices
+                .GetRequiredService<BrowserStatusPageRenderer>()
                 .ValidateConfiguredViews();
 
             app.UseWhen(
-                ShouldApplyConventionalNotFoundPage,
+                ShouldApplyConventionalBrowserStatusPages,
                 branch =>
                 {
                     branch.UseStatusCodePages(
                         async statusCodeContext =>
                         {
-                            if (statusCodeContext.HttpContext.Response.StatusCode != StatusCodes.Status404NotFound)
+                            if (!BrowserStatusPageDescriptor.TryGet(
+                                    statusCodeContext.HttpContext.Response.StatusCode,
+                                    out var descriptor))
                             {
                                 return;
                             }
 
-                            await ReExecuteConventionalNotFoundPageAsync(statusCodeContext);
+                            await ReExecuteConventionalBrowserStatusPageAsync(statusCodeContext, descriptor);
                         });
                 });
         }
@@ -340,17 +377,18 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
 
             if (_options.Mvc.MvcSupportLevel > MvcSupport.None)
             {
-                if (_options.Errors.IsConventionalNotFoundPageEnabled(_options.Mvc.MvcSupportLevel))
+                if (_options.Errors.AreConventionalBrowserStatusPagesEnabled(_options.Mvc.MvcSupportLevel))
                 {
                     endpoints.MapMethods(
-                        ConventionalNotFoundPageDefaults.ReservedRoutePattern,
+                        BrowserStatusPageDefaults.ReservedRoutePattern,
                         [HttpMethods.Get, HttpMethods.Head],
                         async httpContext =>
                         {
                             var statusCode = GetReservedRouteStatusCode(httpContext);
                             var isDirectRequest = httpContext.Features.Get<IStatusCodeReExecuteFeature>() is null;
 
-                            if (statusCode != StatusCodes.Status404NotFound)
+                            if (!statusCode.HasValue
+                                || !BrowserStatusPageDescriptor.TryGet(statusCode.Value, out _))
                             {
                                 if (isDirectRequest)
                                 {
@@ -361,7 +399,7 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
                             }
 
                             await httpContext.RequestServices
-                                .GetRequiredService<ConventionalNotFoundPageRenderer>()
+                                .GetRequiredService<BrowserStatusPageRenderer>()
                                 .RenderAsync(httpContext);
                         });
                 }
@@ -371,29 +409,39 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
         });
     }
 
-    internal static bool ShouldApplyConventionalNotFoundPage(HttpContext httpContext)
+    internal static bool ShouldApplyConventionalBrowserStatusPages(HttpContext httpContext)
     {
         if (!HttpMethods.IsGet(httpContext.Request.Method) && !HttpMethods.IsHead(httpContext.Request.Method))
         {
             return false;
         }
 
-        if (httpContext.Request.Path.StartsWithSegments(ConventionalNotFoundPageDefaults.ReservedRouteBase))
+        if (httpContext.Request.Path.StartsWithSegments(BrowserStatusPageDefaults.ReservedRouteBase))
         {
             return false;
         }
 
-        var acceptsHtml = httpContext.Request.GetTypedHeaders().Accept?
+        return RequestAcceptsHtml(httpContext);
+    }
+
+    internal static bool ShouldApplyConventionalExceptionPage(HttpContext httpContext)
+    {
+        return RequestAcceptsHtml(httpContext);
+    }
+
+    private static bool RequestAcceptsHtml(HttpContext httpContext)
+    {
+        return httpContext.Request.GetTypedHeaders().Accept?
             .Any(mediaType =>
                 mediaType.MediaType.HasValue
                 && (mediaType.MediaType.Value.Equals("text/html", StringComparison.OrdinalIgnoreCase)
                     || mediaType.MediaType.Value.Equals("application/xhtml+xml", StringComparison.OrdinalIgnoreCase)))
             ?? false;
-
-        return acceptsHtml;
     }
 
-    private static async Task ReExecuteConventionalNotFoundPageAsync(StatusCodeContext statusCodeContext)
+    private static async Task ReExecuteConventionalBrowserStatusPageAsync(
+        StatusCodeContext statusCodeContext,
+        BrowserStatusPageDescriptor descriptor)
     {
         var httpContext = statusCodeContext.HttpContext;
         var originalPath = httpContext.Request.Path;
@@ -405,7 +453,7 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
         var originalStatusCodePagesEnabled = statusCodePagesFeature?.Enabled;
 
         httpContext.Features.Set<IStatusCodeReExecuteFeature>(
-            new ConventionalNotFoundPageReExecuteFeature(
+            new BrowserStatusPageReExecuteFeature(
                 httpContext.Request.PathBase.Value ?? string.Empty,
                 originalPath.Value ?? string.Empty,
                 originalQueryString.Value ?? string.Empty,
@@ -418,7 +466,7 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
             statusCodePagesFeature.Enabled = false;
         }
 
-        httpContext.Request.Path = new PathString(ConventionalNotFoundPageDefaults.ReservedNotFoundRoute);
+        httpContext.Request.Path = new PathString(descriptor.ReservedRoute);
         httpContext.Request.QueryString = QueryString.Empty;
         httpContext.Request.RouteValues = new RouteValueDictionary();
         httpContext.SetEndpoint(null);
@@ -458,9 +506,9 @@ public abstract class WebStartup<TModule> : RunnableStartup<TModule>
         };
     }
 
-    private sealed class ConventionalNotFoundPageReExecuteFeature : IStatusCodeReExecuteFeature
+    private sealed class BrowserStatusPageReExecuteFeature : IStatusCodeReExecuteFeature
     {
-        public ConventionalNotFoundPageReExecuteFeature(
+        public BrowserStatusPageReExecuteFeature(
             string originalPathBase,
             string originalPath,
             string? originalQueryString,

@@ -19,6 +19,15 @@ featured_page_groups:
         path: releases/README.md
         supporting_copy: Start with the public release hub, then drill into the unreleased proof artifact, changelog, and pre-1.0 upgrade policy.
         order: 10
+  - intent: build-docs
+    label: Build docs with RazorDocs
+    summary: Use this path when you want to host authored docs and generated API reference from your own repository.
+    order: 15
+    pages:
+      - question: How do I use RazorDocs in my own repository?
+        path: Web/ForgeTrust.Runnable.Web.RazorDocs/use-razordocs.md
+        supporting_copy: Follow the consumer landing page for the package thesis, host shape, authoring model, and adoption checklist.
+        order: 10
   - intent: see-it-working
     label: See it working
     summary: Follow concrete application paths before drilling into reference material.

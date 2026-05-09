@@ -36,6 +36,7 @@ public class RazorDocsViewsTests
         Assert.Contains("var isSearchPage = string.Equals(", layout);
         Assert.Contains("crossorigin=\"use-credentials\"", layout);
         Assert.Contains("data-rw-search-runtime=\"minisearch\"", layout);
+        Assert.DoesNotContain("src=\"~/docs/outline-client.js\"", layout);
         Assert.Contains("window.__razorDocsConfig", layout);
         Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"search-client.js\"))", layout);
         Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"minisearch.min.js\"))", layout);
@@ -146,12 +147,53 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-page-meta", tailwindEntryStylesheet);
         Assert.Contains(".docs-provenance-strip", tailwindEntryStylesheet);
         Assert.Contains(".docs-trust-bar", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-shell", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-link", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-toggle", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-label", tailwindEntryStylesheet);
 
         Assert.DoesNotContain(".docs-page-badge", searchStylesheet);
         Assert.DoesNotContain(".docs-metadata-chip", searchStylesheet);
         Assert.DoesNotContain(".docs-page-meta", searchStylesheet);
         Assert.DoesNotContain(".docs-provenance-strip", searchStylesheet);
         Assert.DoesNotContain(".docs-trust-bar", searchStylesheet);
+        Assert.DoesNotContain(".docs-outline-shell", searchStylesheet);
+        Assert.DoesNotContain(".docs-outline-link", searchStylesheet);
+    }
+
+    [Fact]
+    public void OutlineClient_ShouldUseMainContentRoot_AndRebindAfterFrameNavigation()
+    {
+        var outlineClient = ReadOutlineClientMarkup();
+
+        Assert.Contains("const outlineSelector = \"#docs-page-outline\"", outlineClient);
+        Assert.Contains("const mainContent = document.getElementById(\"main-content\")", outlineClient);
+        Assert.Contains("if (!mainContent)", outlineClient);
+        Assert.Contains("if (entries.length === 0)", outlineClient);
+        Assert.Contains("root: mainContent", outlineClient);
+        Assert.Contains("document.addEventListener(\"turbo:frame-load\"", outlineClient);
+        Assert.Contains("activeObserver?.disconnect()", outlineClient);
+        Assert.Contains("aria-current", outlineClient);
+        Assert.Contains("typeof AbortController === \"function\"", outlineClient);
+        Assert.Contains("function addLifecycleEventListener", outlineClient);
+        Assert.Contains("removeEventListener", outlineClient);
+        Assert.Contains("addListener", outlineClient);
+    }
+
+    [Fact]
+    public void Stylesheets_ShouldDefineMarkdownProseReadabilityRules()
+    {
+        var tailwindEntryStylesheet = ReadTailwindEntryStylesheetMarkup();
+
+        Assert.Contains(".docs-content--markdown", tailwindEntryStylesheet);
+        Assert.Contains("max-width: 70ch;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown p", tailwindEntryStylesheet);
+        Assert.Contains("margin: 0 0 1.08rem;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown ul,", tailwindEntryStylesheet);
+        Assert.Contains("list-style: disc;", tailwindEntryStylesheet);
+        Assert.Contains("list-style: decimal;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown blockquote", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown :not(pre) > code", tailwindEntryStylesheet);
     }
 
     [Fact]
@@ -167,6 +209,15 @@ public class RazorDocsViewsTests
 
         var sidebarDeclaration = layout.Substring(sidebarStart, sidebarEnd - sidebarStart);
         Assert.DoesNotContain("-translate-x-full", sidebarDeclaration);
+    }
+
+    [Fact]
+    public void Layout_ShouldClampDocumentShellAroundMainScroller_ForWebKit()
+    {
+        var layout = ReadLayoutMarkup();
+
+        Assert.Contains("<div class=\"flex h-full min-h-0 overflow-hidden\">", layout);
+        Assert.Contains("id=\"main-content\" role=\"main\" class=\"h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-slate-900\"", layout);
     }
 
     [Fact]
@@ -1148,10 +1199,19 @@ public class RazorDocsViewsTests
             });
 
         var html = await RenderDetailsViewAsync(landingDoc, deepDive, anchor);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var sectionRoutes = document.QuerySelectorAll("a[href='/docs/sections/concepts']")
+            .Where(link => (link.ClassName ?? string.Empty).Contains("rounded-full", StringComparison.Ordinal))
+            .ToArray();
 
         Assert.Contains("Section landing", html);
         Assert.Contains("Use this section as the entry point.", html);
-        Assert.Contains("href=\"/docs/sections/concepts\"", html);
+        Assert.Equal(2, sectionRoutes.Length);
+        Assert.All(sectionRoutes, sectionRoute =>
+        {
+            Assert.Equal("doc-content", sectionRoute.GetAttribute("data-turbo-frame"));
+            Assert.Equal("advance", sectionRoute.GetAttribute("data-turbo-action"));
+        });
         Assert.Contains("Next steps", html);
         Assert.Contains(">Test</h3>", html);
         Assert.Contains("Choose this path when you need section context.", html);
@@ -1390,6 +1450,62 @@ public class RazorDocsViewsTests
 
         Assert.DoesNotContain("text-3xl font-bold text-white tracking-tight", html);
         Assert.Contains("Example body", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldMarkMarkdownAndApiContent_ForSurfaceSpecificProseStyling()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+
+        var markdownHtml = await RenderDocsViewAsync(
+            services,
+            "Details",
+            c => c.Details("guides/intro.md"));
+        var apiHtml = await RenderDocsViewAsync(
+            services,
+            "Details",
+            c => c.Details("src/Example.cs"));
+
+        Assert.Contains("class=\"docs-content docs-content--markdown\"", markdownHtml);
+        Assert.Contains("class=\"docs-content docs-content--api\"", apiHtml);
+    }
+
+    [Theory]
+    [InlineData("api")]
+    [InlineData("api-reference")]
+    public async Task DetailsView_ShouldUseApiContentSurface_ForApiPageTypeMarkdown(string pageType)
+    {
+        var doc = new DocNode(
+            "API Guide",
+            "guides/api-reference.md",
+            "<p>Reference body</p>",
+            Metadata: new DocMetadata
+            {
+                PageType = pageType
+            });
+
+        var html = await RenderDetailsViewAsync(doc);
+
+        Assert.Contains("class=\"docs-content docs-content--api\"", html);
+        Assert.DoesNotContain("class=\"docs-content docs-content--markdown\"", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldUseApiContentSurface_ForGeneratedExtensionlessDocs()
+    {
+        var doc = new DocNode(
+            "Namespaces",
+            "Namespaces",
+            "<p>Namespace body</p>",
+            Metadata: new DocMetadata
+            {
+                NavGroup = "API Reference"
+            });
+
+        var html = await RenderDetailsViewAsync(doc);
+
+        Assert.Contains("class=\"docs-content docs-content--api\"", html);
+        Assert.DoesNotContain("class=\"docs-content docs-content--markdown\"", html);
     }
 
     [Fact]
@@ -1810,8 +1926,8 @@ public class RazorDocsViewsTests
             [
                 new DocOutlineItem
                 {
-                    Title = "Install",
-                    Id = "install",
+                    Title = " Install ",
+                    Id = " install ",
                     Level = 2
                 },
                 new DocOutlineItem
@@ -1819,6 +1935,19 @@ public class RazorDocsViewsTests
                     Title = "Verify",
                     Id = "verify",
                     Level = 3
+                },
+                null!,
+                new DocOutlineItem
+                {
+                    Title = "Missing fragment",
+                    Id = " ",
+                    Level = 2
+                },
+                new DocOutlineItem
+                {
+                    Title = " ",
+                    Id = "missing-title",
+                    Level = 2
                 }
             ]);
 
@@ -1826,11 +1955,104 @@ public class RazorDocsViewsTests
             services,
             "/Views/Docs/Details.cshtml",
             model);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
 
         Assert.Contains("id=\"docs-page-outline\"", html);
         Assert.Contains("href=\"#install\"", html);
         Assert.Contains("data-doc-outline-link=\"true\"", html);
         Assert.Contains("href=\"#verify\"", html);
+        Assert.Contains("docs-detail-layout--with-outline", html);
+        Assert.NotNull(document.QuerySelector("#docs-page-outline.docs-outline-shell"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-toggle[aria-controls='docs-page-outline-panel']"));
+        Assert.NotNull(document.QuerySelector("#docs-page-outline-panel[aria-label='On this page']"));
+        Assert.NotNull(document.QuerySelector("a.docs-outline-link[href='#install']"));
+        Assert.NotNull(document.QuerySelector("a.docs-outline-link--level-3[href='#verify']"));
+        Assert.Null(document.QuerySelector("a.docs-outline-link[href='#missing-title']"));
+        Assert.DoesNotContain("Missing fragment", html);
+        Assert.Single(document.QuerySelectorAll("#docs-page-outline nav"));
+        Assert.True(
+            document.QuerySelector(".docs-detail-primary")!.CompareDocumentPosition(document.QuerySelector("#docs-page-outline")!)
+                .HasFlag(DocumentPositions.Following));
+        Assert.NotNull(document.QuerySelector("script[src='/docs/outline-client.js'][data-doc-outline-client='true']"));
+        Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", html);
+        Assert.DoesNotContain("rounded-2xl border border-slate-800 bg-slate-900/60", html);
+
+        var tenantHtml = await RenderViewAsync(
+            services,
+            "/Views/Docs/Details.cshtml",
+            model,
+            pathBase: "/tenant");
+        var tenantDocument = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(tenantHtml);
+
+        Assert.NotNull(tenantDocument.QuerySelector("script[src='/tenant/docs/outline-client.js'][data-doc-outline-client='true']"));
+        Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", tenantHtml);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldHideOutlineRail_WhenOnlyMalformedOutlineEntriesExist()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var doc = new DocNode("Quickstart", "guides/quickstart.md", "<h2 id='install'>Install</h2>");
+        var model = CreateDetailsViewModel(
+            doc,
+            outline:
+            [
+                null!,
+                new DocOutlineItem
+                {
+                    Title = "Missing fragment",
+                    Id = " ",
+                    Level = 2
+                },
+                new DocOutlineItem
+                {
+                    Title = " ",
+                    Id = "missing-title",
+                    Level = 2
+                }
+            ]);
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/Details.cshtml",
+            model);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        Assert.Null(document.QuerySelector("#docs-page-outline"));
+        Assert.Null(document.QuerySelector("script[data-doc-outline-client='true']"));
+        Assert.DoesNotContain("docs-detail-layout--with-outline", html);
+        Assert.NotNull(document.QuerySelector(".docs-detail-primary"));
+        Assert.Contains("<h2 id='install'>Install</h2>", html);
+    }
+
+    [Fact]
+    public async Task DetailsFrame_ShouldUseWideContainer_ForOutlineRail()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var doc = new DocNode("Quickstart", "guides/quickstart.md", "<h2 id='install'>Install</h2>");
+        var model = CreateDetailsViewModel(
+            doc,
+            outline:
+            [
+                new DocOutlineItem
+                {
+                    Title = "Install",
+                    Id = "install",
+                    Level = 2
+                }
+            ]);
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/DetailsFrame.cshtml",
+            model);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        var frameShell = document.QuerySelector("div.max-w-6xl");
+        Assert.NotNull(frameShell);
+        Assert.Contains("max-w-6xl", frameShell!.ClassList);
+        Assert.DoesNotContain("max-w-4xl", frameShell.ClassList);
+        Assert.NotNull(document.QuerySelector(".docs-detail-layout--with-outline #docs-page-outline"));
     }
 
     [Fact]
@@ -2709,7 +2931,7 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
-    public async Task IndexView_ShouldNotRenderSearchWorkspaceOnlyAssets()
+    public async Task IndexView_ShouldNotRenderSearchWorkspaceOrOutlineOnlyAssets()
     {
         using var services = CreateServiceProvider(CreateDocs());
 
@@ -2721,6 +2943,7 @@ public class RazorDocsViewsTests
         Assert.DoesNotContain("href=\"/docs/search-index.json\"", html);
         Assert.DoesNotContain("data-rw-search-runtime=\"minisearch\"", html);
         Assert.Contains("src=\"/docs/search-client.js\"", html);
+        Assert.DoesNotContain("src=\"/docs/outline-client.js\"", html);
         Assert.Contains("id=\"docs-search-input\"", html);
     }
 
@@ -3003,6 +3226,20 @@ public class RazorDocsViewsTests
             "search-client.js");
 
         return File.ReadAllText(searchClientPath);
+    }
+
+    private static string ReadOutlineClientMarkup()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var outlineClientPath = Path.Combine(
+            repoRoot,
+            "Web",
+            "ForgeTrust.Runnable.Web.RazorDocs",
+            "wwwroot",
+            "docs",
+            "outline-client.js");
+
+        return File.ReadAllText(outlineClientPath);
     }
 
     private static string ReadTailwindEntryStylesheetMarkup()
@@ -3321,6 +3558,8 @@ public class RazorDocsViewsTests
             Summary = metadata?.Summary,
             ShowSummary = !string.IsNullOrWhiteSpace(metadata?.Summary) && metadata?.SummaryIsDerived != true,
             IsCSharpApiDoc = doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
+            IsApiSurfaceDoc = !IsMarkdownDoc(doc.Path)
+                              || IsApiSurfacePageType(metadata?.PageType),
             PageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge(metadata?.PageType),
             Component = metadata?.ComponentIsDerived == true || string.IsNullOrWhiteSpace(metadata?.Component)
                 ? null
@@ -3336,6 +3575,19 @@ public class RazorDocsViewsTests
             ContributorSourceUsesTurbo = contributorSourceUsesTurbo,
             ContributorEditUsesTurbo = contributorEditUsesTurbo
         };
+    }
+
+    private static bool IsApiSurfacePageType(string? pageType)
+    {
+        var normalizedPageType = DocMetadataPresentation.NormalizeToken(pageType);
+
+        return normalizedPageType is "api" or "api-reference";
+    }
+
+    private static bool IsMarkdownDoc(string path)
+    {
+        return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase);
     }
 
     private static DocSidebarViewModel CreateSidebarViewModel(

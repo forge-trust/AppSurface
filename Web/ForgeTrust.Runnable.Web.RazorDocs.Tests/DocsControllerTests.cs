@@ -2235,6 +2235,48 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchIndex_ShouldUseConfiguredSnapshotCacheExpirationForCacheControlHeader()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+
+        var env = A.Fake<IWebHostEnvironment>();
+        A.CallTo(() => env.ContentRootPath).Returns(Path.GetTempPath());
+        var sanitizer = A.Fake<IRazorDocsHtmlSanitizer>();
+        A.CallTo(() => sanitizer.Sanitize(A<string>._))
+            .ReturnsLazily((string input) => input);
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        using var memo = new Memo(cache);
+        var aggregator = new DocAggregator(
+            [harvester],
+            new RazorDocsOptions
+            {
+                CacheExpirationMinutes = 0.5,
+                Source = new RazorDocsSourceOptions
+                {
+                    RepositoryRoot = Path.GetTempPath()
+                }
+            },
+            env,
+            memo,
+            sanitizer,
+            A.Fake<ILogger<DocAggregator>>());
+        var controller = new DocsController(
+            aggregator,
+            new DocFeaturedPageResolver(_featuredPageResolverLoggerFake),
+            _controllerLoggerFake)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+
+        _ = await controller.SearchIndex();
+
+        Assert.Equal("private,max-age=30", controller.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
     public async Task SearchIndex_ShouldRefreshCache_WhenAuthenticatedRefreshRequested()
     {
         var docs = new List<DocNode>

@@ -102,12 +102,18 @@ public sealed class RazorDocsPublishedTreeHandlerTests : IDisposable
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
 
         var getRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
+        var outlineRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/outline-client.js");
         var headRequest = CreateContext(HttpMethods.Head, "/docs/v/1.2.3/search.css");
 
         Assert.True(await handler.TryHandleAsync(getRequest));
         Assert.Equal("text/css", getRequest.Response.ContentType);
         Assert.Contains("body { color: #fff; }", ReadBody(getRequest));
         Assert.NotNull(getRequest.Response.ContentLength);
+
+        Assert.True(await handler.TryHandleAsync(outlineRequest));
+        Assert.Equal("text/javascript", outlineRequest.Response.ContentType);
+        Assert.Contains("window.__outlineClientLoaded = true;", ReadBody(outlineRequest));
+        Assert.NotNull(outlineRequest.Response.ContentLength);
 
         Assert.True(await handler.TryHandleAsync(headRequest));
         Assert.Equal("text/css", headRequest.Response.ContentType);
@@ -542,6 +548,7 @@ public sealed class RazorDocsPublishedTreeHandlerTests : IDisposable
         File.WriteAllText(Path.Combine(root, "folder-only", "index.html"), "<!DOCTYPE html><html><body>folder-only</body></html>");
         File.WriteAllText(Path.Combine(root, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
+        File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
 
         return root;
     }
