@@ -381,7 +381,7 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
                 if (!IsValidAppRelativeRootPath(routing.RouteRootPath))
                 {
                     failures.Add(
-                        "RazorDocs:Routing:RouteRootPath must be an app-relative path such as '/docs' or '/foo/bar'. It must not end with '/', include a query or fragment, or use an absolute URL.");
+                        "RazorDocs:Routing:RouteRootPath must be an app-relative path such as '/docs', 'docs', '/foo/bar', or 'foo/bar'. It must not end with '/', include a query or fragment, or use an absolute URL.");
                     routeRootPathIsValid = false;
                 }
                 else if (IsReservedRouteFamilyChildPath(routing.RouteRootPath))
@@ -395,7 +395,7 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
             if (routing.DocsRootPath is not null && !IsValidAppRelativeRootPath(routing.DocsRootPath))
             {
                 failures.Add(
-                    "RazorDocs:Routing:DocsRootPath must be an app-relative path such as '/docs/next' or '/foo/bar/next'. It must not end with '/', include a query or fragment, or use an absolute URL.");
+                    "RazorDocs:Routing:DocsRootPath must be an app-relative path such as '/docs/next', 'docs/next', '/foo/bar/next', or 'foo/bar/next'. It must not end with '/', include a query or fragment, or use an absolute URL.");
                 docsRootPathIsValid = false;
             }
 
@@ -559,24 +559,26 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
             return false;
         }
 
-        if (!path.StartsWith("/", StringComparison.Ordinal)
-            || path.Contains("://", StringComparison.Ordinal))
+        var trimmedPath = path.Trim();
+        if (trimmedPath.Contains("://", StringComparison.Ordinal)
+            || trimmedPath.StartsWith("//", StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (path.Length > 1 && path[^1] == '/')
+        if (trimmedPath.Length > 1 && trimmedPath[^1] == '/')
         {
             return false;
         }
 
-        return path.IndexOfAny(['?', '#']) < 0;
+        return trimmedPath.IndexOfAny(['?', '#']) < 0;
     }
 
     private static bool IsReservedRouteFamilyChildPath(string path)
     {
-        return path.EndsWith("/versions", StringComparison.OrdinalIgnoreCase)
-               || path.EndsWith("/v", StringComparison.OrdinalIgnoreCase);
+        var normalizedPath = DocsUrlBuilder.NormalizeRouteRootPath(path, DocsUrlBuilder.DocsEntryPath, versioningEnabled: false);
+        return normalizedPath.EndsWith("/versions", StringComparison.OrdinalIgnoreCase)
+               || normalizedPath.EndsWith("/v", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsReservedRouteFamilyChildPath(string docsRootPath, string routeRootPath)

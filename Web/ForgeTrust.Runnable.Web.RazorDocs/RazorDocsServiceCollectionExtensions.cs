@@ -37,6 +37,17 @@ public static class RazorDocsServiceCollectionExtensions
     /// registration.
     /// </para>
     /// <para>
+    /// When <see cref="RazorDocsRoutingOptions.DocsRootPath"/> is omitted or whitespace, the live docs root is derived
+    /// from the normalized <see cref="RazorDocsRoutingOptions.RouteRootPath"/> through
+    /// <see cref="DocsUrlBuilder.ResolveDefaultDocsRootPath(string, bool)"/>. For example,
+    /// <c>RazorDocs:Routing:RouteRootPath=/foo/bar</c> with versioning enabled produces <c>/foo/bar/next</c> as the
+    /// default live root. Callers that set both <see cref="RazorDocsRoutingOptions.RouteRootPath"/> and
+    /// <see cref="RazorDocsRoutingOptions.DocsRootPath"/> should keep the pair coherent so stable entry, archive,
+    /// exact-version, and live preview routes compose predictably after
+    /// <see cref="DocsUrlBuilder.NormalizeRouteRootPath(string?, string, bool)"/> and
+    /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/> run.
+    /// </para>
+    /// <para>
     /// The method also registers <see cref="DocsUrlBuilder"/> and <see cref="RazorDocsVersionCatalogService"/> as
     /// singleton downstream services alongside the standard harvesters, memo cache, and <see cref="DocAggregator"/>.
     /// Consumers that resolve <see cref="RazorDocsOptions"/> directly should expect the normalized values rather than

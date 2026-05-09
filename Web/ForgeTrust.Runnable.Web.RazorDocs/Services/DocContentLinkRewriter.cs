@@ -284,12 +284,24 @@ internal static class DocContentLinkRewriter
     private static bool IsDocsLocalRootedPath(string path, string docsRootPath, string routeRootPath)
     {
         return DocsUrlBuilder.IsUnderRoot(path, docsRootPath)
-               || (!string.Equals(routeRootPath, "/", StringComparison.Ordinal)
-                   && DocsUrlBuilder.IsUnderRoot(path, routeRootPath))
+               || IsUnderConfiguredRouteFamily(path, routeRootPath)
                || DocsUrlBuilder.IsUnderRoot(path, DocsUrlBuilder.DocsEntryPath)
                || DocsUrlBuilder.IsUnderRoot(path, DocsUrlBuilder.DocsVersionsPath)
                || string.Equals(path, DocsUrlBuilder.DocsVersionPrefix, StringComparison.OrdinalIgnoreCase)
                || path.StartsWith(DocsUrlBuilder.DocsVersionPrefix + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsUnderConfiguredRouteFamily(string path, string routeRootPath)
+    {
+        if (!string.Equals(routeRootPath, "/", StringComparison.Ordinal))
+        {
+            return DocsUrlBuilder.IsUnderRoot(path, routeRootPath);
+        }
+
+        return string.Equals(path, "/", StringComparison.Ordinal)
+               || string.Equals(path, "/versions", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/v", StringComparison.OrdinalIgnoreCase)
+               || path.StartsWith("/v/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsRootMountedDecoratedDocsLink(IElement anchor, string docsRootPath, string path)

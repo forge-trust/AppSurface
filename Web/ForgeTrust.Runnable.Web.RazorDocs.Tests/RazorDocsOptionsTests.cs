@@ -763,7 +763,7 @@ public sealed class RazorDocsOptionsTests
         {
             Routing = new RazorDocsRoutingOptions
             {
-                RouteRootPath = "foo/bar"
+                RouteRootPath = "https://example.com/foo/bar"
             },
             Versioning = new RazorDocsVersioningOptions
             {
@@ -899,9 +899,9 @@ public sealed class RazorDocsOptionsTests
 
     [Theory]
     [InlineData("   ")]
-    [InlineData("guides")]
     [InlineData("/docs/")]
     [InlineData("https://example.com/docs")]
+    [InlineData("//example.com/docs")]
     [InlineData("/docs?view=full")]
     [InlineData("/docs#top")]
     public void Validator_ShouldRejectInvalidDocsRootPaths(string docsRootPath)
@@ -925,13 +925,14 @@ public sealed class RazorDocsOptionsTests
 
     [Theory]
     [InlineData("   ")]
-    [InlineData("foo/bar")]
     [InlineData("/foo/bar/")]
     [InlineData("https://example.com/foo")]
+    [InlineData("//example.com/foo")]
     [InlineData("/foo/bar?view=full")]
     [InlineData("/foo/bar#top")]
     [InlineData("/foo/bar/versions")]
     [InlineData("/foo/bar/v")]
+    [InlineData(" foo/bar/v ")]
     public void Validator_ShouldRejectInvalidRouteRootPaths(string routeRootPath)
     {
         var validator = new RazorDocsOptionsValidator();
@@ -949,6 +950,31 @@ public sealed class RazorDocsOptionsTests
         Assert.Contains(
             result.Failures,
             failure => failure.Contains("RouteRootPath", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("foo/bar", "foo/bar/next")]
+    [InlineData(" foo/bar ", " foo/bar/next ")]
+    public void Validator_ShouldAllowRelativeLookingRouteRoots(string routeRootPath, string docsRootPath)
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Routing = new RazorDocsRoutingOptions
+            {
+                RouteRootPath = routeRootPath,
+                DocsRootPath = docsRootPath
+            },
+            Versioning = new RazorDocsVersioningOptions
+            {
+                Enabled = true,
+                CatalogPath = "catalog.json"
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(result.Failed);
     }
 
     [Fact]
