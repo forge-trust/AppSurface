@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using CliFx.Exceptions;
 using CliFx.Infrastructure;
 using FakeItEasy;
@@ -111,24 +113,69 @@ public class ExportCommandTests
         Assert.Equal(missingSeedFile, ex.FileName);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_Should_Translate_Cdn_Validation_Failures_To_CommandException()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var command = CreateCommand(
+                "http://localhost:5001",
+                null,
+                null,
+                tempDir,
+                responseFactory: request =>
+                {
+                    if (request.RequestUri?.AbsolutePath == "/")
+                    {
+                        return new HttpResponseMessage(HttpStatusCode.OK)
+                        {
+                            Content = new StringContent(
+                                "<html><body><img src=\"/missing.png\"></body></html>",
+                                Encoding.UTF8,
+                                "text/html")
+                        };
+                    }
+
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                });
+
+            var ex = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(A.Fake<IConsole>()));
+
+            Assert.Contains("CDN export validation failed", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("/missing.png", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
     private static ExportCommand CreateCommand(
         string? url,
         string? project,
         string? dll,
         string outputPath = "dist",
-        string? seedRoutesPath = null)
+        string? seedRoutesPath = null,
+        Func<HttpRequestMessage, HttpResponseMessage>? responseFactory = null)
     {
         var logger = A.Fake<ILogger<ExportCommand>>();
         var engineLogger = A.Fake<ILogger<ExportEngine>>();
         var requestFactory = new ExportSourceRequestFactory();
         var processFactory = new NoopProcessFactory();
+        responseFactory ??= TestHttpHelpers.UrlAwareHtmlRoot("http://localhost:5001");
         var sourceResolver = new ExportSourceResolver(
             A.Fake<ILoggerFactory>(),
             processFactory,
-            new TestHttpHelpers.Factory(TestHttpHelpers.UrlAwareHtmlRoot("http://localhost:5001")));
+            new TestHttpHelpers.Factory(responseFactory));
         var engine = new ExportEngine(
             engineLogger,
-            new TestHttpHelpers.Factory(TestHttpHelpers.UrlAwareHtmlRoot("http://localhost:5001")));
+            new TestHttpHelpers.Factory(responseFactory));
 
         return new ExportCommand(logger, engine, requestFactory, sourceResolver)
         {
