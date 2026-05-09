@@ -57,11 +57,41 @@ public class RazorDocsCodeLanguageCatalogTests
         Assert.True(result.IsPlainText);
     }
 
+    [Fact]
+    public void Normalize_ShouldFallbackToPlaintextClass_WhenSafeCharactersProduceNoSlug()
+    {
+        var result = _catalog.Normalize(".");
+
+        Assert.Equal("unknown", result.NormalizedLanguage);
+        Assert.Equal("plaintext", result.ClassLanguage);
+        Assert.Equal("Unknown", result.Label);
+        Assert.False(result.IsKnown);
+        Assert.True(result.IsPlainText);
+    }
+
+    [Theory]
+    [InlineData("abc", "abc")]
+    [InlineData("ABC", "abc")]
+    [InlineData("123", "123")]
+    [InlineData("foo_bar.baz", "foo-bar-baz")]
+    public void Normalize_ShouldKeepSafeUnknownLanguageCharacters(string input, string expectedClassLanguage)
+    {
+        var result = _catalog.Normalize(input);
+
+        Assert.Equal("unknown", result.NormalizedLanguage);
+        Assert.Equal(expectedClassLanguage, result.ClassLanguage);
+        Assert.Equal(expectedClassLanguage, result.Label);
+        Assert.False(result.IsKnown);
+        Assert.True(result.IsPlainText);
+    }
+
     [Theory]
     [InlineData("CSharp", "csharp")]
     [InlineData("foo_bar.baz", "foo-bar-baz")]
     [InlineData(" \"><script> ", "script")]
     [InlineData("!!!", "")]
+    [InlineData("   ", "")]
+    [InlineData("foo-", "foo")]
     public void CreateSafeClassSlug_ShouldAllowOnlyLowercaseAsciiDigitsAndHyphens(string input, string expected)
     {
         Assert.Equal(expected, RazorDocsCodeLanguageCatalog.CreateSafeClassSlug(input));

@@ -1,6 +1,8 @@
 using FakeItEasy;
 using ForgeTrust.Runnable.Web.RazorDocs.Services;
 using Markdig;
+using Markdig.Helpers;
+using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 using Microsoft.Extensions.Logging;
 
@@ -241,6 +243,57 @@ public class MarkdownHarvesterTests : IDisposable
 
         var block = Assert.Single(highlighter.Blocks);
         Assert.Equal("csharp", block.Language);
+    }
+
+    [Fact]
+    public void ExtractLanguage_ShouldFallbackToRawInfo_WhenUnescapedInfoIsEmpty()
+    {
+        var block = new FencedCodeBlock(null!)
+        {
+            Info = "csharp title=\"demo\"",
+        };
+
+        Assert.Equal("csharp", RazorDocsCodeBlockRenderer.ExtractLanguage(block));
+    }
+
+    [Fact]
+    public void ExtractLanguage_ShouldPreferUnescapedInfo_WhenAvailable()
+    {
+        var block = new FencedCodeBlock(null!)
+        {
+            Info = "raw",
+            UnescapedInfo = new StringSlice("json title=\"demo\""),
+        };
+
+        Assert.Equal("json", RazorDocsCodeBlockRenderer.ExtractLanguage(block));
+    }
+
+    [Fact]
+    public void ExtractLanguage_ShouldReturnNull_WhenInfoIsMissing()
+    {
+        var block = new FencedCodeBlock(null!);
+
+        Assert.Null(RazorDocsCodeBlockRenderer.ExtractLanguage(block));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRenderIndentedCodeBlocksAsPlainLanguage()
+    {
+        var highlighter = new RecordingCodeHighlighter();
+        var harvester = new MarkdownHarvester(_loggerFake, File.ReadAllTextAsync, highlighter);
+        var content = """
+            # Guide
+
+                dotnet test
+            """;
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, "Guide.md"), content);
+
+        var doc = Assert.Single(await harvester.HarvestAsync(_testRoot));
+
+        Assert.Contains("<pre class=\"doc-code test-code\"><code>dotnet test</code></pre>", doc.Content);
+        var block = Assert.Single(highlighter.Blocks);
+        Assert.Null(block.Language);
+        Assert.Equal("dotnet test", block.Code.Trim());
     }
 
     [Fact]

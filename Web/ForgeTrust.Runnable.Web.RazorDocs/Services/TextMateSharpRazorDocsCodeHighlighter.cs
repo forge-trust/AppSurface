@@ -20,6 +20,7 @@ internal sealed class TextMateSharpRazorDocsCodeHighlighter : IRazorDocsCodeHigh
     private readonly ILogger<TextMateSharpRazorDocsCodeHighlighter> _logger;
     private readonly RegistryOptions _registryOptions;
     private readonly Registry _registry;
+    private readonly Func<RazorDocsCodeLanguage, IGrammar?>? _loadGrammarOverride;
     private readonly ConcurrentDictionary<string, Lazy<IGrammar?>> _grammars = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -38,6 +39,23 @@ internal sealed class TextMateSharpRazorDocsCodeHighlighter : IRazorDocsCodeHigh
         _logger = logger;
         _registryOptions = new RegistryOptions(ThemeName.DarkPlus);
         _registry = new Registry(_registryOptions);
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the TextMateSharp highlighter with a deterministic grammar-loader seam for tests.
+    /// </summary>
+    /// <param name="languageCatalog">Language normalization catalog.</param>
+    /// <param name="logger">Logger used for fallback diagnostics.</param>
+    /// <param name="loadGrammarOverride">Grammar loader used instead of the TextMate registry.</param>
+    internal TextMateSharpRazorDocsCodeHighlighter(
+        RazorDocsCodeLanguageCatalog languageCatalog,
+        ILogger<TextMateSharpRazorDocsCodeHighlighter> logger,
+        Func<RazorDocsCodeLanguage, IGrammar?> loadGrammarOverride)
+        : this(languageCatalog, logger)
+    {
+        ArgumentNullException.ThrowIfNull(loadGrammarOverride);
+
+        _loadGrammarOverride = loadGrammarOverride;
     }
 
     /// <inheritdoc />
@@ -75,8 +93,18 @@ internal sealed class TextMateSharpRazorDocsCodeHighlighter : IRazorDocsCodeHigh
 
     internal int CachedGrammarCount => _grammars.Count;
 
-    private IGrammar? LoadGrammar(RazorDocsCodeLanguage language)
+    /// <summary>
+    /// Loads the TextMate grammar for a normalized language, returning <see langword="null"/> when no grammar exists.
+    /// </summary>
+    /// <param name="language">The normalized language descriptor.</param>
+    /// <returns>The loaded grammar, or <see langword="null"/> when the language has no TextMate scope.</returns>
+    internal IGrammar? LoadGrammar(RazorDocsCodeLanguage language)
     {
+        if (_loadGrammarOverride is not null)
+        {
+            return _loadGrammarOverride(language);
+        }
+
         if (language.TextMateLanguageId is null)
         {
             return null;
@@ -141,7 +169,13 @@ internal sealed class TextMateSharpRazorDocsCodeHighlighter : IRazorDocsCodeHigh
         return new RazorDocsHighlightedCode(builder.ToString(), language.NormalizedLanguage, IsHighlighted: true);
     }
 
-    private static void AppendTokens(StringBuilder builder, string line, IReadOnlyList<IToken> tokens)
+    /// <summary>
+    /// Appends a tokenized source line while preserving unclassified gaps and trailing text.
+    /// </summary>
+    /// <param name="builder">The destination HTML builder.</param>
+    /// <param name="line">The original source line.</param>
+    /// <param name="tokens">TextMate tokens for the line.</param>
+    internal static void AppendTokens(StringBuilder builder, string line, IReadOnlyList<IToken> tokens)
     {
         if (tokens.Count == 0)
         {
@@ -191,7 +225,12 @@ internal sealed class TextMateSharpRazorDocsCodeHighlighter : IRazorDocsCodeHigh
             .Append("</span>");
     }
 
-    private static string? ResolveTokenClass(IReadOnlyList<string> scopes)
+    /// <summary>
+    /// Maps TextMate scopes to RazorDocs' small semantic token vocabulary.
+    /// </summary>
+    /// <param name="scopes">The scopes attached to a TextMate token.</param>
+    /// <returns>The RazorDocs token modifier, or <see langword="null"/> for unstyled scopes.</returns>
+    internal static string? ResolveTokenClass(IReadOnlyList<string> scopes)
     {
         if (ContainsScope(scopes, "markup.deleted"))
         {

@@ -1,5 +1,7 @@
+using System.Text;
 using ForgeTrust.Runnable.Web.RazorDocs.Services;
 using Microsoft.Extensions.Logging.Abstractions;
+using TextMateSharp.Grammars;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs.Tests;
 
@@ -62,6 +64,17 @@ public class TextMateSharpRazorDocsCodeHighlighterTests
     }
 
     [Fact]
+    public void Highlight_ShouldTreatNullCodeAsEmptyPlainText()
+    {
+        var result = _highlighter.Highlight(new RazorDocsCodeBlock(null!, "plaintext"));
+
+        Assert.False(result.IsHighlighted);
+        Assert.Equal("plaintext", result.NormalizedLanguage);
+        Assert.Contains("doc-code--plain doc-code--language-plaintext language-plaintext", result.Html);
+        Assert.EndsWith("<code></code></pre>", result.Html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Highlight_ShouldRenderOversizedBlockAsPlainText()
     {
         var code = new string('x', TextMateSharpRazorDocsCodeHighlighter.MaxHighlightedCodeBlockCharacters + 1);
@@ -72,6 +85,22 @@ public class TextMateSharpRazorDocsCodeHighlighterTests
         Assert.Equal("csharp", result.NormalizedLanguage);
         Assert.Contains("doc-code--plain doc-code--language-csharp language-csharp", result.Html);
         Assert.DoesNotContain("doc-token", result.Html);
+    }
+
+    [Fact]
+    public void Highlight_ShouldRenderKnownLanguageWithoutGrammarAsPlainText()
+    {
+        var highlighter = new TextMateSharpRazorDocsCodeHighlighter(
+            new RazorDocsCodeLanguageCatalog(),
+            NullLogger<TextMateSharpRazorDocsCodeHighlighter>.Instance,
+            _ => null);
+
+        var result = highlighter.Highlight(new RazorDocsCodeBlock("@page", "csharp"));
+
+        Assert.False(result.IsHighlighted);
+        Assert.Equal("csharp", result.NormalizedLanguage);
+        Assert.Contains("doc-code--plain doc-code--language-csharp language-csharp", result.Html);
+        Assert.Contains("@page", result.Html);
     }
 
     [Fact]
@@ -87,12 +116,89 @@ public class TextMateSharpRazorDocsCodeHighlighterTests
     }
 
     [Fact]
+    public void Highlight_ShouldApplyLineLimitWithoutDoubleCountingCrLf()
+    {
+        var code = string.Join("\r\n", Enumerable.Repeat("x", TextMateSharpRazorDocsCodeHighlighter.MaxHighlightedCodeBlockLines + 1));
+
+        var result = _highlighter.Highlight(new RazorDocsCodeBlock(code, "csharp"));
+
+        Assert.False(result.IsHighlighted);
+        Assert.Equal("csharp", result.NormalizedLanguage);
+        Assert.Contains("x\nx", result.Html);
+    }
+
+    [Fact]
     public void Highlight_ShouldReuseCachedGrammarAcrossRepeatedBlocks()
     {
         _highlighter.Highlight(new RazorDocsCodeBlock("public class One { }", "csharp"));
         _highlighter.Highlight(new RazorDocsCodeBlock("public class Two { }", "cs"));
 
         Assert.Equal(1, _highlighter.CachedGrammarCount);
+    }
+
+    [Fact]
+    public void LoadGrammar_ShouldReturnNull_WhenTextMateLanguageIdIsMissing()
+    {
+        var language = new RazorDocsCodeLanguage(
+            "custom",
+            "custom",
+            "Custom",
+            TextMateLanguageId: null,
+            IsKnown: true,
+            IsPlainText: false);
+
+        Assert.Null(_highlighter.LoadGrammar(language));
+    }
+
+    [Fact]
+    public void LoadGrammar_ShouldReturnNull_WhenTextMateScopeIsUnknown()
+    {
+        var language = new RazorDocsCodeLanguage(
+            "custom",
+            "custom",
+            "Custom",
+            "not-a-textmate-language",
+            IsKnown: true,
+            IsPlainText: false);
+
+        Assert.Null(_highlighter.LoadGrammar(language));
+    }
+
+    [Fact]
+    public void AppendTokens_ShouldEscapeUntokenizedLines()
+    {
+        var builder = new StringBuilder();
+
+        TextMateSharpRazorDocsCodeHighlighter.AppendTokens(builder, "<empty>", []);
+
+        Assert.Equal("&lt;empty&gt;", builder.ToString());
+    }
+
+    [Fact]
+    public void AppendTokens_ShouldPreserveGapsAndTrailingText()
+    {
+        var builder = new StringBuilder();
+        IToken[] tokens =
+        [
+            new TestToken(2, 5, ["string.quoted"]),
+            new TestToken(7, 9, ["source.operator"])
+        ];
+
+        TextMateSharpRazorDocsCodeHighlighter.AppendTokens(builder, "ab<cde>fg&", tokens);
+
+        Assert.Equal(
+            "ab<span class=\"doc-token doc-token--string\">&lt;cd</span>e&gt;<span class=\"doc-token doc-token--operator\">fg</span>&amp;",
+            builder.ToString());
+    }
+
+    [Theory]
+    [InlineData("markup.deleted.diff", "deleted")]
+    [InlineData("markup.inserted.diff", "inserted")]
+    [InlineData("keyword.operator.assignment", "keyword")]
+    [InlineData("source.unknown", null)]
+    public void ResolveTokenClass_ShouldMapDiffAndFallbackScopes(string scope, string? expected)
+    {
+        Assert.Equal(expected, TextMateSharpRazorDocsCodeHighlighter.ResolveTokenClass([scope]));
     }
 
     private static string GetPreClassAttribute(string html)
@@ -104,5 +210,23 @@ public class TextMateSharpRazorDocsCodeHighlighterTests
         var end = html.IndexOf('"', start);
         Assert.True(end > start);
         return html[start..end];
+    }
+
+    private sealed class TestToken : IToken
+    {
+        public TestToken(int startIndex, int endIndex, IEnumerable<string> scopes)
+        {
+            StartIndex = startIndex;
+            EndIndex = endIndex;
+            Scopes = scopes.ToList();
+        }
+
+        public int StartIndex { get; set; }
+
+        public int EndIndex { get; }
+
+        public int Length => EndIndex - StartIndex;
+
+        public List<string> Scopes { get; }
     }
 }

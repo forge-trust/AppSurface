@@ -78,6 +78,11 @@ internal sealed class RazorDocsCodeBlockRenderer : HtmlObjectRenderer<CodeBlock>
         renderer.Write(highlighted.Html);
     }
 
+    /// <summary>
+    /// Extracts the first language token from a fenced code block's info string.
+    /// </summary>
+    /// <param name="block">The fenced code block to inspect.</param>
+    /// <returns>The first language token, or <see langword="null" /> when the fence has no info string.</returns>
     internal static string? ExtractLanguage(FencedCodeBlock block)
     {
         ArgumentNullException.ThrowIfNull(block);
@@ -93,11 +98,6 @@ internal sealed class RazorDocsCodeBlockRenderer : HtmlObjectRenderer<CodeBlock>
             return null;
         }
 
-        foreach (var token in info.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-        {
-            return token;
-        }
-
-        return null;
+        return info.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0];
     }
 }
