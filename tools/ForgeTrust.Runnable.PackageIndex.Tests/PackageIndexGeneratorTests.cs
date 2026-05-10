@@ -375,6 +375,40 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateAsync_ThrowsWhenExpectedDependencyPackageIdIsEmpty()
+    {
+        await WriteFileAsync("packages/README.md.yml", "title: Runnable");
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
+                includes: Base web startup.
+                does_not_include: OpenAPI.
+                start_here_path: Web/ForgeTrust.Runnable.Web/README.md
+                expected_dependency_package_ids:
+                  - ""
+            """);
+        await WriteFileAsync("Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.Runnable.Web/README.md", "# Web");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj",
+                "ForgeTrust.Runnable.Web")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+
+        Assert.Contains("expected_dependency_package_ids", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GenerateAsync_ThrowsWhenNonPublicEntryNoteIsMissing()
     {
         await WriteFileAsync("packages/README.md.yml", "title: Runnable");
@@ -1396,6 +1430,25 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 CancellationToken.None));
 
         Assert.Contains("Failed to start dotnet msbuild", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProcessCommandRunner_ThrowsWhenProcessStartReturnsFalse()
+    {
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new ProcessCommandRunner(_ => false).RunAsync(
+                new CommandRunRequest(
+                    "dotnet",
+                    ["--info"],
+                    _repositoryRoot,
+                    "dotnet msbuild",
+                    "missing/Nope.csproj",
+                    "evaluate",
+                    "evaluating",
+                    100),
+                CancellationToken.None));
+
+        Assert.Contains("process did not start", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

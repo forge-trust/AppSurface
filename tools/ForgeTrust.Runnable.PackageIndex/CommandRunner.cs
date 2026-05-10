@@ -54,6 +54,20 @@ internal sealed record CommandRunResult(string StandardOutput, string StandardEr
 /// </summary>
 internal sealed class ProcessCommandRunner : ICommandRunner
 {
+    private readonly Func<Process, bool> _startProcess;
+
+    public ProcessCommandRunner()
+        : this(process => process.Start())
+    {
+    }
+
+    internal ProcessCommandRunner(Func<Process, bool> startProcess)
+    {
+        ArgumentNullException.ThrowIfNull(startProcess);
+
+        _startProcess = startProcess;
+    }
+
     /// <inheritdoc />
     public async Task<CommandRunResult> RunAsync(CommandRunRequest request, CancellationToken cancellationToken)
     {
@@ -91,7 +105,7 @@ internal sealed class ProcessCommandRunner : ICommandRunner
         using var process = new Process { StartInfo = startInfo };
         try
         {
-            if (!process.Start())
+            if (!_startProcess(process))
             {
                 throw new PackageIndexException(
                     $"Failed to start {request.OperationName} for '{request.Subject}': process did not start.");

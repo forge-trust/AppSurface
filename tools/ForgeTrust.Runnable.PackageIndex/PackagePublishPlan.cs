@@ -59,7 +59,7 @@ internal sealed class PackagePublishPlanResolver
             metadata => metadata.PackageId,
             StringComparer.OrdinalIgnoreCase);
 
-        ValidatePublishFields(resolvedEntries, metadataByPackageId);
+        ValidatePublishFields(resolvedEntries);
         ValidateProjectReferenceDependencies(repositoryRoot, resolvedEntries, metadataByProject);
 
         return new PackagePublishPlan(
@@ -90,23 +90,10 @@ internal sealed class PackagePublishPlanResolver
         return metadataByPath;
     }
 
-    private static void ValidatePublishFields(
-        IReadOnlyList<ResolvedPackageEntry> entries,
-        IReadOnlyDictionary<string, PackageProjectMetadata> metadataByPackageId)
+    private static void ValidatePublishFields(IReadOnlyList<ResolvedPackageEntry> entries)
     {
         foreach (var entry in entries)
         {
-            if (entry.Manifest.PublishDecision is null)
-            {
-                throw new PackageIndexException($"Manifest entry '{entry.Manifest.Project}' must define 'publish_decision'.");
-            }
-
-            if (entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish
-                && string.IsNullOrWhiteSpace(entry.Manifest.PublishReason))
-            {
-                throw new PackageIndexException($"Manifest entry '{entry.Manifest.Project}' must define 'publish_reason' when 'publish_decision' is 'do_not_publish'.");
-            }
-
             if (entry.Manifest.Classification == PackageClassification.Public
                 && entry.Manifest.PublishDecision != PackagePublishDecision.Publish)
             {
@@ -131,14 +118,6 @@ internal sealed class PackagePublishPlanResolver
                 throw new PackageIndexException($"Excluded manifest entry '{entry.Manifest.Project}' must use publish_decision 'do_not_publish'.");
             }
 
-            foreach (var packageId in entry.Manifest.ExpectedDependencyPackageIds)
-            {
-                if (!metadataByPackageId.ContainsKey(packageId))
-                {
-                    throw new PackageIndexException(
-                        $"Manifest entry '{entry.Manifest.Project}' expects unknown dependency package id '{packageId}'.");
-                }
-            }
         }
     }
 

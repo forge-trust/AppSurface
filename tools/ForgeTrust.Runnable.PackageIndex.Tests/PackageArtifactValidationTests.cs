@@ -895,6 +895,34 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_ThrowsWhenTailwindRuntimeIdIsUnsupported()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Web.Tailwind.Runtime.solaris-x64",
+            PackageVersion,
+            EmptyDependencies);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.Runnable.Web.Tailwind/runtimes/ForgeTrust.Runnable.Web.Tailwind.Runtime.solaris-x64.csproj",
+                        "ForgeTrust.Runnable.Web.Tailwind.Runtime.solaris-x64",
+                        PackagePublishDecision.SupportPublish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("unsupported runtime id", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("solaris-x64", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_AcceptsTailwindRuntimePayload()
     {
         var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
