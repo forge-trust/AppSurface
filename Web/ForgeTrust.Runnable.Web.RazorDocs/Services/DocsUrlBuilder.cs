@@ -410,6 +410,63 @@ public sealed class DocsUrlBuilder
 public sealed record RazorDocsRouteReferences
 {
     /// <summary>
+    /// Initializes a new instance of the <see cref="RazorDocsRouteReferences"/> record for object-initializer use.
+    /// </summary>
+    public RazorDocsRouteReferences()
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RazorDocsRouteReferences"/> record with the original route set.
+    /// </summary>
+    /// <remarks>
+    /// This constructor preserves source compatibility for callers that created route references before the harvest
+    /// health routes were added. New code should prefer object-initializer syntax so route additions remain explicit.
+    /// </remarks>
+    /// <param name="home">The current live docs home route.</param>
+    /// <param name="search">The current live docs search workspace route.</param>
+    /// <param name="searchIndex">The current live docs search-index JSON route.</param>
+    /// <param name="searchIndexRefresh">The authenticated search-index refresh route.</param>
+    /// <param name="versions">The route-family archive route.</param>
+    public RazorDocsRouteReferences(
+        string home,
+        string search,
+        string searchIndex,
+        string searchIndexRefresh,
+        string versions)
+        : this(home, search, searchIndex, searchIndexRefresh, versions, string.Empty, string.Empty)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RazorDocsRouteReferences"/> record with all known routes.
+    /// </summary>
+    /// <param name="home">The current live docs home route.</param>
+    /// <param name="search">The current live docs search workspace route.</param>
+    /// <param name="searchIndex">The current live docs search-index JSON route.</param>
+    /// <param name="searchIndexRefresh">The authenticated search-index refresh route.</param>
+    /// <param name="versions">The route-family archive route.</param>
+    /// <param name="health">The current live docs harvest health HTML route.</param>
+    /// <param name="healthJson">The current live docs harvest health JSON route.</param>
+    public RazorDocsRouteReferences(
+        string home,
+        string search,
+        string searchIndex,
+        string searchIndexRefresh,
+        string versions,
+        string health,
+        string healthJson)
+    {
+        Home = home;
+        Search = search;
+        SearchIndex = searchIndex;
+        SearchIndexRefresh = searchIndexRefresh;
+        Versions = versions;
+        Health = health;
+        HealthJson = healthJson;
+    }
+
+    /// <summary>
     /// Gets the current live docs home route.
     /// </summary>
     public string Home { get; init; } = string.Empty;
@@ -443,4 +500,54 @@ public sealed record RazorDocsRouteReferences
     /// Gets the current live docs harvest health JSON route.
     /// </summary>
     public string HealthJson { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Deconstructs the original route set for callers that used the positional record contract.
+    /// </summary>
+    /// <param name="home">The current live docs home route.</param>
+    /// <param name="search">The current live docs search workspace route.</param>
+    /// <param name="searchIndex">The current live docs search-index JSON route.</param>
+    /// <param name="searchIndexRefresh">The authenticated search-index refresh route.</param>
+    /// <param name="versions">The route-family archive route.</param>
+    public void Deconstruct(
+        out string home,
+        out string search,
+        out string searchIndex,
+        out string searchIndexRefresh,
+        out string versions)
+    {
+        home = Home;
+        search = Search;
+        searchIndex = SearchIndex;
+        searchIndexRefresh = SearchIndexRefresh;
+        versions = Versions;
+    }
+
+    /// <summary>
+    /// Deconstructs all known routes.
+    /// </summary>
+    /// <param name="home">The current live docs home route.</param>
+    /// <param name="search">The current live docs search workspace route.</param>
+    /// <param name="searchIndex">The current live docs search-index JSON route.</param>
+    /// <param name="searchIndexRefresh">The authenticated search-index refresh route.</param>
+    /// <param name="versions">The route-family archive route.</param>
+    /// <param name="health">The current live docs harvest health HTML route.</param>
+    /// <param name="healthJson">The current live docs harvest health JSON route.</param>
+    public void Deconstruct(
+        out string home,
+        out string search,
+        out string searchIndex,
+        out string searchIndexRefresh,
+        out string versions,
+        out string health,
+        out string healthJson)
+    {
+        home = Home;
+        search = Search;
+        searchIndex = SearchIndex;
+        searchIndexRefresh = SearchIndexRefresh;
+        versions = Versions;
+        health = Health;
+        healthJson = HealthJson;
+    }
 }

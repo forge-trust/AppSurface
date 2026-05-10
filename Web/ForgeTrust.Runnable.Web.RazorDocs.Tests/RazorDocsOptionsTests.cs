@@ -692,9 +692,12 @@ public sealed class RazorDocsOptionsTests
         var result = validator.Validate(Options.DefaultName, options);
 
         Assert.True(result.Failed);
+        var expectedMessage = invalidRoutes
+            ? "Unsupported RazorDocs harvest health route exposure mode"
+            : "Unsupported RazorDocs harvest health chrome exposure mode";
         Assert.Contains(
             result.Failures,
-            failure => failure.Contains("Unsupported RazorDocs harvest health", StringComparison.OrdinalIgnoreCase));
+            failure => failure.Contains(expectedMessage, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

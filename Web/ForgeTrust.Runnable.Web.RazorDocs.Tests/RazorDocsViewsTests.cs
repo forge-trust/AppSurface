@@ -1012,6 +1012,48 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task HarvestHealthView_ShouldHideDiagnosticsSection_WhenDiagnosticsAreEmpty()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new RazorDocsHarvestHealthResponse
+        {
+            Status = "Healthy",
+            GeneratedUtc = new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero),
+            Verification = new RazorDocsHarvestHealthVerification
+            {
+                Ok = true,
+                HttpStatusCode = StatusCodes.Status200OK
+            },
+            TotalHarvesters = 1,
+            SuccessfulHarvesters = 1,
+            TotalDocs = 3,
+            Harvesters =
+            [
+                new RazorDocsHarvesterHealthResponse
+                {
+                    HarvesterType = "MarkdownHarvester",
+                    Status = "Healthy",
+                    DocCount = 3
+                }
+            ],
+            Diagnostics = []
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/HarvestHealth.cshtml",
+            model);
+
+        Assert.Contains("Harvest Health", html);
+        Assert.Contains("Healthy", html);
+        Assert.Contains("passing", html);
+        Assert.Contains("MarkdownHarvester", html);
+        Assert.DoesNotContain("diagnostics-heading", html);
+        Assert.DoesNotContain("<h2 id=\"diagnostics-heading\"", html);
+        Assert.DoesNotContain(DocHarvestDiagnosticCodes.HarvesterFailed, html);
+    }
+
+    [Fact]
     public async Task SidebarView_ShouldRenderBlankAndRelativeLinks_WithoutPathBaseRewriting()
     {
         using var services = CreateServiceProvider(CreateDocs());

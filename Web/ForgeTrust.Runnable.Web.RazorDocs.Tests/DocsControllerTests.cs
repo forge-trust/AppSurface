@@ -2323,7 +2323,14 @@ public class DocsControllerTests : IDisposable
             var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
             var response = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Value);
             var serialized = JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var customSerialized = JsonSerializer.Serialize(
+                response,
+                new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = new PrefixJsonNamingPolicy()
+                });
             using var document = JsonDocument.Parse(serialized);
+            using var customDocument = JsonDocument.Parse(customSerialized);
 
             Assert.Equal(StatusCodes.Status200OK, result.StatusCode);
             Assert.True(response.Verification.Ok);
@@ -2336,6 +2343,9 @@ public class DocsControllerTests : IDisposable
             Assert.Equal(
                 StatusCodes.Status200OK,
                 document.RootElement.GetProperty("verification").GetProperty("httpStatusCode").GetInt32());
+            Assert.True(customDocument.RootElement.TryGetProperty("status", out _));
+            Assert.False(customDocument.RootElement.TryGetProperty("x_Status", out _));
+            Assert.True(customDocument.RootElement.GetProperty("verification").TryGetProperty("httpStatusCode", out _));
         }
     }
 
@@ -3218,5 +3228,13 @@ public class DocsControllerTests : IDisposable
     {
         return call.Method.Name == nameof(ILogger.Log)
                && call.GetArgument<LogLevel>(0) == LogLevel.Warning;
+    }
+
+    private sealed class PrefixJsonNamingPolicy : JsonNamingPolicy
+    {
+        public override string ConvertName(string name)
+        {
+            return $"x_{name}";
+        }
     }
 }

@@ -1358,7 +1358,7 @@ public class DocsController : Controller
 
         public string WebRootPath { get; set; } = AppContext.BaseDirectory;
 
-        public string EnvironmentName { get; set; } = Environments.Development;
+        public string EnvironmentName { get; set; } = Environments.Production;
 
         public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
 
