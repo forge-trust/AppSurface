@@ -311,9 +311,26 @@ RazorWire also supports hybrid islands where a server-rendered region mounts a c
 
 ## Static Export
 
-RazorWire can generate static or hybrid sites with the installable `razorwire`
-.NET tool, or with the short-lived `dnx` tool execution path. Those
-package-based commands require a published package or an explicit local package
+RazorWire can generate CDN-ready static output with the installable `razorwire`
+.NET tool, or with the short-lived `dnx` tool execution path. CDN mode is the
+default: extensionless internal routes such as `/about` are emitted as files such
+as `about.html`, and exporter-managed links, frames, scripts, stylesheets, images,
+`<img>` and `<source>` `srcset` candidates, and CSS `url(...)` references are
+rewritten to the generated artifact URLs. When the conventional
+`/_runnable/errors/404` route is available, it emits `404.html` through the same
+validation and rewrite path. Use `--mode hybrid` when the exported directory will
+still be served behind infrastructure that resolves application-style extensionless
+URLs.
+
+CDN export validates the dependencies it can discover while crawling. Missing
+frame routes, unsafe query-bearing frame sources, missing internal assets, and
+managed URLs that cannot be rewritten fail the export with `RWEXPORT###`
+diagnostics instead of producing a broken folder. The validation boundary is
+deliberate: app-authored JavaScript fetches, form posts, Server-Sent Events, import
+maps, and other runtime behavior outside markup/CSS references are not proven static
+by the exporter.
+
+Those package-based commands require a published package or an explicit local package
 source; public package publishing is still manual until the coordinated release
 automation tracked in #161 lands.
 

@@ -37,7 +37,8 @@ public record WebOptions
     /// must always force or always suppress the conventional pages. When enabled, Runnable reserves
     /// <c>/_runnable/errors/401</c>, <c>/_runnable/errors/403</c>, and <c>/_runnable/errors/404</c> for direct
     /// rendering, and ignores that path prefix when deciding whether to apply browser-oriented status-page
-    /// middleware. Static export tooling still consumes only the 404 route and writes only <c>404.html</c>.
+    /// middleware. Static export tooling still consumes only the 404 route and writes only <c>404.html</c>;
+    /// when CDN mode is active, that emitted page is validated and rewritten with the rest of the static graph.
     /// </remarks>
     public ErrorPagesOptions Errors { get; set; } = ErrorPagesOptions.Default;
 

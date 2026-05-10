@@ -53,7 +53,8 @@ public static class BrowserStatusPageDefaults
     /// This route is intended for framework tooling such as static export.
     /// </summary>
     /// <remarks>
-    /// Static export probes this route and writes only <c>404.html</c>. Applications should override the view at
+    /// Static export probes this route and writes only <c>404.html</c>. CDN export validates and rewrites that
+    /// page's managed internal references before writing it. Applications should override the view at
     /// <see cref="AppViewPathFormat"/> rather than mapping their own route at this path.
     /// </remarks>
     public const string ReservedNotFoundRoute = ReservedRouteBase + "/404";

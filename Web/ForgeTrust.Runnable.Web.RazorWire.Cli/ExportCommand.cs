@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using CliFx;
 using CliFx.Attributes;
+using CliFx.Exceptions;
 using CliFx.Infrastructure;
 using Microsoft.Extensions.Logging;
 
@@ -32,6 +33,17 @@ public class ExportCommand : ICommand
     /// </remarks>
     [CommandOption("seeds", 'r', Description = "Path to a file containing seed routes.")]
     public string? SeedRoutesPath { get; init; }
+
+    /// <summary>
+    /// Gets or sets the export mode that controls whether output is rewritten for static CDN hosting.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ExportMode.Cdn"/> is the default and emits fully static output for plain static hosts. Use
+    /// <see cref="ExportMode.Hybrid"/> when the exported directory will still be served behind application-style
+    /// routing that can resolve extensionless URLs.
+    /// </remarks>
+    [CommandOption("mode", 'm', Description = "Export mode: cdn (default) or hybrid.")]
+    public ExportMode Mode { get; init; } = ExportMode.Cdn;
 
     /// <summary>
     /// Gets or sets the base URL of a running application to crawl.
@@ -124,8 +136,15 @@ public class ExportCommand : ICommand
 
         _logger.LogInformation("Exporting to {OutputPath}...", OutputPath);
 
-        var context = new ExportContext(OutputPath, SeedRoutesPath, resolvedSource.BaseUrl);
-        await _engine.RunAsync(context, cancellationToken);
+        var context = new ExportContext(OutputPath, SeedRoutesPath, resolvedSource.BaseUrl, Mode);
+        try
+        {
+            await _engine.RunAsync(context, cancellationToken);
+        }
+        catch (ExportValidationException ex)
+        {
+            throw new CommandException(ex.Message);
+        }
 
         _logger.LogInformation("Export complete!");
     }

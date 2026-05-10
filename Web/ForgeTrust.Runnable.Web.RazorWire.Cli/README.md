@@ -1,6 +1,6 @@
 # RazorWire CLI
 
-The **RazorWire CLI** is a command-line tool for managing RazorWire projects. Its primary feature is the ability to export a reactive RazorWire site into a static or hybrid directory for hosting on services like S3 or traditional web servers.
+The **RazorWire CLI** is a command-line tool for managing RazorWire projects. Its primary feature is exporting a reactive RazorWire site into CDN-ready static files by default, with an opt-in hybrid mode for deployments that still provide server routing.
 
 The CLI uses Runnable's command-first console mode. That means help and validation output are intentionally quiet, without Generic Host lifecycle banners, while real export runs still emit useful progress logs.
 
@@ -71,10 +71,33 @@ Exports a RazorWire application to a static directory.
 - **`-p|--project <path.csproj>`**: Path to a .NET project to run automatically and export.
 - **`-d|--dll <path.dll>`**: Path to a .NET DLL to run automatically and export.
 - **`-f|--framework <TFM>`**: Target framework for project exports. Required when `--project` points at a multi-targeted project.
+- **`-m|--mode <cdn|hybrid>`**: Export mode. `cdn` is the default and rewrites managed internal URLs to emitted static artifacts. `hybrid` preserves application-style internal URLs for hosts that still route extensionless paths.
 - **`--app-args <token>`**: Repeatable app-argument token to pass through when launching `--project` or `--dll`.
 - **`--no-build`**: Project mode only. Skips the release publish step and reuses existing published output.
 
 Exactly one source option is required: `--url`, `--project`, or `--dll`.
+
+#### Export modes
+
+`cdn` mode is the default because most `razorwire export` runs produce folders that are uploaded to plain static hosting or a CDN. It emits extension-backed artifact URLs for exporter-managed internal references:
+
+- `/` is emitted as `index.html` and may still be referenced as `/`.
+- `/about` is emitted as `about.html` and internal references rewrite to `/about.html`.
+- `/docs/start` is emitted as `docs/start.html` and internal references rewrite to `/docs/start.html`.
+- RazorDocs content frames also emit `.partial.html` artifacts when a `doc-content` frame exists, so static frame navigation can fetch the content island.
+- Assets that already have extensions, such as `/css/site.css`, `/img/logo.png`, or `/_content/.../razorwire.js`, keep their path. Cache-busting query strings on assets are allowed only when the query-free path maps to an exported file.
+- The conventional `/_runnable/errors/404` page, when available, is emitted as `404.html` and participates in the same CDN validation and URL rewriting.
+
+CDN validation fails the export when exporter-managed dependencies cannot be represented as static artifacts. Diagnostics use stable codes:
+
+- `RWEXPORT001`: a server-fetched frame route did not materialize.
+- `RWEXPORT002`: a query-bearing frame route cannot be represented as one static artifact.
+- `RWEXPORT003`: a required internal asset did not materialize.
+- `RWEXPORT004`: a managed internal URL could not be rewritten to an emitted artifact URL.
+
+`hybrid` mode preserves the older application-style URL behavior. Use it when the exported directory will still be served by infrastructure that resolves extensionless URLs, dynamic frame endpoints, or other live-server behavior. Hybrid mode logs missing discovered dependencies but does not enforce CDN static-safety validation.
+
+CDN mode validates the URLs the exporter owns and can see while crawling HTML and CSS: discovered page links, Turbo Frame sources, supported HTML asset references, `<img>` and `<source>` `srcset` candidates, and CSS `url(...)` references. It does not prove arbitrary app-authored JavaScript `fetch` calls, form posts, Server-Sent Events, import maps, or other runtime behavior that is not represented as exporter-managed markup or CSS URLs.
 
 When launched app processes are started by the CLI (`--project` or `--dll`), they run in production environment (`DOTNET_ENVIRONMENT=Production`, `ASPNETCORE_ENVIRONMENT=Production`).
 
