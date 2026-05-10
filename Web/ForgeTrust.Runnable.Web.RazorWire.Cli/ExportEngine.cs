@@ -1017,7 +1017,11 @@ public class ExportEngine
                     rewrittenSrcSet = rewrittenSrcSet.Replace(rawValue, artifactUrl, StringComparison.Ordinal);
                 }
 
-                return match.Value.Replace(srcSet, rewrittenSrcSet, StringComparison.Ordinal);
+                var valueGroup = match.Groups[2];
+                var valueStart = valueGroup.Index - match.Index;
+                var prefix = match.Value[..valueStart];
+                var suffix = match.Value[(valueStart + valueGroup.Length)..];
+                return prefix + rewrittenSrcSet + suffix;
             });
     }
 

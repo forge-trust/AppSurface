@@ -621,6 +621,7 @@ public class ExportEngineTests
             Assert.Contains("src=\"/_content/pkg/app.js?v=abc123\"", indexHtml);
             Assert.Contains("href=\"/css/site.css\"", indexHtml);
             Assert.Contains("src=\"/img/logo.png\"", indexHtml);
+            Assert.Contains("data-copy=\"img/hero.avif 1x, img/hero.webp 2x\" srcset=\"/img/hero.avif 1x, /img/hero.webp 2x\"", indexHtml);
             Assert.Contains("srcset=\"/img/hero.avif 1x, /img/hero.webp 2x\"", indexHtml);
             Assert.Contains("srcset=\"/img/logo-2x.png 2x, /img/logo-small.png 300w\"", indexHtml);
             Assert.Contains("url('/img/inline.png')", indexHtml);
@@ -1159,7 +1160,7 @@ public class ExportEngineTests
                         <a href="/docs/start#intro">Docs</a>
                         <turbo-frame id="doc-content" src="/docs/start"></turbo-frame>
                         <script src="/_content/pkg/app.js?v=abc123"></script>
-                        <picture><source srcset="img/hero.avif 1x, img/hero.webp 2x" type="image/avif"></picture>
+                        <picture><source data-copy="img/hero.avif 1x, img/hero.webp 2x" srcset="img/hero.avif 1x, img/hero.webp 2x" type="image/avif"></picture>
                         <img src="/img/logo.png" srcset="/img/logo-2x.png 2x, /img/logo-small.png 300w">
                       </body>
                     </html>
