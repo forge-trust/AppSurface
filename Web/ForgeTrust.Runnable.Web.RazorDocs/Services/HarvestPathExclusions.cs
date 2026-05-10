@@ -46,7 +46,8 @@ internal static class HarvestPathExclusions
     /// Directory names that should always be excluded in addition to the shared hidden-directory behavior.
     /// </param>
     /// <param name="excludeTestProjectDirectories">
-    /// When <c>true</c>, also excludes project-style test directory names such as <c>*.Tests</c> and <c>*Tests</c>.
+    /// When <c>true</c>, also excludes project-style test directory names such as <c>*.Tests</c>,
+    /// <c>*.UnitTests</c>, <c>*-Tests</c>, and <c>*_Tests</c>.
     /// </param>
     /// <returns><c>true</c> if the file should be excluded; otherwise, <c>false</c>.</returns>
     internal static bool ShouldExcludeFilePath(
