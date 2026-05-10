@@ -46,6 +46,7 @@ public class ExportEngineTests
     [InlineData("/about?query=1", "/about")]
     [InlineData("/contact#fragment", "/contact")]
     [InlineData("/home", "/home")]
+    [InlineData("/docs/../about?query=1#fragment", "/about")]
     public void TryGetNormalizedRoute_Should_Normalize_Correctly(string raw, string expectedPath)
     {
         // Act
@@ -202,6 +203,20 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractLinks_Should_Resolve_Relative_Urls_Against_CurrentRoute()
+    {
+        var html = @"<a href=""next"">Next</a>";
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        _sut.ExtractLinks(html, context, "/docs/start");
+
+        var reference = Assert.Single(context.References);
+        Assert.Equal("/docs/next", reference.Path);
+        Assert.Equal("/docs/start", reference.SourceRoute);
+        Assert.Contains("/docs/next", context.Queue);
+    }
+
+    [Fact]
     public async Task ExtractAssets_Should_Extract_Turbo_Frame_Dependencies_During_Run()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -269,6 +284,38 @@ public class ExportEngineTests
             await _sut.RunAsync(context);
 
             Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Normalize_Absolute_Seed_Urls_Against_BaseUrl_PathBase()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        Directory.CreateDirectory(tempDir);
+        await File.WriteAllLinesAsync(seedFile, ["http://localhost:5000/app/docs"]);
+
+        try
+        {
+            var handler = new PathBaseSeedHandler();
+            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, seedFile, "http://localhost:5000/app");
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Combine(tempDir, "docs.html")));
+            Assert.DoesNotContain("/app/docs", context.RouteOutcomes.Keys);
+            Assert.Contains("/docs", context.RouteOutcomes.Keys);
+            Assert.Contains("/app/docs", handler.RequestPaths);
+            Assert.DoesNotContain("/app/app/docs", handler.RequestPaths);
         }
         finally
         {
@@ -624,8 +671,8 @@ public class ExportEngineTests
             Assert.Contains("data-copy=\"img/hero.avif 1x, img/hero.webp 2x\" srcset=\"/img/hero.avif 1x, /img/hero.webp 2x\"", indexHtml);
             Assert.Contains("srcset=\"/img/hero.avif 1x, /img/hero.webp 2x\"", indexHtml);
             Assert.Contains("srcset=\"/img/logo-2x.png 2x, /img/logo-small.png 300w\"", indexHtml);
-            Assert.Contains("url('/img/inline.png')", indexHtml);
-            Assert.Contains("url('/img/attr.png')", indexHtml);
+            Assert.Contains("data-copy=\".hero { background: url('img/inline.png'); }\">.hero { background: url('/img/inline.png'); }</style>", indexHtml);
+            Assert.Contains("data-copy=\"background: url('img/attr.png')\" style=\"background: url('/img/attr.png')\"", indexHtml);
 
             var aboutHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "about.html"));
             Assert.Contains("<h1>About</h1>", aboutHtml);
@@ -792,6 +839,35 @@ public class ExportEngineTests
             await _sut.RunAsync(context);
 
             Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Write_Text_Artifacts_Without_Buffering_Bodies()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new CdnRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Combine(tempDir, "css", "site.css")));
+            Assert.All(
+                context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && (outcome.IsHtml || outcome.IsCss)),
+                outcome => Assert.Null(outcome.TextBody));
         }
         finally
         {
@@ -1153,9 +1229,9 @@ public class ExportEngineTests
                     <html>
                       <head>
                         <link rel="stylesheet" href="/css/site.css">
-                        <style>.hero { background: url('/img/inline.png'); }</style>
+                        <style data-copy=".hero { background: url('img/inline.png'); }">.hero { background: url('img/inline.png'); }</style>
                       </head>
-                      <body style="background: url('/img/attr.png')">
+                      <body data-copy="background: url('img/attr.png')" style="background: url('img/attr.png')">
                         <a data-copy="/about" href="/about">About</a>
                         <a href="/docs/start#intro">Docs</a>
                         <turbo-frame id="doc-content" src="/docs/start"></turbo-frame>
@@ -1200,6 +1276,21 @@ public class ExportEngineTests
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class PathBaseSeedHandler : HttpMessageHandler
+    {
+        public List<string> RequestPaths { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            RequestPaths.Add(path);
+
+            return path == "/app/docs"
+                ? Html("<html><body><h1>Path base docs</h1></body></html>")
+                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         }
     }
 

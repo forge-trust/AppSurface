@@ -14,6 +14,7 @@ public class ExportEngine
 {
     private readonly ILogger<ExportEngine> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
+    private static readonly Uri ManagedUrlBase = new("http://dummy");
 
     // Compiled Regexes for performance
     private static readonly Regex AnchorHrefRegex = new(
@@ -180,7 +181,8 @@ public class ExportEngine
             {
                 var html = await response.Content.ReadAsStringAsync(cancellationToken);
                 var docContentFrame = ExtractDocContentFrame(html);
-                context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, html);
+                var textBody = context.Mode == ExportMode.Cdn ? html : null;
+                context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, textBody);
 
                 if (IsDocsExportPage(route, html, docContentFrame) && !string.IsNullOrWhiteSpace(docContentFrame))
                 {
@@ -188,12 +190,21 @@ public class ExportEngine
                 }
 
                 AddReferencesAndQueue(ExtractReferences(html, route, htmlScope: true), context);
+                if (context.Mode == ExportMode.Hybrid)
+                {
+                    await WriteHtmlRouteAsync(route, filePath, html, context, rewriteManagedReferences: false, cancellationToken);
+                }
             }
             else if (isCss)
             {
                 var css = await response.Content.ReadAsStringAsync(cancellationToken);
-                context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, css);
+                var textBody = context.Mode == ExportMode.Cdn ? css : null;
+                context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, textBody);
                 AddReferencesAndQueue(ExtractReferences(css, route, htmlScope: false), context);
+                if (context.Mode == ExportMode.Hybrid)
+                {
+                    await WriteCssRouteAsync(route, filePath, css, context, rewriteManagedReferences: false, cancellationToken);
+                }
             }
             else
             {
@@ -241,14 +252,10 @@ public class ExportEngine
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var added = false;
-                if (Uri.TryCreate(seed, UriKind.RelativeOrAbsolute, out var uri))
+                if (TryGetNormalizedSeedRoute(seed, context, out var normalized))
                 {
-                    var path = uri.IsAbsoluteUri ? uri.PathAndQuery : seed;
-                    if (TryGetNormalizedRoute(path, out var normalized))
-                    {
-                        added = true;
-                        EnqueueRoute(context, normalized);
-                    }
+                    added = true;
+                    EnqueueRoute(context, normalized);
                 }
 
                 if (!added)
@@ -285,28 +292,113 @@ public class ExportEngine
             var body = outcome.TextBody!;
             if (outcome.IsHtml)
             {
-                var docContentFrame = ExtractDocContentFrame(body);
-                var isDocsPage = IsDocsExportPage(outcome.Route, body, docContentFrame);
-                var htmlForWrite = isDocsPage
-                    ? AddDocsStaticPartialsMarker(body)
-                    : body;
-                htmlForWrite = context.Mode == ExportMode.Cdn
-                    ? RewriteManagedReferences(htmlForWrite, outcome.Route, htmlScope: true, context)
-                    : htmlForWrite;
-                await File.WriteAllTextAsync(outcome.ArtifactPath, htmlForWrite, cancellationToken);
-                await TryWriteDocsPartialAsync(
-                    outcome.ArtifactPath,
-                    ExtractDocContentFrame(htmlForWrite),
-                    cancellationToken);
+                await WriteHtmlRouteAsync(outcome.Route, outcome.ArtifactPath, body, context, rewriteManagedReferences: context.Mode == ExportMode.Cdn, cancellationToken);
             }
             else if (outcome.IsCss)
             {
-                var cssForWrite = context.Mode == ExportMode.Cdn
-                    ? RewriteManagedReferences(body, outcome.Route, htmlScope: false, context)
-                    : body;
-                await File.WriteAllTextAsync(outcome.ArtifactPath, cssForWrite, cancellationToken);
+                await WriteCssRouteAsync(outcome.Route, outcome.ArtifactPath, body, context, rewriteManagedReferences: context.Mode == ExportMode.Cdn, cancellationToken);
             }
         }
+    }
+
+    private bool TryGetNormalizedSeedRoute(string seed, ExportContext context, out string normalized)
+    {
+        normalized = string.Empty;
+        if (!Uri.TryCreate(seed, UriKind.RelativeOrAbsolute, out var uri))
+        {
+            return false;
+        }
+
+        var route = seed;
+        if (uri.IsAbsoluteUri)
+        {
+            if (!Uri.TryCreate(EnsureTrailingSlash(context.BaseUrl), UriKind.Absolute, out var baseUri)
+                || !HasSameOrigin(uri, baseUri)
+                || !TryGetAppRelativeRoute(uri, baseUri, out route))
+            {
+                return false;
+            }
+        }
+
+        return TryGetNormalizedRoute(route, out normalized);
+    }
+
+    private static string EnsureTrailingSlash(string value)
+    {
+        return value.EndsWith('/') ? value : value + "/";
+    }
+
+    private static bool HasSameOrigin(Uri left, Uri right)
+    {
+        return string.Equals(left.Scheme, right.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(left.Host, right.Host, StringComparison.OrdinalIgnoreCase)
+            && left.Port == right.Port;
+    }
+
+    private static bool TryGetAppRelativeRoute(Uri seedUri, Uri baseUri, out string route)
+    {
+        route = string.Empty;
+        var basePath = baseUri.AbsolutePath.TrimEnd('/');
+        var seedPath = seedUri.AbsolutePath;
+
+        if (string.IsNullOrEmpty(basePath))
+        {
+            route = seedPath + seedUri.Query + seedUri.Fragment;
+            return true;
+        }
+
+        if (string.Equals(seedPath, basePath, StringComparison.Ordinal))
+        {
+            route = "/" + seedUri.Query + seedUri.Fragment;
+            return true;
+        }
+
+        if (seedPath.StartsWith(basePath + "/", StringComparison.Ordinal))
+        {
+            route = seedPath[basePath.Length..] + seedUri.Query + seedUri.Fragment;
+            return true;
+        }
+
+        return false;
+    }
+
+    private async Task WriteHtmlRouteAsync(
+        string route,
+        string filePath,
+        string body,
+        ExportContext context,
+        bool rewriteManagedReferences,
+        CancellationToken cancellationToken)
+    {
+        var docContentFrame = ExtractDocContentFrame(body);
+        var isDocsPage = IsDocsExportPage(route, body, docContentFrame);
+        var htmlForWrite = isDocsPage
+            ? AddDocsStaticPartialsMarker(body)
+            : body;
+        htmlForWrite = rewriteManagedReferences
+            ? RewriteManagedReferences(htmlForWrite, route, htmlScope: true, context)
+            : htmlForWrite;
+        EnsureDirectoryExists(filePath);
+        await File.WriteAllTextAsync(filePath, htmlForWrite, cancellationToken);
+        await TryWriteDocsPartialAsync(
+            filePath,
+            ExtractDocContentFrame(htmlForWrite),
+            cancellationToken);
+    }
+
+    private async Task WriteCssRouteAsync(
+        string route,
+        string filePath,
+        string body,
+        ExportContext context,
+        bool rewriteManagedReferences,
+        CancellationToken cancellationToken)
+    {
+        var cssForWrite = rewriteManagedReferences
+            ? RewriteManagedReferences(body, route, htmlScope: false, context)
+            : body;
+        EnsureDirectoryExists(filePath);
+        await File.WriteAllTextAsync(filePath, cssForWrite, cancellationToken);
     }
 
     private void ValidateCdnExport(ExportContext context)
@@ -717,10 +809,11 @@ public class ExportEngine
     /// </summary>
     /// <param name="html">HTML source to scan.</param>
     /// <param name="context">The export context.</param>
-    internal void ExtractLinks(string html, ExportContext context)
+    /// <param name="currentRoute">The route used to resolve relative anchor URLs and record source provenance.</param>
+    internal void ExtractLinks(string html, ExportContext context, string currentRoute = "/")
     {
         var references = AnchorHrefRegex.Matches(html)
-            .Select(m => CreateReference(m.Groups[2].Value.Trim(), ExportReferenceKind.AnchorHref, "/"))
+            .Select(m => CreateReference(m.Groups[2].Value.Trim(), ExportReferenceKind.AnchorHref, currentRoute))
             .Where(r => r is not null)
             .Select(r => r!);
 
@@ -732,10 +825,11 @@ public class ExportEngine
     /// </summary>
     /// <param name="html">HTML content to scan.</param>
     /// <param name="context">The export context.</param>
-    private void ExtractFrames(string html, ExportContext context)
+    /// <param name="currentRoute">The route used to resolve relative frame source URLs and record source provenance.</param>
+    private void ExtractFrames(string html, ExportContext context, string currentRoute = "/")
     {
         var references = TurboFrameSrcRegex.Matches(html)
-            .Select(m => CreateReference(m.Groups[2].Value.Trim(), ExportReferenceKind.TurboFrameSrc, "/"))
+            .Select(m => CreateReference(m.Groups[2].Value.Trim(), ExportReferenceKind.TurboFrameSrc, currentRoute))
             .Where(r => r is not null)
             .Select(r => r!);
 
@@ -756,6 +850,19 @@ public class ExportEngine
             context);
     }
 
+    /// <summary>
+    /// Extracts exporter-managed internal references from HTML or CSS content.
+    /// </summary>
+    /// <param name="content">The HTML document, style block, style attribute, or stylesheet body to scan.</param>
+    /// <param name="currentRoute">The normalized route that owns <paramref name="content"/>, used to resolve relative URLs and record provenance.</param>
+    /// <param name="htmlScope">
+    /// <c>true</c> scans HTML surfaces including anchors, Turbo Frames, scripts, supported link tags, image sources, <c>srcset</c>
+    /// candidates, style blocks, and style attributes. <c>false</c> scans only CSS <c>url(...)</c> references.
+    /// </param>
+    /// <returns>
+    /// References with managed root-relative paths only. External URLs, protocol-relative URLs, hash-only references, data URLs,
+    /// JavaScript URLs, mailto links, and malformed values are filtered out before the caller enqueues or validates them.
+    /// </returns>
     internal IReadOnlyList<ExportReference> ExtractReferences(string content, string currentRoute, bool htmlScope)
     {
         var references = new List<ExportReference>();
@@ -933,16 +1040,16 @@ public class ExportEngine
         rewritten = RewriteSrcSetReferences(rewritten, currentRoute, context);
         rewritten = StyleBlockRegex.Replace(
             rewritten,
-            match => match.Value.Replace(
-                match.Groups[1].Value,
-                RewriteCssReferences(match.Groups[1].Value, currentRoute, context),
-                StringComparison.Ordinal));
+            match => ReplaceCapturedValue(
+                match,
+                1,
+                RewriteCssReferences(match.Groups[1].Value, currentRoute, context)));
         rewritten = StyleAttrRegex.Replace(
             rewritten,
-            match => match.Value.Replace(
-                match.Groups[2].Value,
-                RewriteCssReferences(match.Groups[2].Value, currentRoute, context),
-                StringComparison.Ordinal));
+            match => ReplaceCapturedValue(
+                match,
+                2,
+                RewriteCssReferences(match.Groups[2].Value, currentRoute, context)));
 
         return rewritten;
     }
@@ -1017,11 +1124,7 @@ public class ExportEngine
                     rewrittenSrcSet = rewrittenSrcSet.Replace(rawValue, artifactUrl, StringComparison.Ordinal);
                 }
 
-                var valueGroup = match.Groups[2];
-                var valueStart = valueGroup.Index - match.Index;
-                var prefix = match.Value[..valueStart];
-                var suffix = match.Value[(valueStart + valueGroup.Length)..];
-                return prefix + rewrittenSrcSet + suffix;
+                return ReplaceCapturedValue(match, 2, rewrittenSrcSet);
             });
     }
 
@@ -1045,11 +1148,16 @@ public class ExportEngine
             return match.Value;
         }
 
-        var valueGroup = match.Groups[2];
+        return ReplaceCapturedValue(match, 2, artifactUrl);
+    }
+
+    private static string ReplaceCapturedValue(Match match, int groupNumber, string replacement)
+    {
+        var valueGroup = match.Groups[groupNumber];
         var valueStart = valueGroup.Index - match.Index;
         var prefix = match.Value[..valueStart];
         var suffix = match.Value[(valueStart + valueGroup.Length)..];
-        return prefix + artifactUrl + suffix;
+        return prefix + replacement + suffix;
     }
 
     private static bool TryResolveReferenceArtifactUrl(
@@ -1132,6 +1240,13 @@ public class ExportEngine
         {
             return false;
         }
+
+        if (!Uri.TryCreate(ManagedUrlBase, rawRef, out var normalizedUri))
+        {
+            return false;
+        }
+
+        rawRef = normalizedUri.PathAndQuery + normalizedUri.Fragment;
 
         var pathEnd = rawRef.Length;
         var queryStart = rawRef.IndexOf('?');
