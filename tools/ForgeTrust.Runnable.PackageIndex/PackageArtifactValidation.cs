@@ -11,6 +11,18 @@ namespace ForgeTrust.Runnable.PackageIndex;
 /// </summary>
 internal sealed class PackageArtifactValidator
 {
+    private const string TailwindRuntimePackagePrefix = "ForgeTrust.Runnable.Web.Tailwind.Runtime.";
+
+    private static readonly IReadOnlyDictionary<string, string> TailwindRuntimeBinaryNames =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["linux-arm64"] = "tailwindcss-linux-arm64",
+            ["linux-x64"] = "tailwindcss-linux-x64",
+            ["osx-arm64"] = "tailwindcss-macos-arm64",
+            ["osx-x64"] = "tailwindcss-macos-x64",
+            ["win-x64"] = "tailwindcss-windows-x64.exe"
+        };
+
     /// <summary>
     /// Validates the package output directory and returns a markdown-ready report.
     /// </summary>
@@ -105,6 +117,14 @@ internal sealed class PackageArtifactValidator
             throw new PackageIndexException($"Tool package '{expected.PackageId}' must declare package type 'DotnetTool'.");
         }
 
+        var expectedPayloadPath = GetExpectedPayloadPath(expected.PackageId);
+        if (expectedPayloadPath is not null
+            && !inspected.EntryPaths.Contains(expectedPayloadPath, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new PackageIndexException(
+                $"Package '{expected.PackageId}' is missing required payload '{expectedPayloadPath}'.");
+        }
+
         foreach (var expectedDependency in expected.ExpectedDependencyPackageIds)
         {
             if (!inspected.Dependencies.TryGetValue(expectedDependency, out var dependencyVersion))
@@ -170,6 +190,9 @@ internal sealed class PackageArtifactValidator
             .Where(entry => IsFirstPartyAssemblyEntry(entry, packageIds))
             .Select(ReadAssemblyVersion)
             .ToArray();
+        var entryPaths = archive.Entries
+            .Select(entry => NormalizePackagePath(entry.FullName))
+            .ToArray();
 
         var packageId = GetElementValue(metadata, ns, "id");
         var packageVersion = GetElementValue(metadata, ns, "version");
@@ -195,6 +218,7 @@ internal sealed class PackageArtifactValidator
             GetElementValue(metadata, ns, "readme"),
             packageTypes,
             dependencies,
+            entryPaths,
             firstPartyAssemblyVersions);
     }
 
@@ -229,6 +253,27 @@ internal sealed class PackageArtifactValidator
 
         var assemblyName = Path.GetFileNameWithoutExtension(entry.FullName);
         return packageIds.Contains(assemblyName);
+    }
+
+    private static string? GetExpectedPayloadPath(string packageId)
+    {
+        if (!packageId.StartsWith(TailwindRuntimePackagePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var rid = packageId[TailwindRuntimePackagePrefix.Length..];
+        if (!TailwindRuntimeBinaryNames.TryGetValue(rid, out var binaryName))
+        {
+            throw new PackageIndexException($"Tailwind runtime package '{packageId}' uses unsupported runtime id '{rid}'.");
+        }
+
+        return $"runtimes/{rid}/native/{binaryName}";
+    }
+
+    private static string NormalizePackagePath(string entryPath)
+    {
+        return entryPath.Replace('\\', '/').TrimStart('/');
     }
 
     private static InspectedAssemblyVersion ReadAssemblyVersion(ZipArchiveEntry entry)
@@ -417,6 +462,7 @@ internal sealed record InspectedPackage(
     string? Readme,
     IReadOnlyList<string> PackageTypes,
     IReadOnlyDictionary<string, string> Dependencies,
+    IReadOnlyList<string> EntryPaths,
     IReadOnlyList<InspectedAssemblyVersion> FirstPartyAssemblyVersions);
 
 internal sealed record InspectedAssemblyVersion(

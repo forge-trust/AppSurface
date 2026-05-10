@@ -47,7 +47,9 @@ dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.
 
 The verifier restores and builds the solution once, packs manifest-selected packages
 with `--no-restore --no-build`, inspects each `.nupkg`, and writes a markdown report.
-It intentionally rejects stable versions and SemVer build metadata because this path
-is for prerelease package identity that NuGet will preserve exactly.
+It checks package metadata, expected same-version dependencies, first-party DLL
+informational versions, and Tailwind runtime binary payloads. It intentionally
+rejects stable versions and SemVer build metadata because this path is for
+prerelease package identity that NuGet will preserve exactly.
 
 Tracked follow-up for actual publishing: #253, "Add protected NuGet prerelease publish workflow after rename pass".

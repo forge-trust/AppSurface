@@ -837,6 +837,64 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_ThrowsWhenTailwindRuntimePayloadIsMissing()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-x64",
+            PackageVersion,
+            EmptyDependencies);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.Runnable.Web.Tailwind/runtimes/ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-x64.csproj",
+                        "ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-x64",
+                        PackagePublishDecision.SupportPublish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("missing required payload", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("runtimes/linux-x64/native/tailwindcss-linux-x64", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AcceptsTailwindRuntimePayload()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-x64",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["runtimes/linux-x64/native/tailwindcss-linux-x64"] = Encoding.UTF8.GetBytes("tailwind binary")
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "Web/ForgeTrust.Runnable.Web.Tailwind/runtimes/ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-x64.csproj",
+                    "ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-x64",
+                    PackagePublishDecision.SupportPublish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            PackageVersion);
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
     public void PackageVersionValidator_RejectsStableVersionsAndBuildMetadata()
     {
         var stable = Assert.Throws<PackageIndexException>(
