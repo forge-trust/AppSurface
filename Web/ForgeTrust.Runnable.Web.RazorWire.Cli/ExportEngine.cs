@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using ForgeTrust.Runnable.Web;
 using Microsoft.Extensions.Logging;
@@ -282,11 +283,11 @@ public class ExportEngine
 
     private async Task MaterializeTextRoutesAsync(ExportContext context, CancellationToken cancellationToken)
     {
-        foreach (var outcome in context.RouteOutcomes.Values.Where(o => o.Succeeded && o.TextBody is not null))
+        foreach (var outcome in context.RouteOutcomes.Values.Where(o => o.Succeeded && o.TextBody is not null).ToList())
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (outcome.ArtifactPath is null)
+            if (outcome.ArtifactPath is null || outcome.ArtifactUrl is null)
             {
                 continue;
             }
@@ -301,6 +302,12 @@ public class ExportEngine
             {
                 await WriteCssRouteAsync(outcome.Route, outcome.ArtifactPath, body, context, rewriteManagedReferences: context.Mode == ExportMode.Cdn, cancellationToken);
             }
+
+            context.RouteOutcomes[outcome.Route] = ExportRouteOutcome.Success(
+                outcome.Route,
+                outcome.ContentType,
+                outcome.ArtifactPath,
+                outcome.ArtifactUrl);
         }
     }
 
@@ -1018,18 +1025,50 @@ public class ExportEngine
 
     private IEnumerable<string> ParseSrcSet(string srcSet)
     {
-        // srcset format: "url [descriptor], url [descriptor]"
-        // Split by comma, then take the first part of the whitespace-split segment
+        return ParseSrcSetCandidates(srcSet).Select(candidate => candidate.Url);
+    }
+
+    private static IReadOnlyList<SrcSetCandidate> ParseSrcSetCandidates(string srcSet)
+    {
+        var candidates = new List<SrcSetCandidate>();
         if (string.IsNullOrWhiteSpace(srcSet))
         {
-            return Enumerable.Empty<string>();
+            return candidates;
         }
 
-        return srcSet.Split(',')
-            .Select(candidate =>
-                candidate.Trim().Split([' ', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries))
-            .Where(parts => parts.Length > 0)
-            .Select(parts => parts[0]);
+        var segmentStart = 0;
+        while (segmentStart < srcSet.Length)
+        {
+            var segmentEnd = srcSet.IndexOf(',', segmentStart);
+            if (segmentEnd < 0)
+            {
+                segmentEnd = srcSet.Length;
+            }
+
+            var urlStart = segmentStart;
+            while (urlStart < segmentEnd && char.IsWhiteSpace(srcSet[urlStart]))
+            {
+                urlStart++;
+            }
+
+            var urlEnd = urlStart;
+            while (urlEnd < segmentEnd && !char.IsWhiteSpace(srcSet[urlEnd]))
+            {
+                urlEnd++;
+            }
+
+            if (urlEnd > urlStart)
+            {
+                candidates.Add(new SrcSetCandidate(
+                    srcSet[urlStart..urlEnd],
+                    urlStart,
+                    urlEnd - urlStart));
+            }
+
+            segmentStart = segmentEnd + 1;
+        }
+
+        return candidates;
     }
 
     private string RewriteManagedReferences(string content, string currentRoute, bool htmlScope, ExportContext context)
@@ -1121,19 +1160,21 @@ public class ExportEngine
             match =>
             {
                 var srcSet = match.Groups[2].Value;
-                var rewrittenSrcSet = srcSet;
-                foreach (var rawValue in ParseSrcSet(srcSet).OrderByDescending(url => url.Length))
+                var rewrittenSrcSet = new StringBuilder(srcSet);
+                foreach (var candidate in ParseSrcSetCandidates(srcSet).OrderByDescending(candidate => candidate.Start))
                 {
-                    var reference = CreateReference(rawValue, ExportReferenceKind.ImgSrcSet, currentRoute);
+                    var reference = CreateReference(candidate.Url, ExportReferenceKind.ImgSrcSet, currentRoute);
                     if (reference is null || !TryResolveReferenceArtifactUrl(reference, context, out var artifactUrl))
                     {
                         continue;
                     }
 
-                    rewrittenSrcSet = rewrittenSrcSet.Replace(rawValue, artifactUrl, StringComparison.Ordinal);
+                    rewrittenSrcSet
+                        .Remove(candidate.Start, candidate.Length)
+                        .Insert(candidate.Start, artifactUrl);
                 }
 
-                return ReplaceCapturedValue(match, 2, rewrittenSrcSet);
+                return ReplaceCapturedValue(match, 2, rewrittenSrcSet.ToString());
             });
     }
 
@@ -1323,4 +1364,6 @@ public class ExportEngine
 
         return false;
     }
+
+    private readonly record struct SrcSetCandidate(string Url, int Start, int Length);
 }

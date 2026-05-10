@@ -671,6 +671,8 @@ public class ExportEngineTests
             Assert.Contains("data-copy=\"img/hero.avif 1x, img/hero.webp 2x\" srcset=\"/img/hero.avif 1x, /img/hero.webp 2x\"", indexHtml);
             Assert.Contains("srcset=\"/img/hero.avif 1x, /img/hero.webp 2x\"", indexHtml);
             Assert.Contains("srcset=\"/img/logo-2x.png 2x, /img/logo-small.png 300w\"", indexHtml);
+            Assert.Contains("srcset=\"/img/a.png 1x, /img/a.png?version=1 2x\"", indexHtml);
+            Assert.DoesNotContain("//img/a.png?version=1", indexHtml);
             Assert.Contains("data-copy=\".hero { background: url('img/inline.png'); }\">.hero { background: url('/img/inline.png'); }</style>", indexHtml);
             Assert.Contains("data-copy=\"background: url('img/attr.png')\" style=\"background: url('/img/attr.png')\"", indexHtml);
 
@@ -685,6 +687,9 @@ public class ExportEngineTests
             Assert.True(File.Exists(Path.Combine(tempDir, "img", "bg.png")));
             Assert.True(File.Exists(Path.Combine(tempDir, "img", "hero.avif")));
             Assert.True(File.Exists(Path.Combine(tempDir, "img", "hero.webp")));
+            Assert.All(
+                context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && (outcome.IsHtml || outcome.IsCss)),
+                outcome => Assert.Null(outcome.TextBody));
         }
         finally
         {
@@ -1238,6 +1243,7 @@ public class ExportEngineTests
                         <script src="/_content/pkg/app.js?v=abc123"></script>
                         <picture><source data-copy="img/hero.avif 1x, img/hero.webp 2x" srcset="img/hero.avif 1x, img/hero.webp 2x" type="image/avif"></picture>
                         <img src="/img/logo.png" srcset="/img/logo-2x.png 2x, /img/logo-small.png 300w">
+                        <img srcset="img/a.png 1x, img/a.png?version=1 2x">
                       </body>
                     </html>
                     """;
