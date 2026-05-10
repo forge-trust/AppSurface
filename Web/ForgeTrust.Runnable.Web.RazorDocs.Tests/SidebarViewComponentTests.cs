@@ -164,6 +164,58 @@ public sealed class SidebarViewComponentTests
     }
 
     [Fact]
+    public async Task InvokeAsync_ShouldKeepApiReferenceSidebarAtNamespaceLevel()
+    {
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Web", "Namespaces/ForgeTrust.Runnable.Web", "API Reference"),
+                new DocNode(
+                    "AspireApp",
+                    "Namespaces/ForgeTrust.Runnable.Web#AspireApp",
+                    string.Empty,
+                    ParentPath: "Namespaces/ForgeTrust.Runnable.Web",
+                    Metadata: new DocMetadata { NavGroup = "API Reference" })
+            ]);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            var section = Assert.Single(model.Sections);
+            var namespaceLink = Assert.Single(Assert.Single(section.Groups).Links);
+            Assert.Equal("Web", namespaceLink.Title);
+            Assert.Empty(namespaceLink.Children);
+        }
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldNestDeepApiNamespacesUnderParent()
+    {
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Core", "Namespaces/ForgeTrust.Runnable.Core", "API Reference"),
+                CreateDoc("Defaults", "Namespaces/ForgeTrust.Runnable.Core.Defaults", "API Reference"),
+                CreateDoc("Extensions", "Namespaces/ForgeTrust.Runnable.Core.Extensions", "API Reference"),
+                CreateDoc("Aspire", "Namespaces/ForgeTrust.Runnable.Aspire", "API Reference"),
+                CreateDoc("Configuration", "Namespaces/Microsoft.Extensions.Configuration", "API Reference")
+            ]);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            var section = Assert.Single(model.Sections);
+            var links = section.Groups.SelectMany(group => group.Links).ToList();
+            var coreLink = Assert.Single(links, link => link.Title == "Runnable.Core");
+
+            Assert.Equal(new[] { "Defaults", "Extensions" }, coreLink.Children.Select(child => child.Title).ToArray());
+            Assert.Contains(links, link => link.Title == "Runnable.Aspire");
+            Assert.DoesNotContain(links, link => link.Title == "Runnable.Core.Defaults");
+            Assert.DoesNotContain(links, link => link.Title == "Runnable.Core.Extensions");
+        }
+    }
+
+    [Fact]
     public async Task InvokeAsync_ShouldExposeConfiguredNamespacePrefixes_WhenProvided()
     {
         var options = new RazorDocsOptions

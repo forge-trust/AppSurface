@@ -359,23 +359,7 @@
                                                     }
                                                 </a>
 
-                                                @if (link.Children.Count > 0)
-                                                {
-                                                    <ul class="ml-4 mt-2 space-y-1 border-l border-slate-800">
-                                                        @foreach (var child in link.Children)
-                                                        {
-                                                            <li>
-                                                                <a href="@Url.PathBaseAware(child.Href)"
-                                                                   data-doc-anchor-link="true"
-                                                                   data-turbo-frame="doc-content"
-                                                                   data-turbo-action="advance"
-                                                                   class="block px-4 py-1 text-xs text-slate-500 transition-colors hover:text-cyan-300">
-                                                                    @child.Title
-                                                                </a>
-                                                            </li>
-                                                        }
-                                                    </ul>
-                                                }
+                                                @await Html.PartialAsync("_DocSectionCardChildren", link.Children)
                                             </li>
                                         }
                                     </ul>

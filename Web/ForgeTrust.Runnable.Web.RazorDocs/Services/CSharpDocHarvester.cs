@@ -17,6 +17,15 @@ public class CSharpDocHarvester : IDocHarvester
 {
     private readonly ILogger<CSharpDocHarvester> _logger;
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
+    private static readonly HashSet<string> SourceExcludedDirectories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "node_modules",
+        "bin",
+        "obj",
+        "Test",
+        "Tests",
+        "examples"
+    };
 
     /// <summary>
     /// Initializes a new instance of <see cref="CSharpDocHarvester"/> with the provided logger.
@@ -33,7 +42,7 @@ public class CSharpDocHarvester : IDocHarvester
     /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
     /// <returns>A collection of DocNode objects; each contains a title, a relative file path including a fragment anchor, and the extracted HTML documentation.</returns>
     /// <remarks>
-    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", and "Tests") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included.
+    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", "Tests", and "examples") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included.
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(
         string rootPath,
@@ -42,15 +51,16 @@ public class CSharpDocHarvester : IDocHarvester
         var nodes = new List<DocNode>();
         var stubNodes = new List<DocNode>();
         var namespacePages = new Dictionary<string, NamespaceDocPage>(StringComparer.OrdinalIgnoreCase);
-        var csFiles = Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories);
-
-        foreach (var file in csFiles)
+        foreach (var file in EnumerateEligibleCSharpFiles(rootPath, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var relativePath = Path.GetRelativePath(rootPath, file)
                 .Replace('\\', '/'); // Normalize to forward slashes for URLs
-            if (HarvestPathExclusions.ShouldExcludeFilePath(relativePath))
+            if (HarvestPathExclusions.ShouldExcludeFilePath(
+                    relativePath,
+                    SourceExcludedDirectories,
+                    excludeTestProjectDirectories: true))
             {
                 continue;
             }
@@ -265,6 +275,39 @@ public class CSharpDocHarvester : IDocHarvester
         nodes.AddRange(stubNodes);
 
         return nodes;
+    }
+
+    private static IEnumerable<string> EnumerateEligibleCSharpFiles(
+        string rootPath,
+        CancellationToken cancellationToken)
+    {
+        var pendingDirectories = new Stack<string>();
+        pendingDirectories.Push(rootPath);
+
+        while (pendingDirectories.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var currentDirectory = pendingDirectories.Pop();
+            foreach (var file in Directory.EnumerateFiles(currentDirectory, "*.cs", SearchOption.TopDirectoryOnly))
+            {
+                yield return file;
+            }
+
+            foreach (var directory in Directory.EnumerateDirectories(currentDirectory))
+            {
+                var relativeDirectory = Path.GetRelativePath(rootPath, directory).Replace('\\', '/');
+                if (HarvestPathExclusions.ShouldExcludeFilePath(
+                        $"{relativeDirectory}/_",
+                        SourceExcludedDirectories,
+                        excludeTestProjectDirectories: true))
+                {
+                    continue;
+                }
+
+                pendingDirectories.Push(directory);
+            }
+        }
     }
 
     /// <summary>
