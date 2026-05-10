@@ -121,6 +121,34 @@ public sealed class SidebarViewComponentTests
     }
 
     [Fact]
+    public async Task InvokeAsync_ShouldHideHarvestHealthChrome_WhenExposureValueIsUnsupported()
+    {
+        var options = new RazorDocsOptions
+        {
+            Harvest = new RazorDocsHarvestOptions
+            {
+                Health = new RazorDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = RazorDocsHarvestHealthExposure.Always,
+                    ShowChrome = (RazorDocsHarvestHealthExposure)999
+                }
+            }
+        };
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Quickstart", "guides/start.md", "Start Here")
+            ],
+            options);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            Assert.Null(model.HarvestHealth);
+        }
+    }
+
+    [Fact]
     public async Task InvokeAsync_ShouldRespectShowChromeIndependentlyFromExposeRoutes()
     {
         var options = new RazorDocsOptions
