@@ -690,7 +690,7 @@ Field behavior and pitfalls:
 - If multiple docs in one section set `section_landing: true`, RazorDocs keeps the lowest `order` value, then the lowest canonical path, and logs a warning for the others.
 - A section landing doc can also author `featured_page_groups`; RazorDocs uses those reader-intent groups for section-level “next steps” on the detail page and collapses the first resolved rows into section preview links surfaced on the current docs home.
 - `HideFromPublicNav = true` always wins. Hidden pages do not appear in section routes, the sidebar, the docs home, or the public search index even if they declare a section or landing status.
-- Default harvesting excludes test-project directories such as `Tests`, `Test`, `*.Tests`, and `*Tests`. The C# harvester also skips `examples` directories so example README walkthroughs can stay public without publishing generated API reference for example application internals.
+- Default harvesting excludes test-project directories such as `Tests`, `Test`, `*.Tests`, `*.UnitTests`, and `*.IntegrationTests`. The C# harvester also skips `examples` directories so example README walkthroughs can stay public without publishing generated API reference for example application internals.
 
 ## Docs Link Authoring
 

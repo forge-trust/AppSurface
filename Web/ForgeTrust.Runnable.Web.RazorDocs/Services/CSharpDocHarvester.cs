@@ -51,9 +51,7 @@ public class CSharpDocHarvester : IDocHarvester
         var nodes = new List<DocNode>();
         var stubNodes = new List<DocNode>();
         var namespacePages = new Dictionary<string, NamespaceDocPage>(StringComparer.OrdinalIgnoreCase);
-        var csFiles = Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories);
-
-        foreach (var file in csFiles)
+        foreach (var file in EnumerateEligibleCSharpFiles(rootPath, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -277,6 +275,39 @@ public class CSharpDocHarvester : IDocHarvester
         nodes.AddRange(stubNodes);
 
         return nodes;
+    }
+
+    private static IEnumerable<string> EnumerateEligibleCSharpFiles(
+        string rootPath,
+        CancellationToken cancellationToken)
+    {
+        var pendingDirectories = new Stack<string>();
+        pendingDirectories.Push(rootPath);
+
+        while (pendingDirectories.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var currentDirectory = pendingDirectories.Pop();
+            foreach (var file in Directory.EnumerateFiles(currentDirectory, "*.cs", SearchOption.TopDirectoryOnly))
+            {
+                yield return file;
+            }
+
+            foreach (var directory in Directory.EnumerateDirectories(currentDirectory))
+            {
+                var relativeDirectory = Path.GetRelativePath(rootPath, directory).Replace('\\', '/');
+                if (HarvestPathExclusions.ShouldExcludeFilePath(
+                        $"{relativeDirectory}/_",
+                        SourceExcludedDirectories,
+                        excludeTestProjectDirectories: true))
+                {
+                    continue;
+                }
+
+                pendingDirectories.Push(directory);
+            }
+        }
     }
 
     /// <summary>

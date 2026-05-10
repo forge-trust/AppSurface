@@ -21,6 +21,8 @@ public class HarvestPathExclusionsTests
     [InlineData("src/Test/file.cs")]
     [InlineData("Web/ForgeTrust.Runnable.Web.Tests/README.md")]
     [InlineData("Web/ForgeTrust.Runnable.Web.UnitTests/Fixture.cs")]
+    [InlineData("Web/ForgeTrust.Runnable.Web.IntegrationTests/Fixture.cs")]
+    [InlineData("Web/ForgeTrust.Runnable.Web-Tests/Fixture.cs")]
     [InlineData("node_modules/pkg/readme.md")]
     public void ShouldExcludeFilePath_WhenPathContainsExplicitExcludedDirectory(string filePath)
     {
@@ -31,6 +33,7 @@ public class HarvestPathExclusionsTests
     [InlineData("docs/readme.md")]
     [InlineData(".hidden.md")]
     [InlineData("docs/@special!$/file.md")]
+    [InlineData("docs/Contests/README.md")]
     [InlineData("")]
     public void ShouldExcludeFilePath_WhenPathHasNoExcludedDirectories_ReturnsFalse(string filePath)
     {

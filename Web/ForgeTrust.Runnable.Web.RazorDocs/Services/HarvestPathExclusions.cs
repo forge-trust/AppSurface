@@ -2,6 +2,17 @@ namespace ForgeTrust.Runnable.Web.RazorDocs.Services;
 
 internal static class HarvestPathExclusions
 {
+    private static readonly string[] TestProjectSuffixes =
+    [
+        ".Tests",
+        ".UnitTests",
+        ".IntegrationTests",
+        ".FunctionalTests",
+        ".E2ETests",
+        "-Tests",
+        "_Tests"
+    ];
+
     // Explicitly excluded regardless of hidden-directory allowlist behavior.
     private static readonly HashSet<string> ExcludedDirectories = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -80,7 +91,10 @@ internal static class HarvestPathExclusions
     {
         return segment.Equals("Test", StringComparison.OrdinalIgnoreCase)
                || segment.Equals("Tests", StringComparison.OrdinalIgnoreCase)
-               || segment.Contains(".Tests", StringComparison.OrdinalIgnoreCase)
-               || segment.EndsWith("Tests", StringComparison.OrdinalIgnoreCase);
+               || segment.Equals("UnitTests", StringComparison.OrdinalIgnoreCase)
+               || segment.Equals("IntegrationTests", StringComparison.OrdinalIgnoreCase)
+               || segment.Equals("FunctionalTests", StringComparison.OrdinalIgnoreCase)
+               || segment.Equals("E2ETests", StringComparison.OrdinalIgnoreCase)
+               || TestProjectSuffixes.Any(suffix => segment.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
     }
 }
