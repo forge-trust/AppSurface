@@ -690,6 +690,7 @@ Field behavior and pitfalls:
 - If multiple docs in one section set `section_landing: true`, RazorDocs keeps the lowest `order` value, then the lowest canonical path, and logs a warning for the others.
 - A section landing doc can also author `featured_page_groups`; RazorDocs uses those reader-intent groups for section-level “next steps” on the detail page and collapses the first resolved rows into section preview links surfaced on the current docs home.
 - `HideFromPublicNav = true` always wins. Hidden pages do not appear in section routes, the sidebar, the docs home, or the public search index even if they declare a section or landing status.
+- Default harvesting excludes test-project directories such as `Tests`, `Test`, `*.Tests`, `*.UnitTests`, and `*.IntegrationTests`. The C# harvester also skips `examples` directories so example README walkthroughs can stay public without publishing generated API reference for example application internals.
 
 ## Docs Link Authoring
 
@@ -875,7 +876,6 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `publicSection` for the normalized built-in section slug when the page is publicly visible
 - `publicSectionLabel` for the reader-facing section label
 - `isSectionLanding` for authored section landing entry points
-
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
 ## Custom Harvester Outline Contract
@@ -892,6 +892,7 @@ Public visibility note:
 
 - `HideFromSearch = true` removes a page from the search payload directly.
 - `HideFromPublicNav = true` also removes the page from the search payload because the public shell treats hidden pages as fully non-public.
+- Default path exclusions run before metadata is assigned. Test-project README files and C# source under test-project directories are not harvested, and C# source under `examples` is skipped so generated API-reference pages for example apps do not enter navigation, search, or direct docs routing.
 
 ## Trust Metadata For Release Notes And Policy Pages
 
