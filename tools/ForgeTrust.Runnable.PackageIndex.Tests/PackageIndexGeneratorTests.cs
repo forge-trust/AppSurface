@@ -22,6 +22,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Console/ForgeTrust.Runnable.Console/ForgeTrust.Runnable.Console.csproj
                 classification: public
+                publish_decision: publish
                 order: 10
                 use_when: Start here for CLI apps.
                 includes: Command hosting.
@@ -115,6 +116,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
                 classification: public
+                publish_decision: publish
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
                 includes: Base web startup.
@@ -153,6 +155,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
                 classification: public
+                publish_decision: publish
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
                 includes: Base startup
@@ -185,6 +188,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
                 classification: public
+                publish_decision: publish
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
                 includes: Base web startup.
@@ -274,7 +278,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
-    public async Task GenerateAsync_ThrowsWhenNonPublicEntryNoteIsMissing()
+    public async Task GenerateAsync_ThrowsWhenPublishDecisionIsMissing()
     {
         await WriteFileAsync("packages/README.md.yml", "title: Runnable");
         await WriteFileAsync(
@@ -288,8 +292,107 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 includes: Base web startup.
                 does_not_include: OpenAPI.
                 start_here_path: Web/ForgeTrust.Runnable.Web/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.Runnable.Web/README.md", "# Web");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj",
+                "ForgeTrust.Runnable.Web")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+
+        Assert.Contains("publish_decision", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ThrowsWhenDoNotPublishReasonIsMissing()
+    {
+        await WriteFileAsync("packages/README.md.yml", "title: Runnable");
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
+                classification: public
+                publish_decision: do_not_publish
+                order: 10
+                use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
+                includes: Base web startup.
+                does_not_include: OpenAPI.
+                start_here_path: Web/ForgeTrust.Runnable.Web/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.Runnable.Web/README.md", "# Web");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj",
+                "ForgeTrust.Runnable.Web")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+
+        Assert.Contains("publish_reason", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ThrowsWhenExpectedDependencyPackageIdIsUnknown()
+    {
+        await WriteFileAsync("packages/README.md.yml", "title: Runnable");
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
+                includes: Base web startup.
+                does_not_include: OpenAPI.
+                start_here_path: Web/ForgeTrust.Runnable.Web/README.md
+                expected_dependency_package_ids:
+                  - Missing.Package
+            """);
+        await WriteFileAsync("Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.Runnable.Web/README.md", "# Web");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj",
+                "ForgeTrust.Runnable.Web")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+
+        Assert.Contains("expects unknown dependency package id", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ThrowsWhenNonPublicEntryNoteIsMissing()
+    {
+        await WriteFileAsync("packages/README.md.yml", "title: Runnable");
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
+                includes: Base web startup.
+                does_not_include: OpenAPI.
+                start_here_path: Web/ForgeTrust.Runnable.Web/README.md
               - project: Web/ForgeTrust.Runnable.Web.RazorDocs/ForgeTrust.Runnable.Web.RazorDocs.csproj
                 classification: proof_host
+                publish_decision: do_not_publish
                 order: 20
                 start_here_path: Web/ForgeTrust.Runnable.Web.RazorDocs/README.md
             """);
@@ -353,6 +456,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Console/ForgeTrust.Runnable.Console/ForgeTrust.Runnable.Console.csproj
                 classification: public
+                publish_decision: publish
                 order: 10
                 use_when: Start here for CLI apps.
                 includes: Command hosting.
@@ -384,6 +488,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
                 classification: support
+                publish_decision: support_publish
                 order: 10
                 note: This row should stay out of direct-install guidance.
             """);
@@ -413,6 +518,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
                 classification: public
+                publish_decision: publish
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
                 includes: Base web startup.
@@ -420,6 +526,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 start_here_path: Web/ForgeTrust.Runnable.Web/README.md
               - project: Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj
                 classification: public
+                publish_decision: publish
                 order: 20
                 use_when: Install this when you want to export RazorWire apps from a stable command-line tool.
                 includes: The `razorwire` .NET tool command and static export workflow.
@@ -537,6 +644,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
                 classification: public
+                publish_decision: publish
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
                 includes: Base web startup.
@@ -544,6 +652,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 start_here_path: Web/ForgeTrust.Runnable.Web/README.md
               - project: Web/ForgeTrust.Runnable.Web.OpenApi/ForgeTrust.Runnable.Web.OpenApi.csproj
                 classification: public
+                publish_decision: publish
                 order: 20
                 use_when: Add this after the base web package when you want an OpenAPI document.
                 includes: OpenAPI generation.
@@ -552,6 +661,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 recipe_summary: Add `ForgeTrust.Runnable.Web.OpenApi` when you want an OpenAPI document.
               - project: Web/ForgeTrust.Runnable.Web.Tailwind/runtimes/ForgeTrust.Runnable.Web.Tailwind.Runtime.osx-arm64.csproj
                 classification: support
+                publish_decision: support_publish
                 order: 30
                 note: Restored transitively on matching build hosts.
                 start_here_path: Web/ForgeTrust.Runnable.Web.Tailwind/README.md
@@ -634,6 +744,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
                 classification: public
+                publish_decision: publish
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
                 includes: Base web startup.
@@ -641,6 +752,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 start_here_path: Web/ForgeTrust.Runnable.Web/README.md
               - project: Console/ForgeTrust.Runnable.Console/ForgeTrust.Runnable.Console.csproj
                 classification: public
+                publish_decision: publish
                 order: 20
                 use_when: Start here for CLI apps.
                 includes: Command hosting.
@@ -1358,6 +1470,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
                 classification: public
+                publish_decision: publish
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
                 includes: Base web startup, middleware composition, and endpoint registration.
@@ -1366,6 +1479,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 recipe_summary: Add `ForgeTrust.Runnable.Web.OpenApi` after `ForgeTrust.Runnable.Web` when you want an OpenAPI document.
               - project: Web/ForgeTrust.Runnable.Web.OpenApi/ForgeTrust.Runnable.Web.OpenApi.csproj
                 classification: public
+                publish_decision: publish
                 order: 20
                 use_when: Add this after the base web package when you want an OpenAPI document.
                 includes: OpenAPI generation and endpoint explorer wiring.
@@ -1373,15 +1487,19 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 start_here_path: Web/ForgeTrust.Runnable.Web.OpenApi/README.md
               - project: Web/ForgeTrust.Runnable.Web.Tailwind/runtimes/ForgeTrust.Runnable.Web.Tailwind.Runtime.osx-arm64.csproj
                 classification: support
+                publish_decision: support_publish
                 order: 30
                 note: Restored transitively by `ForgeTrust.Runnable.Web.Tailwind` on matching build hosts. Do not install it directly.
               - project: Web/ForgeTrust.Runnable.Web.RazorDocs/ForgeTrust.Runnable.Web.RazorDocs.csproj
                 classification: proof_host
+                publish_decision: do_not_publish
+                publish_reason: Proof-host package is not part of the prerelease package surface.
                 order: 40
                 note: Reusable docs package for hosting harvested repository docs.
                 start_here_path: Web/ForgeTrust.Runnable.Web.RazorDocs/README.md
               - project: Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj
                 classification: public
+                publish_decision: publish
                 order: 50
                 use_when: Install this when you want to export RazorWire apps from a stable command-line tool.
                 includes: The `razorwire` .NET tool command and static export workflow.
@@ -1422,6 +1540,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             packages:
               - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
                 classification: public
+                publish_decision: publish
                 order: 10
                 use_when: Install this first for a normal ASP.NET Core app with Runnable modules.
                 includes: Base web startup.

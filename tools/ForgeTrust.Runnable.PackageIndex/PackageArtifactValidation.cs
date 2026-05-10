@@ -246,6 +246,9 @@ internal sealed class PackageArtifactValidator
     private static bool IsFirstPartyAssemblyEntry(ZipArchiveEntry entry, IReadOnlySet<string> packageIds)
     {
         if (!entry.FullName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            || entry.FullName.StartsWith("ref/", StringComparison.OrdinalIgnoreCase)
+            || entry.FullName.StartsWith("refs/", StringComparison.OrdinalIgnoreCase)
+            || entry.FullName.Contains("/ref/", StringComparison.OrdinalIgnoreCase)
             || entry.FullName.Contains("/refs/", StringComparison.OrdinalIgnoreCase))
         {
             return false;

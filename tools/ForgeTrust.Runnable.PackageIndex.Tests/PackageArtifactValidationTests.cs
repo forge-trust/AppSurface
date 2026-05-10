@@ -712,6 +712,36 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_SkipsReferenceAssemblyPayloadVersionChecks()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Core",
+            PackageVersion,
+            dependencies: EmptyDependencies,
+            assemblyEntries: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ref/net10.0/ForgeTrust.Runnable.Core.dll"] = typeof(PackageArtifactValidationTests).Assembly.Location
+            });
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "ForgeTrust.Runnable.Core/ForgeTrust.Runnable.Core.csproj",
+                    "ForgeTrust.Runnable.Core",
+                    PackagePublishDecision.Publish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            PackageVersion);
+
+        Assert.Single(report.Entries);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_ThrowsWhenDuplicatePackageArtifactsExist()
     {
         var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");

@@ -238,6 +238,36 @@ internal sealed class PackageIndexGenerator
             }
         }
 
+        ValidatePublishContract(entry, knownPackageIds);
+    }
+
+    private static void ValidatePublishContract(PackageManifestEntry entry, IReadOnlySet<string> knownPackageIds)
+    {
+        if (entry.PublishDecision is null)
+        {
+            throw new PackageIndexException($"Manifest entry '{entry.Project}' must define 'publish_decision'.");
+        }
+
+        if (entry.PublishDecision == PackagePublishDecision.DoNotPublish
+            && string.IsNullOrWhiteSpace(entry.PublishReason))
+        {
+            throw new PackageIndexException($"Manifest entry '{entry.Project}' must define 'publish_reason' when 'publish_decision' is 'do_not_publish'.");
+        }
+
+        foreach (var packageId in entry.ExpectedDependencyPackageIds)
+        {
+            if (string.IsNullOrWhiteSpace(packageId))
+            {
+                throw new PackageIndexException(
+                    $"Manifest entry '{entry.Project}' must define a package id in 'expected_dependency_package_ids'.");
+            }
+
+            if (!knownPackageIds.Contains(packageId))
+            {
+                throw new PackageIndexException(
+                    $"Manifest entry '{entry.Project}' expects unknown dependency package id '{packageId}'.");
+            }
+        }
     }
 
     private static void RequireValue(string projectPath, string propertyName, string? value)

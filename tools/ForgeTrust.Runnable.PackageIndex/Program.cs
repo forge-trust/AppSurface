@@ -168,8 +168,9 @@ internal static class Program
         var rootPrefix = normalizedRoot.EndsWith(Path.DirectorySeparatorChar)
             ? normalizedRoot
             : normalizedRoot + Path.DirectorySeparatorChar;
-        if (string.Equals(normalizedRoot, normalizedPath, StringComparison.Ordinal)
-            || normalizedPath.StartsWith(rootPrefix, StringComparison.Ordinal))
+        var pathComparison = PackageIndexGenerator.RepositoryPathComparison;
+        if (string.Equals(normalizedRoot, normalizedPath, pathComparison)
+            || normalizedPath.StartsWith(rootPrefix, pathComparison))
         {
             return Path.GetRelativePath(normalizedRoot, normalizedPath).Replace('\\', '/');
         }

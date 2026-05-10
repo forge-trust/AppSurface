@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <PackageType>Dependency</PackageType>
-    <PackageDescription Condition="'$(Description)' != ''">$(Description)</PackageDescription>
+    <PackageDescription Condition="'$(PackageDescription)' == '' and '$(Description)' != ''">$(Description)</PackageDescription>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <!-- TailwindRid should be set by the importing project -->
     <TailwindBinaryName Condition="'$(TailwindRid)' == 'win-x64'">tailwindcss-windows-x64.exe</TailwindBinaryName>
