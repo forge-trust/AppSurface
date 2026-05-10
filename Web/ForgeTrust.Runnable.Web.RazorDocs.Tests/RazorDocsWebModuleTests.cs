@@ -220,6 +220,29 @@ public class RazorDocsWebModuleTests
     }
 
     [Fact]
+    public void ConfigureEndpoints_ShouldFallbackToDevelopmentEnvironment_WhenWebHostEnvironmentIsMissing()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        using var app = builder.Build();
+        var routeBuilder = new RecordingEndpointRouteBuilder(
+            new HiddenServiceProvider(app.Services, typeof(IWebHostEnvironment)));
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var routePatterns = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .Where(pattern => !string.IsNullOrEmpty(pattern))
+            .ToList();
+
+        Assert.Contains("docs/_health", routePatterns);
+        Assert.Contains("docs/_health.json", routePatterns);
+    }
+
+    [Fact]
     public void ConfigureEndpoints_ShouldNotMapHealthRoutes_InProductionByDefault()
     {
         var context = CreateStartupContext();
@@ -817,6 +840,40 @@ public class RazorDocsWebModuleTests
             ArgumentNullException.ThrowIfNull(middleware);
             _components.Add(middleware);
             return this;
+        }
+    }
+
+    private sealed class HiddenServiceProvider : IServiceProvider
+    {
+        private readonly IServiceProvider _inner;
+        private readonly Type _hiddenServiceType;
+
+        public HiddenServiceProvider(IServiceProvider inner, Type hiddenServiceType)
+        {
+            _inner = inner;
+            _hiddenServiceType = hiddenServiceType;
+        }
+
+        public object? GetService(Type serviceType)
+        {
+            return serviceType == _hiddenServiceType ? null : _inner.GetService(serviceType);
+        }
+    }
+
+    private sealed class RecordingEndpointRouteBuilder : IEndpointRouteBuilder
+    {
+        public RecordingEndpointRouteBuilder(IServiceProvider serviceProvider)
+        {
+            ServiceProvider = serviceProvider;
+        }
+
+        public IServiceProvider ServiceProvider { get; }
+
+        public ICollection<EndpointDataSource> DataSources { get; } = [];
+
+        public IApplicationBuilder CreateApplicationBuilder()
+        {
+            return new ApplicationBuilder(ServiceProvider);
         }
     }
 }

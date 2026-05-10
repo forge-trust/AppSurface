@@ -1664,6 +1664,39 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_ShouldThrow_WhenOptionsIsNull()
+    {
+        var docsUrlBuilder = new DocsUrlBuilder(new RazorDocsOptions());
+
+        Assert.Throws<ArgumentNullException>(
+            () => new DocsController(
+                _aggregator,
+                docsUrlBuilder,
+                CreateDefaultVersionCatalogService(new RazorDocsOptions()),
+                new DocFeaturedPageResolver(_featuredPageResolverLoggerFake, docsUrlBuilder),
+                null!,
+                A.Fake<IWebHostEnvironment>(),
+                _controllerLoggerFake));
+    }
+
+    [Fact]
+    public void Constructor_ShouldThrow_WhenEnvironmentIsNull()
+    {
+        var options = new RazorDocsOptions();
+        var docsUrlBuilder = new DocsUrlBuilder(options);
+
+        Assert.Throws<ArgumentNullException>(
+            () => new DocsController(
+                _aggregator,
+                docsUrlBuilder,
+                CreateDefaultVersionCatalogService(options),
+                new DocFeaturedPageResolver(_featuredPageResolverLoggerFake, docsUrlBuilder),
+                options,
+                null!,
+                _controllerLoggerFake));
+    }
+
+    [Fact]
     public void VersionEntry_ShouldRedirectToStableDocsHome_WhenUsingAggregatorOnlyConstructor()
     {
         var controller = new DocsController(_aggregator, _controllerLoggerFake)
@@ -2396,6 +2429,23 @@ public class DocsControllerTests : IDisposable
             Assert.Equal("HarvestHealth", result.ViewName);
             Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
             Assert.False(model.Verification.Ok);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestHealth_ShouldReturnNotFound_WhenRoutesAreNotExposedForEnvironment()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+        var options = new RazorDocsOptions();
+        var (controller, cache, memo) = CreateController(options, harvester, Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var result = await controller.HarvestHealth();
+
+            Assert.IsType<NotFoundResult>(result);
         }
     }
 
