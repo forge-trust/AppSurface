@@ -820,23 +820,40 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Equal(Path.Combine(_repositoryRoot, "packages", "package-index.yml"), defaults.Request.ManifestPath);
         Assert.Equal(Path.Combine(_repositoryRoot, "packages", "README.md"), defaults.Request.OutputPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "packages"), defaults.ArtifactsOutputPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-validation-report.md"), defaults.ReportPath);
+        Assert.Null(defaults.PackageVersion);
 
         var parsed = CommandLineOptions.Parse(
-            ["--repo-root", "src", "--manifest", "manifest.yml", "--output", "chooser.md"],
+            [
+                "--repo-root", "src",
+                "--manifest", "manifest.yml",
+                "--output", "chooser.md",
+                "--artifacts-output", "packages-out",
+                "--package-version", "0.0.0-ci.99",
+                "--report", "package-report.md"
+            ],
             _repositoryRoot);
 
         Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src")), parsed.Request.RepositoryRoot);
         Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "manifest.yml")), parsed.Request.ManifestPath);
         Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "chooser.md")), parsed.Request.OutputPath);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "packages-out")), parsed.ArtifactsOutputPath);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "package-report.md")), parsed.ReportPath);
+        Assert.Equal("0.0.0-ci.99", parsed.PackageVersion);
 
         var absoluteManifest = Path.Combine(_repositoryRoot, "abs", "manifest.yml");
         var absoluteOutput = Path.Combine(_repositoryRoot, "abs", "chooser.md");
+        var absoluteArtifacts = Path.Combine(_repositoryRoot, "abs", "artifacts");
+        var absoluteReport = Path.Combine(_repositoryRoot, "abs", "report.md");
         var absolute = CommandLineOptions.Parse(
-            ["--manifest", absoluteManifest, "--output", absoluteOutput],
+            ["--manifest", absoluteManifest, "--output", absoluteOutput, "--artifacts-output", absoluteArtifacts, "--report", absoluteReport],
             _repositoryRoot);
 
         Assert.Equal(absoluteManifest, absolute.Request.ManifestPath);
         Assert.Equal(absoluteOutput, absolute.Request.OutputPath);
+        Assert.Equal(absoluteArtifacts, absolute.ArtifactsOutputPath);
+        Assert.Equal(absoluteReport, absolute.ReportPath);
     }
 
     [Fact]
@@ -952,6 +969,78 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("Package chooser is up to date.", stdout.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr.ToString());
         Assert.True(File.Exists(Path.Combine(_repositoryRoot, "packages", "README.md")));
+    }
+
+    [Fact]
+    public async Task RunAsync_VerifyPackages_UsesWorkflowAndWritesRelativeReportPath()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        PackageArtifactRequest? capturedRequest = null;
+
+        var exitCode = await Program.RunAsync(
+            [
+                "verify-packages",
+                "--package-version", "0.0.0-ci.99",
+                "--artifacts-output", "packages-out",
+                "--report", "reports/packages.md"
+            ],
+            stdout,
+            stderr,
+            _repositoryRoot,
+            verifyPackagesAsync: (request, cancellationToken) =>
+            {
+                capturedRequest = request;
+                Assert.False(cancellationToken.IsCancellationRequested);
+                return Task.FromResult(new PackageArtifactValidationReport(
+                    request.PackageVersion,
+                    [
+                        new PackageArtifactValidationReportEntry(
+                            "ForgeTrust.Runnable.Web",
+                            "Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj",
+                            PackagePublishDecision.Publish,
+                            [])
+                    ]));
+            });
+
+        Assert.Equal(0, exitCode);
+        Assert.NotNull(capturedRequest);
+        Assert.Equal(Path.Combine(_repositoryRoot, "packages-out"), capturedRequest.ArtifactsOutputPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "packages.md"), capturedRequest.ReportPath);
+        Assert.Equal("0.0.0-ci.99", capturedRequest.PackageVersion);
+        Assert.Contains("Validated 1 package artifacts for 0.0.0-ci.99. Report: reports/packages.md.", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    [Fact]
+    public async Task RunAsync_VerifyPackages_WritesAbsoluteReportPathOutsideRepository()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var reportPath = Path.Combine(Path.GetTempPath(), $"package-report-{Guid.NewGuid():N}.md");
+
+        var exitCode = await Program.RunAsync(
+            ["verify-packages", "--package-version", "0.0.0-ci.99", "--report", reportPath],
+            stdout,
+            stderr,
+            _repositoryRoot,
+            verifyPackagesAsync: (request, _) => Task.FromResult(new PackageArtifactValidationReport(request.PackageVersion, [])));
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains($"Report: {reportPath}.", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_VerifyPackages_RequiresPackageVersion()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(["verify-packages"], stdout, stderr, _repositoryRoot);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("--package-version", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stdout.ToString());
     }
 
     [Fact]

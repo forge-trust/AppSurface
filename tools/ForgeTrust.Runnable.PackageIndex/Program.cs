@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace ForgeTrust.Runnable.PackageIndex;
 
 /// <summary>
@@ -57,13 +59,15 @@ internal static class Program
     /// <param name="standardError">Writer that receives invalid invocation usage and failure messages.</param>
     /// <param name="currentDirectory">Working directory used to resolve default repository-relative paths after help handling.</param>
     /// <param name="cancellationToken">Cancellation token propagated to generator operations.</param>
+    /// <param name="verifyPackagesAsync">Optional package artifact workflow override used by tests.</param>
     /// <returns><c>0</c> when the command succeeds; otherwise a non-zero exit code.</returns>
     internal static async Task<int> RunAsync(
         string[] args,
         TextWriter standardOut,
         TextWriter standardError,
         string currentDirectory,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Func<PackageArtifactRequest, CancellationToken, Task<PackageArtifactValidationReport>>? verifyPackagesAsync = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(standardOut);
@@ -117,14 +121,8 @@ internal static class Program
             if (normalizedCommand == VerifyPackagesCommand)
             {
                 var packageRequest = options.CreatePackageArtifactRequest();
-                var workflow = new PackageArtifactWorkflow(
-                    new PackagePublishPlanResolver(
-                        new PackageProjectScanner(),
-                        new DotNetProjectMetadataProvider(),
-                        new PackageManifestLoader()),
-                    new ProcessCommandRunner(),
-                    new PackageArtifactValidator());
-                var report = await workflow.RunAsync(packageRequest, cancellationToken);
+                verifyPackagesAsync ??= RunPackageArtifactWorkflowAsync;
+                var report = await verifyPackagesAsync(packageRequest, cancellationToken);
                 var reportPath = FormatDisplayPath(packageRequest.RepositoryRoot, packageRequest.ReportPath);
                 await standardOut.WriteLineAsync(
                     $"Validated {report.Entries.Count} package artifacts for {packageRequest.PackageVersion}. Report: {reportPath}.");
@@ -146,6 +144,21 @@ internal static class Program
     {
         return string.Equals(argument, "--help", StringComparison.Ordinal)
             || string.Equals(argument, "-h", StringComparison.Ordinal);
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Default CLI dependency wiring is covered by package artifact workflow tests.")]
+    private static async Task<PackageArtifactValidationReport> RunPackageArtifactWorkflowAsync(
+        PackageArtifactRequest packageRequest,
+        CancellationToken cancellationToken)
+    {
+        var workflow = new PackageArtifactWorkflow(
+            new PackagePublishPlanResolver(
+                new PackageProjectScanner(),
+                new DotNetProjectMetadataProvider(),
+                new PackageManifestLoader()),
+            new ProcessCommandRunner(),
+            new PackageArtifactValidator());
+        return await workflow.RunAsync(packageRequest, cancellationToken);
     }
 
     private static string FormatDisplayPath(string repositoryRoot, string path)

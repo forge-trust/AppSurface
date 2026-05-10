@@ -20,6 +20,7 @@ Runnable is putting the release contract in place before `v0.1.0`. This slice is
 - Runnable now ships a public release hub, a changelog, an unreleased page, and a tagged release template inside the repository.
 - Release-note pages can show status, freshness, scope, migration guidance, and provenance in a shared trust bar instead of bespoke page chrome.
 - Runnable now ships a generated package chooser that tells first-time adopters which package to install first, which optional modules to add next, and which proof paths to follow for release risk and working examples.
+- Runnable now builds and uploads validated prerelease package artifacts on pull requests and manual workflow runs, using the package chooser manifest as the single source of truth for publish decisions, dependency expectations, tool packages, and first-party DLL version identity before NuGet publishing is enabled.
 - The public docs Start Here path now leads with a Runnable evaluator sequence for teams comparing module-based startup against plain ASP.NET Core `Program.cs` configuration.
 - The root README now has a single hello-world quickstart that starts the smallest web example on an explicit port and proves the response with `curl`.
 
