@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 
 namespace ForgeTrust.Runnable.PackageIndex;
 
@@ -175,6 +176,7 @@ internal sealed class ProcessCommandRunner : ICommandRunner
         return (await standardOutputTask, await standardErrorTask);
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Best-effort process cleanup handles OS timing races after timeout or cancellation; public failure paths are covered.")]
     private static async Task TerminateProcessAsync(Process process)
     {
         try
