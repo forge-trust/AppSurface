@@ -310,6 +310,46 @@ public class RazorDocsWebModuleTests
     }
 
     [Fact]
+    public void ConfigureEndpoints_ShouldNotMapHealthRoutes_InDevelopmentWhenExplicitlyDisabled()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(
+            new TestWebHostEnvironment
+            {
+                EnvironmentName = Environments.Development
+            });
+        var options = new RazorDocsOptions
+        {
+            Harvest = new RazorDocsHarvestOptions
+            {
+                Health = new RazorDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = RazorDocsHarvestHealthExposure.Never
+                }
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<RazorDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var routePatterns = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .Where(pattern => !string.IsNullOrEmpty(pattern))
+            .ToList();
+
+        Assert.DoesNotContain("docs/_health", routePatterns);
+        Assert.DoesNotContain("docs/_health.json", routePatterns);
+    }
+
+    [Fact]
     public void ConfigureEndpoints_ShouldMapVersionedRoutes_WhenVersioningIsEnabled()
     {
         var context = CreateStartupContext();

@@ -1354,7 +1354,7 @@ public class DocsController : Controller
     {
         public string ApplicationName { get; set; } = typeof(DocsController).Assembly.GetName().Name ?? "RazorDocs";
 
-        public IFileProvider WebRootFileProvider { get; set; } = null!;
+        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
 
         public string WebRootPath { get; set; } = AppContext.BaseDirectory;
 
@@ -1362,6 +1362,6 @@ public class DocsController : Controller
 
         public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
 
-        public IFileProvider ContentRootFileProvider { get; set; } = null!;
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

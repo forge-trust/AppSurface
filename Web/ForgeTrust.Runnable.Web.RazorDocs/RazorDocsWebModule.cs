@@ -484,7 +484,7 @@ public class RazorDocsWebModule : IRunnableWebModule
     {
         public string ApplicationName { get; set; } = typeof(RazorDocsWebModule).Assembly.GetName().Name ?? "RazorDocs";
 
-        public IFileProvider WebRootFileProvider { get; set; } = null!;
+        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
 
         public string WebRootPath { get; set; } = AppContext.BaseDirectory;
 
@@ -492,6 +492,6 @@ public class RazorDocsWebModule : IRunnableWebModule
 
         public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
 
-        public IFileProvider ContentRootFileProvider { get; set; } = null!;
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

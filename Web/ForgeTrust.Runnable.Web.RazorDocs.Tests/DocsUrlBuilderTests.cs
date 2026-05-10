@@ -190,6 +190,29 @@ public sealed class DocsUrlBuilderTests
     }
 
     [Fact]
+    public void Routes_ShouldRoundTripHealthRoutes_ForFullConstructorAndDeconstruct()
+    {
+        var routes = new RazorDocsRouteReferences(
+            "/docs",
+            "/docs/search",
+            "/docs/search-index.json",
+            "/docs/search-index.json?refresh=1",
+            "/docs/versions",
+            "/docs/_health",
+            "/docs/_health.json");
+
+        var (home, search, searchIndex, searchIndexRefresh, versions, health, healthJson) = routes;
+
+        Assert.Equal("/docs", home);
+        Assert.Equal("/docs/search", search);
+        Assert.Equal("/docs/search-index.json", searchIndex);
+        Assert.Equal("/docs/search-index.json?refresh=1", searchIndexRefresh);
+        Assert.Equal("/docs/versions", versions);
+        Assert.Equal("/docs/_health", health);
+        Assert.Equal("/docs/_health.json", healthJson);
+    }
+
+    [Fact]
     public void Constructor_ShouldTrimTrailingSlashFromConfiguredDocsRootPath()
     {
         var builder = new DocsUrlBuilder(

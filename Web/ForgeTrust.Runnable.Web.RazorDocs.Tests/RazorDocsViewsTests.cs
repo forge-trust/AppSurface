@@ -950,11 +950,12 @@ public class RazorDocsViewsTests
             "/Views/Shared/Components/Sidebar/Default.cshtml",
             model);
 
-        var statusIndex = html.IndexOf("Harvest StatusOnly", StringComparison.Ordinal);
-        Assert.NotEqual(-1, statusIndex);
-        var precedingAnchorIndex = html.LastIndexOf("<a ", statusIndex, StringComparison.Ordinal);
-        var precedingDivIndex = html.LastIndexOf("<div ", statusIndex, StringComparison.Ordinal);
-        Assert.True(precedingDivIndex > precedingAnchorIndex);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var statusElement = document.QuerySelectorAll("span")
+            .FirstOrDefault(element => element.TextContent.Contains("Harvest StatusOnly", StringComparison.Ordinal));
+        Assert.NotNull(statusElement);
+        Assert.NotNull(FindAncestor(statusElement, "div"));
+        Assert.Null(FindAncestor(statusElement, "a"));
         Assert.Contains("Harvest StatusOnly", html);
         Assert.Contains("Health", html);
         Assert.Contains("text-emerald-200", html);
@@ -3806,6 +3807,22 @@ public class RazorDocsViewsTests
             Label = label,
             Pages = pages
         };
+    }
+
+    private static IElement? FindAncestor(IElement element, string tagName)
+    {
+        var current = element.ParentElement;
+        while (current is not null)
+        {
+            if (string.Equals(current.LocalName, tagName, StringComparison.OrdinalIgnoreCase))
+            {
+                return current;
+            }
+
+            current = current.ParentElement;
+        }
+
+        return null;
     }
 
     private sealed class StaticDocHarvester : IDocHarvester
