@@ -89,6 +89,9 @@ public class RazorDocsWebModuleTests
             services,
             s => s.ServiceType == typeof(IRazorDocsHtmlSanitizer) && s.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, s => s.ServiceType == typeof(RazorDocsAssetPathResolver));
+        Assert.Contains(
+            services,
+            s => s.ServiceType == typeof(IHostedService) && s.ImplementationType == typeof(RazorDocsHarvestFailurePreflightService));
         Assert.DoesNotContain(services, s => s.ServiceType == typeof(TailwindCliManager));
         Assert.DoesNotContain(
             services,
@@ -105,12 +108,16 @@ public class RazorDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetRequiredService<IMemoryCache>());
         Assert.NotNull(serviceProvider.GetRequiredService<IMemo>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
+        Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is MarkdownHarvester);
         Assert.Equal(RazorDocsAssetPathResolver.PackagedStylesheetPath, assetPathResolver.StylesheetPath);
         Assert.Contains("section", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("article", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("header", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("details", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("summary", sanitizer.InnerSanitizer.AllowedTags);
+        Assert.Contains("pre", sanitizer.InnerSanitizer.AllowedTags);
+        Assert.Contains("code", sanitizer.InnerSanitizer.AllowedTags);
+        Assert.Contains("span", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("class", sanitizer.InnerSanitizer.AllowedAttributes);
         Assert.Contains("id", sanitizer.InnerSanitizer.AllowedAttributes);
         Assert.Contains("open", sanitizer.InnerSanitizer.AllowedAttributes);

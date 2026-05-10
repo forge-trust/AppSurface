@@ -2,8 +2,7 @@ title: Runnable v0.1 package chooser
 summary: Start with the package that matches the app you are building, then add optional web modules and support surfaces only when you need them.
 page_type: guide
 nav_group: Start Here
-order: 5
-section_landing: true
+order: 50
 breadcrumbs:
   - Start Here
   - Packages

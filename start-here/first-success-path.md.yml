@@ -1,0 +1,19 @@
+title: First Success Path
+summary: Run the existing minimal web example and verify the first response before reading deeper docs.
+page_type: tutorial
+nav_group: Start Here
+sequence_key: runnable-evaluator
+order: 30
+aliases:
+  - quickstart
+  - first run
+  - hello world
+keywords:
+  - WebApp
+  - root module
+  - dotnet run
+  - examples/web-app
+related_pages:
+  - examples/web-app/README.md
+  - Web/ForgeTrust.Runnable.Web/README.md
+  - guides/from-program-cs-to-module.md

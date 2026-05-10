@@ -29,6 +29,8 @@
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="Microsoft.Playwright" Version="1.58.0" />
     <PackageVersion Include="Scalar.AspNetCore" Version="2.6.8" />
+    <PackageVersion Include="TextMateSharp" Version="2.0.3" />
+    <PackageVersion Include="TextMateSharp.Grammars" Version="2.0.3" />
     <PackageVersion Include="YamlDotNet" Version="17.0.1" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />

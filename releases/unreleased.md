@@ -20,6 +20,7 @@ Runnable is putting the release contract in place before `v0.1.0`. This slice is
 - Runnable now ships a public release hub, a changelog, an unreleased page, and a tagged release template inside the repository.
 - Release-note pages can show status, freshness, scope, migration guidance, and provenance in a shared trust bar instead of bespoke page chrome.
 - Runnable now ships a generated package chooser that tells first-time adopters which package to install first, which optional modules to add next, and which proof paths to follow for release risk and working examples.
+- The public docs Start Here path now leads with a Runnable evaluator sequence for teams comparing module-based startup against plain ASP.NET Core `Program.cs` configuration.
 - The root README now has a single hello-world quickstart that starts the smallest web example on an explicit port and proves the response with `curl`.
 
 ### Contribution contract
@@ -55,6 +56,7 @@ Runnable is putting the release contract in place before `v0.1.0`. This slice is
 ### Configuration validation
 
 - Strongly typed config wrappers now validate resolved object values with DataAnnotations during startup, including defaults, and report operator-friendly `ConfigurationValidationException` failures without echoing attempted values.
+- Configuration audits can now produce a source-aware report for discovered wrappers and explicitly registered keys, showing provider order, file and environment provenance, defaults, validation diagnostics, and redacted display-safe values.
 - Nested config validation can now opt into Microsoft Options `[ValidateObjectMembers]` and `[ValidateEnumeratedItems]` markers while Runnable owns traversal, path formatting, and cycle protection.
 - Scalar config wrappers can now validate resolved primitive values directly with `ConfigValueNotEmpty`, `ConfigValueRange`, and `ConfigValueMinLength` attributes, while wrapper-specific scalar rules can override `ValidateValue`.
 - Config wrappers can now opt into required resolved presence with `ConfigKeyRequired`, so startup fails when no provider value and no default are available while defaults and supplied zero values still count as present.
@@ -94,6 +96,7 @@ Runnable is putting the release contract in place before `v0.1.0`. This slice is
 - Public docs navigation now groups pages by intent-first sections, preserves authored editorial breadcrumbs, and keeps Start Here recovery links hidden when that section is unavailable.
 - RazorDocs landing curation now uses `featured_page_groups`, so root and section landing pages can organize next-step links by reader intent instead of rendering one flat list.
 - RazorDocs now exposes structured harvest health through `DocAggregator.GetHarvestHealthAsync(...)`, letting hosts distinguish healthy, valid-empty, degraded, and all-failed source-backed docs snapshots while keeping raw exception details in logs.
+- RazorDocs hosts can now opt into strict startup failure with `RazorDocs:Harvest:FailOnFailure`, so CI, release, and static export runs fail before listening when every configured harvester fails while runtime hosts stay tolerant by default.
 - RazorDocs page lookup now uses one shared path resolver for details pages, landing curation, related-page links, and search recovery links, keeping source paths, canonical `.html` paths, fragments, backslash normalization, and configured docs-root prefixes behaviorally aligned.
 - The release contract is designed so future tooling can generate both a changelog entry and a blog-style tagged release note from the same underlying signals.
 - RazorDocs now rewrites authored doc links from a harvested target manifest instead of broad suffix heuristics, so normal site links such as `../privacy.html` stay untouched and missing doc targets do not become broken `/docs/...` routes.
@@ -105,6 +108,7 @@ Runnable is putting the release contract in place before `v0.1.0`. This slice is
 - RazorDocs snapshot caching is now configurable with `RazorDocs:CacheExpirationMinutes`, so development hosts can shorten reuse while production hosts can choose a longer docs and search-index cache lifetime.
 - Shared RazorDocs badges, metadata chips, provenance strips, and trust bars now live in the shared package stylesheet while `search.css` stays focused on search-specific UI.
 - RazorDocs authored Markdown pages now use a dedicated prose treatment with a shorter line length, stronger paragraph rhythm, readable lists, clearer links, blockquotes, and inline code while generated API pages keep the wider reference layout.
+- RazorDocs fenced Markdown code blocks now render server-side syntax highlighting through TextMateSharp with RazorDocs-owned token classes, language badges, and escaped plaintext fallback when a language is unknown, unsupported, oversized, or cannot be tokenized safely.
 - RazorDocs search now keeps failure recovery markup out of the active search shell until the index actually fails to load, so successful searches no longer expose hidden failure copy to text extraction tools.
 - RazorDocs now documents the namespace README merge contract with positive and negative examples, while detail-page titles wrap on narrow screens so long package names do not clip on mobile.
 - RazorDocs now has an authored consumer landing page for teams evaluating how to use RazorDocs in their own repositories, and the root docs landing features it through `featured_page_groups` instead of hardcoded controller copy.
@@ -127,7 +131,7 @@ There is no tagged migration guide yet because Runnable has not cut `v0.1.0`. Un
 - the stable policy lives in [Pre-1.0 upgrade policy](./upgrade-policy.md)
 - finalized migration steps move into the tagged release note when the version ships
 - custom RazorDocs harvesters that want detail-page outlines and search heading metadata should populate `DocNode.Outline`; pages without outline metadata continue to render without the optional outline section
-- RazorDocs hosts that need source-backed harvest status should use `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` plus diagnostic codes. Empty snapshots are not failures, degraded snapshots may still serve partial docs, and all-failed snapshots remain empty until strict failure mode lands in issue #237.
+- RazorDocs hosts that need source-backed harvest status should use `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` plus diagnostic codes. Empty snapshots are not failures, degraded snapshots may still serve partial docs, and hosts that publish release artifacts should enable `RazorDocs:Harvest:FailOnFailure` when all-failed snapshots must stop startup.
 - `DocAggregator.GetSearchIndexPayloadAsync(...)` is no longer a supported package-consumer API. The live search-index payload is now treated as an internal RazorDocs implementation detail so the host can rebase docs paths and serialize once per request. Consumers that previously called that method directly should switch to the public docs search endpoint or build their own search payload contract instead of depending on RazorDocs' internal snapshot shape.
 - existing `rw-active` forms opt into failed-form request markers and default fallback UI; applications with custom failure rendering can use `RazorWireOptions.Forms.FailureMode = Manual`, `RazorWireOptions.Forms.EnableFailureUx = false`, or per-form `data-rw-form-failure="off"`
 - RazorDocs authors should migrate flat `featured_pages` metadata to `featured_page_groups`. The old field is ignored and logs a warning; each group needs at least `label` or `intent`, plus a `pages` list containing the existing `question`, `path`, `supporting_copy`, and `order` entries.

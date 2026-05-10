@@ -12,6 +12,8 @@ This package provides the configuration layer for Runnable modules. It combines 
 - **`IConfigManager`**: Central access point for resolving configuration values.
 - **`IConfigProvider`**: Abstraction for reading configuration from a source.
 - **`FileBasedConfigProvider`**: Loads configuration from files.
+- **`IConfigAuditReporter`**: Builds source-aware configuration audit reports for known config entries.
+- **`ConfigAuditTextRenderer`**: Renders a safe, human-readable audit report from the structured model.
 - **`Config<T>` / `ConfigStruct<T>`**: Base types for strongly typed configuration values.
 - **`ConfigKeyAttribute`**: Associates a configuration type or property with a specific key.
 - **`ConfigKeyRequiredAttribute`**: Requires a config wrapper to resolve a provider or default value during startup.
@@ -46,6 +48,76 @@ Install the package from an application project with:
 ```bash
 dotnet add package ForgeTrust.Runnable.Config --project <path-to-your-app.csproj>
 ```
+
+## Configuration Audit Reports
+
+Use `IConfigAuditReporter` when an operator or maintainer needs to answer:
+
+```text
+What does this app believe its configuration is, and why?
+```
+
+The reporter returns a structured `ConfigAuditReport` for an environment. The report includes provider order, known
+configuration entries, source records, entry states, diagnostics, and display-safe values. A known entry is either a
+discovered `Config<T>` / `ConfigStruct<T>` wrapper or a key registered explicitly with `AddConfigAuditKey<T>()`.
+
+```csharp
+var report = auditReporter.GetReport("Staging");
+var text = textRenderer.Render(report);
+```
+
+Explicit registrations are useful for keys that are read directly through `IConfigManager` instead of a wrapper:
+
+```csharp
+services.AddConfigAuditKey<string>("Billing.Endpoint");
+```
+
+Audit entry states are intentionally small:
+
+| State | Meaning |
+| --- | --- |
+| `Resolved` | A provider supplied the value without member-level mixed provenance. |
+| `PartiallyResolved` | An object value has a base source plus one or more member-level environment patches. |
+| `Defaulted` | No provider supplied a value, but the config wrapper default supplied one. |
+| `Missing` | No provider value and no default resolved for the known entry. |
+| `Invalid` | A provider value, patch, or wrapper validation result was invalid. |
+
+### Provenance Behavior
+
+Environment variables are checked before lower-priority providers, matching normal `DefaultConfigManager` resolution.
+File values report `FileBasedConfigProvider`, the file path, and the config path. Direct environment values report the
+concrete environment variable name. Object-valued entries can include child entries when the final value combines a file
+base with environment child patches:
+
+```text
+MyApp.Settings
+  Source: FileBasedConfigProvider appsettings.Staging.json :: MyApp.Settings
+  Children:
+    MyApp.Settings.Database.Port = 6543
+      Source: Environment variable MYAPP__SETTINGS__DATABASE__PORT
+```
+
+The report is observational. Environment patch diagnostics trace patches against a cloned value so asking for an audit
+report does not mutate the provider object being inspected.
+
+### Redaction Defaults
+
+Audit reports are redacted by default before renderers see values. Sensitive-looking paths, keys, and environment
+variable names render as `[redacted]`. The built-in fragments include `password`, `secret`, `token`, `apikey`, `key`,
+`connectionstring`, `credential`, and `private`.
+
+Redaction is deliberately conservative. It does not expose string lengths, sensitive collection counts, or sensitive
+nested values. Source metadata remains visible unless a provider marks the source metadata itself as sensitive. This
+keeps reports safe to paste into support issues while still showing where a value came from.
+
+### Audit Pitfalls
+
+- Audit reports cover Runnable-known entries, not every raw process environment variable or every unused file key.
+- Provider-discovered raw key enumeration is intentionally separate from the first audit surface.
+- File origins include file path and config path. Line and column origins are not part of the first report.
+- Validation diagnostics name keys and rules; they do not include attempted secret values.
+- A direct environment object value replaces the whole object, while child environment variables produce member-level
+  patch provenance.
 
 ## Environment Overrides
 

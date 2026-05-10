@@ -2,7 +2,7 @@ title: Use RazorDocs in your repository
 summary: Learn when to adopt RazorDocs, how to host it, and how to use authored metadata to turn repository Markdown and C# APIs into a usable docs site.
 page_type: guide
 nav_group: Start Here
-order: 15
+order: 60
 aliases:
   - RazorDocs adoption
   - repository docs

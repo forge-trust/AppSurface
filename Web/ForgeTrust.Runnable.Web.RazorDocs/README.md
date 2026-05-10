@@ -68,6 +68,46 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 - Do not add semantic classes to static package chrome when plain utilities are clearer and the styling is truly local.
 - Do not place non-search primitives in `wwwroot/docs/search.css` just because the layout loads search assets globally today. Use `wwwroot/css/app.css` for shared components so future theming can target one stable package layer.
 
+## Syntax-highlighted code blocks
+
+RazorDocs renders fenced Markdown code blocks during Markdown harvest. Supported languages are highlighted server-side, so normal docs pages and exported docs do not need client-side Prism, highlight.js, or Shiki initialization after navigation.
+
+The v1 contract is RazorDocs-owned HTML:
+
+```html
+<pre class="doc-code doc-code--highlighted doc-code--language-csharp language-csharp"><span class="doc-code__language">C#</span><code>...</code></pre>
+```
+
+Plain fallback uses the same shape with `doc-code--plain`. Token spans, when present, use `doc-token` plus semantic modifiers such as `doc-token--keyword`, `doc-token--string`, `doc-token--comment`, `doc-token--number`, `doc-token--type`, `doc-token--member`, `doc-token--operator`, and `doc-token--punctuation`. These classes are internal RazorDocs output in v1. They are stable enough for the package stylesheet and tests, but they are not a public custom highlighter API.
+
+### Language aliases
+
+RazorDocs uses the first whitespace-delimited code-fence info token as the language. Metadata after the language is ignored in v1, so ` ```csharp {2}` is treated as `csharp` without activating line markers.
+
+| Authored token | Normalized language |
+| --- | --- |
+| `cs`, `c#`, `csharp` | `csharp` |
+| `razor`, `cshtml` | `razor` |
+| `xml` | `xml` |
+| `json` | `json` |
+| `bash`, `sh`, `shell` | `bash` |
+| `html` | `html` |
+| `css` | `css` |
+| `js`, `javascript` | `javascript` |
+| `md`, `markdown` | `markdown` |
+| `diff` | `diff` |
+| `txt`, `text`, `plaintext` | `plaintext` |
+
+Supported normalized languages render highlighted output when the bundled TextMateSharp grammar loads successfully. `plaintext`, unsupported languages, unknown languages, grammar failures, tokenization failures, and blocks above RazorDocs' internal size threshold render as escaped plaintext with the same quiet code-block treatment. A correct plain block is preferred over fake highlighting.
+
+### Authoring pitfalls
+
+- Do not paste raw HTML token spans into Markdown code fences. RazorDocs owns token markup.
+- Do not rely on automatic language detection. Add the language token explicitly when highlighting matters.
+- Do not assume every language alias supports custom semantics beyond normalization.
+- Do not use Shiki or Expressive Code line-marker syntax yet. V1 ignores code-fence metadata after the language.
+- Do not style highlighter output outside the RazorDocs package stylesheet. Code block styling belongs under `.docs-content` in `wwwroot/css/app.css`.
+
 ## Harvest Health
 
 `DocAggregator.GetHarvestHealthAsync(CancellationToken)` returns structured health for the same cached harvest snapshot used by docs pages, public sections, and the search index. Hosts should use this API when they need to report whether source-backed docs are healthy, empty by configuration, partially degraded, or unavailable because every harvester failed.
@@ -153,7 +193,26 @@ Health and docs are computed from the same cached snapshot. This is deliberate: 
 - Do not treat `Empty` as a failure. It means RazorDocs found no docs without a failed harvester.
 - Do not expect raw exception details in public diagnostics. Use host logs for stack traces and exception messages.
 - Do not assume this API exposes visible operator UI or an ASP.NET Core `IHealthCheck`. The first harvest-health slice is API and documentation only; operator UI is tracked in issue #238.
-- Do not depend on fail-closed behavior for all-failed harvests yet. Strict failure mode is tracked in issue #237.
+
+### Strict Startup Failure
+
+Set `RazorDocs:Harvest:FailOnFailure` to `true` when a host should fail during startup if the cached harvest-health snapshot is `DocHarvestHealthStatus.Failed`.
+
+```json
+{
+  "RazorDocs": {
+    "Harvest": {
+      "FailOnFailure": true
+    }
+  }
+}
+```
+
+Strict mode is built for CI and export hosts that publish docs artifacts. It prevents an all-failed harvest from becoming an empty or untrustworthy release tree. Leave it off for general public runtime hosts unless failing the whole application is the right operational posture for that host.
+
+The startup preflight calls `DocAggregator.GetHarvestHealthAsync(CancellationToken)` and reuses the normal cached docs snapshot. It does not run a second harvester pipeline. `Healthy`, `Empty`, and `Degraded` snapshots continue startup; only aggregate `Failed` throws `RazorDocsHarvestFailedException`.
+
+`RazorDocsHarvestFailedException` exposes a redacted `DocHarvestFailureSummary` with status, counts, timestamp, and diagnostic code/severity/problem/fix fields. It omits `RepositoryRoot`, raw exception messages, stack traces, and diagnostic `Cause` text. Host logs can still contain lower-level harvester diagnostics because those logs are operator data, not public exception payload.
 
 ## Configuration
 
@@ -256,6 +315,12 @@ var searchIndexRefresh = routes.SearchIndexRefresh;
 - `RazorDocs:Source:RepositoryRoot`
   - Optional absolute or app-relative repository root for source harvesting.
   - When omitted, RazorDocs falls back to repository discovery from the content root.
+- `RazorDocs:Harvest:FailOnFailure`
+  - Defaults to `false`.
+  - `AddRazorDocs()` always registers `RazorDocsHarvestFailurePreflightService`; this flag controls whether that preflight can fail startup.
+  - When `true`, the preflight fails the host with `RazorDocsHarvestFailedException` only when aggregate harvest health is `Failed`.
+  - Use this for release publishing, static export, and CI smoke hosts where publishing empty or untrustworthy docs is worse than a failed build.
+  - Do not use this expecting `Empty` or `Degraded` to fail in v1. Empty docs can be intentional, and degraded docs can still be usable.
 - `RazorDocs:Routing:RouteRootPath`
   - Controls the route-family root for stable entry, archive, and exact-version routes.
   - Defaults to `/docs` when versioning is on.

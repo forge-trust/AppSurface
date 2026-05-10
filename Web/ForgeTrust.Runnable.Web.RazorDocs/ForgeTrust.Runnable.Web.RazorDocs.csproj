@@ -21,6 +21,8 @@
     <PackageReference Include="HtmlSanitizer" />
     <PackageReference Include="Markdig" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="TextMateSharp" />
+    <PackageReference Include="TextMateSharp.Grammars" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 

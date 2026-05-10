@@ -62,6 +62,11 @@ public sealed class RazorDocsOptions
     public RazorDocsSourceOptions Source { get; set; } = new();
 
     /// <summary>
+    /// Gets harvest policy settings used by runtime and export hosts.
+    /// </summary>
+    public RazorDocsHarvestOptions Harvest { get; set; } = new();
+
+    /// <summary>
     /// Gets bundle-mode settings used by future bundle-backed runtime loading.
     /// </summary>
     public RazorDocsBundleOptions Bundle { get; set; } = new();
@@ -118,6 +123,27 @@ public sealed class RazorDocsSourceOptions
     /// When null, RazorDocs falls back to repository discovery from the content root.
     /// </summary>
     public string? RepositoryRoot { get; set; }
+}
+
+/// <summary>
+/// Harvest policy settings for RazorDocs source-backed documentation.
+/// </summary>
+/// <remarks>
+/// The default policy is tolerant so public runtime hosts can continue serving even when source harvesting has a
+/// transient problem. Enable <see cref="FailOnFailure"/> in CI or export hosts that should fail closed when every
+/// configured harvester fails, times out, or cancels.
+/// </remarks>
+public sealed class RazorDocsHarvestOptions
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether host startup should fail when the aggregate harvest health is
+    /// <see cref="ForgeTrust.Runnable.Web.RazorDocs.Models.DocHarvestHealthStatus.Failed"/>.
+    /// </summary>
+    /// <remarks>
+    /// Strict mode treats only the aggregate failed state as fatal. Empty docs and degraded partial harvests remain
+    /// non-fatal in this slice because they can represent intentional empty repositories or still-usable partial docs.
+    /// </remarks>
+    public bool FailOnFailure { get; set; }
 }
 
 /// <summary>
@@ -320,6 +346,7 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
 
         List<string> failures = [];
         var source = options.Source;
+        var harvest = options.Harvest;
         var bundle = options.Bundle;
         var sidebar = options.Sidebar;
         var contributor = options.Contributor;
@@ -342,6 +369,11 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         if (source is null)
         {
             failures.Add("RazorDocs:Source must not be null.");
+        }
+
+        if (harvest is null)
+        {
+            failures.Add("RazorDocs:Harvest must not be null.");
         }
 
         if (bundle is null)
