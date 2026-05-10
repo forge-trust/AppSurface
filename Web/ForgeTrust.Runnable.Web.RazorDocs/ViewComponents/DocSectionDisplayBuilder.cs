@@ -258,11 +258,6 @@ internal static class DocSectionDisplayBuilder
 
     private static string GetParentNamespace(string fullNamespace)
     {
-        if (string.IsNullOrWhiteSpace(fullNamespace))
-        {
-            return string.Empty;
-        }
-
         var separatorIndex = fullNamespace.LastIndexOf('.');
         return separatorIndex <= 0 ? string.Empty : fullNamespace[..separatorIndex];
     }
@@ -274,13 +269,8 @@ internal static class DocSectionDisplayBuilder
 
     private static string GetNamespaceLeafLabel(string fullNamespace)
     {
-        if (string.IsNullOrWhiteSpace(fullNamespace))
-        {
-            return string.Empty;
-        }
-
         var separatorIndex = fullNamespace.LastIndexOf('.');
-        return separatorIndex < 0 ? fullNamespace : fullNamespace[(separatorIndex + 1)..];
+        return fullNamespace[(separatorIndex + 1)..];
     }
 
     private static bool IsCurrentLink(string? currentHref, string href)
