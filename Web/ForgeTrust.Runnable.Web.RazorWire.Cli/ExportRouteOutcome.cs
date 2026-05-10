@@ -83,6 +83,25 @@ internal sealed class ExportRouteOutcome
     }
 
     /// <summary>
+    /// Creates a successful route outcome for an artifact whose body does not need deferred validation or rewriting.
+    /// </summary>
+    /// <param name="route">Normalized root-relative route that was crawled, such as <c>/</c> or <c>/docs/start</c>.</param>
+    /// <param name="contentType">Response media type when known, or <see langword="null"/> when the server omitted it.</param>
+    /// <param name="artifactPath">Absolute output file path written for the route.</param>
+    /// <param name="artifactUrl">Static-host URL that resolves to the emitted artifact.</param>
+    /// <returns>
+    /// An outcome with <see cref="Succeeded"/> set to <see langword="true"/>, artifact fields populated, and no retained body.
+    /// </returns>
+    public static ExportRouteOutcome Success(
+        string route,
+        string? contentType,
+        string artifactPath,
+        string artifactUrl)
+    {
+        return Success(route, contentType, artifactPath, artifactUrl, textBody: null);
+    }
+
+    /// <summary>
     /// Creates an outcome for a route that completed at the HTTP layer with a non-success status code.
     /// </summary>
     /// <param name="route">Normalized root-relative route that was crawled.</param>

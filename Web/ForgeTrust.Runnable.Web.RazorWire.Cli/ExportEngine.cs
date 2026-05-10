@@ -98,9 +98,10 @@ public class ExportEngine
     /// seed queue -> crawl/fetch/discover -> CDN validation -> materialize/rewrite
     /// </code>
     ///
-    /// The crawl stage records route outcomes, artifact URLs, and reference provenance. HTML and CSS bodies are kept
-    /// once until materialization so managed URLs can be rewritten after the artifact map is complete. Binary assets are
-    /// streamed directly to their final files and only their outcomes are retained in memory.
+    /// The crawl stage records route outcomes, artifact URLs, and reference provenance. In CDN mode, HTML and CSS bodies
+    /// are kept once until materialization so managed URLs can be rewritten after the artifact map is complete. In hybrid
+    /// mode, text artifacts and binary assets are written directly to their final files and only their outcomes are
+    /// retained in memory.
     /// </remarks>
     /// <returns>A task that completes when the crawl and export operations have finished.</returns>
     /// <exception cref="FileNotFoundException">Thrown when <see cref="ExportContext.SeedRoutesPath"/> is specified but the file does not exist.</exception>
@@ -181,8 +182,9 @@ public class ExportEngine
             {
                 var html = await response.Content.ReadAsStringAsync(cancellationToken);
                 var docContentFrame = ExtractDocContentFrame(html);
-                var textBody = context.Mode == ExportMode.Cdn ? html : null;
-                context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, textBody);
+                context.RouteOutcomes[route] = context.Mode == ExportMode.Cdn
+                    ? ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, html)
+                    : ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl);
 
                 if (IsDocsExportPage(route, html, docContentFrame) && !string.IsNullOrWhiteSpace(docContentFrame))
                 {
@@ -198,8 +200,9 @@ public class ExportEngine
             else if (isCss)
             {
                 var css = await response.Content.ReadAsStringAsync(cancellationToken);
-                var textBody = context.Mode == ExportMode.Cdn ? css : null;
-                context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, textBody);
+                context.RouteOutcomes[route] = context.Mode == ExportMode.Cdn
+                    ? ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, css)
+                    : ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl);
                 AddReferencesAndQueue(ExtractReferences(css, route, htmlScope: false), context);
                 if (context.Mode == ExportMode.Hybrid)
                 {
@@ -218,7 +221,7 @@ public class ExportEngine
                     bufferSize: 4096,
                     useAsync: true);
                 await contentStream.CopyToAsync(fileStream, cancellationToken);
-                context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, textBody: null);
+                context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl);
             }
         }
         catch (OperationCanceledException)
@@ -529,9 +532,15 @@ public class ExportEngine
             var filePath = MapRouteToFilePath(route, context.OutputPath, isHtml: true);
             var artifactUrl = MapFilePathToArtifactUrl(filePath, context.OutputPath, route);
             context.ArtifactUrls[route] = artifactUrl;
-            context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, html);
+            context.RouteOutcomes[route] = context.Mode == ExportMode.Cdn
+                ? ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, html)
+                : ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl);
             context.Visited.Add(route);
             AddReferencesAndQueue(ExtractReferences(html, route, htmlScope: true), context);
+            if (context.Mode == ExportMode.Hybrid)
+            {
+                await WriteHtmlRouteAsync(route, filePath, html, context, rewriteManagedReferences: false, cancellationToken);
+            }
         }
         catch (OperationCanceledException)
         {
