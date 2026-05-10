@@ -237,7 +237,7 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
-    public async Task IndexView_ShouldRenderSidebarNamespaceAndTypeLinks()
+    public async Task IndexView_ShouldRenderSidebarNamespacesWithoutTypeLinks()
     {
         using var services = CreateServiceProvider(
             CreateDocs(),
@@ -251,8 +251,7 @@ public class RazorDocsViewsTests
         Assert.Contains("Documentation Index", html);
         Assert.Contains("href=\"/docs/sections/api-reference\"", html);
         Assert.Contains("href=\"/docs/Namespaces.html\"", html);
-        Assert.Contains("data-doc-anchor-link=\"true\"", html);
-        Assert.Contains("href=\"/docs/Namespaces/ForgeTrust.Runnable.Web.html#ForgeTrust.Runnable.Web.AspireApp\"", html);
+        Assert.DoesNotContain("href=\"/docs/Namespaces/ForgeTrust.Runnable.Web.html#ForgeTrust.Runnable.Web.AspireApp\"", html);
         Assert.Contains("ForgeTrust", html);
     }
 
@@ -749,48 +748,71 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
-    public async Task SectionView_ShouldRenderGroupedLinks_BadgesSummariesAndChildren()
+    public async Task SectionView_ShouldRenderEditorialGroupedLinks_BadgesSummariesAndChildren()
     {
         var docs = new List<DocNode>
         {
             new(
-                "Namespaces",
-                "Namespaces",
-                "<p>Namespace root</p>",
+                "Install",
+                "guides/install.md",
+                "<p>Install guide</p>",
                 Metadata: new DocMetadata
                 {
-                    NavGroup = "API Reference",
-                    PageType = "api-reference"
+                    NavGroup = "How-to Guides",
+                    PageType = "guide",
+                    Summary = "Install guide summary."
                 }),
             new(
-                "Foo",
-                "Namespaces/Foo",
-                "<p>Foo namespace</p>",
-                Metadata: new DocMetadata
-                {
-                    NavGroup = "API Reference",
-                    PageType = "api-reference",
-                    Summary = "Foo namespace summary."
-                }),
-            new(
-                "FooService",
-                "Namespaces/Foo#FooService",
+                "Install steps",
+                "guides/install.md#install-steps",
                 string.Empty,
-                ParentPath: "Namespaces/Foo",
+                ParentPath: "guides/install.md",
                 Metadata: new DocMetadata
                 {
-                    NavGroup = "API Reference",
-                    PageType = "api-reference"
+                    NavGroup = "How-to Guides",
+                    PageType = "guide"
                 })
         };
         using var services = CreateServiceProvider(docs);
 
-        var html = await RenderDocsViewAsync(services, "Section", c => c.Section("api-reference"));
+        var html = await RenderDocsViewAsync(services, "Section", c => c.Section("how-to-guides"));
 
         Assert.Contains("Browse the public pages here.", html);
-        Assert.Contains("Foo namespace summary.", html);
-        Assert.Contains("docs-page-badge--api-reference", html);
-        Assert.Contains("FooService", html);
+        Assert.Contains("Install guide summary.", html);
+        Assert.Contains("docs-page-badge--guide", html);
+        Assert.Contains("Install steps", html);
+    }
+
+    [Fact]
+    public async Task SectionChildrenPartial_ShouldRenderRecursiveApiNamespaceChildren()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var children = new[]
+        {
+            new DocSectionLinkViewModel
+            {
+                Title = "Baz",
+                Href = "/docs/Namespaces/Foo.Bar.Baz.html",
+                Children =
+                [
+                    new DocSectionLinkViewModel
+                    {
+                        Title = "Qux",
+                        Href = "/docs/Namespaces/Foo.Bar.Baz.Qux.html"
+                    }
+                ]
+            }
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Shared/_DocSectionCardChildren.cshtml",
+            children);
+
+        Assert.Contains("href=\"/docs/Namespaces/Foo.Bar.Baz.html\"", html);
+        Assert.Contains("href=\"/docs/Namespaces/Foo.Bar.Baz.Qux.html\"", html);
+        Assert.Contains("Baz", html);
+        Assert.Contains("Qux", html);
     }
 
     [Fact]
@@ -826,7 +848,15 @@ public class RazorDocsViewsTests
                                         {
                                             Title = "Run",
                                             Href = "/docs/guides/guide.md.html#run",
-                                            IsCurrent = true
+                                            IsCurrent = true,
+                                            Children =
+                                            [
+                                                new DocSectionLinkViewModel
+                                                {
+                                                    Title = "Verify",
+                                                    Href = "/docs/guides/guide.md.html#verify"
+                                                }
+                                            ]
                                         }
                                     ]
                                 }
@@ -845,6 +875,7 @@ public class RazorDocsViewsTests
         Assert.Contains("href=\"/docs/sections/how-to-guides\"", html);
         Assert.Contains("aria-current=\"location\"", html);
         Assert.Contains("href=\"/docs/guides/guide.md.html\"", html);
+        Assert.Contains("href=\"/docs/guides/guide.md.html#verify\"", html);
         Assert.Contains("aria-current=\"page\"", html);
         Assert.DoesNotContain("aria-current=&quot;page&quot;", html);
         Assert.DoesNotContain("aria-current=&quot;location&quot;", html);
@@ -997,21 +1028,21 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
-    public void BuildGroups_ShouldNormalizeSourcePaths_ForHrefFallbackAndChildren()
+    public void BuildGroups_ShouldNormalizeSourcePaths_ForHrefFallbackAndEditorialChildren()
     {
         var snapshot = new DocSectionSnapshot
         {
-            Section = DocPublicSection.ApiReference,
-            Label = "API Reference",
-            Slug = "api-reference",
+            Section = DocPublicSection.HowToGuides,
+            Label = "How-to Guides",
+            Slug = "how-to-guides",
             VisiblePages =
             [
-                new("Foo", "/Namespaces/Foo", "<p>Foo namespace</p>"),
+                new("Guide", "/docs/guide.md", "<p>Guide</p>"),
                 new(
-                    "Widget",
-                    "Namespaces/Foo#Widget",
+                    "Build",
+                    "docs/guide.md#Build",
                     string.Empty,
-                    ParentPath: "Namespaces/Foo")
+                    ParentPath: "docs/guide.md")
             ]
         };
 
@@ -1019,13 +1050,40 @@ public class RazorDocsViewsTests
         var link = Assert.Single(groups.SelectMany(group => group.Links));
         var child = Assert.Single(link.Children);
 
-        Assert.Equal("/docs/Namespaces/Foo", link.Href);
-        Assert.DoesNotContain("//Namespaces", link.Href, StringComparison.Ordinal);
-        Assert.Equal("Widget", child.Title);
+        Assert.Equal("/docs/docs/guide.md", link.Href);
+        Assert.DoesNotContain("//docs", link.Href, StringComparison.Ordinal);
+        Assert.Equal("Build", child.Title);
     }
 
     [Fact]
-    public void BuildGroups_ShouldMatchTypeAnchorChildren_CaseInsensitively()
+    public void BuildGroups_ShouldMatchEditorialAnchorChildren_CaseInsensitively()
+    {
+        var snapshot = new DocSectionSnapshot
+        {
+            Section = DocPublicSection.HowToGuides,
+            Label = "How-to Guides",
+            Slug = "how-to-guides",
+            VisiblePages =
+            [
+                new("Guide", "docs/guide.md", "<p>Guide</p>", CanonicalPath: "docs/guide.md.html"),
+                new(
+                    "Build",
+                    "docs/guide.md#Build",
+                    string.Empty,
+                    ParentPath: "DOCS/GUIDE.MD",
+                    CanonicalPath: "docs/guide.md.html#Build")
+            ]
+        };
+
+        var groups = DocSectionDisplayBuilder.BuildGroups(snapshot);
+        var link = Assert.Single(groups.SelectMany(group => group.Links));
+        var child = Assert.Single(link.Children);
+
+        Assert.Equal("Build", child.Title);
+    }
+
+    [Fact]
+    public void BuildGroups_ShouldOmitTypeAnchorChildren_FromApiReferenceGroups()
     {
         var snapshot = new DocSectionSnapshot
         {
@@ -1039,16 +1097,92 @@ public class RazorDocsViewsTests
                     "Widget",
                     "Namespaces/Foo#Widget",
                     string.Empty,
-                    ParentPath: "namespaces/foo",
+                    ParentPath: "Namespaces/Foo",
                     CanonicalPath: "Namespaces/Foo.html#Widget")
             ]
         };
 
         var groups = DocSectionDisplayBuilder.BuildGroups(snapshot);
         var link = Assert.Single(groups.SelectMany(group => group.Links));
-        var child = Assert.Single(link.Children);
 
-        Assert.Equal("Widget", child.Title);
+        Assert.Empty(link.Children);
+    }
+
+    [Fact]
+    public void BuildGroups_ShouldNestDeepApiNamespacesUnderNearestParent_WithLeafLabels()
+    {
+        var snapshot = new DocSectionSnapshot
+        {
+            Section = DocPublicSection.ApiReference,
+            Label = "API Reference",
+            Slug = "api-reference",
+            VisiblePages =
+            [
+                new("Core", "Namespaces/ForgeTrust.Runnable.Core", "<p>Core namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.html"),
+                new("Defaults", "Namespaces/ForgeTrust.Runnable.Core.Defaults", "<p>Defaults namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.Defaults.html"),
+                new("Extensions", "Namespaces/ForgeTrust.Runnable.Core.Extensions", "<p>Extensions namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.Extensions.html"),
+                new("Aspire", "Namespaces/ForgeTrust.Runnable.Aspire", "<p>Aspire namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Aspire.html"),
+                new("Configuration", "Namespaces/Microsoft.Extensions.Configuration", "<p>Configuration namespace</p>", CanonicalPath: "Namespaces/Microsoft.Extensions.Configuration.html")
+            ]
+        };
+
+        var groups = DocSectionDisplayBuilder.BuildGroups(snapshot);
+        var links = groups.SelectMany(group => group.Links).ToList();
+        var coreLink = Assert.Single(links, link => string.Equals(link.Title, "Runnable.Core", StringComparison.Ordinal));
+
+        Assert.Equal(["Defaults", "Extensions"], coreLink.Children.Select(child => child.Title).ToArray());
+        Assert.Equal("Runnable.Aspire", Assert.Single(links, link => string.Equals(link.Title, "Runnable.Aspire", StringComparison.Ordinal)).Title);
+        Assert.DoesNotContain(links, link => string.Equals(link.Title, "Runnable.Core.Defaults", StringComparison.Ordinal));
+        Assert.DoesNotContain(links, link => string.Equals(link.Title, "Runnable.Core.Extensions", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildGroups_ShouldNestApiNamespacesUnderTwoSegmentParent_WhenParentPageExists()
+    {
+        var snapshot = new DocSectionSnapshot
+        {
+            Section = DocPublicSection.ApiReference,
+            Label = "API Reference",
+            Slug = "api-reference",
+            VisiblePages =
+            [
+                new("Bar", "Namespaces/Foo.Bar", "<p>Bar namespace</p>", CanonicalPath: "Namespaces/Foo.Bar.html"),
+                new("Baz", "Namespaces/Foo.Bar.Baz", "<p>Baz namespace</p>", CanonicalPath: "Namespaces/Foo.Bar.Baz.html")
+            ]
+        };
+
+        var groups = DocSectionDisplayBuilder.BuildGroups(snapshot);
+        var barLink = Assert.Single(groups.SelectMany(group => group.Links));
+        var bazLink = Assert.Single(barLink.Children);
+
+        Assert.Equal("Bar", barLink.Title);
+        Assert.Equal("Baz", bazLink.Title);
+        Assert.Equal("/docs/Namespaces/Foo.Bar.Baz.html", bazLink.Href);
+    }
+
+    [Fact]
+    public void BuildGroups_ShouldKeepRecursiveNestedApiNamespacesReachable()
+    {
+        var snapshot = new DocSectionSnapshot
+        {
+            Section = DocPublicSection.ApiReference,
+            Label = "API Reference",
+            Slug = "api-reference",
+            VisiblePages =
+            [
+                new("Core", "Namespaces/ForgeTrust.Runnable.Core", "<p>Core namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.html"),
+                new("Defaults", "Namespaces/ForgeTrust.Runnable.Core.Defaults", "<p>Defaults namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.Defaults.html"),
+                new("Internal", "Namespaces/ForgeTrust.Runnable.Core.Defaults.Internal", "<p>Internal namespace</p>", CanonicalPath: "Namespaces/ForgeTrust.Runnable.Core.Defaults.Internal.html")
+            ]
+        };
+
+        var groups = DocSectionDisplayBuilder.BuildGroups(snapshot, namespacePrefixes: ["ForgeTrust."]);
+        var coreLink = Assert.Single(groups.SelectMany(group => group.Links));
+        var defaultsLink = Assert.Single(coreLink.Children);
+        var internalLink = Assert.Single(defaultsLink.Children);
+
+        Assert.Equal("Defaults", defaultsLink.Title);
+        Assert.Equal("Internal", internalLink.Title);
     }
 
     [Fact]
@@ -3034,7 +3168,7 @@ public class RazorDocsViewsTests
 
         Assert.Contains("href=\"/docs/Namespaces.html\"", canonicalHtml);
         Assert.Contains("href=\"/docs/Namespaces/ForgeTrust.Runnable.Web.html\"", canonicalHtml);
-        Assert.Contains("href=\"/docs/Namespaces/ForgeTrust.Runnable.Web.html#AspireApp\"", canonicalHtml);
+        Assert.DoesNotContain("href=\"/docs/Namespaces/ForgeTrust.Runnable.Web.html#AspireApp\"", canonicalHtml);
         Assert.Contains("href=\"/docs/docs/guide.md.html\"", canonicalHtml);
         Assert.Contains("href=\"/docs/docs/guide.md.html#Build\"", canonicalHtml);
         Assert.Contains("href=\"/docs/docs/guide.md.html#Run\"", canonicalHtml);
@@ -3077,7 +3211,7 @@ public class RazorDocsViewsTests
 
         Assert.Contains("href=\"/docs/Namespaces\"", html);
         Assert.Contains("href=\"/docs/Namespaces/ForgeTrust.Runnable.Web\"", html);
-        Assert.Contains("href=\"/docs/Namespaces/ForgeTrust.Runnable.Web#AspireApp\"", html);
+        Assert.DoesNotContain("href=\"/docs/Namespaces/ForgeTrust.Runnable.Web#AspireApp\"", html);
         Assert.Contains("href=\"/docs/docs/guide.md\"", html);
         Assert.Contains("href=\"/docs/docs/guide.md#Build\"", html);
         Assert.Contains("href=\"/docs/docs/guide.md#Run\"", html);

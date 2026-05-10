@@ -34,24 +34,7 @@
                                     @link.Title
                                 </a>
 
-                                @if (link.Children.Count > 0)
-                                {
-                                    <ul class="ml-4 mt-1 space-y-0.5 border-l border-slate-800">
-                                        @foreach (var child in link.Children)
-                                        {
-                                            <li>
-                                                <a href="@Url.PathBaseAware(child.Href)"
-                                                   data-doc-anchor-link="true"
-                                                   data-turbo-frame="doc-content"
-                                                   data-turbo-action="advance"
-                                                   class="block px-4 py-1 text-xs transition-colors @(child.IsCurrent ? "text-cyan-300" : "text-slate-500 hover:text-cyan-300")"
-                                                   aria-current="@(child.IsCurrent ? "page" : null)">
-                                                    @child.Title
-                                                </a>
-                                            </li>
-                                        }
-                                    </ul>
-                                }
+                                @await Html.PartialAsync("_DocSectionCompactChildren", link.Children)
                             </li>
                         }
                     </ul>

@@ -665,6 +665,19 @@ These sections back the current docs home, the sidebar shell, and the dedicated 
   - anything else falls into `How-to Guides`
 - API reference content continues to use the canonical `API Reference` section.
 
+### API reference sidebar shape
+
+The primary sidebar keeps API Reference collapsed at the package and namespace level. Generated type and member anchors
+stay available from the namespace page itself through `On this page`, source links, and search, but they are not emitted
+as nested links in the global left rail. Deeper namespaces nest under the nearest namespace page that exists in the
+sidebar and use only their leaf label, so `Runnable.Core` can show child links such as `Defaults` and `Extensions`
+instead of repeating `Runnable.Core.Defaults` and `Runnable.Core.Extensions`. This keeps large harvested API surfaces
+browsable without making readers scan hundreds of symbols before they intentionally open a namespace page.
+
+Configure `RazorDocs:Sidebar:NamespacePrefixes` when a host wants package names shortened in that rail. For example,
+`ForgeTrust.Runnable.` turns `ForgeTrust.Runnable.Web.RazorDocs.Services` into a `Web` family heading with
+`RazorDocs.Services` as the namespace link label.
+
 ### Section routes and landing docs
 
 - The current docs surface exposes section routes such as `{DocsRootPath}/sections/start-here`.
