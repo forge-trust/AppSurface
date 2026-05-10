@@ -55,9 +55,6 @@ internal sealed class PackagePublishPlanResolver
             manifest,
             candidateProjects,
             metadataByProject);
-        var metadataByPackageId = metadataByProject.Values.ToDictionary(
-            metadata => metadata.PackageId,
-            StringComparer.OrdinalIgnoreCase);
 
         ValidatePublishFields(resolvedEntries);
         ValidateProjectReferenceDependencies(repositoryRoot, resolvedEntries, metadataByProject);

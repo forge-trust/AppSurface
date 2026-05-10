@@ -623,6 +623,34 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_ThrowsWhenNonToolPackageDeclaresToolPackageType()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Web",
+            PackageVersion,
+            EmptyDependencies,
+            packageTypes: ["DotnetTool"]);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj",
+                        "ForgeTrust.Runnable.Web",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("DotnetTool", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_ThrowsWhenExpectedDependencyIsMissing()
     {
         var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
@@ -677,6 +705,44 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 PackageVersion));
 
         Assert.Contains("expected same-version dependency", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenAnyDependencyGroupVersionDoesNotMatch()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Web",
+            PackageVersion,
+            dependencies: EmptyDependencies,
+            dependencyXml: $$"""
+                <dependencies>
+                  <group targetFramework="net10.0">
+                    <dependency id="ForgeTrust.Runnable.Core" version="[{{PackageVersion}}, )" />
+                  </group>
+                  <group targetFramework="net9.0">
+                    <dependency id="ForgeTrust.Runnable.Core" version="0.0.0-ci.41" />
+                  </group>
+                </dependencies>
+            """);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj",
+                        "ForgeTrust.Runnable.Web",
+                        PackagePublishDecision.Publish,
+                        ["ForgeTrust.Runnable.Core"],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("expected same-version dependency", error.Message, StringComparison.Ordinal);
+        Assert.Contains("0.0.0-ci.41", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1254,7 +1320,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         bool includeId = true,
         bool includeVersion = true,
         IReadOnlyList<string>? packageTypes = null,
-        IReadOnlyDictionary<string, byte[]>? rawEntries = null)
+        IReadOnlyDictionary<string, byte[]>? rawEntries = null,
+        string? dependencyXml = null)
     {
         var packagePath = Path.Combine(artifactDirectory, $"{packageId}.{packageVersion}.nupkg");
         using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
@@ -1271,7 +1338,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 description,
                 includeId,
                 includeVersion,
-                packageTypes));
+                packageTypes,
+                dependencyXml));
         }
 
         if (includeReadme)
@@ -1312,11 +1380,19 @@ public sealed class PackageArtifactValidationTests : IDisposable
         string? description,
         bool includeId,
         bool includeVersion,
-        IReadOnlyList<string>? packageTypes)
+        IReadOnlyList<string>? packageTypes,
+        string? dependencyXmlOverride)
     {
         var dependencyXml = string.Join(
             Environment.NewLine,
             dependencies.Select(pair => $"""        <dependency id="{pair.Key}" version="{pair.Value}" />"""));
+        var dependenciesXml = dependencyXmlOverride ?? $$"""
+                <dependencies>
+                  <group targetFramework="net10.0">
+            {{dependencyXml}}
+                  </group>
+                </dependencies>
+            """;
         var readmeXml = includeReadme ? "    <readme>README.md</readme>" : string.Empty;
         var idXml = includeId ? $"    <id>{packageId}</id>" : string.Empty;
         var versionXml = includeVersion ? $"    <version>{packageVersion}</version>" : string.Empty;
@@ -1341,11 +1417,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 <tags>runnable dotnet</tags>
             {{readmeXml}}
             {{packageTypesXml}}
-                <dependencies>
-                  <group targetFramework="net10.0">
-            {{dependencyXml}}
-                  </group>
-                </dependencies>
+            {{dependenciesXml}}
               </metadata>
             </package>
             """;

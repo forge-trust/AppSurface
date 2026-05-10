@@ -112,9 +112,15 @@ internal sealed class PackageArtifactValidator
         RequireMetadata(expected.PackageId, "tags", inspected.Tags);
         RequireMetadata(expected.PackageId, "readme", inspected.Readme);
 
-        if (expected.IsTool && !inspected.PackageTypes.Contains("DotnetTool", StringComparer.OrdinalIgnoreCase))
+        var isDotnetToolPackage = inspected.PackageTypes.Contains("DotnetTool", StringComparer.OrdinalIgnoreCase);
+        if (expected.IsTool && !isDotnetToolPackage)
         {
             throw new PackageIndexException($"Tool package '{expected.PackageId}' must declare package type 'DotnetTool'.");
+        }
+
+        if (!expected.IsTool && isDotnetToolPackage)
+        {
+            throw new PackageIndexException($"Package '{expected.PackageId}' must not declare package type 'DotnetTool'.");
         }
 
         var expectedPayloadPath = GetExpectedPayloadPath(expected.PackageId);
@@ -127,16 +133,19 @@ internal sealed class PackageArtifactValidator
 
         foreach (var expectedDependency in expected.ExpectedDependencyPackageIds)
         {
-            if (!inspected.Dependencies.TryGetValue(expectedDependency, out var dependencyVersion))
+            if (!inspected.Dependencies.TryGetValue(expectedDependency, out var dependencyVersions))
             {
                 throw new PackageIndexException(
                     $"Package '{expected.PackageId}' is missing dependency '{expectedDependency}'.");
             }
 
-            if (!DependencyVersionMatches(dependencyVersion, packageVersion))
+            var mismatchedVersions = dependencyVersions
+                .Where(dependencyVersion => !DependencyVersionMatches(dependencyVersion, packageVersion))
+                .ToArray();
+            if (mismatchedVersions.Length > 0)
             {
                 throw new PackageIndexException(
-                    $"Package '{expected.PackageId}' dependency '{expectedDependency}' has version '{dependencyVersion}', expected same-version dependency '{packageVersion}'.");
+                    $"Package '{expected.PackageId}' dependency '{expectedDependency}' has version '{string.Join(", ", mismatchedVersions)}', expected same-version dependency '{packageVersion}'.");
             }
         }
 
@@ -184,7 +193,10 @@ internal sealed class PackageArtifactValidator
             .GroupBy(dependency => dependency.Id!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
-                group => group.First().Version ?? string.Empty,
+                group => (IReadOnlyList<string>)group
+                    .Select(dependency => dependency.Version ?? string.Empty)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
                 StringComparer.OrdinalIgnoreCase);
         var firstPartyAssemblyVersions = archive.Entries
             .Where(entry => IsFirstPartyAssemblyEntry(entry, packageIds))
@@ -453,6 +465,22 @@ internal sealed record PackageArtifactValidationReportEntry(
     PackagePublishDecision Decision,
     IReadOnlyList<string> ExpectedDependencyPackageIds);
 
+/// <summary>
+/// Metadata and payload facts inspected from one NuGet package artifact.
+/// </summary>
+/// <param name="PackagePath">Absolute or caller-supplied path to the inspected <c>.nupkg</c> file.</param>
+/// <param name="PackageId">Nuspec package id. Expected to be non-empty after inspection.</param>
+/// <param name="PackageVersion">Nuspec package version. Expected to be non-empty after inspection.</param>
+/// <param name="Authors">Nuspec authors metadata, or <c>null</c> when absent.</param>
+/// <param name="Description">Nuspec description metadata, or <c>null</c> when absent.</param>
+/// <param name="License">Nuspec license expression or value, or <c>null</c> when absent.</param>
+/// <param name="RepositoryUrl">Nuspec repository URL, or <c>null</c> when absent.</param>
+/// <param name="Tags">Nuspec package tags, or <c>null</c> when absent.</param>
+/// <param name="Readme">Nuspec README path, or <c>null</c> when absent.</param>
+/// <param name="PackageTypes">Declared nuspec package type names such as <c>DotnetTool</c>.</param>
+/// <param name="Dependencies">Dependency ids mapped to all distinct nuspec versions observed across dependency groups.</param>
+/// <param name="EntryPaths">Normalized archive entry paths contained in the package.</param>
+/// <param name="FirstPartyAssemblyVersions">First-party implementation assemblies and their informational versions.</param>
 internal sealed record InspectedPackage(
     string PackagePath,
     string PackageId,
@@ -464,10 +492,15 @@ internal sealed record InspectedPackage(
     string? Tags,
     string? Readme,
     IReadOnlyList<string> PackageTypes,
-    IReadOnlyDictionary<string, string> Dependencies,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> Dependencies,
     IReadOnlyList<string> EntryPaths,
     IReadOnlyList<InspectedAssemblyVersion> FirstPartyAssemblyVersions);
 
+/// <summary>
+/// Informational version metadata read from a first-party assembly inside a package artifact.
+/// </summary>
+/// <param name="EntryPath">Archive path for the inspected assembly entry.</param>
+/// <param name="InformationalVersion">Assembly informational version value read from metadata.</param>
 internal sealed record InspectedAssemblyVersion(
     string EntryPath,
     string InformationalVersion);
