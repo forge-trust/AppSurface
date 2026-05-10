@@ -2486,66 +2486,6 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
-    public async Task GetSearchIndexPayloadAsync_ShouldIndexNavigationHiddenDocs_WithSearchModes()
-    {
-        var harvestedDocs = new List<DocNode>
-        {
-            new(
-                "Public Guide",
-                "guides/public.md",
-                "<p>Public body</p>",
-                Metadata: new DocMetadata
-                {
-                    PageType = "guide"
-                }),
-            new(
-                "Benchmarks",
-                "benchmarks/README.md",
-                "<p>Benchmark internals</p>",
-                Metadata: new DocMetadata
-                {
-                    PageType = "internals",
-                    HideFromPublicNav = true
-                }),
-            new(
-                "Example Service",
-                "Namespaces/RazorWireWebExample.Services",
-                "<p>Generated example reference</p>",
-                Metadata: new DocMetadata
-                {
-                    PageType = "api-reference",
-                    HideFromPublicNav = true
-                }),
-            new(
-                "Secret Runbook",
-                "runbooks/secret.md",
-                "<p>Secret</p>",
-                Metadata: new DocMetadata
-                {
-                    HideFromPublicNav = true,
-                    HideFromSearch = true
-                })
-        };
-        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
-
-        var payload = await _aggregator.GetSearchIndexPayloadAsync();
-
-        Assert.DoesNotContain(payload.Documents, doc => doc.Title == "Secret Runbook");
-
-        var publicDoc = Assert.Single(payload.Documents, doc => doc.Title == "Public Guide");
-        Assert.Equal("public", publicDoc.SearchMode);
-        Assert.Equal("Public Docs", publicDoc.SearchModeLabel);
-
-        var internalsDoc = Assert.Single(payload.Documents, doc => doc.Title == "Benchmarks");
-        Assert.Equal("internals", internalsDoc.SearchMode);
-        Assert.Equal("Internals", internalsDoc.SearchModeLabel);
-
-        var generatedDoc = Assert.Single(payload.Documents, doc => doc.Title == "Example Service");
-        Assert.Equal("generated-reference", generatedDoc.SearchMode);
-        Assert.Equal("Generated Reference", generatedDoc.SearchModeLabel);
-    }
-
-    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldHonorConfiguredDocsRoot()
     {
         var harvestedDocs = new List<DocNode>

@@ -178,7 +178,7 @@ public sealed class DocMetadataFactoryTests
         Assert.Equal("internals", metadata.PageType);
         Assert.Equal("contributor", metadata.Audience);
         Assert.True(metadata.HideFromPublicNav);
-        Assert.Null(metadata.HideFromSearch);
+        Assert.True(metadata.HideFromSearch);
     }
 
     [Theory]
@@ -192,7 +192,7 @@ public sealed class DocMetadataFactoryTests
         Assert.Equal("internals", metadata.PageType);
         Assert.Equal("contributor", metadata.Audience);
         Assert.True(metadata.HideFromPublicNav);
-        Assert.Null(metadata.HideFromSearch);
+        Assert.True(metadata.HideFromSearch);
     }
 
     [Fact]
@@ -262,22 +262,12 @@ public sealed class DocMetadataFactoryTests
     [InlineData("ForgeTrust.Runnable.Web.RazorWire.Cli.Tests", true)]
     [InlineData("RunnableBenchmarks.Web", true)]
     [InlineData("ForgeTrust.Runnable.Web.RazorDocs", false)]
-    public void CreateApiReferenceMetadata_ShouldHideInternalNamespacesFromPublicNavigationOnly(string namespaceName, bool expectedHidden)
+    public void CreateApiReferenceMetadata_ShouldHideInternalNamespacesByDefault(string namespaceName, bool expectedHidden)
     {
         var metadata = DocMetadataFactory.CreateApiReferenceMetadata("Title", namespaceName);
 
-        Assert.Equal(expectedHidden ? true : null, metadata.HideFromPublicNav);
-        Assert.Null(metadata.HideFromSearch);
-    }
-
-    [Fact]
-    public void CreateApiReferenceMetadata_ShouldHideExternalGeneratedNamespacesFromPublicNavigationOnly()
-    {
-        var metadata = DocMetadataFactory.CreateApiReferenceMetadata("Title", "RazorWireWebExample.Services");
-
-        Assert.True(metadata.HideFromPublicNav);
-        Assert.Null(metadata.HideFromSearch);
-        Assert.Equal("RazorWireWebExample", metadata.Component);
+        Assert.Equal(expectedHidden, metadata.HideFromPublicNav);
+        Assert.Equal(expectedHidden, metadata.HideFromSearch);
     }
 
     [Fact]

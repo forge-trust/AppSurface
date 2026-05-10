@@ -62,8 +62,6 @@ internal sealed record DocsSearchIndexMetadata(
 /// <param name="CanonicalSlug">Optional canonical slug used for route continuity.</param>
 /// <param name="RelatedPages">Authored related-page references used for recovery links.</param>
 /// <param name="Breadcrumbs">Authored breadcrumb labels displayed in result chrome.</param>
-/// <param name="SearchMode">Search-mode facet that controls whether the built-in client shows the page by default.</param>
-/// <param name="SearchModeLabel">Human-readable search-mode label for custom clients and result chrome.</param>
 internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("path")] string Path,
@@ -88,9 +86,7 @@ internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("sequenceKey")] string? SequenceKey,
     [property: JsonPropertyName("canonicalSlug")] string? CanonicalSlug,
     [property: JsonPropertyName("relatedPages")] IReadOnlyList<string> RelatedPages,
-    [property: JsonPropertyName("breadcrumbs")] IReadOnlyList<string> Breadcrumbs,
-    [property: JsonPropertyName("searchMode")] string SearchMode = "public",
-    [property: JsonPropertyName("searchModeLabel")] string SearchModeLabel = "Public Docs");
+    [property: JsonPropertyName("breadcrumbs")] IReadOnlyList<string> Breadcrumbs);
 
 /// <summary>
 /// Service responsible for aggregating documentation from multiple harvesters and caching the results.
@@ -1502,7 +1498,7 @@ public class DocAggregator
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var records = docs
-            .Where(d => d.Metadata?.HideFromSearch != true)
+            .Where(d => d.Metadata?.HideFromSearch != true && d.Metadata?.HideFromPublicNav != true)
             .Select(
                 d =>
                 {
@@ -1522,7 +1518,6 @@ public class DocAggregator
                     var pageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge(d.Metadata?.PageType);
                     var hasPublicSection = DocPublicSectionCatalog.TryResolve(d.Metadata?.NavGroup, out var publicSection);
 
-                    var searchMode = ResolveSearchMode(d);
                     return new DocsSearchIndexDocument(
                         d.Path,
                         BuildSearchDocUrl(_docsUrlBuilder.CurrentDocsRootPath, d.Path),
@@ -1547,9 +1542,7 @@ public class DocAggregator
                         d.Metadata?.SequenceKey,
                         d.Metadata?.CanonicalSlug,
                         d.Metadata?.RelatedPages ?? [],
-                        d.Metadata?.Breadcrumbs ?? [],
-                        searchMode.Value,
-                        searchMode.Label);
+                        d.Metadata?.Breadcrumbs ?? []);
                 })
             .Where(r => !string.IsNullOrWhiteSpace(r.Title) || !string.IsNullOrWhiteSpace(r.BodyText))
             .GroupBy(r => r.Path, StringComparer.OrdinalIgnoreCase)
@@ -1565,30 +1558,6 @@ public class DocAggregator
             records);
 
         return (payload, records.Count);
-    }
-
-    private static (string Value, string Label) ResolveSearchMode(DocNode doc)
-    {
-        if (doc.Metadata?.HideFromPublicNav != true)
-        {
-            return ("public", "Public Docs");
-        }
-
-        return IsApiSearchSurface(doc)
-            ? ("generated-reference", "Generated Reference")
-            : ("internals", "Internals");
-    }
-
-    private static bool IsApiSearchSurface(DocNode doc)
-    {
-        return IsApiSurfacePageType(doc.Metadata?.PageType)
-               || doc.Path.StartsWith("Namespaces/", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsApiSurfacePageType(string? pageType)
-    {
-        var normalizedPageType = DocMetadataPresentation.NormalizeToken(pageType);
-        return normalizedPageType is "api" or "api-reference";
     }
 
     private static string ResolveSearchIndexTitle(DocNode doc)

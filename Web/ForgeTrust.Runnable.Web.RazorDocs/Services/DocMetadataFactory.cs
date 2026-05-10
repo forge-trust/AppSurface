@@ -67,7 +67,7 @@ internal static class DocMetadataFactory
             NavGroup = defaultNavGroup,
             NavGroupIsDerived = string.IsNullOrWhiteSpace(defaultNavGroup) ? null : true,
             HideFromPublicNav = isInternalPath ? true : null,
-            HideFromSearch = null
+            HideFromSearch = isInternalPath ? true : null
         };
 
         var merged = DocMetadata.Merge(explicitMetadata, defaults) ?? new DocMetadata();
@@ -119,8 +119,6 @@ internal static class DocMetadataFactory
     internal static DocMetadata CreateApiReferenceMetadata(string title, string namespaceName)
     {
         var isInternalNamespace = IsInternalNamespace(namespaceName);
-        var isRunnableNamespace = IsRunnableNamespace(namespaceName);
-        var hideFromPublicNav = isInternalNamespace || !isRunnableNamespace;
         return new DocMetadata
         {
             Title = title,
@@ -132,8 +130,8 @@ internal static class DocMetadataFactory
             ComponentIsDerived = false,
             NavGroup = DocPublicSectionCatalog.GetLabel(DocPublicSection.ApiReference),
             NavGroupIsDerived = false,
-            HideFromPublicNav = hideFromPublicNav ? true : null,
-            HideFromSearch = null,
+            HideFromPublicNav = isInternalNamespace,
+            HideFromSearch = isInternalNamespace,
             Breadcrumbs = BuildApiReferenceBreadcrumbs(title, namespaceName),
             BreadcrumbsMatchPathTargets = true
         };
@@ -274,12 +272,6 @@ internal static class DocMetadataFactory
         var segments = namespaceName.Split('.', StringSplitOptions.RemoveEmptyEntries);
         return segments.Any(IsInternalSegment)
                || namespaceName.Contains("Benchmark", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsRunnableNamespace(string namespaceName)
-    {
-        return namespaceName.Equals("ForgeTrust.Runnable", StringComparison.OrdinalIgnoreCase)
-               || namespaceName.StartsWith(RunnableNamespacePrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetRunnableComponentName(IReadOnlyList<string> parts)

@@ -98,9 +98,6 @@ public class RazorDocsViewsTests
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.pageType))", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.component))", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
-        Assert.Contains("'searchMode'", searchClient);
-        Assert.Contains("Search Mode", searchClient);
-        Assert.Contains("defaultSearchMode = 'public'", searchClient);
     }
 
     [Fact]
