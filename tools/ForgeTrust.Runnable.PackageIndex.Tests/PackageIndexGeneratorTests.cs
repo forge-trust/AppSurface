@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Text;
 
 namespace ForgeTrust.Runnable.PackageIndex.Tests;
@@ -406,7 +404,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
-    public async Task GenerateAsync_ThrowsWhenRazorWireCliIsNotExcluded()
+    public async Task GenerateAsync_RendersRazorWireCliAsToolInstallSurface()
     {
         await WriteFileAsync("packages/README.md.yml", "title: Runnable");
         await WriteFileAsync(
@@ -421,13 +419,21 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 does_not_include: OpenAPI.
                 start_here_path: Web/ForgeTrust.Runnable.Web/README.md
               - project: Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj
-                classification: proof_host
+                classification: public
                 order: 20
-                note: Incorrect classification for the CLI.
+                use_when: Install this when you want to export RazorWire apps from a stable command-line tool.
+                includes: The `razorwire` .NET tool command and static export workflow.
+                does_not_include: The RazorWire runtime package or coordinated package publishing automation.
+                start_here_path: Web/ForgeTrust.Runnable.Web.RazorWire.Cli/README.md
             """);
         await WriteFileAsync("Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.Runnable.Web/README.md", "# Web");
         await WriteFileAsync("Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.Runnable.Web.RazorWire.Cli/README.md", "# RazorWire CLI");
+        await WriteFileAsync("examples/web-app/README.md", "# Example");
+        await WriteFileAsync("releases/README.md", "# Releases");
+        await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
+        await WriteFileAsync("CHANGELOG.md", "# Changelog");
 
         var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
@@ -437,12 +443,15 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ["Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj"] = CreateMetadata(
                 "Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj",
                 "ForgeTrust.Runnable.Web.RazorWire.Cli",
+                isTool: true,
                 outputType: "Exe")
         });
 
-        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+        var markdown = await generator.GenerateAsync(CreateRequest());
 
-        Assert.Contains("must stay excluded", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("| `ForgeTrust.Runnable.Web.RazorWire.Cli` |", markdown, StringComparison.Ordinal);
+        Assert.Contains("`dotnet tool install --global ForgeTrust.Runnable.Web.RazorWire.Cli`", markdown, StringComparison.Ordinal);
+        Assert.Contains("Library package rows use `dotnet package add`", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -467,6 +476,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ["Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj"] = CreateMetadata(
                 "Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj",
                 "ForgeTrust.Runnable.Web.RazorWire.Cli",
+                isTool: true,
                 outputType: "Exe")
         });
 
@@ -481,7 +491,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.EndsWith("\n", markdown, StringComparison.Ordinal);
         Assert.Contains("### Support and runtime packages", markdown, StringComparison.Ordinal);
         Assert.Contains("### Docs and proof hosts", markdown, StringComparison.Ordinal);
-        Assert.Contains("### Not in the direct-install matrix", markdown, StringComparison.Ordinal);
+        Assert.Contains("dotnet tool install --global ForgeTrust.Runnable.Web.RazorWire.Cli", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -507,6 +517,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ["Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj"] = CreateMetadata(
                 "Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj",
                 "ForgeTrust.Runnable.Web.RazorWire.Cli",
+                isTool: true,
                 outputType: "Exe")
         });
 
@@ -602,6 +613,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ["Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj"] = CreateMetadata(
                 "Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj",
                 "ForgeTrust.Runnable.Web.RazorWire.Cli",
+                isTool: true,
                 outputType: "Exe")
         });
 
@@ -683,6 +695,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ["Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj"] = CreateMetadata(
                 "Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj",
                 "ForgeTrust.Runnable.Web.RazorWire.Cli",
+                isTool: true,
                 outputType: "Exe")
         });
 
@@ -714,6 +727,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ["Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj"] = CreateMetadata(
                 "Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj",
                 "ForgeTrust.Runnable.Web.RazorWire.Cli",
+                isTool: true,
                 outputType: "Exe")
         });
 
@@ -748,6 +762,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ["Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj"] = CreateMetadata(
                 "Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj",
                 "ForgeTrust.Runnable.Web.RazorWire.Cli",
+                isTool: true,
                 outputType: "Exe")
         });
 
@@ -778,6 +793,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ["Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj"] = CreateMetadata(
                 "Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj",
                 "ForgeTrust.Runnable.Web.RazorWire.Cli",
+                isTool: true,
                 outputType: "Exe")
         });
 
@@ -993,6 +1009,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Equal("App", metadata.PackageId);
         Assert.Equal("net10.0", metadata.TargetFramework);
+        Assert.False(metadata.IsTool);
         Assert.Equal("Exe", metadata.OutputType);
         Assert.Single(metadata.ProjectReferences);
         Assert.EndsWith("src/Dependency/Dependency.csproj", metadata.ProjectReferences[0].Replace('\\', '/'), StringComparison.Ordinal);
@@ -1068,6 +1085,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "TargetFramework": "",
                 "TargetFrameworks": "net10.0",
                 "IsPackable": "true",
+                "PackAsTool": "false",
                 "OutputType": "Library"
               },
               "Items": {
@@ -1090,6 +1108,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal("ForgeTrust.Runnable.Web", metadata.PackageId);
         Assert.Equal("net10.0", metadata.TargetFramework);
         Assert.True(metadata.IsPackable);
+        Assert.False(metadata.IsTool);
         Assert.Equal("Library", metadata.OutputType);
         Assert.Single(metadata.ProjectReferences);
         Assert.Equal("/repo/src/Dependency/Dependency.csproj", metadata.ProjectReferences[0]);
@@ -1104,6 +1123,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "PackageId": "ForgeTrust.Runnable.Console",
                 "TargetFramework": "net10.0",
                 "IsPackable": "false",
+                "PackAsTool": "true",
                 "OutputType": "Exe"
               }
             }
@@ -1116,6 +1136,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal("ForgeTrust.Runnable.Console", metadata.PackageId);
         Assert.Equal("net10.0", metadata.TargetFramework);
         Assert.False(metadata.IsPackable);
+        Assert.True(metadata.IsTool);
         Assert.Equal("Exe", metadata.OutputType);
         Assert.Empty(metadata.ProjectReferences);
     }
@@ -1130,6 +1151,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "TargetFramework": "",
                 "TargetFrameworks": "",
                 "IsPackable": "true",
+                "PackAsTool": "false",
                 "OutputType": ""
               }
             }
@@ -1157,21 +1179,19 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task RunProcessAsync_ThrowsWhenProcessCannotStart()
+    public async Task ProcessCommandRunner_ThrowsWhenProcessCannotStart()
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = Path.Combine(_repositoryRoot, "missing-dotnet"),
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
         var error = await Assert.ThrowsAsync<PackageIndexException>(
-            () => DotNetProjectMetadataProvider.RunProcessAsync(
-                startInfo,
-                "missing/Nope.csproj",
-                timeoutMilliseconds: 100,
+            () => new ProcessCommandRunner().RunAsync(
+                new CommandRunRequest(
+                    Path.Combine(_repositoryRoot, "missing-dotnet"),
+                    [],
+                    _repositoryRoot,
+                    "dotnet msbuild",
+                    "missing/Nope.csproj",
+                    "evaluate",
+                    "evaluating",
+                    100),
                 CancellationToken.None));
 
         Assert.Contains("Failed to start dotnet msbuild", error.Message, StringComparison.OrdinalIgnoreCase);
@@ -1179,15 +1199,21 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task RunProcessAsync_ThrowsWhenProcessTimesOut()
+    public async Task ProcessCommandRunner_ThrowsWhenProcessTimesOut()
     {
-        using var process = CreateSleepProcess(durationSeconds: 5);
+        var command = CreateSleepCommand(durationSeconds: 5);
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(
-            () => DotNetProjectMetadataProvider.RunProcessAsync(
-                process.StartInfo,
-                "slow/Project.csproj",
-                timeoutMilliseconds: 100,
+            () => new ProcessCommandRunner().RunAsync(
+                new CommandRunRequest(
+                    command.FileName,
+                    command.Arguments,
+                    _repositoryRoot,
+                    "dotnet msbuild",
+                    "slow/Project.csproj",
+                    "evaluate",
+                    "evaluating",
+                    100),
                 CancellationToken.None));
 
         Assert.Contains("timed out", error.Message, StringComparison.OrdinalIgnoreCase);
@@ -1266,9 +1292,12 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 note: Reusable docs package for hosting harvested repository docs.
                 start_here_path: Web/ForgeTrust.Runnable.Web.RazorDocs/README.md
               - project: Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj
-                classification: excluded
+                classification: public
                 order: 50
-                note: Held out of the direct-install chooser until issue #171 lands real tool packaging.
+                use_when: Install this when you want to export RazorWire apps from a stable command-line tool.
+                includes: The `razorwire` .NET tool command and static export workflow.
+                does_not_include: The RazorWire runtime package or coordinated package publishing automation.
+                start_here_path: Web/ForgeTrust.Runnable.Web.RazorWire.Cli/README.md
             """);
         await WriteFileAsync("Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.Runnable.Web/README.md", "# Web");
@@ -1280,6 +1309,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.Runnable.Web.RazorDocs/ForgeTrust.Runnable.Web.RazorDocs.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.Runnable.Web.RazorDocs/README.md", "# RazorDocs");
         await WriteFileAsync("Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.Runnable.Web.RazorWire.Cli/README.md", "# RazorWire CLI");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
         await WriteFileAsync("releases/README.md", "# Releases");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
@@ -1338,37 +1368,20 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         string projectPath,
         string packageId,
         string outputType = "Library",
-        string targetFramework = "net10.0")
+        string targetFramework = "net10.0",
+        bool isTool = false)
     {
-        return new PackageProjectMetadata(projectPath, packageId, targetFramework, true, outputType, []);
+        return new PackageProjectMetadata(projectPath, packageId, targetFramework, true, isTool, outputType, []);
     }
 
-    private static Process CreateSleepProcess(int durationSeconds)
+    private static SleepCommand CreateSleepCommand(int durationSeconds)
     {
         return OperatingSystem.IsWindows()
-            ? new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c timeout /t {durationSeconds} /nobreak > nul",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false
-                }
-            }
-            : new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "/bin/sh",
-                    Arguments = $"-c \"sleep {durationSeconds}\"",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false
-                }
-            };
+            ? new SleepCommand("cmd.exe", ["/c", "timeout", "/t", durationSeconds.ToString(), "/nobreak"])
+            : new SleepCommand("/bin/sh", ["-c", $"sleep {durationSeconds}"]);
     }
+
+    private sealed record SleepCommand(string FileName, IReadOnlyList<string> Arguments);
 
     private sealed class FakeMetadataProvider : IProjectMetadataProvider
     {

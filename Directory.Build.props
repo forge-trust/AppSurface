@@ -8,7 +8,16 @@
     <IsBenchmarkProject Condition="$(_NormalizedProjectDir.Contains('/benchmarks/')) OR $(_NormalizedProjectName.Contains('benchmarks'))">true</IsBenchmarkProject>
     <IsExampleProject Condition="$(_NormalizedProjectDir.Contains('/examples/'))">true</IsExampleProject>
     <IsTailwindRuntimeProject Condition="$(_NormalizedProjectDir.Contains('/web/forgetrust.runnable.web.tailwind/runtimes')) AND $(_NormalizedProjectName.StartsWith('forgetrust.runnable.web.tailwind.runtime.'))">true</IsTailwindRuntimeProject>
-    
+
+    <Authors Condition="'$(Authors)' == ''">Forge Trust</Authors>
+    <Company Condition="'$(Company)' == ''">Forge Trust</Company>
+    <PackageDescription Condition="'$(PackageDescription)' == '' and '$(Description)' == ''">$(MSBuildProjectName) package for Runnable application composition.</PackageDescription>
+    <PackageLicenseExpression Condition="'$(PackageLicenseExpression)' == ''">MIT</PackageLicenseExpression>
+    <PackageProjectUrl Condition="'$(PackageProjectUrl)' == ''">https://github.com/forge-trust/Runnable</PackageProjectUrl>
+    <PackageTags Condition="'$(PackageTags)' == ''">runnable;dotnet;modular;startup</PackageTags>
+    <RepositoryType Condition="'$(RepositoryType)' == ''">git</RepositoryType>
+    <RepositoryUrl Condition="'$(RepositoryUrl)' == ''">https://github.com/forge-trust/Runnable</RepositoryUrl>
+
     <GenerateDocumentationFile Condition="'$(IsTestProject)' != 'true' AND '$(IsBenchmarkProject)' != 'true' AND '$(IsExampleProject)' != 'true'">true</GenerateDocumentationFile>
     <WarningsAsErrors Condition="'$(IsTestProject)' != 'true' AND '$(IsBenchmarkProject)' != 'true' AND '$(IsExampleProject)' != 'true'">$(WarningsAsErrors);CS1591</WarningsAsErrors>
     <BaseIntermediateOutputPath Condition="'$(IsTailwindRuntimeProject)' == 'true'">obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>

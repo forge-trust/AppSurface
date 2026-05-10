@@ -4,7 +4,7 @@
 
 Runnable v0.1 is a coordinated .NET 10 package family. Start with the package that matches the app you're building, then add optional modules only when your app needs them.
 
-All direct-install packages currently target `net10.0`. In .NET 10, `dotnet package add` and `dotnet add package` are equivalent. This chooser uses `dotnet package add`, while `dotnet add package` remains the familiar cross-version form on older SDKs.
+All direct-install packages and tools currently target `net10.0`. Library package rows use `dotnet package add`; in .NET 10, `dotnet package add` and `dotnet add package` are equivalent. Tool rows use `dotnet tool install`.
 
 ## Web app
 
@@ -34,6 +34,7 @@ Release and readiness:
 - Add `ForgeTrust.Runnable.Web.Scalar` after `ForgeTrust.Runnable.Web.OpenApi` when you want a hosted API reference UI.
 - Add `ForgeTrust.Runnable.Web.RazorWire` when you want reactive Razor UI, Turbo-style streams, and server-rendered islands.
 - Add `ForgeTrust.Runnable.Web.Tailwind` when you want Tailwind without a separate Node.js asset pipeline.
+- Install `ForgeTrust.Runnable.Web.RazorWire.Cli` as a .NET tool when you want repeatable RazorWire static exports from the `razorwire` command.
 
 ## Package matrix
 
@@ -42,7 +43,7 @@ Swipe to compare package details on narrow screens.
 | Package | Use when | Install | Includes | Does not include | Start here |
 | --- | --- | --- | --- | --- | --- |
 | `ForgeTrust.Runnable.Core` | Install this directly only when you are authoring reusable Runnable modules or host integrations instead of starting from a web, console, or Aspire package. | `dotnet package add ForgeTrust.Runnable.Core` | Core module abstractions, dependency graph orchestration, RunnableStartup, and StartupContext. | ASP.NET Core hosting, CliFx command hosting, Aspire app-model helpers, or optional integrations. | [Package README](../ForgeTrust.Runnable.Core/README.md) |
-| `ForgeTrust.Runnable.Config` | Add this when your Runnable modules need strongly typed configuration primitives instead of ad hoc configuration lookups. | `dotnet package add ForgeTrust.Runnable.Config` | RunnableConfigModule, typed config objects, configuration providers, and explicit configuration access patterns. | Web hosting, UI docs, caching, or a separate secret-management system. | [Package README](../Config/ForgeTrust.Runnable.Config/README.md) |
+| `ForgeTrust.Runnable.Config` | Add this when your Runnable modules need strongly typed configuration primitives instead of ad hoc configuration lookups. | `dotnet package add ForgeTrust.Runnable.Config` | RunnableConfigModule, typed config objects, configuration providers, source-aware audit reports, and explicit configuration access patterns. | Web hosting, UI docs, caching, or a separate secret-management system. | [Package README](../Config/ForgeTrust.Runnable.Config/README.md) |
 | `ForgeTrust.Runnable.Caching` | Add this when your modules need lightweight in-process memoization and cache policy primitives. | `dotnet package add ForgeTrust.Runnable.Caching` | RunnableCachingModule, IMemo or Memo helpers, and cache policy primitives on top of Microsoft.Extensions.Caching.Memory. | Distributed caching infrastructure, web hosting, or configuration binding. | [Package README](../Caching/ForgeTrust.Runnable.Caching/README.md) |
 | `ForgeTrust.Runnable.Console` | Start here for CLI apps and worker-style entry points that should run through the Runnable startup pipeline with CliFx. | `dotnet package add ForgeTrust.Runnable.Console` | ConsoleStartup, ConsoleApp, hosted command execution, and CliFx command discovery through Runnable modules. | ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition. | [Package README](../Console/ForgeTrust.Runnable.Console/README.md) |
 | `ForgeTrust.Runnable.Dependency.Autofac` | Add this when you need Autofac-specific registrations or container features instead of the default .NET service collection. | `dotnet package add ForgeTrust.Runnable.Dependency.Autofac` | RunnableAutofacModule and Autofac-aware service registration hooks for Runnable modules. | The default Microsoft DI container, web hosting, or command hosting by itself. | [Package README](../Dependency/ForgeTrust.Runnable.Dependency.Autofac/README.md) |
@@ -52,6 +53,7 @@ Swipe to compare package details on narrow screens.
 | `ForgeTrust.Runnable.Web.Scalar` | Add this after OpenAPI when you want Scalar's interactive API reference UI served by your Runnable web app. | `dotnet package add ForgeTrust.Runnable.Web.Scalar` | Scalar UI endpoint mapping and the OpenAPI module dependency needed to feed it. | OpenAPI authoring by itself without the base web host, or reactive Razor component streaming. | [Package README](../Web/ForgeTrust.Runnable.Web.Scalar/README.md) |
 | `ForgeTrust.Runnable.Web.RazorWire` | Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, or islands without moving to a separate frontend app. | `dotnet package add ForgeTrust.Runnable.Web.RazorWire` | RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, and hybrid island support. | OpenAPI generation, API reference UI, or Tailwind asset compilation. | [Package README](../Web/ForgeTrust.Runnable.Web.RazorWire/README.md) |
 | `ForgeTrust.Runnable.Web.Tailwind` | Add this when you want Tailwind build and watch integration in a Runnable web app without carrying a Node.js asset pipeline. | `dotnet package add ForgeTrust.Runnable.Web.Tailwind` | Tailwind standalone CLI integration, watch mode, generated CSS output, and transitive runtime package selection for supported build hosts. | JavaScript plugin ecosystems that require npm-first tooling, or direct runtime-package selection. | [Package README](../Web/ForgeTrust.Runnable.Web.Tailwind/README.md) |
+| `ForgeTrust.Runnable.Web.RazorWire.Cli` | Install this when you want to export RazorWire apps from a stable command-line tool instead of running the CLI from source. | `dotnet tool install --global ForgeTrust.Runnable.Web.RazorWire.Cli` | The `razorwire` .NET tool command, exact-version tool execution support, and static export workflow for RazorWire applications. | The RazorWire runtime package itself, package publishing automation, or a replacement for app-specific hosting and deployment choices. | [Package README](../Web/ForgeTrust.Runnable.Web.RazorWire.Cli/README.md) |
 
 ## Support and proof-host surfaces
 
@@ -68,12 +70,10 @@ Swipe to compare package details on narrow screens.
 - `ForgeTrust.Runnable.Web.RazorDocs`: Reusable docs package for harvesting repository docs into a RazorDocs UI. This is a real package, but it is a proof-host surface rather than the default first install for general Runnable apps. Start here: [RazorDocs README](../Web/ForgeTrust.Runnable.Web.RazorDocs/README.md)
 - `ForgeTrust.Runnable.Web.RazorDocs.Standalone`: Thin runnable host for serving or exporting RazorDocs. Treat it as a proof host and example app, not a package you install into another project. Start here: [Standalone host README](../Web/ForgeTrust.Runnable.Web.RazorDocs.Standalone/README.md)
 
-### Not in the direct-install matrix
-
-- `ForgeTrust.Runnable.Web.RazorWire.Cli`: Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance.
-
 ## Maintainer notes
 
 - Edit `packages/package-index.yml` when the public package story changes.
+- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.
 - Run `dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj -- generate` after changing package classifications or package READMEs.
+- Run `dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata or project references.
 - Keep `packages/README.md.yml` hand-authored so RazorDocs metadata, trust-bar copy, and section placement stay intentional.

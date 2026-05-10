@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using YamlDotNet.Core;
@@ -20,7 +18,6 @@ namespace ForgeTrust.Runnable.PackageIndex;
 internal sealed class PackageIndexGenerator
 {
     private const string WebPackageId = "ForgeTrust.Runnable.Web";
-    private const string RazorWireCliPackageId = "ForgeTrust.Runnable.Web.RazorWire.Cli";
     private const string ReleaseHubPath = "releases/README.md";
     private const string UnreleasedPath = "releases/unreleased.md";
     private const string ChangelogPath = "CHANGELOG.md";
@@ -158,7 +155,7 @@ internal sealed class PackageIndexGenerator
         return metadataByPath;
     }
 
-    private static IReadOnlyList<ResolvedPackageEntry> ResolveEntries(
+    internal static IReadOnlyList<ResolvedPackageEntry> ResolveEntries(
         string repositoryRoot,
         PackageManifest manifest,
         IReadOnlyList<string> candidateProjects,
@@ -241,12 +238,6 @@ internal sealed class PackageIndexGenerator
             }
         }
 
-        if (string.Equals(metadata.PackageId, RazorWireCliPackageId, StringComparison.OrdinalIgnoreCase)
-            && entry.Classification != PackageClassification.Excluded)
-        {
-            throw new PackageIndexException(
-                $"{RazorWireCliPackageId} must stay excluded from direct-install guidance until issue #171 lands.");
-        }
     }
 
     private static void RequireValue(string projectPath, string propertyName, string? value)
@@ -286,8 +277,8 @@ internal sealed class PackageIndexGenerator
             .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var targetFrameworkSummary = publicTargetFrameworks.Length == 1
-            ? $"All direct-install packages currently target `{publicTargetFrameworks[0]}`."
-            : $"Direct-install packages currently target {string.Join(", ", publicTargetFrameworks.Select(value => $"`{value}`"))}.";
+            ? $"All direct-install packages and tools currently target `{publicTargetFrameworks[0]}`."
+            : $"Direct-install packages and tools currently target {string.Join(", ", publicTargetFrameworks.Select(value => $"`{value}`"))}.";
 
         var builder = new StringBuilder();
         builder.AppendLine("# Runnable v0.1 package chooser");
@@ -296,7 +287,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("Runnable v0.1 is a coordinated .NET 10 package family. Start with the package that matches the app you're building, then add optional modules only when your app needs them.");
         builder.AppendLine();
-        builder.AppendLine($"{targetFrameworkSummary} In .NET 10, `dotnet package add` and `dotnet add package` are equivalent. This chooser uses `dotnet package add`, while `dotnet add package` remains the familiar cross-version form on older SDKs.");
+        builder.AppendLine($"{targetFrameworkSummary} Library package rows use `dotnet package add`; in .NET 10, `dotnet package add` and `dotnet add package` are equivalent. Tool rows use `dotnet tool install`.");
         builder.AppendLine();
         builder.AppendLine("## Web app");
         builder.AppendLine();
@@ -425,7 +416,9 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("## Maintainer notes");
         builder.AppendLine();
         builder.AppendLine($"- Edit `packages/package-index.yml` when the public package story changes.");
+        builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj -- generate` after changing package classifications or package READMEs.");
+        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata or project references.");
         builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so RazorDocs metadata, trust-bar copy, and section placement stay intentional.");
 
         return NormalizeMarkdownNewlines(builder.ToString()).TrimEnd('\n') + "\n";
@@ -563,6 +556,7 @@ internal interface IProjectMetadataProvider
 /// <param name="PackageId">NuGet package identifier emitted by the project.</param>
 /// <param name="TargetFramework">Resolved target framework summary used in chooser copy.</param>
 /// <param name="IsPackable">Whether the project reports itself as packable.</param>
+/// <param name="IsTool">Whether the project reports itself as a .NET tool package.</param>
 /// <param name="OutputType">Resolved output type, such as <c>Library</c> or <c>Exe</c>.</param>
 /// <param name="ProjectReferences">Evaluated project reference paths reported by MSBuild.</param>
 internal sealed record PackageProjectMetadata(
@@ -570,13 +564,16 @@ internal sealed record PackageProjectMetadata(
     string PackageId,
     string TargetFramework,
     bool IsPackable,
+    bool IsTool,
     string OutputType,
     IReadOnlyList<string> ProjectReferences)
 {
     /// <summary>
-    /// Gets the primary install command shown in the chooser for this package.
+    /// Gets the primary install command shown in the chooser for this package or tool.
     /// </summary>
-    internal string InstallCommand => $"dotnet package add {PackageId}";
+    internal string InstallCommand => IsTool
+        ? $"dotnet tool install --global {PackageId}"
+        : $"dotnet package add {PackageId}";
 }
 
 /// <summary>
@@ -659,33 +656,49 @@ internal sealed class DotNetProjectMetadataProvider : IProjectMetadataProvider
     internal const string TargetFrameworksPropertyName = "TargetFrameworks";
     internal const int DefaultProcessTimeoutMilliseconds = 120_000;
 
+    private readonly ICommandRunner _commandRunner;
+
+    /// <summary>
+    /// Creates a metadata provider backed by the default process runner.
+    /// </summary>
+    internal DotNetProjectMetadataProvider()
+        : this(new ProcessCommandRunner())
+    {
+    }
+
+    /// <summary>
+    /// Creates a metadata provider backed by the supplied command runner.
+    /// </summary>
+    /// <param name="commandRunner">External command runner used to invoke <c>dotnet msbuild</c>.</param>
+    internal DotNetProjectMetadataProvider(ICommandRunner commandRunner)
+    {
+        _commandRunner = commandRunner;
+    }
+
     /// <inheritdoc />
     public async Task<PackageProjectMetadata> GetMetadataAsync(
         string repositoryRoot,
         string projectPath,
         CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            WorkingDirectory = repositoryRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        startInfo.ArgumentList.Add("msbuild");
-        startInfo.ArgumentList.Add(projectPath);
-        startInfo.ArgumentList.Add("-getProperty:PackageId,TargetFramework,TargetFrameworks,IsPackable,OutputType");
-        startInfo.ArgumentList.Add("-getItem:ProjectReference");
-
-        var (standardOutput, standardError) = await RunProcessAsync(
-            startInfo,
-            projectPath,
-            DefaultProcessTimeoutMilliseconds,
+        var result = await _commandRunner.RunAsync(
+            new CommandRunRequest(
+                "dotnet",
+                [
+                    "msbuild",
+                    projectPath,
+                    "-getProperty:PackageId,TargetFramework,TargetFrameworks,IsPackable,PackAsTool,OutputType",
+                    "-getItem:ProjectReference"
+                ],
+                repositoryRoot,
+                "dotnet msbuild",
+                projectPath,
+                "evaluate",
+                "evaluating",
+                DefaultProcessTimeoutMilliseconds),
             cancellationToken);
 
-        return ParseMetadataJson(projectPath, standardOutput);
+        return ParseMetadataJson(projectPath, result.StandardOutput);
     }
 
     /// <summary>
@@ -717,6 +730,7 @@ internal sealed class DotNetProjectMetadataProvider : IProjectMetadataProvider
                 ? tfmsElement.GetString()
                 : null;
             var isPackable = GetRequiredStringProperty(properties, "IsPackable");
+            var packAsTool = GetRequiredStringProperty(properties, "PackAsTool");
             var outputType = GetRequiredStringProperty(properties, "OutputType");
             var projectReferences = ReadProjectReferences(document.RootElement);
 
@@ -734,6 +748,7 @@ internal sealed class DotNetProjectMetadataProvider : IProjectMetadataProvider
                 packageId,
                 resolvedTargetFramework,
                 bool.TryParse(isPackable, out var parsedIsPackable) && parsedIsPackable,
+                bool.TryParse(packAsTool, out var parsedPackAsTool) && parsedPackAsTool,
                 outputType,
                 projectReferences);
         }
@@ -741,130 +756,6 @@ internal sealed class DotNetProjectMetadataProvider : IProjectMetadataProvider
         {
             throw new PackageIndexException(
                 $"dotnet msbuild returned malformed JSON for '{projectPath}': {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Runs one configured process and returns captured stdout and stderr output.
-    /// </summary>
-    /// <param name="startInfo">Process start configuration for the command to run.</param>
-    /// <param name="projectPath">Project path used only for error reporting context.</param>
-    /// <param name="timeoutMilliseconds">Timeout applied to the process wait.</param>
-    /// <param name="cancellationToken">Cancellation token that aborts waiting and output reads.</param>
-    /// <returns>The captured standard output and standard error streams.</returns>
-    /// <exception cref="PackageIndexException">
-    /// Thrown when the process cannot start, times out, or exits unsuccessfully.
-    /// </exception>
-    internal static async Task<(string StandardOutput, string StandardError)> RunProcessAsync(
-        ProcessStartInfo startInfo,
-        string projectPath,
-        int timeoutMilliseconds,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(startInfo);
-        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(timeoutMilliseconds);
-
-        using var process = new Process { StartInfo = startInfo };
-        try
-        {
-            if (!process.Start())
-            {
-                throw new PackageIndexException($"Failed to start dotnet msbuild for '{projectPath}'.");
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
-        {
-            throw new PackageIndexException(
-                $"Failed to start dotnet msbuild for '{projectPath}': {ex.Message}");
-        }
-
-        var standardOutputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var standardErrorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-
-        try
-        {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(timeoutMilliseconds);
-            await process.WaitForExitAsync(timeoutCts.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            await TerminateProcessAsync(process);
-            var (_, timeoutError) = await AwaitProcessOutputAsync(
-                standardOutputTask,
-                standardErrorTask,
-                swallowReadFailures: true);
-            var message = $"dotnet msbuild timed out after {timeoutMilliseconds} ms while evaluating '{projectPath}'.";
-            if (!string.IsNullOrWhiteSpace(timeoutError))
-            {
-                message = $"{message}{Environment.NewLine}{timeoutError.TrimEnd()}";
-            }
-
-            throw new PackageIndexException(message);
-        }
-        catch
-        {
-            await TerminateProcessAsync(process);
-            _ = await AwaitProcessOutputAsync(
-                standardOutputTask,
-                standardErrorTask,
-                swallowReadFailures: true);
-            throw;
-        }
-
-        var (standardOutput, standardError) = await AwaitProcessOutputAsync(
-            standardOutputTask,
-            standardErrorTask,
-            swallowReadFailures: false);
-        if (process.ExitCode != 0)
-        {
-            throw new PackageIndexException(
-                $"Failed to evaluate '{projectPath}' with dotnet msbuild.{Environment.NewLine}{standardError}");
-        }
-
-        return (standardOutput, standardError);
-    }
-
-    private static async Task<(string StandardOutput, string StandardError)> AwaitProcessOutputAsync(
-        Task<string> standardOutputTask,
-        Task<string> standardErrorTask,
-        bool swallowReadFailures)
-    {
-        if (swallowReadFailures)
-        {
-            try
-            {
-                await Task.WhenAll(standardOutputTask, standardErrorTask);
-            }
-            catch
-            {
-                // Best-effort cleanup after process termination should not hide the original failure path.
-            }
-
-            return (
-                standardOutputTask.Status == TaskStatus.RanToCompletion ? standardOutputTask.Result : string.Empty,
-                standardErrorTask.Status == TaskStatus.RanToCompletion ? standardErrorTask.Result : string.Empty);
-        }
-
-        await Task.WhenAll(standardOutputTask, standardErrorTask);
-        return (await standardOutputTask, await standardErrorTask);
-    }
-
-    private static async Task TerminateProcessAsync(Process process)
-    {
-        try
-        {
-            if (process.HasExited)
-            {
-                return;
-            }
-
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync(CancellationToken.None);
-        }
-        catch (InvalidOperationException)
-        {
         }
     }
 
@@ -985,6 +876,16 @@ internal sealed class PackageManifestEntry
     public PackageClassification Classification { get; init; }
 
     /// <summary>
+    /// Gets the publish decision consumed by the prerelease package artifact workflow.
+    /// </summary>
+    public PackagePublishDecision? PublishDecision { get; init; }
+
+    /// <summary>
+    /// Gets the required maintainer-facing reason for entries that are intentionally not published.
+    /// </summary>
+    public string? PublishReason { get; init; }
+
+    /// <summary>
     /// Gets the stable display order within the chooser section.
     /// </summary>
     public int Order { get; init; }
@@ -1028,6 +929,11 @@ internal sealed class PackageManifestEntry
     /// Gets the optional package ids that this row depends on for install guidance.
     /// </summary>
     public List<string> DependsOn { get; init; } = [];
+
+    /// <summary>
+    /// Gets the exact package ids expected from project-reference dependencies in the produced package.
+    /// </summary>
+    public List<string> ExpectedDependencyPackageIds { get; init; } = [];
 }
 
 /// <summary>
@@ -1054,4 +960,25 @@ internal enum PackageClassification
     /// A package intentionally omitted from direct-install guidance but still documented for maintainers.
     /// </summary>
     Excluded
+}
+
+/// <summary>
+/// Publish decisions for package artifact verification and later prerelease publishing.
+/// </summary>
+internal enum PackagePublishDecision
+{
+    /// <summary>
+    /// A public package that should be packed and eventually published as a direct install surface.
+    /// </summary>
+    Publish,
+
+    /// <summary>
+    /// A support package that should be packed and eventually published for transitive restore.
+    /// </summary>
+    SupportPublish,
+
+    /// <summary>
+    /// A project that should stay visible in the chooser but must not be packed or published.
+    /// </summary>
+    DoNotPublish
 }
