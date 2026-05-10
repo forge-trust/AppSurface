@@ -568,6 +568,35 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_ThrowsWhenDeclaredReadmeEntryIsMissing()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Core",
+            PackageVersion,
+            dependencies: EmptyDependencies,
+            includeReadmeEntry: false);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "ForgeTrust.Runnable.Core/ForgeTrust.Runnable.Core.csproj",
+                        "ForgeTrust.Runnable.Core",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("missing required README", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("README.md", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_ThrowsWhenDefaultDescriptionRemains()
     {
         var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
@@ -675,6 +704,49 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 PackageVersion));
 
         Assert.Contains("missing dependency 'ForgeTrust.Runnable.Core'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenUnexpectedFirstPartyDependencyIsPresent()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Core",
+            PackageVersion,
+            EmptyDependencies);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Web.RazorWire.Cli",
+            PackageVersion,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ForgeTrust.Runnable.Core"] = PackageVersion
+            },
+            packageTypes: ["DotnetTool"]);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "ForgeTrust.Runnable.Core/ForgeTrust.Runnable.Core.csproj",
+                        "ForgeTrust.Runnable.Core",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false),
+                    new PackagePublishPlanEntry(
+                        "Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj",
+                        "ForgeTrust.Runnable.Web.RazorWire.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: true)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("unexpected first-party dependencies", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ForgeTrust.Runnable.Core", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1314,6 +1386,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         string packageVersion,
         IReadOnlyDictionary<string, string> dependencies,
         bool includeReadme = true,
+        bool includeReadmeEntry = true,
         IReadOnlyDictionary<string, string>? assemblyEntries = null,
         string? description = null,
         bool includeNuspec = true,
@@ -1342,7 +1415,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 dependencyXml));
         }
 
-        if (includeReadme)
+        if (includeReadme && includeReadmeEntry)
         {
             var readmeEntry = archive.CreateEntry("README.md");
             using var readmeStream = readmeEntry.Open();

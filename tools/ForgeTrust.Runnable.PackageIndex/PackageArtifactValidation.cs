@@ -72,7 +72,7 @@ internal sealed class PackageArtifactValidator
                 throw new PackageIndexException($"Package artifact directory contains multiple artifacts for '{expected.PackageId}'.");
             }
 
-            ValidatePackage(expected, matches[0], packageVersion);
+            ValidatePackage(expected, matches[0], expectedPackageIds, packageVersion);
         }
 
         foreach (var unexpected in inspectedPackages.Where(package => !expectedPackageIds.Contains(package.PackageId)))
@@ -92,6 +92,7 @@ internal sealed class PackageArtifactValidator
     private static void ValidatePackage(
         PackagePublishPlanEntry expected,
         InspectedPackage inspected,
+        IReadOnlySet<string> firstPartyPackageIds,
         string packageVersion)
     {
         if (!string.Equals(inspected.PackageVersion, packageVersion, StringComparison.OrdinalIgnoreCase))
@@ -111,6 +112,12 @@ internal sealed class PackageArtifactValidator
         RequireMetadata(expected.PackageId, "repository url", inspected.RepositoryUrl);
         RequireMetadata(expected.PackageId, "tags", inspected.Tags);
         RequireMetadata(expected.PackageId, "readme", inspected.Readme);
+        var readmePath = NormalizePackagePath(inspected.Readme!);
+        if (!inspected.EntryPaths.Contains(readmePath, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new PackageIndexException(
+                $"Package '{expected.PackageId}' is missing required README entry '{inspected.Readme}'.");
+        }
 
         var isDotnetToolPackage = inspected.PackageTypes.Contains("DotnetTool", StringComparer.OrdinalIgnoreCase);
         if (expected.IsTool && !isDotnetToolPackage)
@@ -147,6 +154,19 @@ internal sealed class PackageArtifactValidator
                 throw new PackageIndexException(
                     $"Package '{expected.PackageId}' dependency '{expectedDependency}' has version '{string.Join(", ", mismatchedVersions)}', expected same-version dependency '{packageVersion}'.");
             }
+        }
+
+        var expectedFirstPartyDependencies = expected.ExpectedDependencyPackageIds
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unexpectedFirstPartyDependencies = inspected.Dependencies.Keys
+            .Where(dependencyId => firstPartyPackageIds.Contains(dependencyId)
+                && !expectedFirstPartyDependencies.Contains(dependencyId))
+            .OrderBy(dependencyId => dependencyId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (unexpectedFirstPartyDependencies.Length > 0)
+        {
+            throw new PackageIndexException(
+                $"Package '{expected.PackageId}' has unexpected first-party dependencies: {string.Join(", ", unexpectedFirstPartyDependencies)}.");
         }
 
         foreach (var assembly in inspected.FirstPartyAssemblyVersions)
