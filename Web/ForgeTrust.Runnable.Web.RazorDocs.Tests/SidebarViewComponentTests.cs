@@ -146,7 +146,7 @@ public sealed class SidebarViewComponentTests
             var model = await GetModelAsync(component);
 
             Assert.NotNull(model.HarvestHealth);
-            Assert.Equal("/docs/_health", model.HarvestHealth.Href);
+            Assert.Null(model.HarvestHealth.Href);
         }
     }
 

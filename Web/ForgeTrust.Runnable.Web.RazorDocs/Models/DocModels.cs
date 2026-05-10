@@ -1170,9 +1170,10 @@ public sealed record DocSidebarHarvestHealthViewModel
     public bool Ok { get; init; }
 
     /// <summary>
-    /// Gets the app-relative health page route.
+    /// Gets the app-relative health page route when health routes are exposed; otherwise <see langword="null" /> for
+    /// status-only chrome.
     /// </summary>
-    public string Href { get; init; } = string.Empty;
+    public string? Href { get; init; }
 }
 
 /// <summary>

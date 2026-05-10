@@ -2289,11 +2289,20 @@ public class DocsControllerTests : IDisposable
         {
             var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
             var response = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Value);
+            var serialized = JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            using var document = JsonDocument.Parse(serialized);
 
             Assert.Equal(StatusCodes.Status200OK, result.StatusCode);
             Assert.True(response.Verification.Ok);
             Assert.Equal("Healthy", response.Status);
             Assert.Equal("no-store, no-cache", controller.Response.Headers.CacheControl.ToString());
+            Assert.True(document.RootElement.TryGetProperty("status", out var status));
+            Assert.Equal("Healthy", status.GetString());
+            Assert.False(document.RootElement.TryGetProperty("Status", out _));
+            Assert.True(document.RootElement.GetProperty("verification").GetProperty("ok").GetBoolean());
+            Assert.Equal(
+                StatusCodes.Status200OK,
+                document.RootElement.GetProperty("verification").GetProperty("httpStatusCode").GetInt32());
         }
     }
 

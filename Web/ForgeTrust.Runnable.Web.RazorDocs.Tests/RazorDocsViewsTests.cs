@@ -932,6 +932,35 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task SidebarView_ShouldRenderHarvestHealthStatusWithoutLink_WhenHealthHrefIsHidden()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new DocSidebarViewModel
+        {
+            HarvestHealth = new DocSidebarHarvestHealthViewModel
+            {
+                Status = "StatusOnly",
+                Ok = true,
+                Href = null
+            }
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Shared/Components/Sidebar/Default.cshtml",
+            model);
+
+        var statusIndex = html.IndexOf("Harvest StatusOnly", StringComparison.Ordinal);
+        Assert.NotEqual(-1, statusIndex);
+        var precedingAnchorIndex = html.LastIndexOf("<a ", statusIndex, StringComparison.Ordinal);
+        var precedingDivIndex = html.LastIndexOf("<div ", statusIndex, StringComparison.Ordinal);
+        Assert.True(precedingDivIndex > precedingAnchorIndex);
+        Assert.Contains("Harvest StatusOnly", html);
+        Assert.Contains("Health", html);
+        Assert.Contains("text-emerald-200", html);
+    }
+
+    [Fact]
     public async Task HarvestHealthView_ShouldRenderRedactedSummaryAndDiagnostics()
     {
         using var services = CreateServiceProvider(CreateDocs());

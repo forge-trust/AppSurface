@@ -191,16 +191,16 @@ Health and docs are computed from the same cached snapshot. This is deliberate: 
 
 RazorDocs can expose a redacted operator health page at `{DocsRootPath}/_health` and a machine-readable JSON endpoint at `{DocsRootPath}/_health.json`. Both routes are visible by default only when the host environment is `Development`. Non-development hosts must opt in with `RazorDocs:Harvest:Health:ExposeRoutes=Always`.
 
-The JSON response uses `RazorDocsHarvestHealthResponse`:
+The JSON response uses the camelCase wire form of `RazorDocsHarvestHealthResponse`:
 
-- `Status`: `Healthy`, `Empty`, `Degraded`, or `Failed`.
-- `Verification.Ok`: `true` for `Healthy` and `Empty`; `false` for `Degraded` and `Failed`.
-- `Verification.HttpStatusCode`: `200` for `Healthy` and `Empty`; `503` for `Degraded` and `Failed`.
-- `GeneratedUtc`, harvester counts, total docs, per-harvester status, and redacted diagnostics.
+- `status`: `Healthy`, `Empty`, `Degraded`, or `Failed`.
+- `verification.ok`: `true` for `Healthy` and `Empty`; `false` for `Degraded` and `Failed`.
+- `verification.httpStatusCode`: `200` for `Healthy` and `Empty`; `503` for `Degraded` and `Failed`.
+- `generatedUtc`, harvester counts, total docs, per-harvester status, and redacted diagnostics.
 
 The response omits `RepositoryRoot`, diagnostic `Cause`, raw exception messages, stack traces, and absolute filesystem paths. Health routes set `Cache-Control: no-store, no-cache` so local and CI checks do not pass or fail on stale operator data.
 
-The sidebar health entry follows `RazorDocs:Harvest:Health:ShowChrome`, which is independent from route exposure. This lets a host expose `_health.json` for a script without advertising the health page in the docs chrome, or keep local development chrome on without changing non-development route behavior.
+The sidebar health entry follows `RazorDocs:Harvest:Health:ShowChrome`, which is independent from route exposure. This lets a host expose `_health.json` for a script without advertising the health page in the docs chrome, or show status-only chrome without mapping the health routes. When chrome is visible but `ExposeRoutes` hides routes for the current environment, RazorDocs renders a non-clickable status chip instead of a link.
 
 ```json
 {
@@ -360,8 +360,9 @@ var healthJson = routes.HealthJson;
   - `Never` disables explicit health route mapping, though direct controller action routes still return `404` when the visibility guard denies exposure.
 - `RazorDocs:Harvest:Health:ShowChrome`
   - Defaults to `DevelopmentOnly`.
-  - Controls whether the built-in sidebar shows a health status link.
+  - Controls whether the built-in sidebar shows health status chrome.
   - This is independent from `ExposeRoutes` so machine-readable checks and visible docs chrome can be configured separately.
+  - If routes are hidden for the current environment, the sidebar renders status-only chrome without an `href`.
 - `RazorDocs:Routing:RouteRootPath`
   - Controls the route-family root for stable entry, archive, and exact-version routes.
   - Defaults to `/docs` when versioning is on.

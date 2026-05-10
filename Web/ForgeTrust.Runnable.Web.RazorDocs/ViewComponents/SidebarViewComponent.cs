@@ -110,11 +110,15 @@ public class SidebarViewComponent : ViewComponent
         }
 
         var health = await _aggregator.GetHarvestHealthAsync();
+        var href = RazorDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment)
+            ? _docsUrlBuilder.BuildHealthUrl()
+            : null;
+
         return new DocSidebarHarvestHealthViewModel
         {
             Status = health.Status.ToString(),
             Ok = RazorDocsHarvestHealthResponse.IsOk(health.Status),
-            Href = _docsUrlBuilder.BuildHealthUrl()
+            Href = href
         };
     }
 

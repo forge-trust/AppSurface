@@ -6,14 +6,28 @@
         : "border-rose-500/35 bg-rose-950/30 text-rose-200";
     var dotClass = Model.HarvestHealth.Ok ? "bg-emerald-300" : "bg-rose-300";
 
-    <a href="@Url.PathBaseAware(Model.HarvestHealth.Href)"
-       class="mb-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs font-semibold no-underline transition-colors hover:border-cyan-400/45 @statusClass">
-        <span class="inline-flex min-w-0 items-center gap-2">
-            <span class="h-2 w-2 flex-none rounded-full @dotClass" aria-hidden="true"></span>
-            <span class="truncate">Harvest @Model.HarvestHealth.Status</span>
-        </span>
-        <span class="flex-none uppercase tracking-[0.12em]">Health</span>
-    </a>
+    @if (!string.IsNullOrWhiteSpace(Model.HarvestHealth.Href))
+    {
+        <a href="@Url.PathBaseAware(Model.HarvestHealth.Href)"
+           class="mb-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs font-semibold no-underline transition-colors hover:border-cyan-400/45 @statusClass">
+            <span class="inline-flex min-w-0 items-center gap-2">
+                <span class="h-2 w-2 flex-none rounded-full @dotClass" aria-hidden="true"></span>
+                <span class="truncate">Harvest @Model.HarvestHealth.Status</span>
+            </span>
+            <span class="flex-none uppercase tracking-[0.12em]">Health</span>
+        </a>
+    }
+    else
+    {
+        <div class="mb-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs font-semibold @statusClass"
+             aria-label="Harvest @Model.HarvestHealth.Status">
+            <span class="inline-flex min-w-0 items-center gap-2">
+                <span class="h-2 w-2 flex-none rounded-full @dotClass" aria-hidden="true"></span>
+                <span class="truncate">Harvest @Model.HarvestHealth.Status</span>
+            </span>
+            <span class="flex-none uppercase tracking-[0.12em]">Health</span>
+        </div>
+    }
 }
 @foreach (var sidebarSection in Model.Sections)
 {
