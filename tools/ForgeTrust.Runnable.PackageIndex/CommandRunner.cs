@@ -90,10 +90,7 @@ internal sealed class ProcessCommandRunner : ICommandRunner
         using var process = new Process { StartInfo = startInfo };
         try
         {
-            if (!process.Start())
-            {
-                throw new PackageIndexException($"Failed to start {request.OperationName} for '{request.Subject}'.");
-            }
+            process.Start();
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
         {

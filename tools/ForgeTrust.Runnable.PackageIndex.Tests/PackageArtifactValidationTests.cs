@@ -1073,6 +1073,29 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("still working", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task ProcessCommandRunner_TerminatesProcessWhenCallerCancels()
+    {
+        var command = CreateShellCommand(OperatingSystem.IsWindows()
+            ? "ping -n 6 127.0.0.1 > nul"
+            : "sleep 5");
+        using var cts = new CancellationTokenSource(100);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => new ProcessCommandRunner().RunAsync(
+                new CommandRunRequest(
+                    command.FileName,
+                    command.Arguments,
+                    _repositoryRoot,
+                    "cancel probe",
+                    "slow",
+                    "probe",
+                    "probing",
+                    30_000),
+                cts.Token));
+    }
+
     private string ManifestPath => Path.Combine(_repositoryRoot, "packages", "package-index.yml");
 
     private static IReadOnlyDictionary<string, string> EmptyDependencies { get; } =
