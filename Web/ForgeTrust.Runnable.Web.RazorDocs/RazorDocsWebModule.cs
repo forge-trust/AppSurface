@@ -248,6 +248,17 @@ public class RazorDocsWebModule : IRunnableWebModule
     /// least specific so the live preview root continues to behave correctly even when the current docs root is
     /// root-mounted or overlaps published exact-version aliases.
     /// </remarks>
+    /// <remarks>
+    /// The operator-facing harvest health routes are registered only when
+    /// <see cref="RazorDocsHarvestHealthVisibility.AreRoutesExposed(RazorDocsOptions, IHostEnvironment)"/> returns
+    /// <c>true</c>. By default that exposes the routes only in Development; production hosts must opt in with
+    /// <see cref="RazorDocsHarvestHealthOptions.ExposeRoutes"/>. When exposed, the route named
+    /// <c>razordocs_harvest_health</c> maps the current docs root health pattern from
+    /// <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
+    /// <c>razordocs_harvest_health_json</c> maps <see cref="DocsUrlBuilder.BuildHealthJsonUrl"/> to
+    /// <c>DocsController.HarvestHealthJson</c>. These routes are intended for local and operator verification, not as
+    /// unauthenticated public reader navigation.
+    /// </remarks>
     /// <param name="context">Startup context for the application and environment.</param>
     /// <param name="endpoints">Endpoint route builder used to map the module's routes.</param>
     public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)

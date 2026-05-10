@@ -109,7 +109,8 @@ public class SidebarViewComponent : ViewComponent
             return null;
         }
 
-        var health = await _aggregator.GetHarvestHealthAsync();
+        var requestAborted = ViewContext?.HttpContext?.RequestAborted ?? CancellationToken.None;
+        var health = await _aggregator.GetHarvestHealthAsync(requestAborted);
         var href = RazorDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment)
             ? _docsUrlBuilder.BuildHealthUrl()
             : null;
