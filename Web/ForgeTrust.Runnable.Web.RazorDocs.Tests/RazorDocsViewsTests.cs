@@ -784,6 +784,38 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task SectionChildrenPartial_ShouldRenderRecursiveApiNamespaceChildren()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var children = new[]
+        {
+            new DocSectionLinkViewModel
+            {
+                Title = "Baz",
+                Href = "/docs/Namespaces/Foo.Bar.Baz.html",
+                Children =
+                [
+                    new DocSectionLinkViewModel
+                    {
+                        Title = "Qux",
+                        Href = "/docs/Namespaces/Foo.Bar.Baz.Qux.html"
+                    }
+                ]
+            }
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Shared/_DocSectionCardChildren.cshtml",
+            children);
+
+        Assert.Contains("href=\"/docs/Namespaces/Foo.Bar.Baz.html\"", html);
+        Assert.Contains("href=\"/docs/Namespaces/Foo.Bar.Baz.Qux.html\"", html);
+        Assert.Contains("Baz", html);
+        Assert.Contains("Qux", html);
+    }
+
+    [Fact]
     public async Task SidebarView_ShouldRenderAriaCurrentAttributes_UsingConditionalAttributeValues()
     {
         using var services = CreateServiceProvider(CreateDocs());
@@ -816,7 +848,15 @@ public class RazorDocsViewsTests
                                         {
                                             Title = "Run",
                                             Href = "/docs/guides/guide.md.html#run",
-                                            IsCurrent = true
+                                            IsCurrent = true,
+                                            Children =
+                                            [
+                                                new DocSectionLinkViewModel
+                                                {
+                                                    Title = "Verify",
+                                                    Href = "/docs/guides/guide.md.html#verify"
+                                                }
+                                            ]
                                         }
                                     ]
                                 }
@@ -835,6 +875,7 @@ public class RazorDocsViewsTests
         Assert.Contains("href=\"/docs/sections/how-to-guides\"", html);
         Assert.Contains("aria-current=\"location\"", html);
         Assert.Contains("href=\"/docs/guides/guide.md.html\"", html);
+        Assert.Contains("href=\"/docs/guides/guide.md.html#verify\"", html);
         Assert.Contains("aria-current=\"page\"", html);
         Assert.DoesNotContain("aria-current=&quot;page&quot;", html);
         Assert.DoesNotContain("aria-current=&quot;location&quot;", html);
@@ -1093,6 +1134,30 @@ public class RazorDocsViewsTests
         Assert.Equal("Runnable.Aspire", Assert.Single(links, link => string.Equals(link.Title, "Runnable.Aspire", StringComparison.Ordinal)).Title);
         Assert.DoesNotContain(links, link => string.Equals(link.Title, "Runnable.Core.Defaults", StringComparison.Ordinal));
         Assert.DoesNotContain(links, link => string.Equals(link.Title, "Runnable.Core.Extensions", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildGroups_ShouldNestApiNamespacesUnderTwoSegmentParent_WhenParentPageExists()
+    {
+        var snapshot = new DocSectionSnapshot
+        {
+            Section = DocPublicSection.ApiReference,
+            Label = "API Reference",
+            Slug = "api-reference",
+            VisiblePages =
+            [
+                new("Bar", "Namespaces/Foo.Bar", "<p>Bar namespace</p>", CanonicalPath: "Namespaces/Foo.Bar.html"),
+                new("Baz", "Namespaces/Foo.Bar.Baz", "<p>Baz namespace</p>", CanonicalPath: "Namespaces/Foo.Bar.Baz.html")
+            ]
+        };
+
+        var groups = DocSectionDisplayBuilder.BuildGroups(snapshot);
+        var barLink = Assert.Single(groups.SelectMany(group => group.Links));
+        var bazLink = Assert.Single(barLink.Children);
+
+        Assert.Equal("Bar", barLink.Title);
+        Assert.Equal("Baz", bazLink.Title);
+        Assert.Equal("/docs/Namespaces/Foo.Bar.Baz.html", bazLink.Href);
     }
 
     [Fact]

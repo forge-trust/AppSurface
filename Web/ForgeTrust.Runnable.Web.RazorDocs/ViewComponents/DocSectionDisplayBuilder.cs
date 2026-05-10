@@ -111,7 +111,6 @@ internal static class DocSectionDisplayBuilder
                     FullNamespace = SidebarDisplayHelper.GetFullNamespaceName(doc)
                 })
             .Where(item => TryGetParentNamespace(item.FullNamespace, out var parentNamespace)
-                && ShouldNestApiNamespaceChild(parentNamespace)
                 && namespaceNodesByName.ContainsKey(parentNamespace))
             .GroupBy(item => GetParentNamespace(item.FullNamespace), item => item.Doc, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
@@ -260,11 +259,6 @@ internal static class DocSectionDisplayBuilder
     {
         var separatorIndex = fullNamespace.LastIndexOf('.');
         return separatorIndex <= 0 ? string.Empty : fullNamespace[..separatorIndex];
-    }
-
-    private static bool ShouldNestApiNamespaceChild(string parentNamespace)
-    {
-        return parentNamespace.Split('.', StringSplitOptions.RemoveEmptyEntries).Length >= 3;
     }
 
     private static string GetNamespaceLeafLabel(string fullNamespace)
