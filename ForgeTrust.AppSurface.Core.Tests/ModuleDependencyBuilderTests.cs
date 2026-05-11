@@ -40,6 +40,18 @@ public class ModuleDependencyBuilderTests
         Assert.Contains(builder.Modules, m => m.GetType() == typeof(ModuleB));
     }
 
+    [Fact]
+    public void AddModule_PreRegistersModuleBeforeResolvingDependencies()
+    {
+        var builder = new ModuleDependencyBuilder();
+
+        builder.AddModule<CyclicModuleA>();
+
+        Assert.Equal(2, builder.Modules.Count());
+        Assert.Contains(builder.Modules, m => m.GetType() == typeof(CyclicModuleA));
+        Assert.Contains(builder.Modules, m => m.GetType() == typeof(CyclicModuleB));
+    }
+
     private class RecordingModule : IAppSurfaceModule
     {
         public static int CallCount;
@@ -71,6 +83,30 @@ public class ModuleDependencyBuilderTests
 
         public void RegisterDependentModules(ModuleDependencyBuilder builder)
         {
+        }
+    }
+
+    private class CyclicModuleA : IAppSurfaceModule
+    {
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+            builder.AddModule<CyclicModuleB>();
+        }
+    }
+
+    private class CyclicModuleB : IAppSurfaceModule
+    {
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+            builder.AddModule<CyclicModuleA>();
         }
     }
 }

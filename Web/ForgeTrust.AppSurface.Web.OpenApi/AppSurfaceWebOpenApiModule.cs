@@ -24,16 +24,22 @@ public class AppSurfaceWebOpenApiModule : IAppSurfaceWebModule
             {
                 // TODO: Update w/ real versioning strategy
                 d.Info.Title = $"{context.ApplicationName} | v1";
-                d.Tags = d.Tags.Where(x => x.Name != "ForgeTrust.AppSurface.Web").ToList();
+                if (d.Tags is not null)
+                {
+                    d.Tags = d.Tags.Where(x => x.Name != "ForgeTrust.AppSurface.Web").ToList();
+                }
 
                 return Task.CompletedTask;
             });
 
             options.AddOperationTransformer((op, ctx, _) =>
             {
-                op.Tags = op.Tags
-                    .Where(x => x.Name != "ForgeTrust.AppSurface.Web")
-                    .ToList();
+                if (op.Tags is not null)
+                {
+                    op.Tags = op.Tags
+                        .Where(x => x.Name != "ForgeTrust.AppSurface.Web")
+                        .ToList();
+                }
 
                 return Task.CompletedTask;
             });

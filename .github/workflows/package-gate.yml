@@ -16,8 +16,6 @@ jobs:
   package-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
 
     steps:
       - name: Checkout code
@@ -30,17 +28,25 @@ jobs:
             10.0.x
 
       - name: Restore with isolated NuGet cache
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
         run: |
           dotnet restore ForgeTrust.AppSurface.slnx --configfile NuGet.package-gate.config
 
       - name: Build release packages
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
         run: |
           dotnet build ForgeTrust.AppSurface.slnx --configuration Release --no-restore
 
       - name: Validate package manifest gate
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-build -- gate
 
       - name: Pack release artifacts
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
         run: |
           dotnet pack ForgeTrust.AppSurface.slnx --configuration Release --no-build --output "${{ runner.temp }}/appsurface-packages"

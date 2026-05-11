@@ -45,12 +45,15 @@ This approach aims to:
 - [**AppSurface v0.1 package chooser**](./packages/README.md) - the generated install map for direct-install packages, support/runtime packages, and proof-host surfaces.
 
 ### [Core](./ForgeTrust.AppSurface.Core/README.md)
+
 - [**ForgeTrust.AppSurface.Core**](./ForgeTrust.AppSurface.Core/README.md) – Core abstractions for defining modules and starting an application via `AppSurfaceStartup` and `StartupContext`.
 
 ### [Console](./Console/README.md)
-- [**ForgeTrust.AppSurface.Console**](./Console/ForgeTrust.AppSurface.Console/README.md) – Helpers for building command line apps with [CliFx](https://github.com/Tyrrrz/CliFx) including a `CriticalService` based command runner and helpers for configuring services.
+
+- [**ForgeTrust.AppSurface.Console**](./Console/ForgeTrust.AppSurface.Console/README.md) – Helpers for building command line apps with [CliFx](https://github.com/Tyrrrz/CliFx) including a `CriticalService`-based command runner and helpers for configuring services.
 
 ### [Web](./Web/README.md)
+
 - [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register middleware and endpoints, and includes conventional browser status pages plus opt-in production 500 pages.
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation using `AddEndpointsApiExplorer` and `WithOpenApi`.
 - [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
@@ -59,9 +62,11 @@ This approach aims to:
 - [**ForgeTrust.AppSurface.Web.Scalar**](./Web/ForgeTrust.AppSurface.Web.Scalar/README.md) – Optional module that serves the Scalar API reference UI and depends on the OpenAPI module.
 
 ### [Dependency](./Dependency/README.md)
+
 - [**ForgeTrust.AppSurface.Dependency.Autofac**](./Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) – Optional integration with the Autofac IoC container so modules can participate in Autofac service registration.
 
 ### [Aspire](./Aspire/README.md)
+
 - [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Integration with .NET Aspire to provide a modular approach to defining distributed applications and service defaults.
 
 These packages are designed to work together so that features can be shared

@@ -9,7 +9,7 @@ For quick access, use GitHub's issue template chooser: [choose an issue template
 
 - Use the [**Bug report** issue form](https://github.com/forge-trust/AppSurface/issues/new?template=bug_report.yml) when behavior is broken or surprising.
 - Use the [**Feature request** issue form](https://github.com/forge-trust/AppSurface/issues/new?template=feature_request.yml) when you can name a focused product capability, API shape, workflow, or example that would remove friction.
-- Use the [**Docs or developer experience feedback** issue form](https://github.com/forge-trust/AppSurface/issues/new?template=docs_dx_feedback.yml) when the code may work, but the route to understanding it is unclear.
+- Use the [**Docs or developer experience feedback** issue form](https://github.com/forge-trust/AppSurface/issues/new?template=docs_feedback.yml) when the code may work, but the route to understanding it is unclear.
 - Do not use public issue forms for suspected vulnerabilities, leaked secrets, or exploit details. Use the [security policy](./SECURITY.md) and report sensitive findings privately.
 - Include the command, page, example, package, or API where the confusion started. The sharpest reports name the exact step that failed and the next thing you expected to see.
 - If you are unsure whether something is a bug, feature request, or docs gap, file the docs/DX form and explain the behavior you expected.

@@ -24,8 +24,8 @@ public sealed class ModuleDependencyBuilder
         if (!_modules.ContainsKey(type))
         {
             var newModule = new T();
-            newModule.RegisterDependentModules(this);
             _modules.Add(type, newModule);
+            newModule.RegisterDependentModules(this);
         }
 
         return this;

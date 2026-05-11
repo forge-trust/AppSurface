@@ -6,6 +6,12 @@
 
 `ForgeTrust.AppSurface.Aspire` provides a modular way to define distributed applications using .NET Aspire. It allows you to encapsulate service defaults and resource registrations into modules.
 
+## Installation
+
+```bash
+dotnet add package ForgeTrust.AppSurface.Aspire
+```
+
 ## Usage
 
 Use `AspireApp` to start your Aspire AppHost:

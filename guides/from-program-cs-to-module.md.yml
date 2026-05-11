@@ -1,4 +1,4 @@
-title: From Program.cs to a AppSurface Module
+title: From Program.cs to an AppSurface Module
 summary: See browser status pages and production error pages move from local startup policy to a named AppSurface Web behavior contract.
 page_type: guide
 nav_group: How-to Guides

@@ -1,7 +1,7 @@
 namespace ForgeTrust.AppSurface.Config;
 
 /// <summary>
-/// Describes the resolved configuration state for a AppSurface environment.
+/// Describes the resolved configuration state for an AppSurface environment.
 /// </summary>
 /// <remarks>
 /// Reports are immutable snapshots from the caller's perspective: provider order, entries, diagnostics, and redaction

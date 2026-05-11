@@ -7,9 +7,27 @@ namespace ForgeTrust.AppSurface.Config;
 /// <summary>
 /// A module that registers configuration management services and automatically discovers and registers configuration objects.
 /// </summary>
+/// <remarks>
+/// <see cref="AppSurfaceConfigModule"/> registers core configuration services immediately, then defers typed
+/// <see cref="IConfig"/> discovery through <see cref="StartupContext.CustomRegistrations"/> so all module dependencies
+/// are known first. The deferred scan inspects dependency module assemblies, the entry assembly, and the root module
+/// assembly. Pitfall: config dependencies should be registered before the custom registration callback runs; otherwise
+/// discovered config objects may activate before their supporting services are available.
+/// </remarks>
 public class AppSurfaceConfigModule : IAppSurfaceModule
 {
-    /// <inheritdoc />
+    /// <summary>
+    /// Registers AppSurface config services and schedules typed config discovery after module registration.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ConfigureServices(StartupContext, IServiceCollection)"/> adds the default manager, providers,
+    /// audit reporter, redactor, and file-location provider, then appends a
+    /// <see cref="StartupContext.CustomRegistrations"/> callback. That callback scans dependency, entry, and
+    /// root-module assemblies for concrete <see cref="IConfig"/> implementations and registers each as a singleton
+    /// initialized from <see cref="IConfigManager"/> and <see cref="IEnvironmentProvider"/>.
+    /// </remarks>
+    /// <param name="context">Startup context that supplies assemblies, dependency modules, and the custom registration log.</param>
+    /// <param name="services">Service collection that receives the default configuration services.</param>
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
         services.AddSingleton<IConfigManager, DefaultConfigManager>();

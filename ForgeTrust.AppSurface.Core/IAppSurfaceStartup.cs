@@ -3,8 +3,16 @@ using Microsoft.Extensions.Hosting;
 namespace ForgeTrust.AppSurface.Core;
 
 /// <summary>
-/// Defines the entry point for starting and running a AppSurface application.
+/// Defines the entry point for starting and running an AppSurface application.
 /// </summary>
+/// <remarks>
+/// <see cref="IAppSurfaceStartup.CreateHostBuilder"/> is called before <see cref="IAppSurfaceStartup.RunAsync"/>. The
+/// implementation configures an <see cref="IHostBuilder"/>, but the framework or caller owns starting, stopping, and
+/// disposing the built <see cref="IHost"/>. <see cref="CreateHostBuilder"/> must not start the host or perform blocking
+/// I/O and should be idempotent unless documented otherwise. <see cref="RunAsync"/> may be called once per
+/// <see cref="StartupContext"/>, should remain asynchronous, and should honor cancellation exposed by the configured
+/// host.
+/// </remarks>
 public interface IAppSurfaceStartup
 {
     /// <summary>

@@ -8,6 +8,7 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </summary>
 internal static class DocMetadataFactory
 {
+    private const string AppSurfaceNamespaceRoot = "ForgeTrust.AppSurface";
     private const string AppSurfaceNamespacePrefix = "ForgeTrust.AppSurface.";
     private const string RazorWireNamespacePrefix = "ForgeTrust.RazorWire";
 
@@ -229,6 +230,11 @@ internal static class DocMetadataFactory
         if (string.IsNullOrWhiteSpace(namespaceName))
         {
             return null;
+        }
+
+        if (namespaceName.Equals(AppSurfaceNamespaceRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return "AppSurface";
         }
 
         if (namespaceName.StartsWith(AppSurfaceNamespacePrefix, StringComparison.OrdinalIgnoreCase))

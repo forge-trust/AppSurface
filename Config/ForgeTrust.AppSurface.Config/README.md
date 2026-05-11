@@ -8,7 +8,7 @@ This package provides the configuration layer for AppSurface modules. It combine
 
 ## Key Types
 
-- **`AppSurfaceConfigModule`**: Registers the configuration services for a AppSurface application.
+- **`AppSurfaceConfigModule`**: Registers the configuration services for an AppSurface application.
 - **`IConfigManager`**: Central access point for resolving configuration values.
 - **`IConfigProvider`**: Abstraction for reading configuration from a source.
 - **`FileBasedConfigProvider`**: Loads configuration from files.

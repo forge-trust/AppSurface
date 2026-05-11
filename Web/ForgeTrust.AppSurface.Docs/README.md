@@ -10,7 +10,7 @@ If you are evaluating RazorDocs for your own repository, start with [Use RazorDo
 
 ## What It Provides
 
-- `RazorDocsWebModule` for wiring the docs UI into a AppSurface web host
+- `RazorDocsWebModule` for wiring the docs UI into an AppSurface web host
 - `AddRazorDocs()` for typed options binding and core service registration
 - `DocAggregator` plus the built-in Markdown and C# harvesters, including structured harvest health diagnostics
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by RazorDocs consumers

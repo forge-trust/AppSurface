@@ -8,7 +8,7 @@ This glossary defines the terms needed to read the AppSurface package docs and e
 
 ## Root Module
 
-The root module is the module type passed to a AppSurface entry point. It is the starting point for module composition.
+The root module is the module type passed to an AppSurface entry point. It is the starting point for module composition.
 
 Example:
 
@@ -34,7 +34,7 @@ Keep display labels and host identity separate. Static web assets use host ident
 
 ## Package Module
 
-A package module is a AppSurface module shipped by a package, such as the Web, Console, Aspire, or optional web modules. Install package modules only when the [package chooser](../packages/README.md) says they match the app.
+A package module is an AppSurface module shipped by a package, such as the Web, Console, Aspire, or optional web modules. Install package modules only when the [package chooser](../packages/README.md) says they match the app.
 
 ## Web Module
 

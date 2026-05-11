@@ -18,8 +18,14 @@ public interface IEnvironmentProvider
     /// <summary>
     /// Gets the value of an environment variable.
     /// </summary>
-    /// <param name="name">The name of the environment variable.</param>
-    /// <param name="defaultValue">The value to return if the environment variable is not set.</param>
-    /// <returns>The value of the environment variable, or the default value if not found.</returns>
+    /// <remarks>
+    /// Implementations should be side-effect-free and preserve the platform's environment-name behavior: Windows is
+    /// generally case-insensitive, while Unix-like systems are case-sensitive. Return <paramref name="defaultValue"/>
+    /// only when the variable is unset and the underlying lookup returns <see langword="null"/>; an explicitly empty
+    /// variable is a real empty string and should not be replaced by the default.
+    /// </remarks>
+    /// <param name="name">The exact environment variable name to query.</param>
+    /// <param name="defaultValue">The value to return when the variable is unset.</param>
+    /// <returns>The variable value, an empty string when explicitly set empty, or <paramref name="defaultValue"/> when unset.</returns>
     string? GetEnvironmentVariable(string name, string? defaultValue = null);
 }

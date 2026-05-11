@@ -1,4 +1,4 @@
-# From Program.cs to a AppSurface Module
+# From Program.cs to an AppSurface Module
 
 The clearest AppSurface proof is not a smaller `Program.cs`. It is a startup policy that becomes named, tested, and reusable.
 

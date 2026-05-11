@@ -8,7 +8,7 @@ The target reader is a team lead, engineering manager, architect, or senior deve
 
 1. Read [Should I Use AppSurface?](should-i-use-appsurface.md) to decide whether plain ASP.NET Core is still enough.
 2. Run [First Success Path](first-success-path.md) to prove the smallest web app starts.
-3. Read [From Program.cs to a AppSurface Module](../guides/from-program-cs-to-module.md) to inspect one concrete startup concern as a module.
+3. Read [From Program.cs to an AppSurface Module](../guides/from-program-cs-to-module.md) to inspect one concrete startup concern as a module.
 4. Keep [Troubleshoot Startup and Modules](../troubleshooting/startup-and-modules.md) nearby if the first run or module composition does not behave as expected.
 5. Use the [AppSurface Glossary](../concepts/glossary.md) when a term in package docs is unfamiliar.
 

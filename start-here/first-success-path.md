@@ -42,7 +42,7 @@ Hello from the example module!
 
 This first run does not prove the status-page behavior used later in the evaluator path. It only proves the base web host starts and the module contributes behavior.
 
-For the status-page proof, read [From Program.cs to a AppSurface Module](../guides/from-program-cs-to-module.md). That page points at the Web package behavior and the tests that verify browser status pages and production exception pages.
+For the status-page proof, read [From Program.cs to an AppSurface Module](../guides/from-program-cs-to-module.md). That page points at the Web package behavior and the tests that verify browser status pages and production exception pages.
 
 ## Pitfalls
 
@@ -50,4 +50,4 @@ For the status-page proof, read [From Program.cs to a AppSurface Module](../guid
 - Start with `ForgeTrust.AppSurface.Web` for a normal web app. Add optional modules only when the [package chooser](../packages/README.md) points to them.
 - Treat the startup log as the source of truth if you choose a different port.
 
-Next: [From Program.cs to a AppSurface Module](../guides/from-program-cs-to-module.md)
+Next: [From Program.cs to an AppSurface Module](../guides/from-program-cs-to-module.md)

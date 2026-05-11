@@ -1,5 +1,5 @@
 title: Should I Use AppSurface?
-summary: Decide when plain ASP.NET Core startup code is enough and when a AppSurface module makes a setup concern clearer.
+summary: Decide when plain ASP.NET Core startup code is enough and when an AppSurface module makes a setup concern clearer.
 page_type: guide
 nav_group: Start Here
 sequence_key: appsurface-evaluator

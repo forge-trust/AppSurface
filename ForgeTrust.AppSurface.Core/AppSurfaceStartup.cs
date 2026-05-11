@@ -8,6 +8,14 @@ namespace ForgeTrust.AppSurface.Core;
 /// <summary>
 /// Provides a base implementation for starting and running applications with module support.
 /// </summary>
+/// <remarks>
+/// Inherit from <see cref="AppSurfaceStartup{TRootModule}"/> when the application has a concrete root
+/// <see cref="IAppSurfaceHostModule"/> and can use the standard AppSurface host-building flow. Use a host-specific
+/// startup such as WebStartup when middleware or endpoint hooks are needed, or implement <see cref="IAppSurfaceStartup"/>
+/// directly when the host lifecycle is custom. <see cref="StartupContext.ApplicationName"/> is the AppSurface-facing
+/// label used by modules and diagnostics; <see cref="StartupContext.HostApplicationName"/> is the generic host identity
+/// applied to configuration and hosting infrastructure.
+/// </remarks>
 public abstract class AppSurfaceStartup
 {
     /// <summary>
@@ -27,8 +35,14 @@ public abstract class AppSurfaceStartup
 }
 
 /// <summary>
-/// An abstract base class for initializing a AppSurface application with a specific root module.
+/// An abstract base class for initializing an AppSurface application with a specific root module.
 /// </summary>
+/// <remarks>
+/// <see cref="AppSurfaceStartup{TRootModule}"/> creates <typeparamref name="TRootModule"/> through the <c>new()</c>
+/// constraint, discovers its dependencies, and lets only <see cref="IAppSurfaceHostModule"/> dependencies receive host
+/// lifecycle hooks. Plain <see cref="IAppSurfaceModule"/> dependencies participate in service registration only. Prefer
+/// this base class for console or generic-host apps; use web-specific startup types for ASP.NET Core pipeline work.
+/// </remarks>
 /// <typeparam name="TRootModule">The type of the root module for the application.</typeparam>
 public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSurfaceStartup
     where TRootModule : IAppSurfaceHostModule, new()
