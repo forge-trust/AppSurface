@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Runtime.CompilerServices;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Core.Defaults;
 
@@ -20,6 +21,7 @@ public static class AspireApp
     /// </summary>
     /// <param name="args">Command-line arguments.</param>
     /// <returns>A task representing the run operation.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static Task RunAsync(string[] args)
     {
         var startupContext = new StartupContext(args, new NoHostModule())

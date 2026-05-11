@@ -68,8 +68,7 @@ public class AppSurfaceAutofacExtensionsTests
     {
         var builder = new ContainerBuilder();
 
-        builder.RegisterImplementations<IScannedAutofacService>()
-            .As<IScannedAutofacService>();
+        builder.RegisterImplementations<IScannedAutofacService>();
 
         using var container = builder.Build();
 
@@ -79,6 +78,17 @@ public class AppSurfaceAutofacExtensionsTests
         Assert.Contains(services, service => service is SecondScannedAutofacService);
         Assert.DoesNotContain(services, service => service.GetType().IsAbstract);
         Assert.DoesNotContain(services, service => service.GetType() == typeof(UnrelatedAutofacService));
+    }
+
+    [Fact]
+    public void RegisterImplementations_RequiresInterfaceType()
+    {
+        var builder = new ContainerBuilder();
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => builder.RegisterImplementations<UnrelatedAutofacService>());
+
+        Assert.Equal("TInterface", exception.ParamName);
     }
 }
 

@@ -33,11 +33,13 @@ internal static class SidebarDisplayHelper
     /// <summary>
     /// Gets the sidebar group implied by a source path.
     /// </summary>
-    /// <param name="path">A source or docs path. Leading and trailing slashes are ignored.</param>
+    /// <param name="path">A source or docs path. Directory separators and leading or trailing slashes are normalized.</param>
     /// <returns><c>Namespaces</c> for namespace paths, <c>General</c> for root files, or the containing directory.</returns>
     internal static string GetGroupName(string path)
     {
-        var normalizedPath = path.Trim().Trim('/');
+        var normalizedPath = path.Trim()
+            .Replace('\\', '/')
+            .Trim('/');
         if (normalizedPath.Equals("Namespaces", StringComparison.OrdinalIgnoreCase)
             || normalizedPath.StartsWith("Namespaces/", StringComparison.OrdinalIgnoreCase))
         {

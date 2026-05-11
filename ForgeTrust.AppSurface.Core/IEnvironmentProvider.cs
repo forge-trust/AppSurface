@@ -3,6 +3,16 @@
 /// <summary>
 /// Provides information about the application's environment and configuration variables.
 /// </summary>
+/// <remarks>
+/// Use <see cref="IEnvironmentProvider"/> for DI-friendly, testable environment access in application and core code.
+/// Prefer direct <see cref="System.Environment"/> access only in infrastructure adapters, one-off scripts, or the
+/// implementation of this contract.
+///
+/// <see cref="IsDevelopment"/> must stay consistent with <see cref="Environment"/> and should be derived by comparing
+/// the environment name to <c>Development</c> with ordinal ignore-case semantics. <see cref="GetEnvironmentVariable"/>
+/// implementations should be side-effect-free, preserve OS-specific variable name behavior, and document invalid-name
+/// handling when they do not delegate directly to <see cref="System.Environment"/>.
+/// </remarks>
 public interface IEnvironmentProvider
 {
     /// <summary>

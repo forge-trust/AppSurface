@@ -73,6 +73,26 @@ public class DefaultEnvironmentProviderTests
         Assert.False(provider.IsDevelopment);
     }
 
+    [Fact]
+    public void GetEnvironmentVariable_ReturnsEmptyString_WhenVariableIsExplicitlyEmpty()
+    {
+        var variableName = $"APPSURFACE_TEST_{Guid.NewGuid():N}";
+        Environment.SetEnvironmentVariable(variableName, string.Empty);
+
+        try
+        {
+            var provider = new DefaultEnvironmentProvider();
+
+            var value = provider.GetEnvironmentVariable(variableName, "fallback");
+
+            Assert.Equal(string.Empty, value);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variableName, null);
+        }
+    }
+
     private class CaptureIsDevStartup : AppSurfaceStartup<NoHostModule>
     {
         public bool CapturedIsDevelopment { get; private set; }

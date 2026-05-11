@@ -291,7 +291,9 @@ internal static class DocMetadataFactory
     {
         if (parts.Count == 1)
         {
-            return parts[0];
+            return parts[0].Equals("Docs", StringComparison.OrdinalIgnoreCase)
+                ? "RazorDocs"
+                : parts[0];
         }
 
         return parts[0] switch

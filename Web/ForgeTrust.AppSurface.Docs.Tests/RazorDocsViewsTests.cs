@@ -3385,6 +3385,14 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public void SidebarDisplayHelper_GetGroupName_ShouldRecognizeBackslashSeparatedNamespacePaths()
+    {
+        var groupName = SidebarDisplayHelper.GetGroupName(@"Namespaces\ForgeTrust.AppSurface");
+
+        Assert.Equal("Namespaces", groupName);
+    }
+
+    [Fact]
     public void SidebarDisplayHelper_GetFullNamespaceName_ShouldHandleEdgeBranches()
     {
         var fullNamespaceRoot = SidebarDisplayHelper.GetFullNamespaceName(

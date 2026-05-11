@@ -1,4 +1,5 @@
-﻿using Autofac;
+﻿using System.Reflection;
+using Autofac;
 using Autofac.Builder;
 using Autofac.Features.Scanning;
 
@@ -19,11 +20,14 @@ public static class AppSurfaceAutofacExtensions
     /// </summary>
     /// <remarks>
     /// <see cref="RegisterImplementations{TInterface}"/> scans only the assembly that declares
-    /// <typeparamref name="TInterface"/> and registers concrete, non-abstract assignable classes. It returns Autofac's
+    /// <typeparamref name="TInterface"/> and registers concrete, non-abstract assignable classes as
+    /// <typeparamref name="TInterface"/> services. It returns Autofac's
     /// <see cref="IRegistrationBuilder{TLimit,TActivatorData,TRegistrationStyle}"/> so callers can add lifetime,
-    /// ownership, and metadata configuration. Reflection scanning can load dependent types, may miss trimmed/private
-    /// implementation patterns, and should be called during container construction rather than concurrently with
-    /// container use.
+    /// ownership, and metadata configuration. Use this helper when one interface owns a small assembly-local plugin
+    /// surface and interface resolution is the intended contract. Prefer explicit registrations when implementations
+    /// cross assemblies, require different service interfaces, need distinct lifetimes, or must be linker/AOT-friendly.
+    /// Reflection scanning recovers from partial type-load failures by registering successfully loaded types only, so
+    /// missing optional dependencies can still hide implementations that failed to load.
     /// </remarks>
     /// <typeparam name="TInterface">The interface type to scan for implementations of.</typeparam>
     /// <param name="builder">The container builder.</param>
@@ -31,10 +35,32 @@ public static class AppSurfaceAutofacExtensions
     public static IRegistrationBuilder<object, ScanningActivatorData, DynamicRegistrationStyle>
         RegisterImplementations<TInterface>(this ContainerBuilder builder)
     {
+        ArgumentNullException.ThrowIfNull(builder);
+        if (!typeof(TInterface).IsInterface)
+        {
+            throw new ArgumentException(
+                $"{typeof(TInterface).FullName} must be an interface type.",
+                nameof(TInterface));
+        }
+
         var assembly = typeof(TInterface).Assembly;
-        var types = assembly.GetTypes()
+        var loadedTypes = GetLoadableTypes(assembly);
+        var types = loadedTypes
             .Where(t => t.IsClass && !t.IsAbstract && typeof(TInterface).IsAssignableFrom(t));
 
-        return builder.RegisterTypes(types.ToArray());
+        return builder.RegisterTypes(types.ToArray())
+            .As(typeof(TInterface));
+    }
+
+    private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.OfType<Type>();
+        }
     }
 }

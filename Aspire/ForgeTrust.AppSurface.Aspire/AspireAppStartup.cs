@@ -46,8 +46,19 @@ internal class AspireAppStartup<TModule> : ConsoleStartup<TModule>
 
     private IReadOnlyList<Type> GetComponentTypes(Assembly hostAssembly)
     {
-        var componentTypes = hostAssembly.GetTypes()
-            .Where(t => t.IsClass && !t.IsAbstract && typeof(IAspireComponent).IsAssignableFrom(t))
+        IEnumerable<Type> discoveredTypes;
+        try
+        {
+            discoveredTypes = hostAssembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            discoveredTypes = ex.Types.OfType<Type>();
+        }
+
+        var componentTypes = discoveredTypes
+            .Where(t => t.IsClass && !t.IsAbstract && !t.ContainsGenericParameters)
+            .Where(t => typeof(IAspireComponent).IsAssignableFrom(t))
             .ToList();
 
         return componentTypes;
