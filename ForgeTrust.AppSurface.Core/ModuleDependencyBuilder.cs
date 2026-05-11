@@ -16,8 +16,8 @@ public sealed class ModuleDependencyBuilder
     /// Gets the collection of registered modules.
     /// </summary>
     /// <remarks>
-    /// Modules are keyed by concrete type and added once. Enumeration follows insertion order for the current
-    /// dependency graph, with a module visible in <see cref="Modules"/> before its
+    /// Modules are keyed by concrete type and added once. Enumeration order is implementation-dependent and should
+    /// not be treated as a stable contract. A module is visible in <see cref="Modules"/> before its
     /// <see cref="IAppSurfaceModule.RegisterDependentModules(ModuleDependencyBuilder)"/> callback registers children.
     /// </remarks>
     public IEnumerable<IAppSurfaceModule> Modules => _modules.Values;

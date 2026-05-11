@@ -104,6 +104,17 @@ public class AppSurfaceAutofacExtensionsTests
     }
 
     [Fact]
+    public void RegisterImplementations_ThrowsArgumentNullException_WhenGetTypesIsNull()
+    {
+        var builder = new ContainerBuilder();
+
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => builder.RegisterImplementations<IScannedAutofacService>(null!));
+
+        Assert.Equal("getTypes", exception.ParamName);
+    }
+
+    [Fact]
     public void RegisterImplementations_RegistersLoadableTypes_WhenAssemblyPartiallyFailsToLoad()
     {
         var builder = new ContainerBuilder();

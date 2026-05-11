@@ -39,6 +39,19 @@ public static class AppSurfaceAutofacExtensions
         return builder.RegisterImplementations<TInterface>(static assembly => assembly.GetTypes());
     }
 
+    /// <summary>
+    /// Registers implementations of <typeparamref name="TInterface"/> using a caller-provided assembly type loader.
+    /// </summary>
+    /// <remarks>
+    /// This internal seam exists so tests can verify partial-load recovery without creating a broken fixture assembly.
+    /// The <paramref name="getTypes"/> delegate must return a non-null array for successful loads. If it throws
+    /// <see cref="ReflectionTypeLoadException"/>, successfully loaded non-null entries from
+    /// <see cref="ReflectionTypeLoadException.Types"/> are still registered and failed entries are ignored.
+    /// </remarks>
+    /// <typeparam name="TInterface">The interface type to scan for implementations of.</typeparam>
+    /// <param name="builder">The container builder.</param>
+    /// <param name="getTypes">Type loader for the assembly that declares <typeparamref name="TInterface"/>.</param>
+    /// <returns>A registration builder for the scanned types.</returns>
     internal static IRegistrationBuilder<object, ScanningActivatorData, DynamicRegistrationStyle>
         RegisterImplementations<TInterface>(this ContainerBuilder builder, Func<Assembly, Type[]> getTypes)
         where TInterface : notnull
@@ -61,6 +74,12 @@ public static class AppSurfaceAutofacExtensions
             .As<TInterface>();
     }
 
+    /// <summary>
+    /// Gets all loadable types from an assembly while tolerating partial reflection-load failures.
+    /// </summary>
+    /// <param name="assembly">The assembly being scanned.</param>
+    /// <param name="getTypes">The delegate used to load the assembly's type array.</param>
+    /// <returns>All loaded types, or the non-null subset from <see cref="ReflectionTypeLoadException.Types"/>.</returns>
     private static IEnumerable<Type> GetLoadableTypes(Assembly assembly, Func<Assembly, Type[]> getTypes)
     {
         try
