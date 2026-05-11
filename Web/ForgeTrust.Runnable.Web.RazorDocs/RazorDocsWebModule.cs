@@ -230,13 +230,14 @@ public class RazorDocsWebModule : IRunnableWebModule
     /// Adds the module's default controller routes and supporting asset routes for documentation endpoints.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// When RazorDocs is the root module assembly, standalone and static-export hosts preserve the historical
     /// <c>/css/site.gen.css</c> URL by redirecting it to the packaged Razor Class Library stylesheet at
     /// <c>/_content/ForgeTrust.Runnable.Web.RazorDocs/css/site.gen.css</c>. Embedded hosts do not register that
     /// redirect because they already link to the packaged asset directly. Redirects preserve the request
     /// <see cref="HttpRequest.PathBase"/> and query string so legacy links continue to work behind a virtual path.
-    /// </remarks>
-    /// <remarks>
+    /// </para>
+    /// <para>
     /// When versioning is enabled, this hook also reserves the stable version entry route at the configured route-family
     /// root, adds the archive surface below that route root, and serves preview-surface assets from either the live web
     /// root or the packaged Razor Class Library depending on whether published-tree mounts can shadow the stable docs root.
@@ -247,8 +248,8 @@ public class RazorDocsWebModule : IRunnableWebModule
     /// Route ordering matters: index, search, search-index, section, and catch-all routes are registered from most to
     /// least specific so the live preview root continues to behave correctly even when the current docs root is
     /// root-mounted or overlaps published exact-version aliases.
-    /// </remarks>
-    /// <remarks>
+    /// </para>
+    /// <para>
     /// The operator-facing harvest health routes are registered only when
     /// <see cref="RazorDocsHarvestHealthVisibility.AreRoutesExposed(RazorDocsOptions, IHostEnvironment)"/> returns
     /// <c>true</c>. By default that exposes the routes only in Development; production hosts must opt in with
@@ -258,6 +259,7 @@ public class RazorDocsWebModule : IRunnableWebModule
     /// <c>razordocs_harvest_health_json</c> maps <see cref="DocsUrlBuilder.BuildHealthJsonUrl"/> to
     /// <c>DocsController.HarvestHealthJson</c>. These routes are intended for local and operator verification, not as
     /// unauthenticated public reader navigation.
+    /// </para>
     /// </remarks>
     /// <param name="context">Startup context for the application and environment.</param>
     /// <param name="endpoints">Endpoint route builder used to map the module's routes.</param>
