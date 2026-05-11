@@ -206,7 +206,7 @@ internal sealed class RazorDocsInProcessHost : IAsyncDisposable
 
             var value = System.Environment.GetEnvironmentVariable(name);
 
-            return string.IsNullOrEmpty(value) ? defaultValue : value;
+            return value ?? defaultValue;
         }
     }
 }
