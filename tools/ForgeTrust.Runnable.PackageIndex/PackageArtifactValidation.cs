@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace ForgeTrust.Runnable.PackageIndex;
@@ -182,15 +183,32 @@ internal sealed class PackageArtifactValidator
     private static InspectedPackage InspectPackage(string packagePath, IReadOnlySet<string> packageIds)
     {
         using var archive = ZipFile.OpenRead(packagePath);
-        var nuspecEntry = archive.Entries.SingleOrDefault(
-            entry => entry.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase));
-        if (nuspecEntry is null)
+        var nuspecEntries = archive.Entries
+            .Where(entry => entry.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (nuspecEntries.Length == 0)
         {
             throw new PackageIndexException($"Package artifact '{packagePath}' does not contain a .nuspec file.");
         }
 
-        using var nuspecStream = nuspecEntry.Open();
-        var nuspec = XDocument.Load(nuspecStream);
+        if (nuspecEntries.Length > 1)
+        {
+            throw new PackageIndexException($"Package artifact '{packagePath}' contains multiple .nuspec files.");
+        }
+
+        XDocument nuspec;
+        try
+        {
+            using var nuspecStream = nuspecEntries[0].Open();
+            nuspec = XDocument.Load(nuspecStream);
+        }
+        catch (Exception ex) when (ex is XmlException or IOException)
+        {
+            throw new PackageIndexException(
+                $"Package artifact '{packagePath}' contains invalid nuspec XML: {ex.Message}",
+                ex);
+        }
+
         var metadata = nuspec.Root?.Element(nuspec.Root.Name.Namespace + "metadata")
             ?? throw new PackageIndexException($"Package artifact '{packagePath}' does not contain nuspec metadata.");
         var ns = metadata.Name.Namespace;
@@ -421,8 +439,8 @@ internal static class PackageArtifactReportRenderer
         return decision switch
         {
             PackagePublishDecision.Publish => "publish",
-            PackagePublishDecision.SupportPublish => "support-publish",
-            PackagePublishDecision.DoNotPublish => "do-not-publish",
+            PackagePublishDecision.SupportPublish => "support_publish",
+            PackagePublishDecision.DoNotPublish => "do_not_publish",
             _ => decision.ToString()
         };
     }

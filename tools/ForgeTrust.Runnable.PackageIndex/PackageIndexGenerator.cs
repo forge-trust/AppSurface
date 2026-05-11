@@ -559,6 +559,16 @@ internal sealed class PackageIndexException : Exception
         : base(message)
     {
     }
+
+    /// <summary>
+    /// Creates a new package chooser exception with an actionable message and underlying cause.
+    /// </summary>
+    /// <param name="message">User-facing description of the failed chooser precondition or generation step.</param>
+    /// <param name="innerException">Original exception that caused the package chooser failure.</param>
+    internal PackageIndexException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }
 
 /// <summary>

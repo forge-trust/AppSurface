@@ -54,7 +54,8 @@ internal sealed class PackageArtifactWorkflow
             request,
             [
                 "restore",
-                "ForgeTrust.Runnable.slnx"
+                "ForgeTrust.Runnable.slnx",
+                "/p:ContinuousIntegrationBuild=true"
             ],
             "dotnet restore",
             "repository",

@@ -939,6 +939,70 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains(".nuspec", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenMultipleNuspecFilesExist()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Core",
+            PackageVersion,
+            EmptyDependencies,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["extra.nuspec"] = Encoding.UTF8.GetBytes("<package />")
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "ForgeTrust.Runnable.Core/ForgeTrust.Runnable.Core.csproj",
+                        "ForgeTrust.Runnable.Core",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("multiple .nuspec", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsPackageIndexExceptionWhenNuspecXmlIsInvalid()
+    {
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.Runnable.Core",
+            PackageVersion,
+            EmptyDependencies,
+            includeNuspec: false,
+            rawEntries: new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ForgeTrust.Runnable.Core.nuspec"] = Encoding.UTF8.GetBytes("<package><metadata></package>")
+            });
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "ForgeTrust.Runnable.Core/ForgeTrust.Runnable.Core.csproj",
+                        "ForgeTrust.Runnable.Core",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("invalid nuspec XML", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(error.InnerException);
+    }
+
     [Theory]
     [InlineData(false, true, "id")]
     [InlineData(true, false, "version")]
@@ -1143,11 +1207,11 @@ public sealed class PackageArtifactValidationTests : IDisposable
             ]));
 
         Assert.Contains("`publish`", markdown, StringComparison.Ordinal);
-        Assert.Contains("`support-publish`", markdown, StringComparison.Ordinal);
-        Assert.Contains("`do-not-publish`", markdown, StringComparison.Ordinal);
+        Assert.Contains("`support_publish`", markdown, StringComparison.Ordinal);
+        Assert.Contains("`do_not_publish`", markdown, StringComparison.Ordinal);
         Assert.Contains("`999`", markdown, StringComparison.Ordinal);
         Assert.Contains("`ForgeTrust.Runnable.Web`", markdown, StringComparison.Ordinal);
-        Assert.Contains("| `ForgeTrust.Runnable.Example` | `examples/Example.csproj` | `do-not-publish` | none |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| `ForgeTrust.Runnable.Example` | `examples/Example.csproj` | `do_not_publish` | none |", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1195,6 +1259,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         Assert.Single(report.Entries);
         Assert.Equal(["dotnet restore", "dotnet build", "dotnet pack"], commandRunner.OperationNames);
+        var restoreCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet restore");
+        Assert.Contains("/p:ContinuousIntegrationBuild=true", restoreCommand.Arguments);
         var packCommand = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet pack");
         Assert.Contains("--no-restore", packCommand.Arguments);
         Assert.Contains("--no-build", packCommand.Arguments);
