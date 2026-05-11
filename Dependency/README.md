@@ -4,7 +4,7 @@ Integrations with various dependency injection containers and advanced DI utilit
 
 ## Contents
 
-- [**ForgeTrust.Runnable.Dependency.Autofac**](./ForgeTrust.Runnable.Dependency.Autofac/README.md) – Autofac container integration.
+- [**ForgeTrust.AppSurface.Dependency.Autofac**](./ForgeTrust.AppSurface.Dependency.Autofac/README.md) – Autofac container integration.
 
 ---
 [🏠 Back to Root](../README.md)

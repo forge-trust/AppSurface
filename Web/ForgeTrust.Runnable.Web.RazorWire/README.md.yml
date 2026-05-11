@@ -1,7 +1,0 @@
-sequence_key: razorwire-proof
-order: 10
-related_pages:
-  - Web/ForgeTrust.Runnable.Web.RazorWire/DESIGN.md
-  - examples/razorwire-mvc/README.md
-  - Web/ForgeTrust.Runnable.Web.RazorWire/Docs/form-failures.md
-  - Web/ForgeTrust.Runnable.Web.RazorWire/Docs/antiforgery.md

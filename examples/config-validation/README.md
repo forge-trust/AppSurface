@@ -1,6 +1,6 @@
 # Config validation example
 
-This sample shows scalar validation on a strongly typed Runnable config wrapper.
+This sample shows scalar validation on a strongly typed AppSurface config wrapper.
 
 Run it from the repository root:
 

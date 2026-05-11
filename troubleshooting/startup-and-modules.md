@@ -16,7 +16,7 @@ The root module did not register the module, or the app is running a different r
 
 ### Check
 
-Find the root module passed to `WebApp<TModule>`, `ConsoleApp<TModule>`, or `RunnableStartup<TModule>`. Then check `RegisterDependentModules`.
+Find the root module passed to `WebApp<TModule>`, `ConsoleApp<TModule>`, or `AppSurfaceStartup<TModule>`. Then check `RegisterDependentModules`.
 
 ### Fix
 
@@ -30,7 +30,7 @@ A module runs, but a service or option from another module is missing.
 
 ### Likely Cause
 
-The module assumes another Runnable module is present but does not declare that dependency.
+The module assumes another AppSurface module is present but does not declare that dependency.
 
 ### Check
 
@@ -99,8 +99,8 @@ An optional package was installed before the base package or the package chooser
 
 ### Check
 
-Read the [Runnable v0.1 package chooser](../packages/README.md). Start with the package that matches the app type.
+Read the [AppSurface v0.1 package chooser](../packages/README.md). Start with the package that matches the app type.
 
 ### Fix
 
-For a normal ASP.NET Core app, start with `ForgeTrust.Runnable.Web`. Add optional packages such as OpenAPI, Scalar, RazorWire, Tailwind, or RazorDocs only when the app needs them.
+For a normal ASP.NET Core app, start with `ForgeTrust.AppSurface.Web`. Add optional packages such as OpenAPI, Scalar, RazorWire, Tailwind, or RazorDocs only when the app needs them.

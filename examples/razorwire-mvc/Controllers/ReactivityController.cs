@@ -1,6 +1,6 @@
-using ForgeTrust.Runnable.Web.RazorWire;
-using ForgeTrust.Runnable.Web.RazorWire.Bridge;
-using ForgeTrust.Runnable.Web.RazorWire.Streams;
+using ForgeTrust.RazorWire;
+using ForgeTrust.RazorWire.Bridge;
+using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Mvc;
 using RazorWireWebExample.Models;
 using RazorWireWebExample.Services;

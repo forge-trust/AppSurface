@@ -1,8 +1,8 @@
-title: From Program.cs to a Runnable Module
-summary: See browser status pages and production error pages move from local startup policy to a named Runnable Web behavior contract.
+title: From Program.cs to an AppSurface Module
+summary: See browser status pages and production error pages move from local startup policy to a named AppSurface Web behavior contract.
 page_type: guide
 nav_group: How-to Guides
-sequence_key: runnable-evaluator
+sequence_key: appsurface-evaluator
 order: 40
 aliases:
   - Program.cs
@@ -15,6 +15,6 @@ keywords:
   - WebOptions.Errors
   - BrowserStatusPageMode
 related_pages:
-  - Web/ForgeTrust.Runnable.Web/README.md
-  - ForgeTrust.Runnable.Core/README.md
-  - start-here/should-i-use-runnable.md
+  - Web/ForgeTrust.AppSurface.Web/README.md
+  - ForgeTrust.AppSurface.Core/README.md
+  - start-here/should-i-use-appsurface.md

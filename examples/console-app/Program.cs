@@ -1,4 +1,4 @@
 using ConsoleAppExample;
-using ForgeTrust.Runnable.Console;
+using ForgeTrust.AppSurface.Console;
 
 await ConsoleApp<ExampleModule>.RunAsync(args);

@@ -1,5 +1,5 @@
 title: Changelog
-summary: Compact ledger for coordinated Runnable releases across packages, CLI tooling, examples, and docs-facing behavior.
+summary: Compact ledger for coordinated AppSurface releases across packages, CLI tooling, examples, and docs-facing behavior.
 page_type: release-log
 nav_group: Releases
 order: 20
@@ -10,7 +10,7 @@ trust:
   status: Changelog contract
   summary: This ledger is the compact record for what is next and what shipped. Narrative detail and full migration walkthroughs live in the matching release pages.
   freshness: Updated whenever unreleased work is regrouped or a tagged release is cut.
-  change_scope: Repository-wide. Every package and runnable surface in this monorepo shares the same release version.
+  change_scope: Repository-wide. Every package and AppSurface surface in this monorepo shares the same release version.
   migration:
     label: Read the pre-1.0 upgrade policy
     href: /docs/releases/upgrade-policy.md.html

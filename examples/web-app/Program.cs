@@ -1,4 +1,4 @@
-using ForgeTrust.Runnable.Web;
+using ForgeTrust.AppSurface.Web;
 using WebAppExample;
 
 await WebApp<ExampleModule>.RunAsync(

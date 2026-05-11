@@ -30,23 +30,23 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: Web/ForgeTrust.Runnable.Web.RazorWire/package-lock.json
+          cache-dependency-path: Web/ForgeTrust.RazorWire/package-lock.json
 
       - name: Verify generated package chooser
         run: |
-          dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify
 
       - name: Verify generated Markdown snippets
         run: |
-          dotnet run --project tools/ForgeTrust.Runnable.MarkdownSnippets/ForgeTrust.Runnable.MarkdownSnippets.csproj -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj -- verify
 
       - name: Build project
         run: dotnet build --configuration Release
 
       - name: Run RazorWire runtime tests
         run: |
-          npm ci --prefix Web/ForgeTrust.Runnable.Web.RazorWire
-          npm test --prefix Web/ForgeTrust.Runnable.Web.RazorWire
+          npm ci --prefix Web/ForgeTrust.RazorWire
+          npm test --prefix Web/ForgeTrust.RazorWire
 
       - name: Run tests
         run: |
@@ -90,15 +90,15 @@ jobs:
 
       - name: Verify generated package chooser
         run: |
-          dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify
 
       - name: Verify generated Markdown snippets
         run: |
-          dotnet run --project tools/ForgeTrust.Runnable.MarkdownSnippets/ForgeTrust.Runnable.MarkdownSnippets.csproj -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj -- verify
 
       - name: Build RazorWire CLI (Release)
         run: |
-          dotnet build Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj -c Release
+          dotnet build Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj -c Release
 
       - name: Export RazorDocs static site
         env:
@@ -109,10 +109,10 @@ jobs:
           RazorDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
           RazorDocs__Contributor__LastUpdatedMode: Git
         run: |
-          dotnet run --project Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj -c Release -- \
+          dotnet run --project Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj -c Release -- \
             export \
             --output "$RUNNER_TEMP/razordocs-pages" \
-            --project Web/ForgeTrust.Runnable.Web.RazorDocs.Standalone/ForgeTrust.Runnable.Web.RazorDocs.Standalone.csproj
+            --project Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

@@ -20,7 +20,7 @@ Expected response:
 Hello World from the root!
 ```
 
-That proves the base `ForgeTrust.Runnable.Web` path: a root module, the Runnable startup pipeline, and one mapped endpoint.
+That proves the base `ForgeTrust.AppSurface.Web` path: a root module, the AppSurface startup pipeline, and one mapped endpoint.
 
 ## What This Example Shows
 
@@ -42,12 +42,12 @@ Hello from the example module!
 
 This first run does not prove the status-page behavior used later in the evaluator path. It only proves the base web host starts and the module contributes behavior.
 
-For the status-page proof, read [From Program.cs to a Runnable Module](../guides/from-program-cs-to-module.md). That page points at the Web package behavior and the tests that verify browser status pages and production exception pages.
+For the status-page proof, read [From Program.cs to an AppSurface Module](../guides/from-program-cs-to-module.md). That page points at the Web package behavior and the tests that verify browser status pages and production exception pages.
 
 ## Pitfalls
 
-- Pass `--port 5055` when following docs. Without it, Runnable may choose a deterministic development port for your worktree.
-- Start with `ForgeTrust.Runnable.Web` for a normal web app. Add optional modules only when the [package chooser](../packages/README.md) points to them.
+- Pass `--port 5055` when following docs. Without it, AppSurface may choose a deterministic development port for your worktree.
+- Start with `ForgeTrust.AppSurface.Web` for a normal web app. Add optional modules only when the [package chooser](../packages/README.md) points to them.
 - Treat the startup log as the source of truth if you choose a different port.
 
-Next: [From Program.cs to a Runnable Module](../guides/from-program-cs-to-module.md)
+Next: [From Program.cs to an AppSurface Module](../guides/from-program-cs-to-module.md)

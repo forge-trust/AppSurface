@@ -235,14 +235,14 @@
         "resolved": "9.0.6",
         "contentHash": "lum+Dv+8S4gqN5H1C576UcQe0M2buoRjEUVs4TctXRSWjBH3ay3w2KyQrOo1yPdRs1I+xK69STz+4mjIisFI5w=="
       },
-      "forgetrust.runnable.config": {
+      "forgetrust.appsurface.config": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.Runnable.Core": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Core": "[1.0.0, )",
           "Microsoft.Extensions.Options": "[9.0.6, )"
         }
       },
-      "forgetrust.runnable.core": {
+      "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.Hosting": "[9.0.6, )",

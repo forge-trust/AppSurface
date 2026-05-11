@@ -1,4 +1,4 @@
-@model ForgeTrust.Runnable.Web.BrowserStatusPageModel
+@model ForgeTrust.AppSurface.Web.BrowserStatusPageModel
 @{
     ViewData["Title"] = "Page Not Found";
     var missingPath = string.IsNullOrWhiteSpace(Model.OriginalPath)
@@ -21,7 +21,7 @@
                     That route drifted <span class="text-rose-600">out of orbit</span>
                 </h1>
                 <p class="max-w-2xl text-lg leading-relaxed text-slate-600">
-                    We couldn't find <span class="font-semibold text-slate-900">@missingPath</span>. The app is still healthy — this page is the conventional Runnable 404 view rendered through the framework pipeline.
+                    We couldn't find <span class="font-semibold text-slate-900">@missingPath</span>. The app is still healthy — this page is the conventional AppSurface 404 view rendered through the framework pipeline.
                 </p>
             </div>
 

@@ -1,0 +1,461 @@
+@using System.Text.Json
+@inject ForgeTrust.AppSurface.Docs.RazorDocsAssetPathResolver AssetPathResolver
+@inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
+@{
+    var stylesheetPath = AssetPathResolver.StylesheetPath;
+    var docsRoutes = DocsUrlBuilder.Routes;
+    var docsHomeUrl = Url.PathBaseAware(docsRoutes.Home);
+    var docsSearchUrl = Url.PathBaseAware(docsRoutes.Search);
+    var docsSearchIndexUrl = Url.PathBaseAware(docsRoutes.SearchIndex);
+    var docsSearchStylesheetUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("search.css"));
+    var docsMiniSearchUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("minisearch.min.js"));
+    var docsSearchClientUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("search-client.js"));
+    var docsClientConfigJson = JsonSerializer.Serialize(
+        new
+        {
+            docsRootPath = docsHomeUrl,
+            docsSearchUrl,
+            docsSearchIndexUrl
+        });
+    var isSearchPage = string.Equals(
+        ViewContext.RouteData.Values["action"]?.ToString(),
+        "Search",
+        StringComparison.OrdinalIgnoreCase);
+}
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-900 border-slate-800" style="scrollbar-gutter: stable;">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>@ViewData["Title"] - RazorDocs</title>
+    <link rel="stylesheet" href="@stylesheetPath" asp-append-version="true" />
+    <link rel="stylesheet" href="@docsSearchStylesheetUrl" />
+    @if (isSearchPage)
+    {
+        <link rel="preload" href="@docsSearchIndexUrl" as="fetch" crossorigin="use-credentials" />
+    }
+    <rw:scripts/>
+    @if (isSearchPage)
+    {
+        <script src="@docsMiniSearchUrl" defer data-rw-search-runtime="minisearch"></script>
+    }
+    <script>window.__razorDocsConfig = @Html.Raw(docsClientConfigJson);</script>
+    <script src="@docsSearchClientUrl" defer></script>
+</head>
+<body class="h-full flex flex-col text-slate-200 overflow-hidden">
+<a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-0 focus:left-0 focus:z-50 focus:p-4 focus:bg-slate-900 focus:text-white">Skip to content</a>
+<div class="flex h-full min-h-0 overflow-hidden">
+    <button id="docs-sidebar-overlay"
+            class="fixed inset-0 z-30 bg-slate-950/70 backdrop-blur-sm hidden md:hidden"
+            type="button"
+            tabindex="-1"
+            aria-label="Close navigation menu">
+    </button>
+
+    <!-- Sidebar -->
+    <aside id="docs-sidebar"
+           class="fixed inset-y-0 left-0 z-40 w-72 max-w-[90vw] flex-shrink-0 bg-slate-950 border-r border-slate-800 flex flex-col transform transition-transform duration-200 ease-out md:relative md:z-auto md:w-64 md:max-w-none md:translate-x-0"
+           tabindex="-1"
+           aria-hidden="false">
+        <div class="flex items-center justify-between p-4 border-b border-slate-800 md:hidden">
+            <a href="@docsHomeUrl" class="text-xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                RazorDocs
+            </a>
+            <button id="docs-sidebar-close"
+                    type="button"
+                    class="px-2 py-1 text-xs font-semibold tracking-wide uppercase text-slate-300 border border-slate-700 rounded-md hover:text-cyan-300 hover:border-cyan-500/50">
+                Close
+            </button>
+        </div>
+        <div class="hidden md:block p-6">
+            <a href="@docsHomeUrl" class="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                RazorDocs
+            </a>
+        </div>
+        <div id="docs-search-shell" class="mb-3 px-4 pb-2">
+            <label for="docs-search-input" class="sr-only">Search docs</label>
+            <input id="docs-search-input"
+                   type="search"
+                   placeholder="Search docs..."
+                   aria-label="Search documentation"
+                   aria-autocomplete="list"
+                   aria-controls="docs-search-results"
+                   role="combobox"
+                   autocomplete="off" />
+            <p id="docs-search-status" class="mt-1 text-xs text-slate-500" aria-live="polite"></p>
+            <ul id="docs-search-results" class="hidden" role="listbox" aria-label="Search results"></ul>
+            <a href="@docsSearchUrl"
+               class="mt-[0.7rem] inline-flex w-full items-center justify-between gap-3 rounded-[0.8rem] border border-cyan-400/30 bg-gradient-to-b from-cyan-950/60 to-cyan-950/20 px-3.5 py-2.5 text-[0.82rem] font-semibold text-cyan-100 no-underline transition-colors hover:border-cyan-400/55 hover:from-cyan-950/70 hover:to-cyan-950/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400">
+                <span>Open Search Workspace</span>
+                <span class="text-[0.7rem] uppercase tracking-[0.08em] text-cyan-300">Cmd/Ctrl+K</span>
+            </a>
+        </div>
+        <nav class="flex-grow overflow-y-auto px-4 pb-4 space-y-1 min-h-0" aria-label="Documentation navigation">
+            @await Component.InvokeAsync("Sidebar")
+        </nav>
+        <div class="p-4 border-t border-slate-800 text-xs text-slate-500 text-center">
+            Powered by RazorWire
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main id="main-content" role="main" class="h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-slate-900">
+        <header class="md:hidden sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 backdrop-blur px-4 py-3 flex items-center gap-3">
+            <button id="docs-sidebar-open"
+                    type="button"
+                    class="inline-flex items-center justify-center w-9 h-9 rounded-md border border-slate-700 text-slate-200 hover:text-cyan-300 hover:border-cyan-500/50"
+                    aria-label="Open navigation menu"
+                    aria-controls="docs-sidebar"
+                    aria-expanded="false">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M4 12h16M4 17h16" />
+                </svg>
+            </button>
+            <a href="@docsHomeUrl" class="text-lg font-semibold text-white">RazorDocs</a>
+            <a href="@docsSearchUrl" class="ml-auto inline-flex items-center gap-2 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-cyan-200 hover:border-cyan-400 hover:bg-cyan-500/15">
+                <span>Search</span>
+                <span aria-hidden="true">/</span>
+            </a>
+        </header>
+        <rw:island id="doc-content">
+            <div class="max-w-6xl mx-auto px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-12">
+                @RenderBody()
+            </div>
+        </rw:island>
+    </main>
+</div>
+
+@await RenderSectionAsync("Scripts", required: false)
+<script>
+    (() => {
+        const sidebar = document.getElementById("docs-sidebar");
+        const sidebarOverlay = document.getElementById("docs-sidebar-overlay");
+        const openSidebarButton = document.getElementById("docs-sidebar-open");
+        const closeSidebarButton = document.getElementById("docs-sidebar-close");
+        const mainContent = document.getElementById("main-content");
+        const mobileMedia = window.matchMedia ? window.matchMedia("(max-width: 767px)") : null;
+        let lastFocusedBeforeSidebarOpen = null;
+
+        function shouldAutoCloseSidebar() {
+            return mobileMedia ? mobileMedia.matches : window.innerWidth < 768;
+        }
+
+        function isSidebarOpen() {
+            return !!sidebar && !sidebar.classList.contains("-translate-x-full");
+        }
+
+        function getSidebarFocusableElements() {
+            if (!sidebar) {
+                return [];
+            }
+
+            const focusableSelector = [
+                "a[href]",
+                "button:not([disabled])",
+                "input:not([disabled])",
+                "select:not([disabled])",
+                "textarea:not([disabled])",
+                "[tabindex]:not([tabindex='-1'])"
+            ].join(",");
+
+            return Array.from(sidebar.querySelectorAll(focusableSelector))
+                .filter(element => {
+                    if (!(element instanceof HTMLElement)) {
+                        return false;
+                    }
+
+                    const styles = window.getComputedStyle(element);
+                    return styles.display !== "none" && styles.visibility !== "hidden";
+                });
+        }
+
+        function setMainInteractivityDisabled(disabled) {
+            if (!mainContent) {
+                return;
+            }
+
+            if (disabled) {
+                mainContent.setAttribute("aria-hidden", "true");
+                mainContent.setAttribute("inert", "");
+                return;
+            }
+
+            mainContent.removeAttribute("aria-hidden");
+            mainContent.removeAttribute("inert");
+        }
+
+        function setSidebarModalAttributes(isModalOpen) {
+            if (!sidebar) {
+                return;
+            }
+
+            if (isModalOpen) {
+                sidebar.setAttribute("role", "dialog");
+                sidebar.setAttribute("aria-modal", "true");
+                sidebar.setAttribute("aria-label", "Documentation navigation");
+                sidebar.setAttribute("aria-hidden", "false");
+                return;
+            }
+
+            sidebar.removeAttribute("role");
+            sidebar.removeAttribute("aria-modal");
+            sidebar.removeAttribute("aria-label");
+            sidebar.setAttribute("aria-hidden", shouldAutoCloseSidebar() ? "true" : "false");
+        }
+
+        function getMainScrollTopForTarget(target) {
+            if (!mainContent || !target) {
+                return 0;
+            }
+
+            const mainRect = mainContent.getBoundingClientRect();
+            const targetRect = target.getBoundingClientRect();
+            const desiredTop = mainContent.scrollTop + targetRect.top - mainRect.top - 64;
+            const maxScrollTop = Math.max(0, mainContent.scrollHeight - mainContent.clientHeight);
+            return Math.min(Math.max(0, desiredTop), maxScrollTop);
+        }
+
+        function scrollMainToTarget(target, behavior = "auto") {
+            if (!mainContent || !target) {
+                return;
+            }
+
+            mainContent.scrollTo({
+                top: getMainScrollTopForTarget(target),
+                behavior
+            });
+        }
+
+        function getCurrentHashTarget() {
+            if (!window.location.hash) {
+                return null;
+            }
+
+            let targetId;
+            try {
+                targetId = decodeURIComponent(window.location.hash.slice(1));
+            } catch {
+                return null;
+            }
+
+            return document.getElementById(targetId);
+        }
+
+        function restoreMainScrollPosition() {
+            const hashTarget = getCurrentHashTarget();
+            if (hashTarget) {
+                scrollMainToTarget(hashTarget);
+                return;
+            }
+
+            mainContent.scrollTo({
+                top: 0,
+                behavior: "auto"
+            });
+        }
+
+        function restoreMainScrollAfterFrameLoad(event) {
+            if (event.target?.id !== "doc-content" || !mainContent) {
+                return;
+            }
+
+            restoreMainScrollPosition();
+
+            if (typeof requestAnimationFrame === "function") {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(restoreMainScrollPosition);
+                });
+            }
+
+            for (const delay of [80, 240]) {
+                window.setTimeout(restoreMainScrollPosition, delay);
+            }
+        }
+
+        function closeSidebar({ restoreFocus = true } = {}) {
+            if (!sidebar || !sidebarOverlay) {
+                return;
+            }
+
+            sidebar.classList.add("-translate-x-full");
+            sidebarOverlay.classList.add("hidden");
+            if (openSidebarButton) {
+                openSidebarButton.setAttribute("aria-expanded", "false");
+            }
+
+            setMainInteractivityDisabled(false);
+            setSidebarModalAttributes(false);
+
+            if (restoreFocus && lastFocusedBeforeSidebarOpen instanceof HTMLElement) {
+                lastFocusedBeforeSidebarOpen.focus();
+            }
+
+            lastFocusedBeforeSidebarOpen = null;
+        }
+
+        function openSidebar() {
+            if (!sidebar || !sidebarOverlay) {
+                return;
+            }
+
+            if (shouldAutoCloseSidebar() && document.activeElement instanceof HTMLElement) {
+                lastFocusedBeforeSidebarOpen = document.activeElement;
+            }
+
+            sidebar.classList.remove("-translate-x-full");
+            sidebarOverlay.classList.remove("hidden");
+            if (openSidebarButton) {
+                openSidebarButton.setAttribute("aria-expanded", "true");
+            }
+
+            if (!shouldAutoCloseSidebar()) {
+                setMainInteractivityDisabled(false);
+                setSidebarModalAttributes(false);
+                return;
+            }
+
+            setMainInteractivityDisabled(true);
+            setSidebarModalAttributes(true);
+
+            const focusableElements = getSidebarFocusableElements();
+            const firstFocusable = focusableElements[0] ?? sidebar;
+            if (firstFocusable instanceof HTMLElement) {
+                firstFocusable.focus();
+            }
+        }
+
+        function syncSidebarForViewport() {
+            if (!sidebar || !sidebarOverlay) {
+                return;
+            }
+
+            if (shouldAutoCloseSidebar()) {
+                closeSidebar({ restoreFocus: false });
+                return;
+            }
+
+            sidebar.classList.remove("-translate-x-full");
+            sidebarOverlay.classList.add("hidden");
+            if (openSidebarButton) {
+                openSidebarButton.setAttribute("aria-expanded", "false");
+            }
+            setMainInteractivityDisabled(false);
+            setSidebarModalAttributes(false);
+        }
+
+        openSidebarButton?.addEventListener("click", openSidebar);
+        closeSidebarButton?.addEventListener("click", () => closeSidebar());
+        sidebarOverlay?.addEventListener("click", () => closeSidebar());
+
+        document.addEventListener("keydown", event => {
+            if (event.key === "Escape" && isSidebarOpen() && shouldAutoCloseSidebar()) {
+                closeSidebar();
+                return;
+            }
+
+            if (event.key !== "Tab" || !isSidebarOpen() || !shouldAutoCloseSidebar() || !sidebar) {
+                return;
+            }
+
+            const focusableElements = getSidebarFocusableElements();
+            if (focusableElements.length === 0) {
+                event.preventDefault();
+                sidebar.focus();
+                return;
+            }
+
+            const firstFocusable = focusableElements[0];
+            const lastFocusable = focusableElements[focusableElements.length - 1];
+
+            if (event.shiftKey && document.activeElement === firstFocusable) {
+                event.preventDefault();
+                lastFocusable.focus();
+                return;
+            }
+
+            if (!event.shiftKey && document.activeElement === lastFocusable) {
+                event.preventDefault();
+                firstFocusable.focus();
+            }
+        });
+
+        if (sidebar) {
+            sidebar.classList.add("transition-none");
+        }
+        syncSidebarForViewport();
+        if (sidebar) {
+            const restoreSidebarTransitions = () => {
+                sidebar.classList.remove("transition-none");
+            };
+
+            if (typeof requestAnimationFrame === "function") {
+                requestAnimationFrame(restoreSidebarTransitions);
+            } else {
+                setTimeout(restoreSidebarTransitions, 0);
+            }
+        }
+
+        mobileMedia?.addEventListener("change", () => {
+            syncSidebarForViewport();
+        });
+
+        document.addEventListener("turbo:frame-load", restoreMainScrollAfterFrameLoad);
+
+        document.addEventListener("click", event => {
+            if (event.defaultPrevented) {
+                return;
+            }
+
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return;
+            }
+
+            const clickTarget = event.target;
+            if (!(clickTarget instanceof Element)) {
+                return;
+            }
+
+            const sidebarNavLink = clickTarget.closest("#docs-sidebar a");
+            if (sidebarNavLink && shouldAutoCloseSidebar()) {
+                closeSidebar();
+            }
+
+            const anchorLink = clickTarget.closest("a[data-doc-anchor-link='true'], a[data-doc-outline-link='true']");
+            if (!anchorLink) {
+                return;
+            }
+
+            if (anchorLink.target && anchorLink.target !== "_self") {
+                return;
+            }
+
+            const targetUrl = new URL(anchorLink.href, window.location.origin);
+            if (targetUrl.pathname !== window.location.pathname
+                || targetUrl.search !== window.location.search
+                || !targetUrl.hash) {
+                return;
+            }
+
+            let targetId;
+            try {
+                targetId = decodeURIComponent(targetUrl.hash.slice(1));
+            } catch {
+                return;
+            }
+
+            const target = document.getElementById(targetId);
+            if (!target) {
+                return;
+            }
+
+            event.preventDefault();
+            history.replaceState(null, "", targetUrl.hash);
+            const prefersReducedMotion = window.matchMedia
+                && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            const scrollBehavior = prefersReducedMotion ? "auto" : "smooth";
+            scrollMainToTarget(target, scrollBehavior);
+        });
+    })();
+</script>
+</body>
+</html>

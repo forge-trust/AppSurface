@@ -1,0 +1,8 @@
+# Temporary stale-brand exceptions for the AppSurface/RazorWire rebrand.
+#
+# Format:
+# path|term|yyyy-mm-dd|reason
+#
+# Keep this file checked in even when it has no entries. Package gate uses its
+# presence to prove that any future stale-name exception is explicit, dated, and
+# reviewed.

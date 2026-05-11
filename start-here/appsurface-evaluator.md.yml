@@ -1,0 +1,22 @@
+title: Start Here for AppSurface Evaluators
+summary: Follow the shortest path for deciding whether AppSurface fits an ASP.NET Core app or a team-wide startup standard.
+page_type: guide
+nav_group: Start Here
+sequence_key: appsurface-evaluator
+section_landing: true
+order: 10
+aliases:
+  - AppSurface evaluator
+  - team standard
+  - startup standardization
+  - plain ASP.NET Core
+keywords:
+  - Program.cs
+  - modules
+  - startup
+  - team lead
+  - architect
+related_pages:
+  - start-here/should-i-use-appsurface.md
+  - start-here/first-success-path.md
+  - packages/README.md

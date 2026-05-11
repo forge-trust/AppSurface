@@ -15,46 +15,46 @@
           "Microsoft.CodeAnalysis.Analyzers": "3.11.0"
         }
       },
-      "forgetrust.runnable.core": {
+      "forgetrust.appsurface.core": {
         "type": "Project"
       },
-      "forgetrust.runnable.web": {
+      "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.Runnable.Core": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Core": "[1.0.0, )"
         }
       },
-      "forgetrust.runnable.web.razorwire": {
+      "forgetrust.razorwire": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.Runnable.Web": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web": "[1.0.0, )",
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
         }
       },
-      "forgetrust.runnable.web.tailwind": {
+      "forgetrust.appsurface.web.tailwind": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.Runnable.Core": "[1.0.0, )",
-          "ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-arm64": "[1.0.0, )",
-          "ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-x64": "[1.0.0, )",
-          "ForgeTrust.Runnable.Web.Tailwind.Runtime.osx-arm64": "[1.0.0, )",
-          "ForgeTrust.Runnable.Web.Tailwind.Runtime.osx-x64": "[1.0.0, )",
-          "ForgeTrust.Runnable.Web.Tailwind.Runtime.win-x64": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Core": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64": "[1.0.0, )"
         }
       },
-      "forgetrust.runnable.web.tailwind.runtime.linux-arm64": {
+      "forgetrust.appsurface.web.tailwind.runtime.linux-arm64": {
         "type": "Project"
       },
-      "forgetrust.runnable.web.tailwind.runtime.linux-x64": {
+      "forgetrust.appsurface.web.tailwind.runtime.linux-x64": {
         "type": "Project"
       },
-      "forgetrust.runnable.web.tailwind.runtime.osx-arm64": {
+      "forgetrust.appsurface.web.tailwind.runtime.osx-arm64": {
         "type": "Project"
       },
-      "forgetrust.runnable.web.tailwind.runtime.osx-x64": {
+      "forgetrust.appsurface.web.tailwind.runtime.osx-x64": {
         "type": "Project"
       },
-      "forgetrust.runnable.web.tailwind.runtime.win-x64": {
+      "forgetrust.appsurface.web.tailwind.runtime.win-x64": {
         "type": "Project"
       },
       "Microsoft.AspNetCore.Mvc.Razor.Extensions": {

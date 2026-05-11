@@ -2,9 +2,9 @@
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOLUTION_PATH="${1:-$ROOT_DIR/ForgeTrust.Runnable.slnx}"
+SOLUTION_PATH="${1:-$ROOT_DIR/ForgeTrust.AppSurface.slnx}"
 OUTPUT_DIR="${2:-$ROOT_DIR/TestResults/coverage-merged}"
-INCLUDE_FILTER="${INCLUDE_FILTER:-[ForgeTrust.Runnable.*]*}"
+INCLUDE_FILTER="${INCLUDE_FILTER:-[ForgeTrust.AppSurface.*]*}"
 EXCLUDE_FILTER="${EXCLUDE_FILTER:-[*.Tests]*,[*.IntegrationTests]*}"
 EXCLUDE_FILTER="${EXCLUDE_FILTER//,/%2c}"
 

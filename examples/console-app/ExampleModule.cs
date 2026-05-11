@@ -1,11 +1,11 @@
-using ForgeTrust.Runnable.Config;
-using ForgeTrust.Runnable.Core;
+using ForgeTrust.AppSurface.Config;
+using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace ConsoleAppExample;
 
-public class ExampleModule : IRunnableHostModule
+public class ExampleModule : IAppSurfaceHostModule
 {
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
@@ -15,7 +15,7 @@ public class ExampleModule : IRunnableHostModule
     public void RegisterDependentModules(ModuleDependencyBuilder builder)
     {
         // Add module dependencies here if needed
-        builder.AddModule<RunnableConfigModule>();
+        builder.AddModule<AppSurfaceConfigModule>();
     }
 
     public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)

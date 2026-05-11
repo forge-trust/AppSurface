@@ -89,7 +89,7 @@ public IActionResult IncrementCounter([FromForm] int clientCount)
 ## If Your Result Differs
 
 - If the page loads on a different port, use the URL printed by `dotnet run`.
-- If clicking `+` gives you a bare `400 Bad Request`, check the package docs for [Security & Anti-Forgery](../../Web/ForgeTrust.Runnable.Web.RazorWire/Docs/antiforgery.md). That is the first thing to verify when you copy this pattern into another page or app.
+- If clicking `+` gives you a bare `400 Bad Request`, check the package docs for [Security & Anti-Forgery](../../Web/ForgeTrust.RazorWire/Docs/antiforgery.md). That is the first thing to verify when you copy this pattern into another page or app.
 - If the form does not update in place, check the same anti-forgery guidance first, then confirm you are still posting with `rw-active="true"` and returning a RazorWire stream from `IncrementCounter`.
 - If you want the broader sample context instead of the focused proof, continue below.
 
@@ -129,7 +129,7 @@ The sample includes a dedicated `/Reactivity/FormFailures` page that demonstrate
 - Default runtime fallbacks for unhandled `400`, `403`, and `500` responses.
 - Consumer customization with CSS variables and `razorwire:form:failure` in manual mode.
 
-See the package guide for the API contract and troubleshooting notes: [Failed Form UX](../../Web/ForgeTrust.Runnable.Web.RazorWire/Docs/form-failures.md).
+See the package guide for the API contract and troubleshooting notes: [Failed Form UX](../../Web/ForgeTrust.RazorWire/Docs/form-failures.md).
 
 ## Project Structure
 

@@ -1,7 +1,7 @@
-using ForgeTrust.Runnable.Core;
-using ForgeTrust.Runnable.Web;
-using ForgeTrust.Runnable.Web.RazorWire;
-using ForgeTrust.Runnable.Web.Tailwind;
+using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Web;
+using ForgeTrust.AppSurface.Web.Tailwind;
+using ForgeTrust.RazorWire;
 using RazorWireWebExample.Services;
 
 namespace RazorWireWebExample;
@@ -9,7 +9,7 @@ namespace RazorWireWebExample;
 /// <summary>
 /// A module that demonstrates the usage of RazorWire in an ASP.NET Core MVC application.
 /// </summary>
-public class RazorWireExampleModule : IRunnableWebModule
+public class RazorWireExampleModule : IAppSurfaceWebModule
 {
     /// <summary>
     /// Registers services required by the Razor Wire example module.

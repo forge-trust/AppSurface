@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <StaticWebAssetBasePath>_content/$(AssemblyName)</StaticWebAssetBasePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\ForgeTrust.RazorWire\ForgeTrust.RazorWire.csproj" />
+    <ProjectReference Include="..\ForgeTrust.AppSurface.Web.Tailwind\ForgeTrust.AppSurface.Web.Tailwind.csproj" />
+    <ProjectReference Include="..\..\Caching\ForgeTrust.AppSurface.Caching\ForgeTrust.AppSurface.Caching.csproj" />
+  </ItemGroup>
+
+  <Import Project="..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets" Condition="Exists('..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets')" />
+
+  <ItemGroup>
+    <PackageReference Include="HtmlSanitizer" />
+    <PackageReference Include="Markdig" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="TextMateSharp" />
+    <PackageReference Include="TextMateSharp.Grammars" />
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>ForgeTrust.AppSurface.Docs.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

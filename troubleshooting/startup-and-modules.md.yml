@@ -10,10 +10,10 @@ aliases:
   - wrong package
 keywords:
   - StartupContext
-  - IRunnableModule
+  - IAppSurfaceModule
   - dependency
   - configuration
 related_pages:
   - examples/config-validation/README.md
-  - ForgeTrust.Runnable.Core/README.md
+  - ForgeTrust.AppSurface.Core/README.md
   - packages/README.md

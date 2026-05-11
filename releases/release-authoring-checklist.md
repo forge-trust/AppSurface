@@ -1,6 +1,6 @@
 # Release authoring checklist
 
-Use this checklist when turning the living unreleased story into a tagged Runnable release.
+Use this checklist when turning the living unreleased story into a tagged AppSurface release.
 
 ## Before the release branch or tag
 
