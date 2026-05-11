@@ -52,6 +52,9 @@ public static class AppSurfaceAutofacExtensions
     /// <param name="builder">The container builder.</param>
     /// <param name="getTypes">Type loader for the assembly that declares <typeparamref name="TInterface"/>.</param>
     /// <returns>A registration builder for the scanned types.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <paramref name="getTypes"/> completes successfully but returns <see langword="null"/>.
+    /// </exception>
     internal static IRegistrationBuilder<object, ScanningActivatorData, DynamicRegistrationStyle>
         RegisterImplementations<TInterface>(this ContainerBuilder builder, Func<Assembly, Type[]> getTypes)
         where TInterface : notnull
@@ -80,11 +83,16 @@ public static class AppSurfaceAutofacExtensions
     /// <param name="assembly">The assembly being scanned.</param>
     /// <param name="getTypes">The delegate used to load the assembly's type array.</param>
     /// <returns>All loaded types, or the non-null subset from <see cref="ReflectionTypeLoadException.Types"/>.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <paramref name="getTypes"/> completes successfully but returns <see langword="null"/>.
+    /// </exception>
     private static IEnumerable<Type> GetLoadableTypes(Assembly assembly, Func<Assembly, Type[]> getTypes)
     {
         try
         {
-            return getTypes(assembly);
+            return getTypes(assembly)
+                ?? throw new InvalidOperationException(
+                    $"The type loader returned null for assembly '{assembly.FullName}'.");
         }
         catch (ReflectionTypeLoadException ex)
         {

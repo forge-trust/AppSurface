@@ -115,6 +115,17 @@ public class AppSurfaceAutofacExtensionsTests
     }
 
     [Fact]
+    public void RegisterImplementations_ThrowsInvalidOperationException_WhenGetTypesReturnsNull()
+    {
+        var builder = new ContainerBuilder();
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => builder.RegisterImplementations<IScannedAutofacService>(_ => null!));
+
+        Assert.Contains("type loader returned null", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RegisterImplementations_RegistersLoadableTypes_WhenAssemblyPartiallyFailsToLoad()
     {
         var builder = new ContainerBuilder();
