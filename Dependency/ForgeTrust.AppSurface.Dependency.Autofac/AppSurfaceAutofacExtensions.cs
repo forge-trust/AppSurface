@@ -19,8 +19,8 @@ public static class AppSurfaceAutofacExtensions
     /// Registers all non-abstract class implementations of the specified interface type found in the interface's assembly.
     /// </summary>
     /// <remarks>
-    /// <see cref="RegisterImplementations{TInterface}"/> scans only the assembly that declares
-    /// <typeparamref name="TInterface"/> and registers concrete, non-abstract assignable classes as
+    /// This method scans only the assembly that declares <typeparamref name="TInterface"/> and registers
+    /// concrete, non-abstract assignable classes as
     /// <typeparamref name="TInterface"/> services. It returns Autofac's
     /// <see cref="IRegistrationBuilder{TLimit,TActivatorData,TRegistrationStyle}"/> so callers can add lifetime,
     /// ownership, and metadata configuration. Use this helper when one interface owns a small assembly-local plugin
@@ -34,8 +34,17 @@ public static class AppSurfaceAutofacExtensions
     /// <returns>A registration builder for the scanned types.</returns>
     public static IRegistrationBuilder<object, ScanningActivatorData, DynamicRegistrationStyle>
         RegisterImplementations<TInterface>(this ContainerBuilder builder)
+        where TInterface : notnull
+    {
+        return builder.RegisterImplementations<TInterface>(static assembly => assembly.GetTypes());
+    }
+
+    internal static IRegistrationBuilder<object, ScanningActivatorData, DynamicRegistrationStyle>
+        RegisterImplementations<TInterface>(this ContainerBuilder builder, Func<Assembly, Type[]> getTypes)
+        where TInterface : notnull
     {
         ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(getTypes);
         if (!typeof(TInterface).IsInterface)
         {
             throw new ArgumentException(
@@ -44,19 +53,19 @@ public static class AppSurfaceAutofacExtensions
         }
 
         var assembly = typeof(TInterface).Assembly;
-        var loadedTypes = GetLoadableTypes(assembly);
+        var loadedTypes = GetLoadableTypes(assembly, getTypes);
         var types = loadedTypes
             .Where(t => t.IsClass && !t.IsAbstract && typeof(TInterface).IsAssignableFrom(t));
 
         return builder.RegisterTypes(types.ToArray())
-            .As(typeof(TInterface));
+            .As<TInterface>();
     }
 
-    private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    private static IEnumerable<Type> GetLoadableTypes(Assembly assembly, Func<Assembly, Type[]> getTypes)
     {
         try
         {
-            return assembly.GetTypes();
+            return getTypes(assembly);
         }
         catch (ReflectionTypeLoadException ex)
         {

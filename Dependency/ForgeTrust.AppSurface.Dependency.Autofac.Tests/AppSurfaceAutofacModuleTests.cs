@@ -1,3 +1,4 @@
+using System.Reflection;
 using Autofac;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -89,6 +90,35 @@ public class AppSurfaceAutofacExtensionsTests
             () => builder.RegisterImplementations<UnrelatedAutofacService>());
 
         Assert.Equal("TInterface", exception.ParamName);
+    }
+
+    [Fact]
+    public void RegisterImplementations_ThrowsArgumentNullException_WhenBuilderIsNull()
+    {
+        ContainerBuilder? builder = null;
+
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => builder!.RegisterImplementations<IScannedAutofacService>());
+
+        Assert.Equal("builder", exception.ParamName);
+    }
+
+    [Fact]
+    public void RegisterImplementations_RegistersLoadableTypes_WhenAssemblyPartiallyFailsToLoad()
+    {
+        var builder = new ContainerBuilder();
+
+        builder.RegisterImplementations<IScannedAutofacService>(
+            _ => throw new ReflectionTypeLoadException(
+                [typeof(FirstScannedAutofacService), null],
+                [new FileNotFoundException("missing optional dependency")]));
+
+        using var container = builder.Build();
+
+        var services = container.Resolve<IEnumerable<IScannedAutofacService>>().ToArray();
+
+        Assert.Single(services);
+        Assert.IsType<FirstScannedAutofacService>(services[0]);
     }
 }
 

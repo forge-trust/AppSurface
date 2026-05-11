@@ -93,6 +93,19 @@ public class DefaultEnvironmentProviderTests
         }
     }
 
+    [Fact]
+    public void GetEnvironmentVariable_ReturnsDefault_WhenVariableIsUnset()
+    {
+        var variableName = $"APPSURFACE_TEST_{Guid.NewGuid():N}";
+        Environment.SetEnvironmentVariable(variableName, null);
+
+        var provider = new DefaultEnvironmentProvider();
+
+        var value = provider.GetEnvironmentVariable(variableName, "fallback");
+
+        Assert.Equal("fallback", value);
+    }
+
     private class CaptureIsDevStartup : AppSurfaceStartup<NoHostModule>
     {
         public bool CapturedIsDevelopment { get; private set; }

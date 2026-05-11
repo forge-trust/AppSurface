@@ -243,6 +243,14 @@ public sealed class DocMetadataFactoryTests
     [Fact]
     public void DeriveComponentFromNamespace_ShouldReturnAppSurfaceForBareAppSurfaceNamespace()
     {
+        var component = DocMetadataFactory.DeriveComponentFromNamespace("ForgeTrust.AppSurface");
+
+        Assert.Equal("AppSurface", component);
+    }
+
+    [Fact]
+    public void DeriveComponentFromNamespace_ShouldReturnAppSurfaceForPrefixedAppSurfaceNamespace()
+    {
         var component = DocMetadataFactory.DeriveComponentFromNamespace("ForgeTrust.AppSurface.");
 
         Assert.Equal("AppSurface", component);
