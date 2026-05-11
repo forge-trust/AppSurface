@@ -1147,6 +1147,33 @@ public sealed record DocSidebarViewModel
     /// Gets the sections shown in the sidebar.
     /// </summary>
     public IReadOnlyList<DocSidebarSectionViewModel> Sections { get; init; } = [];
+
+    /// <summary>
+    /// Gets the harvest health sidebar entry when the current host should show health chrome.
+    /// </summary>
+    public DocSidebarHarvestHealthViewModel? HarvestHealth { get; init; }
+}
+
+/// <summary>
+/// View model for the RazorDocs harvest health sidebar entry.
+/// </summary>
+public sealed record DocSidebarHarvestHealthViewModel
+{
+    /// <summary>
+    /// Gets the aggregate harvest status label.
+    /// </summary>
+    public string Status { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets a value indicating whether the status should pass local or CI verification.
+    /// </summary>
+    public bool Ok { get; init; }
+
+    /// <summary>
+    /// Gets the app-relative health page route when health routes are exposed; otherwise <see langword="null" /> for
+    /// status-only chrome.
+    /// </summary>
+    public string? Href { get; init; }
 }
 
 /// <summary>

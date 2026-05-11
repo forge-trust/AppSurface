@@ -3,9 +3,11 @@ using ForgeTrust.Runnable.Caching;
 using ForgeTrust.Runnable.Core;
 using ForgeTrust.Runnable.Web.RazorDocs.Services;
 using ForgeTrust.Runnable.Web.RazorWire;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.Runnable.Web.RazorDocs;
@@ -228,13 +230,14 @@ public class RazorDocsWebModule : IRunnableWebModule
     /// Adds the module's default controller routes and supporting asset routes for documentation endpoints.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// When RazorDocs is the root module assembly, standalone and static-export hosts preserve the historical
     /// <c>/css/site.gen.css</c> URL by redirecting it to the packaged Razor Class Library stylesheet at
     /// <c>/_content/ForgeTrust.Runnable.Web.RazorDocs/css/site.gen.css</c>. Embedded hosts do not register that
     /// redirect because they already link to the packaged asset directly. Redirects preserve the request
     /// <see cref="HttpRequest.PathBase"/> and query string so legacy links continue to work behind a virtual path.
-    /// </remarks>
-    /// <remarks>
+    /// </para>
+    /// <para>
     /// When versioning is enabled, this hook also reserves the stable version entry route at the configured route-family
     /// root, adds the archive surface below that route root, and serves preview-surface assets from either the live web
     /// root or the packaged Razor Class Library depending on whether published-tree mounts can shadow the stable docs root.
@@ -245,6 +248,19 @@ public class RazorDocsWebModule : IRunnableWebModule
     /// Route ordering matters: index, search, search-index, section, and catch-all routes are registered from most to
     /// least specific so the live preview root continues to behave correctly even when the current docs root is
     /// root-mounted or overlaps published exact-version aliases.
+    /// </para>
+    /// <para>
+    /// The operator-facing harvest health route patterns are always registered before the catch-all docs route so
+    /// <c>{DocsRootPath}/_health</c> and <c>{DocsRootPath}/_health.json</c> remain reserved operator paths rather than
+    /// falling through to document lookup. The route named <c>razordocs_harvest_health</c> maps the current docs root
+    /// health pattern from <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
+    /// <c>razordocs_harvest_health_json</c> maps <see cref="DocsUrlBuilder.BuildHealthJsonUrl"/> to
+    /// <c>DocsController.HarvestHealthJson</c>. The controller actions still gate responses with
+    /// <see cref="RazorDocsHarvestHealthVisibility.AreRoutesExposed(RazorDocsOptions, IHostEnvironment)"/>: by default
+    /// they return health only in Development, while production hosts must opt in with
+    /// <see cref="RazorDocsHarvestHealthOptions.ExposeRoutes"/>. These routes are intended for local and operator
+    /// verification, not as unauthenticated public reader navigation.
+    /// </para>
     /// </remarks>
     /// <param name="context">Startup context for the application and environment.</param>
     /// <param name="endpoints">Endpoint route builder used to map the module's routes.</param>
@@ -253,7 +269,6 @@ public class RazorDocsWebModule : IRunnableWebModule
         var docsOptions = ResolveOptions(endpoints.ServiceProvider);
         var docsUrlBuilder = endpoints.ServiceProvider.GetService(typeof(DocsUrlBuilder)) as DocsUrlBuilder
                              ?? new DocsUrlBuilder(docsOptions);
-
         if (ShouldPreserveRootStylesheetPath(context))
         {
             // Published/exported standalone hosts can resolve the packaged stylesheet only under /_content.
@@ -305,6 +320,8 @@ public class RazorDocsWebModule : IRunnableWebModule
         var currentRootPattern = docsUrlBuilder.CurrentDocsRootPath.TrimStart('/');
         var currentSearchPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchUrl());
         var currentSearchIndexPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexUrl());
+        var currentHealthPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthUrl());
+        var currentHealthJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthJsonUrl());
         var currentSectionPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "sections/{sectionSlug}"));
         var currentDetailsPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "{*path}"));
 
@@ -334,6 +351,24 @@ public class RazorDocsWebModule : IRunnableWebModule
             {
                 controller = "Docs",
                 action = "SearchIndex"
+            });
+
+        endpoints.MapControllerRoute(
+            name: "razordocs_harvest_health",
+            pattern: currentHealthPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "HarvestHealth"
+            });
+
+        endpoints.MapControllerRoute(
+            name: "razordocs_harvest_health_json",
+            pattern: currentHealthJsonPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "HarvestHealthJson"
             });
 
         endpoints.MapControllerRoute(
@@ -452,4 +487,5 @@ public class RazorDocsWebModule : IRunnableWebModule
     {
         return route.TrimStart('/');
     }
+
 }

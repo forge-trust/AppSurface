@@ -937,6 +937,155 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task SidebarView_ShouldRenderHarvestHealthLink_WhenModelProvidesHealth()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new DocSidebarViewModel
+        {
+            HarvestHealth = new DocSidebarHarvestHealthViewModel
+            {
+                Status = "Degraded",
+                Ok = false,
+                Href = "/docs/_health"
+            }
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Shared/Components/Sidebar/Default.cshtml",
+            model,
+            pathBase: "/some-base");
+
+        Assert.Contains("href=\"/some-base/docs/_health\"", html);
+        Assert.Contains("Harvest Degraded", html);
+        Assert.Contains("Health", html);
+        Assert.Contains("text-rose-200", html);
+    }
+
+    [Fact]
+    public async Task SidebarView_ShouldRenderHarvestHealthStatusWithoutLink_WhenHealthHrefIsHidden()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new DocSidebarViewModel
+        {
+            HarvestHealth = new DocSidebarHarvestHealthViewModel
+            {
+                Status = "StatusOnly",
+                Ok = true,
+                Href = null
+            }
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Shared/Components/Sidebar/Default.cshtml",
+            model);
+
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var statusElement = document.QuerySelectorAll("span")
+            .FirstOrDefault(element => element.TextContent.Contains("Harvest StatusOnly", StringComparison.Ordinal));
+        Assert.NotNull(statusElement);
+        Assert.NotNull(FindAncestor(statusElement, "div"));
+        Assert.Null(FindAncestor(statusElement, "a"));
+        Assert.Contains("Harvest StatusOnly", html);
+        Assert.Contains("Health", html);
+        Assert.Contains("text-emerald-200", html);
+    }
+
+    [Fact]
+    public async Task HarvestHealthView_ShouldRenderRedactedSummaryAndDiagnostics()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new RazorDocsHarvestHealthResponse
+        {
+            Status = "Failed",
+            GeneratedUtc = new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero),
+            Verification = new RazorDocsHarvestHealthVerification
+            {
+                Ok = false,
+                HttpStatusCode = StatusCodes.Status503ServiceUnavailable
+            },
+            TotalHarvesters = 1,
+            FailedHarvesters = 1,
+            Harvesters =
+            [
+                new RazorDocsHarvesterHealthResponse
+                {
+                    HarvesterType = "MarkdownHarvester",
+                    Status = "Failed",
+                    DocCount = 0
+                }
+            ],
+            Diagnostics =
+            [
+                new RazorDocsHarvestDiagnosticResponse
+                {
+                    Code = DocHarvestDiagnosticCodes.HarvesterFailed,
+                    Severity = "Error",
+                    HarvesterType = "MarkdownHarvester",
+                    Problem = "A RazorDocs harvester failed.",
+                    Fix = "Check the docs source."
+                }
+            ]
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/HarvestHealth.cshtml",
+            model);
+
+        Assert.Contains("Harvest Health", html);
+        Assert.Contains("Failed", html);
+        Assert.Contains("failing", html);
+        Assert.Contains("MarkdownHarvester", html);
+        Assert.Contains(DocHarvestDiagnosticCodes.HarvesterFailed, html);
+        Assert.DoesNotContain("RepositoryRoot", html);
+        Assert.DoesNotContain("Cause", html);
+    }
+
+    [Fact]
+    public async Task HarvestHealthView_ShouldHideDiagnosticsSection_WhenDiagnosticsAreEmpty()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new RazorDocsHarvestHealthResponse
+        {
+            Status = "Healthy",
+            GeneratedUtc = new DateTimeOffset(2026, 5, 9, 12, 0, 0, TimeSpan.Zero),
+            Verification = new RazorDocsHarvestHealthVerification
+            {
+                Ok = true,
+                HttpStatusCode = StatusCodes.Status200OK
+            },
+            TotalHarvesters = 1,
+            SuccessfulHarvesters = 1,
+            TotalDocs = 3,
+            Harvesters =
+            [
+                new RazorDocsHarvesterHealthResponse
+                {
+                    HarvesterType = "MarkdownHarvester",
+                    Status = "Healthy",
+                    DocCount = 3
+                }
+            ],
+            Diagnostics = []
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/HarvestHealth.cshtml",
+            model);
+
+        Assert.Contains("Harvest Health", html);
+        Assert.Contains("Healthy", html);
+        Assert.Contains("passing", html);
+        Assert.Contains("MarkdownHarvester", html);
+        Assert.DoesNotContain("diagnostics-heading", html);
+        Assert.DoesNotContain("<h2 id=\"diagnostics-heading\"", html);
+        Assert.DoesNotContain(DocHarvestDiagnosticCodes.HarvesterFailed, html);
+    }
+
+    [Fact]
     public async Task SidebarView_ShouldRenderBlankAndRelativeLinks_WithoutPathBaseRewriting()
     {
         using var services = CreateServiceProvider(CreateDocs());
@@ -3792,6 +3941,22 @@ public class RazorDocsViewsTests
             Label = label,
             Pages = pages
         };
+    }
+
+    private static IElement? FindAncestor(IElement element, string tagName)
+    {
+        var current = element.ParentElement;
+        while (current is not null)
+        {
+            if (string.Equals(current.LocalName, tagName, StringComparison.OrdinalIgnoreCase))
+            {
+                return current;
+            }
+
+            current = current.ParentElement;
+        }
+
+        return null;
     }
 
     private sealed class StaticDocHarvester : IDocHarvester
