@@ -8,10 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../Web/ForgeTrust.Runnable.Web.RazorWire/ForgeTrust.Runnable.Web.RazorWire.csproj" />
-    <ProjectReference Include="../../Web/ForgeTrust.Runnable.Web.Tailwind/ForgeTrust.Runnable.Web.Tailwind.csproj" />
+    <ProjectReference Include="../../Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj" />
+    <ProjectReference Include="../../Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj" />
   </ItemGroup>
 
-  <Import Project="..\..\Web\ForgeTrust.Runnable.Web.Tailwind\build\ForgeTrust.Runnable.Web.Tailwind.targets" Condition="Exists('..\..\Web\ForgeTrust.Runnable.Web.Tailwind\build\ForgeTrust.Runnable.Web.Tailwind.targets')" />
+  <Import Project="..\..\Web\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets" Condition="Exists('..\..\Web\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets')" />
 
 </Project>

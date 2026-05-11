@@ -1,184 +1,238 @@
 packages:
-  - project: ForgeTrust.Runnable.Core/ForgeTrust.Runnable.Core.csproj
+  - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 10
-    use_when: Install this directly only when you are authoring reusable Runnable modules or host integrations instead of starting from a web, console, or Aspire package.
-    includes: Core module abstractions, dependency graph orchestration, RunnableStartup, and StartupContext.
+    use_when: Install this directly only when you are authoring reusable AppSurface modules or host integrations instead of starting from a web, console, or Aspire package.
+    includes: Core module abstractions, dependency graph orchestration, AppSurfaceStartup, and StartupContext.
     does_not_include: ASP.NET Core hosting, CliFx command hosting, Aspire app-model helpers, or optional integrations.
-    start_here_path: ForgeTrust.Runnable.Core/README.md
-  - project: Config/ForgeTrust.Runnable.Config/ForgeTrust.Runnable.Config.csproj
+    start_here_path: ForgeTrust.AppSurface.Core/README.md
+  - project: Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 20
-    use_when: Add this when your Runnable modules need strongly typed configuration primitives instead of ad hoc configuration lookups.
-    includes: RunnableConfigModule, typed config objects, configuration providers, source-aware audit reports, and explicit configuration access patterns.
+    use_when: Add this when your AppSurface modules need strongly typed configuration primitives instead of ad hoc configuration lookups.
+    includes: AppSurfaceConfigModule, typed config objects, configuration providers, source-aware audit reports, and explicit configuration access patterns.
     does_not_include: Web hosting, UI docs, caching, or a separate secret-management system.
-    start_here_path: Config/ForgeTrust.Runnable.Config/README.md
+    start_here_path: Config/ForgeTrust.AppSurface.Config/README.md
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Core
-  - project: Caching/ForgeTrust.Runnable.Caching/ForgeTrust.Runnable.Caching.csproj
+      - ForgeTrust.AppSurface.Core
+  - project: Caching/ForgeTrust.AppSurface.Caching/ForgeTrust.AppSurface.Caching.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 30
     use_when: Add this when your modules need lightweight in-process memoization and cache policy primitives.
-    includes: RunnableCachingModule, IMemo or Memo helpers, and cache policy primitives on top of Microsoft.Extensions.Caching.Memory.
+    includes: AppSurfaceCachingModule, IMemo or Memo helpers, and cache policy primitives on top of Microsoft.Extensions.Caching.Memory.
     does_not_include: Distributed caching infrastructure, web hosting, or configuration binding.
-    start_here_path: Caching/ForgeTrust.Runnable.Caching/README.md
+    start_here_path: Caching/ForgeTrust.AppSurface.Caching/README.md
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Core
-  - project: Console/ForgeTrust.Runnable.Console/ForgeTrust.Runnable.Console.csproj
+      - ForgeTrust.AppSurface.Core
+  - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 40
-    use_when: Start here for CLI apps and worker-style entry points that should run through the Runnable startup pipeline with CliFx.
-    includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx command discovery through Runnable modules.
+    use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
+    includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx command discovery through AppSurface modules.
     does_not_include: ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition.
-    start_here_path: Console/ForgeTrust.Runnable.Console/README.md
-    recipe_summary: Start with `ForgeTrust.Runnable.Console` for CLI commands or worker-style processes that should share Runnable module composition.
+    start_here_path: Console/ForgeTrust.AppSurface.Console/README.md
+    recipe_summary: Start with `ForgeTrust.AppSurface.Console` for CLI commands or worker-style processes that should share AppSurface module composition.
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Core
-  - project: Dependency/ForgeTrust.Runnable.Dependency.Autofac/ForgeTrust.Runnable.Dependency.Autofac.csproj
+      - ForgeTrust.AppSurface.Core
+  - project: Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 50
     use_when: Add this when you need Autofac-specific registrations or container features instead of the default .NET service collection.
-    includes: RunnableAutofacModule and Autofac-aware service registration hooks for Runnable modules.
+    includes: AppSurfaceAutofacModule and Autofac-aware service registration hooks for AppSurface modules.
     does_not_include: The default Microsoft DI container, web hosting, or command hosting by itself.
-    start_here_path: Dependency/ForgeTrust.Runnable.Dependency.Autofac/README.md
-    recipe_summary: Add `ForgeTrust.Runnable.Dependency.Autofac` when your app already uses Autofac and your modules need Autofac-specific registrations.
+    start_here_path: Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Dependency.Autofac` when your app already uses Autofac and your modules need Autofac-specific registrations.
     depends_on:
-      - ForgeTrust.Runnable.Core
+      - ForgeTrust.AppSurface.Core
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Core
-  - project: Aspire/ForgeTrust.Runnable.Aspire/ForgeTrust.Runnable.Aspire.csproj
+      - ForgeTrust.AppSurface.Core
+  - project: Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 60
-    use_when: Start here for .NET Aspire app-model projects that want Runnable-style modular composition for service defaults and distributed resources.
+    use_when: Start here for .NET Aspire app-model projects that want AppSurface-style modular composition for service defaults and distributed resources.
     includes: AspireApp entry points and modular registration for distributed application resources and service defaults.
     does_not_include: ASP.NET Core web hosting, Razor UI features, or the standalone docs host.
-    start_here_path: Aspire/ForgeTrust.Runnable.Aspire/README.md
-    recipe_summary: Start with `ForgeTrust.Runnable.Aspire` for distributed app-model projects and service-default composition.
+    start_here_path: Aspire/ForgeTrust.AppSurface.Aspire/README.md
+    recipe_summary: Start with `ForgeTrust.AppSurface.Aspire` for distributed app-model projects and service-default composition.
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Console
-  - project: Web/ForgeTrust.Runnable.Web/ForgeTrust.Runnable.Web.csproj
+      - ForgeTrust.AppSurface.Console
+  - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 70
-    use_when: Install this first for a normal ASP.NET Core app with Runnable modules when you want the base web startup pipeline before layering on optional UI or docs packages.
-    includes: Base ASP.NET Core hosting, middleware and endpoint composition, conventional browser error-page hooks, and the core Runnable web module contract.
+    use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline before layering on optional UI or docs packages.
+    includes: Base ASP.NET Core hosting, middleware and endpoint composition, conventional browser error-page hooks, and the core AppSurface web module contract.
     does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, or the RazorDocs host.
-    start_here_path: Web/ForgeTrust.Runnable.Web/README.md
-    recipe_summary: Add `ForgeTrust.Runnable.Web.OpenApi` after `ForgeTrust.Runnable.Web` when you want generated OpenAPI endpoints.
+    start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Web.OpenApi` after `ForgeTrust.AppSurface.Web` when you want generated OpenAPI endpoints.
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Core
-  - project: Web/ForgeTrust.Runnable.Web.OpenApi/ForgeTrust.Runnable.Web.OpenApi.csproj
+      - ForgeTrust.AppSurface.Core
+  - project: Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 80
-    use_when: Add this after the base web package when you want generated OpenAPI endpoints for a Runnable web app.
+    use_when: Add this after the base web package when you want generated OpenAPI endpoints for an AppSurface web app.
     includes: AddOpenApi wiring, endpoint explorer setup, endpoint mapping, and default OpenAPI document transforms.
     does_not_include: A hosted API reference UI or reactive Razor components.
-    start_here_path: Web/ForgeTrust.Runnable.Web.OpenApi/README.md
-    recipe_summary: Add `ForgeTrust.Runnable.Web.Scalar` after `ForgeTrust.Runnable.Web.OpenApi` when you want a hosted API reference UI.
+    start_here_path: Web/ForgeTrust.AppSurface.Web.OpenApi/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Web.Scalar` after `ForgeTrust.AppSurface.Web.OpenApi` when you want a hosted API reference UI.
     depends_on:
-      - ForgeTrust.Runnable.Web
+      - ForgeTrust.AppSurface.Web
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Web
-  - project: Web/ForgeTrust.Runnable.Web.Scalar/ForgeTrust.Runnable.Web.Scalar.csproj
+      - ForgeTrust.AppSurface.Web
+  - project: Web/ForgeTrust.AppSurface.Web.Scalar/ForgeTrust.AppSurface.Web.Scalar.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 90
-    use_when: Add this after OpenAPI when you want Scalar's interactive API reference UI served by your Runnable web app.
+    use_when: Add this after OpenAPI when you want Scalar's interactive API reference UI served by your AppSurface web app.
     includes: Scalar UI endpoint mapping and the OpenAPI module dependency needed to feed it.
     does_not_include: OpenAPI authoring by itself without the base web host, or reactive Razor component streaming.
-    start_here_path: Web/ForgeTrust.Runnable.Web.Scalar/README.md
+    start_here_path: Web/ForgeTrust.AppSurface.Web.Scalar/README.md
     depends_on:
-      - ForgeTrust.Runnable.Web.OpenApi
+      - ForgeTrust.AppSurface.Web.OpenApi
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Web.OpenApi
-  - project: Web/ForgeTrust.Runnable.Web.RazorWire/ForgeTrust.Runnable.Web.RazorWire.csproj
+      - ForgeTrust.AppSurface.Web.OpenApi
+  - project: Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 100
     use_when: Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, or islands without moving to a separate frontend app.
     includes: RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, and hybrid island support.
     does_not_include: OpenAPI generation, API reference UI, or Tailwind asset compilation.
-    start_here_path: Web/ForgeTrust.Runnable.Web.RazorWire/README.md
-    recipe_summary: Add `ForgeTrust.Runnable.Web.RazorWire` when you want reactive Razor UI, Turbo-style streams, and server-rendered islands.
+    start_here_path: Web/ForgeTrust.RazorWire/README.md
+    recipe_summary: Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, and server-rendered islands.
     depends_on:
-      - ForgeTrust.Runnable.Web
+      - ForgeTrust.AppSurface.Web
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Web
-  - project: Web/ForgeTrust.Runnable.Web.Tailwind/ForgeTrust.Runnable.Web.Tailwind.csproj
+      - ForgeTrust.AppSurface.Web
+  - project: Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj
     classification: public
     publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/unreleased.md
     order: 110
-    use_when: Add this when you want Tailwind build and watch integration in a Runnable web app without carrying a Node.js asset pipeline.
+    use_when: Add this when you want Tailwind build and watch integration in an AppSurface web app without carrying a Node.js asset pipeline.
     includes: Tailwind standalone CLI integration, watch mode, generated CSS output, and transitive runtime package selection for supported build hosts.
     does_not_include: JavaScript plugin ecosystems that require npm-first tooling, or direct runtime-package selection.
-    start_here_path: Web/ForgeTrust.Runnable.Web.Tailwind/README.md
-    recipe_summary: Add `ForgeTrust.Runnable.Web.Tailwind` when you want Tailwind without a separate Node.js asset pipeline.
+    start_here_path: Web/ForgeTrust.AppSurface.Web.Tailwind/README.md
+    recipe_summary: Add `ForgeTrust.AppSurface.Web.Tailwind` when you want Tailwind without a separate Node.js asset pipeline.
     depends_on:
-      - ForgeTrust.Runnable.Web
+      - ForgeTrust.AppSurface.Web
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Core
-      - ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-arm64
-      - ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-x64
-      - ForgeTrust.Runnable.Web.Tailwind.Runtime.osx-arm64
-      - ForgeTrust.Runnable.Web.Tailwind.Runtime.osx-x64
-      - ForgeTrust.Runnable.Web.Tailwind.Runtime.win-x64
-  - project: Web/ForgeTrust.Runnable.Web.RazorDocs/ForgeTrust.Runnable.Web.RazorDocs.csproj
+      - ForgeTrust.AppSurface.Core
+      - ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64
+      - ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64
+      - ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64
+      - ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64
+      - ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64
+  - project: Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj
     classification: proof_host
     publish_decision: support_publish
+    release_status: proof_host
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
     order: 200
-    note: Reusable docs package for harvesting repository docs into a RazorDocs UI. This is a real package, but it is a proof-host surface rather than the default first install for general Runnable apps.
-    start_here_path: Web/ForgeTrust.Runnable.Web.RazorDocs/README.md
+    note: Reusable docs package for harvesting repository docs into a RazorDocs UI. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps.
+    start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
     start_here_label: RazorDocs README
     expected_dependency_package_ids:
-      - ForgeTrust.Runnable.Caching
-      - ForgeTrust.Runnable.Web.RazorWire
-      - ForgeTrust.Runnable.Web.Tailwind
-  - project: Web/ForgeTrust.Runnable.Web.RazorDocs.Standalone/ForgeTrust.Runnable.Web.RazorDocs.Standalone.csproj
+      - ForgeTrust.AppSurface.Caching
+      - ForgeTrust.AppSurface.Web.Tailwind
+      - ForgeTrust.RazorWire
+  - project: Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj
     classification: proof_host
     publish_decision: do_not_publish
-    publish_reason: Standalone is a runnable proof host, not a package intended for external installation.
+    publish_reason: Standalone is an AppSurface proof host, not a package intended for external installation.
+    release_status: proof_host
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
     order: 210
-    note: Thin runnable host for serving or exporting RazorDocs. Treat it as a proof host and example app, not a package you install into another project.
-    start_here_path: Web/ForgeTrust.Runnable.Web.RazorDocs.Standalone/README.md
+    note: Thin export host for serving or exporting RazorDocs. Treat it as a proof host and example app, not a package you install into another project.
+    start_here_path: Web/ForgeTrust.AppSurface.Docs.Standalone/README.md
     start_here_label: Standalone host README
-  - project: Web/ForgeTrust.Runnable.Web.Tailwind/runtimes/ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-arm64.csproj
+  - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64.csproj
     classification: support
     publish_decision: support_publish
+    release_status: support_runtime
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
     order: 300
-    note: Tailwind standalone runtime for Linux Arm64 build hosts. Restore it transitively through `ForgeTrust.Runnable.Web.Tailwind` instead of installing it directly.
-  - project: Web/ForgeTrust.Runnable.Web.Tailwind/runtimes/ForgeTrust.Runnable.Web.Tailwind.Runtime.linux-x64.csproj
+    note: Tailwind standalone runtime for Linux Arm64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+  - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj
     classification: support
     publish_decision: support_publish
+    release_status: support_runtime
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
     order: 310
-    note: Tailwind standalone runtime for Linux x64 build hosts. Restore it transitively through `ForgeTrust.Runnable.Web.Tailwind` instead of installing it directly.
-  - project: Web/ForgeTrust.Runnable.Web.Tailwind/runtimes/ForgeTrust.Runnable.Web.Tailwind.Runtime.osx-arm64.csproj
+    note: Tailwind standalone runtime for Linux x64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+  - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj
     classification: support
     publish_decision: support_publish
+    release_status: support_runtime
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
     order: 320
-    note: Tailwind standalone runtime for macOS Arm64 build hosts. Restore it transitively through `ForgeTrust.Runnable.Web.Tailwind` instead of installing it directly.
-  - project: Web/ForgeTrust.Runnable.Web.Tailwind/runtimes/ForgeTrust.Runnable.Web.Tailwind.Runtime.osx-x64.csproj
+    note: Tailwind standalone runtime for macOS Arm64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+  - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64.csproj
     classification: support
     publish_decision: support_publish
+    release_status: support_runtime
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
     order: 330
-    note: Tailwind standalone runtime for macOS x64 build hosts. Restore it transitively through `ForgeTrust.Runnable.Web.Tailwind` instead of installing it directly.
-  - project: Web/ForgeTrust.Runnable.Web.Tailwind/runtimes/ForgeTrust.Runnable.Web.Tailwind.Runtime.win-x64.csproj
+    note: Tailwind standalone runtime for macOS x64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+  - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64.csproj
     classification: support
     publish_decision: support_publish
+    release_status: support_runtime
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
     order: 340
-    note: Tailwind standalone runtime for Windows x64 build hosts. Restore it transitively through `ForgeTrust.Runnable.Web.Tailwind` instead of installing it directly.
-  - project: Web/ForgeTrust.Runnable.Web.RazorWire.Cli/ForgeTrust.Runnable.Web.RazorWire.Cli.csproj
-    classification: public
-    publish_decision: publish
-    order: 120
-    use_when: Install this when you want to export RazorWire apps from a stable command-line tool instead of running the CLI from source.
-    includes: The `razorwire` .NET tool command, exact-version tool execution support, and static export workflow for RazorWire applications.
-    does_not_include: The RazorWire runtime package itself, package publishing automation, or a replacement for app-specific hosting and deployment choices.
-    start_here_path: Web/ForgeTrust.Runnable.Web.RazorWire.Cli/README.md
-    recipe_summary: Install `ForgeTrust.Runnable.Web.RazorWire.Cli` as a .NET tool when you want repeatable RazorWire static exports from the `razorwire` command.
+    note: Tailwind standalone runtime for Windows x64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+  - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    publish_reason: Held out of package publishing until issue #171 lands real .NET tool packaging and stable install guidance.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 400
+    note: Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance.

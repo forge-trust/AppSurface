@@ -1,8 +1,8 @@
-# From Program.cs to a Runnable Module
+# From Program.cs to a AppSurface Module
 
-The clearest Runnable proof is not a smaller `Program.cs`. It is a startup policy that becomes named, tested, and reusable.
+The clearest AppSurface proof is not a smaller `Program.cs`. It is a startup policy that becomes named, tested, and reusable.
 
-This page uses browser status pages and production error pages from `ForgeTrust.Runnable.Web` as that proof.
+This page uses browser status pages and production error pages from `ForgeTrust.AppSurface.Web` as that proof.
 
 ## Plain ASP.NET Core Baseline
 
@@ -18,11 +18,11 @@ The cost appears when several services must remember the same details:
 - Which production `500` page avoids leaking exception details?
 - Where does each service document the convention?
 
-Plain ASP.NET Core gives you the primitives. Runnable gives the team one named place to express the convention.
+Plain ASP.NET Core gives you the primitives. AppSurface gives the team one named place to express the convention.
 
-## Runnable Module Version
+## AppSurface Module Version
 
-Runnable Web exposes the concern through `WebOptions.Errors`.
+AppSurface Web exposes the concern through `WebOptions.Errors`.
 
 ```csharp
 public void ConfigureWebOptions(StartupContext context, WebOptions options)
@@ -43,21 +43,21 @@ These are separate features. Status-code pages do not catch thrown exceptions.
 
 ## Behavior Contract
 
-Runnable Web verifies this behavior in package tests:
+AppSurface Web verifies this behavior in package tests:
 
 ```bash
-dotnet test Web/ForgeTrust.Runnable.Web.Tests/ForgeTrust.Runnable.Web.Tests.csproj --filter "BrowserStatusPageTests|ConventionalExceptionPageTests"
+dotnet test Web/ForgeTrust.AppSurface.Web.Tests/ForgeTrust.AppSurface.Web.Tests.csproj --filter "BrowserStatusPageTests|ConventionalExceptionPageTests"
 ```
 
 The source-of-truth test classes are:
 
-- `Web/ForgeTrust.Runnable.Web.Tests/BrowserStatusPageTests.cs`
-- `Web/ForgeTrust.Runnable.Web.Tests/ConventionalExceptionPageTests.cs`
+- `Web/ForgeTrust.AppSurface.Web.Tests/BrowserStatusPageTests.cs`
+- `Web/ForgeTrust.AppSurface.Web.Tests/ConventionalExceptionPageTests.cs`
 
 Those tests cover the HTTP contract this page relies on:
 
 - Browser requests to empty supported status responses render recovery-oriented HTML and preserve the original status.
-- Direct preview routes such as `/_runnable/errors/404` render the conventional page.
+- Direct preview routes such as `/_appsurface/errors/404` render the conventional page.
 - JSON and non-HTML requests do not receive browser HTML.
 - Production exception pages return a generic `500` page for browser requests.
 - The generic `500` page includes a request id but not exception messages, stack traces, headers, cookies, route values, or form fields.
@@ -76,6 +76,6 @@ For a single service, this is useful when the error posture is important enough 
 - Do not enable browser pages for API-only behavior that should stay JSON or Problem Details.
 - Do not expose exception details on production `500` pages.
 - Do not assume status-code pages catch thrown exceptions. They handle empty status responses; exception handling is a separate pipeline.
-- Do not duplicate the full Web package reference here. Use the [Runnable Web README](../Web/ForgeTrust.Runnable.Web/README.md) for the full API shape.
+- Do not duplicate the full Web package reference here. Use the [AppSurface Web README](../Web/ForgeTrust.AppSurface.Web/README.md) for the full API shape.
 
 Next recovery path: [Troubleshoot Startup and Modules](../troubleshooting/startup-and-modules.md)

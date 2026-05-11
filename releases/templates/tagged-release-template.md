@@ -1,10 +1,10 @@
 # Release x.y.z
 
-Replace every placeholder in this template before publishing a tagged Runnable release note.
+Replace every placeholder in this template before publishing a tagged AppSurface release note.
 
 ## Why this release matters
 
-Write the short story first. Explain what changed, who should care, and which parts of the Runnable surface moved in this version.
+Write the short story first. Explain what changed, who should care, and which parts of the AppSurface surface moved in this version.
 
 ## Highlights
 

@@ -1,10 +1,10 @@
-using ForgeTrust.Runnable.Core;
-using ForgeTrust.Runnable.Web;
-using ForgeTrust.Runnable.Web.Scalar;
+using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Web;
+using ForgeTrust.AppSurface.Web.Scalar;
 
 namespace WebAppExample;
 
-public class ExampleModule : IRunnableWebModule
+public class ExampleModule : IAppSurfaceWebModule
 {
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
@@ -13,7 +13,7 @@ public class ExampleModule : IRunnableWebModule
 
     public void RegisterDependentModules(ModuleDependencyBuilder builder)
     {
-        builder.AddModule<RunnableWebScalarModule>();
+        builder.AddModule<AppSurfaceWebScalarModule>();
     }
 
     public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)

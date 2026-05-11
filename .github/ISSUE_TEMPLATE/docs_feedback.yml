@@ -7,7 +7,7 @@ body:
     id: page
     attributes:
       label: Page or URL
-      placeholder: https://forge-trust.github.io/Runnable/docs/...
+      placeholder: https://forge-trust.github.io/AppSurface/docs/...
     validations:
       required: true
   - type: textarea

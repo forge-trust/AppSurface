@@ -17,8 +17,8 @@ if [[ "$BE_RESTORE" != "0" ]]; then
 
   # sanity check and restore
   dotnet --info
-  dotnet restore ForgeTrust.Runnable.slnx
-  dotnet build ForgeTrust.Runnable.slnx
+  dotnet restore ForgeTrust.AppSurface.slnx
+  dotnet build ForgeTrust.AppSurface.slnx
 
   # make it stick for every future shell
   echo "Exporting DOTNET PATHS: $INSTALL_DIR"

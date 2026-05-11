@@ -20,7 +20,7 @@ The current workflow establishes the contracts that future release automation wi
 - one public unreleased proof artifact
 - tagged release notes plus a compact changelog
 - verified prerelease `.nupkg` artifacts from the manifest-backed package artifact workflow
-- packageable CLI artifacts such as `ForgeTrust.Runnable.Web.RazorWire.Cli`
+- packageable CLI artifacts such as `ForgeTrust.RazorWire.Cli`
 
 Until that automation lands, package docs that show `dnx`, `dotnet tool execute`,
 or `dotnet tool install` assume either a manually published package source or an
@@ -38,7 +38,7 @@ list.
 Run the package artifact verifier with an exact prerelease version:
 
 ```bash
-dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj -- \
+dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
   verify-packages \
   --package-version 0.0.0-ci.local \
   --artifacts-output artifacts/packages \

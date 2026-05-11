@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net10.0": {
+      "forgetrust.appsurface.core": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.web.tailwind.runtime.linux-arm64": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.web.tailwind.runtime.linux-x64": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.web.tailwind.runtime.osx-arm64": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.web.tailwind.runtime.osx-x64": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.web.tailwind.runtime.win-x64": {
+        "type": "Project"
+      }
+    }
+  }
+}

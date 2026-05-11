@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using ForgeTrust.Runnable.Web.RazorWire;
+using ForgeTrust.RazorWire;
 
 namespace RazorWireWebExample.Services;
 

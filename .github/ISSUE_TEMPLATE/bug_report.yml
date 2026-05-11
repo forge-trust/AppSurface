@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in Runnable packages, examples, docs, or tooling.
+description: Report a reproducible problem in AppSurface packages, examples, docs, or tooling.
 title: "bug: "
 labels:
   - bug
@@ -51,7 +51,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Runnable version or commit
+      label: AppSurface version or commit
       description: Use a package version, tag, branch name, or commit SHA.
       placeholder: "v0.1.0, main@abcdef0, or package version"
     validations:

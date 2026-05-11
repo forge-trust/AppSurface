@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefineConstants>CARTER_WEB;APPSURFACE_WEB;ABP_WEB</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Shared web benchmark dependencies -->
+  <ItemGroup>
+    <ProjectReference Include="../DependencyInjectionControllers/DependencyInjectionControllers.csproj" />
+    <ProjectReference Include="../ManyDependencyInjectionControllers/ManyDependencyInjectionControllers.csproj" />
+    <ProjectReference Include="../SimpleApiController/SimpleApiController.csproj" />
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <!-- AppSurface.Console benchmarks -->
+  <ItemGroup Condition="$([System.String]::Copy(';$(DefineConstants);').Contains(';APPSURFACE_CONSOLE;'))">
+    <ProjectReference Include="../../examples/console-app/ConsoleAppExample.csproj" />
+    <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
+  </ItemGroup>
+
+  <!-- AppSurface.Web benchmarks -->
+  <ItemGroup Condition="$([System.String]::Copy(';$(DefineConstants);').Contains(';APPSURFACE_WEB;'))">
+    <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
+    <ProjectReference Include="../../Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
+    <ProjectReference Include="../../examples/web-app/WebAppExample.csproj" />
+  </ItemGroup>
+
+  <!-- ABP benchmarks -->
+  <ItemGroup Condition="$([System.String]::Copy(';$(DefineConstants);').Contains(';ABP_WEB;'))">
+    <ProjectReference Include="../AbpSimpleController/AbpSimpleController.csproj" />
+    <PackageReference Include="Volo.Abp.AspNetCore" />
+    <PackageReference Include="Volo.Abp.Core" />
+  </ItemGroup>
+
+  <!-- Carter benchmarks -->
+  <ItemGroup Condition="$([System.String]::Copy(';$(DefineConstants);').Contains(';CARTER_WEB;'))">
+    <PackageReference Include="Carter" />
+  </ItemGroup>
+
+  <!-- Spectre.Console.Cli benchmarks -->
+  <ItemGroup Condition="$([System.String]::Copy(';$(DefineConstants);').Contains(';SPECTRE_CLI;'))">
+    <PackageReference Include="Spectre.Console.Cli" />
+  </ItemGroup>
+
+  <!-- ASP.NET Core shared framework for Native/Carter/ABP servers -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

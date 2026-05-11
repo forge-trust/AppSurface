@@ -1,4 +1,4 @@
-title: Runnable v0.1 package chooser
+title: AppSurface v0.1 package chooser
 summary: Start with the package that matches the app you are building, then add optional web modules and support surfaces only when you need them.
 page_type: guide
 nav_group: Start Here
@@ -8,9 +8,9 @@ breadcrumbs:
   - Packages
 trust:
   status: v0.1 chooser
-  summary: This page is generated from evaluated project metadata plus a curated manifest of what first-time Runnable adopters should install directly.
+  summary: This page is generated from evaluated project metadata plus a curated manifest of what first-time AppSurface adopters should install directly.
   freshness: Regenerated in CI whenever the package surface or chooser guidance changes on main.
-  change_scope: Repository-wide. The chooser covers Runnable's coordinated v0.1 package family, support packages, and proof-host surfaces.
+  change_scope: Repository-wide. The chooser covers AppSurface's coordinated v0.1 package family, support packages, and proof-host surfaces.
   migration:
     label: Read the pre-1.0 upgrade policy
     href: /docs/releases/upgrade-policy.md.html

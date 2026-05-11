@@ -21,7 +21,7 @@ body:
     attributes:
       label: Proposed shape
       description: Describe the API, command, package behavior, example, or workflow you expected.
-      placeholder: "It would help if Runnable provided ..."
+      placeholder: "It would help if AppSurface provided ..."
     validations:
       required: true
   - type: dropdown

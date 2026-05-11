@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Core.Tests"/>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Web.Tests"/>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Config.Tests"/>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Web.Tailwind.Tests"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting"/>
+    <PackageReference Include="Microsoft.Extensions.Logging.Console"/>
+  </ItemGroup>
+
+</Project>

@@ -1,17 +1,17 @@
-title: Runnable
-summary: Runnable gives .NET teams a modular startup pipeline for web, console, and distributed apps. Start with the pillar you need, then drill into concrete examples and API reference.
+title: AppSurface
+summary: AppSurface gives .NET teams a modular startup pipeline for web, console, and distributed apps. Start with the pillar you need, then drill into concrete examples and API reference.
 featured_page_groups:
-  - intent: evaluate-runnable
-    label: Decide if Runnable fits
-    summary: Start here when you need to know whether Runnable is better than plain ASP.NET Core startup code for your app or team.
+  - intent: evaluate-appsurface
+    label: Decide if AppSurface fits
+    summary: Start here when you need to know whether AppSurface is better than plain ASP.NET Core startup code for your app or team.
     order: 1
     pages:
-      - question: Should my team use Runnable?
-        path: start-here/should-i-use-runnable.md
-        supporting_copy: Compare plain ASP.NET Core with Runnable's module model before installing extra packages.
+      - question: Should my team use AppSurface?
+        path: start-here/should-i-use-appsurface.md
+        supporting_copy: Compare plain ASP.NET Core with AppSurface's module model before installing extra packages.
         order: 10
       - question: What is the evaluator path?
-        path: start-here/runnable-evaluator.md
+        path: start-here/appsurface-evaluator.md
         supporting_copy: Follow the shortest reading path for team leads, managers, architects, and senior developers evaluating startup standardization.
         order: 20
   - intent: prove-first-service
@@ -25,7 +25,7 @@ featured_page_groups:
         order: 10
       - question: What does a module buy me?
         path: guides/from-program-cs-to-module.md
-        supporting_copy: See browser status and production error page setup move from scattered startup policy to a named Runnable concern.
+        supporting_copy: See browser status and production error page setup move from scattered startup policy to a named AppSurface concern.
         order: 20
   - intent: recover-and-read
     label: Recover and read the vocabulary
@@ -38,14 +38,14 @@ featured_page_groups:
         order: 10
       - question: What do the core terms mean?
         path: concepts/glossary.md
-        supporting_copy: Learn the vocabulary used by Runnable package docs and examples.
+        supporting_copy: Learn the vocabulary used by AppSurface package docs and examples.
         order: 20
   - intent: choose-package
     label: Choose a package
     summary: Start here when you need the smallest useful install path for a new app.
     order: 5
     pages:
-      - question: Which Runnable package should I install first?
+      - question: Which AppSurface package should I install first?
         path: packages/README.md
         supporting_copy: Start with the generated package chooser, then add only the optional modules your app actually needs.
         order: 10
@@ -64,7 +64,7 @@ featured_page_groups:
     order: 15
     pages:
       - question: How do I use RazorDocs in my own repository?
-        path: Web/ForgeTrust.Runnable.Web.RazorDocs/use-razordocs.md
+        path: Web/ForgeTrust.AppSurface.Docs/use-razordocs.md
         supporting_copy: Follow the consumer landing page for the package thesis, host shape, authoring model, and adoption checklist.
         order: 10
   - intent: see-it-working
@@ -74,7 +74,7 @@ featured_page_groups:
     pages:
       - question: Show me a working app, not just abstractions
         path: examples/web-app/README.md
-        supporting_copy: Walk through a minimal ASP.NET Core app that uses Runnable modules end to end.
+        supporting_copy: Walk through a minimal ASP.NET Core app that uses AppSurface modules end to end.
         order: 10
       - question: How does this fit distributed systems?
         path: Aspire/README.md

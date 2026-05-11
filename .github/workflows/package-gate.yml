@@ -1,0 +1,43 @@
+name: package-gate.yml
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  package-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Restore with isolated NuGet cache
+        run: |
+          dotnet restore ForgeTrust.AppSurface.slnx --configfile NuGet.package-gate.config
+
+      - name: Build release packages
+        run: |
+          dotnet build ForgeTrust.AppSurface.slnx --configuration Release --no-restore
+
+      - name: Validate package manifest gate
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-build -- gate
+
+      - name: Pack release artifacts
+        run: |
+          dotnet pack ForgeTrust.AppSurface.slnx --configuration Release --no-build --output "${{ runner.temp }}/appsurface-packages"

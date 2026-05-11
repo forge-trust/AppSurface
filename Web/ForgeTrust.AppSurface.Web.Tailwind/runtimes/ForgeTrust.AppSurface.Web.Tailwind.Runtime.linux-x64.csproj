@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TailwindRid>linux-x64</TailwindRid>
+    <PackageId>ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64</PackageId>
+    <Title>ForgeTrust AppSurface Tailwind Runtime (Linux x64)</Title>
+    <Description>Tailwind CSS standalone binary for Linux x64.</Description>
+  </PropertyGroup>
+  <Import Project="Tailwind.Runtime.Common.targets" />
+</Project>

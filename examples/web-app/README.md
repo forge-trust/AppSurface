@@ -1,6 +1,6 @@
 # Web app example
 
-This example shows how to build a minimal ASP.NET Core application using **ForgeTrust.Runnable.Web**.
+This example shows how to build a minimal ASP.NET Core application using **ForgeTrust.AppSurface.Web**.
 
 Run the application:
 
@@ -20,4 +20,4 @@ Expected output:
 Hello World from the root!
 ```
 
-The explicit `--port` keeps the quickstart copy-paste stable. Without it, Runnable may choose a deterministic development port for your current worktree; use the startup log as the source of truth.
+The explicit `--port` keeps the quickstart copy-paste stable. Without it, AppSurface may choose a deterministic development port for your current worktree; use the startup log as the source of truth.

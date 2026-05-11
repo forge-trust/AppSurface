@@ -1,15 +1,15 @@
-# Contributing to Runnable
+# Contributing to AppSurface
 
-Runnable is putting its release contract in place before the first tagged version. This file explains the contribution rules that feed the public release surface.
+AppSurface is putting its release contract in place before the first tagged version. This file explains the contribution rules that feed the public release surface.
 
 ## Feedback path
 
-Runnable treats docs and onboarding feedback as product input, not as a second-class support queue. File issues when a package, example, README, or release note leaves you unable to reproduce the intended path.
-For quick access, use GitHub's issue template chooser: [choose an issue template](https://github.com/forge-trust/Runnable/issues/new/choose).
+AppSurface treats docs and onboarding feedback as product input, not as a second-class support queue. File issues when a package, example, README, or release note leaves you unable to reproduce the intended path.
+For quick access, use GitHub's issue template chooser: [choose an issue template](https://github.com/forge-trust/AppSurface/issues/new/choose).
 
-- Use the [**Bug report** issue form](https://github.com/forge-trust/Runnable/issues/new?template=bug_report.yml) when behavior is broken or surprising.
-- Use the [**Feature request** issue form](https://github.com/forge-trust/Runnable/issues/new?template=feature_request.yml) when you can name a focused product capability, API shape, workflow, or example that would remove friction.
-- Use the [**Docs or developer experience feedback** issue form](https://github.com/forge-trust/Runnable/issues/new?template=docs_dx_feedback.yml) when the code may work, but the route to understanding it is unclear.
+- Use the [**Bug report** issue form](https://github.com/forge-trust/AppSurface/issues/new?template=bug_report.yml) when behavior is broken or surprising.
+- Use the [**Feature request** issue form](https://github.com/forge-trust/AppSurface/issues/new?template=feature_request.yml) when you can name a focused product capability, API shape, workflow, or example that would remove friction.
+- Use the [**Docs or developer experience feedback** issue form](https://github.com/forge-trust/AppSurface/issues/new?template=docs_dx_feedback.yml) when the code may work, but the route to understanding it is unclear.
 - Do not use public issue forms for suspected vulnerabilities, leaked secrets, or exploit details. Use the [security policy](./SECURITY.md) and report sensitive findings privately.
 - Include the command, page, example, package, or API where the confusion started. The sharpest reports name the exact step that failed and the next thing you expected to see.
 - If you are unsure whether something is a bug, feature request, or docs gap, file the docs/DX form and explain the behavior you expected.
@@ -40,7 +40,7 @@ Good docs pull requests usually include:
 
 ## Release contract
 
-- Runnable releases the monorepo in unison. Packages, CLI tooling, examples, and docs-facing behavior all roll into the same next version.
+- AppSurface releases the monorepo in unison. Packages, CLI tooling, examples, and docs-facing behavior all roll into the same next version.
 - Pull request titles that land on `main` must follow [Conventional Commits](https://www.conventionalcommits.org/) using release-note-friendly types such as `feat`, `fix`, `docs`, `perf`, `refactor`, `test`, `build`, `ci`, `chore`, or `revert`. The squash-merge title is the durable signal for future automation and changelog grouping.
 - Update [`releases/unreleased.md`](./releases/unreleased.md) whenever a pull request changes behavior, usage guidance, release policy, examples, or docs consumers would care about in release notes.
 - Maintainers may apply the `no-unreleased-entry` label only for changes that do not belong in the public release story, such as repo administration or workflow-only cleanup.
