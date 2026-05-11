@@ -220,7 +220,7 @@ public class RazorDocsWebModuleTests
     }
 
     [Fact]
-    public void ConfigureEndpoints_ShouldFailClosedForHealthRoutes_WhenWebHostEnvironmentIsMissing()
+    public void ConfigureEndpoints_ShouldReserveHealthRoutes_WhenWebHostEnvironmentIsMissing()
     {
         var context = CreateStartupContext();
         var builder = WebApplication.CreateBuilder();
@@ -238,12 +238,12 @@ public class RazorDocsWebModuleTests
             .Where(pattern => !string.IsNullOrEmpty(pattern))
             .ToList();
 
-        Assert.DoesNotContain("docs/_health", routePatterns);
-        Assert.DoesNotContain("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_health", routePatterns);
+        Assert.Contains("docs/_health.json", routePatterns);
     }
 
     [Fact]
-    public void ConfigureEndpoints_ShouldNotMapHealthRoutes_InProductionByDefault()
+    public void ConfigureEndpoints_ShouldReserveHealthRoutes_InProductionByDefault()
     {
         var context = CreateStartupContext();
         var builder = WebApplication.CreateBuilder();
@@ -265,8 +265,8 @@ public class RazorDocsWebModuleTests
             .Where(pattern => !string.IsNullOrEmpty(pattern))
             .ToList();
 
-        Assert.DoesNotContain("docs/_health", routePatterns);
-        Assert.DoesNotContain("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_health", routePatterns);
+        Assert.Contains("docs/_health.json", routePatterns);
     }
 
     [Fact]
@@ -310,7 +310,7 @@ public class RazorDocsWebModuleTests
     }
 
     [Fact]
-    public void ConfigureEndpoints_ShouldNotMapHealthRoutes_InDevelopmentWhenExplicitlyDisabled()
+    public void ConfigureEndpoints_ShouldReserveHealthRoutes_InDevelopmentWhenExplicitlyDisabled()
     {
         var context = CreateStartupContext();
         var builder = WebApplication.CreateBuilder();
@@ -345,8 +345,8 @@ public class RazorDocsWebModuleTests
             .Where(pattern => !string.IsNullOrEmpty(pattern))
             .ToList();
 
-        Assert.DoesNotContain("docs/_health", routePatterns);
-        Assert.DoesNotContain("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_health", routePatterns);
+        Assert.Contains("docs/_health.json", routePatterns);
     }
 
     [Fact]

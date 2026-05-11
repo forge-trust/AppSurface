@@ -2477,6 +2477,34 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestHealthActions_ShouldReturnNotFound_InDevelopmentWhenExplicitlyDisabled()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
+        var options = new RazorDocsOptions
+        {
+            Harvest = new RazorDocsHarvestOptions
+            {
+                Health = new RazorDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = RazorDocsHarvestHealthExposure.Never
+                }
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester, Environments.Development);
+        using (memo)
+        using (cache)
+        {
+            var htmlResult = await controller.HarvestHealth();
+            var jsonResult = await controller.HarvestHealthJson();
+
+            Assert.IsType<NotFoundResult>(htmlResult);
+            Assert.IsType<NotFoundResult>(jsonResult);
+        }
+    }
+
+    [Fact]
     public async Task HarvestHealthActions_ShouldAllowRoutes_InProductionWhenExplicitlyEnabled()
     {
         var harvester = A.Fake<IDocHarvester>();

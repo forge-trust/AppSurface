@@ -189,7 +189,7 @@ Health and docs are computed from the same cached snapshot. This is deliberate: 
 
 ### Operator Health Routes
 
-RazorDocs can expose a redacted operator health page at `{DocsRootPath}/_health` and a machine-readable JSON endpoint at `{DocsRootPath}/_health.json`. Both routes are visible by default only when the host environment is `Development`. Non-development hosts must opt in with `RazorDocs:Harvest:Health:ExposeRoutes=Always`.
+RazorDocs reserves a redacted operator health page at `{DocsRootPath}/_health` and a machine-readable JSON endpoint at `{DocsRootPath}/_health.json` ahead of the docs catch-all route. Both endpoints return health responses by default only when the host environment is `Development`; otherwise they return `404`. Non-development hosts must opt in with `RazorDocs:Harvest:Health:ExposeRoutes=Always`.
 
 The JSON response uses the camelCase wire form of `RazorDocsHarvestHealthResponse`:
 
@@ -200,7 +200,7 @@ The JSON response uses the camelCase wire form of `RazorDocsHarvestHealthRespons
 
 The response omits `RepositoryRoot`, diagnostic `Cause`, raw exception messages, stack traces, and absolute filesystem paths. Health routes set `Cache-Control: no-store, no-cache` so local and CI checks do not pass or fail on stale operator data.
 
-The sidebar health entry follows `RazorDocs:Harvest:Health:ShowChrome`, which is independent from route exposure. This lets a host expose `_health.json` for a script without advertising the health page in the docs chrome, or show status-only chrome without mapping the health routes. When chrome is visible but `ExposeRoutes` hides routes for the current environment, RazorDocs renders a non-clickable status chip instead of a link.
+The sidebar health entry follows `RazorDocs:Harvest:Health:ShowChrome`, which is independent from route exposure. This lets a host expose `_health.json` for a script without advertising the health page in the docs chrome, or show status-only chrome while the reserved health endpoints still return `404`. When chrome is visible but `ExposeRoutes` hides responses for the current environment, RazorDocs renders a non-clickable status chip instead of a link.
 
 ```json
 {
@@ -215,7 +215,7 @@ The sidebar health entry follows `RazorDocs:Harvest:Health:ShowChrome`, which is
 }
 ```
 
-Allowed exposure values are `DevelopmentOnly`, `Always`, and `Never`. If you set `ExposeRoutes=Always`, the health routes become an operator surface in that environment. Protect them with host-owned authentication, authorization, or network controls when they are reachable by untrusted users.
+Allowed exposure values are `DevelopmentOnly`, `Always`, and `Never`. If you set `ExposeRoutes=Always`, the reserved health endpoints become an operator surface in that environment. Protect them with host-owned authentication, authorization, or network controls when they are reachable by untrusted users.
 
 ### Pitfalls
 
@@ -355,9 +355,10 @@ var healthJson = routes.HealthJson;
   - Do not use this expecting `Empty` or `Degraded` to fail in v1. Empty docs can be intentional, and degraded docs can still be usable.
 - `RazorDocs:Harvest:Health:ExposeRoutes`
   - Defaults to `DevelopmentOnly`.
-  - Controls whether `{DocsRootPath}/_health` and `{DocsRootPath}/_health.json` are mapped.
-  - `Always` exposes the routes in non-development environments; protect the routes at the host boundary when they are publicly reachable.
-  - `Never` disables explicit health route mapping, though direct controller action routes still return `404` when the visibility guard denies exposure.
+  - Controls whether `{DocsRootPath}/_health` and `{DocsRootPath}/_health.json` return health responses.
+  - RazorDocs always reserves the endpoint patterns before the docs catch-all route so health URLs do not fall through to document lookup.
+  - `Always` exposes the responses in non-development environments; protect the endpoints at the host boundary when they are publicly reachable.
+  - `Never` keeps the reserved endpoints returning `404`, including in development.
 - `RazorDocs:Harvest:Health:ShowChrome`
   - Defaults to `DevelopmentOnly`.
   - Controls whether the built-in sidebar shows health status chrome.

@@ -157,20 +157,21 @@ public sealed class RazorDocsHarvestOptions
 /// <remarks>
 /// The health surface exposes the same cached harvest state returned by
 /// <see cref="ForgeTrust.Runnable.Web.RazorDocs.Services.DocAggregator.GetHarvestHealthAsync(System.Threading.CancellationToken)"/>.
-/// Development hosts show the route and sidebar chrome by default so local failures are visible immediately. Other
-/// environments must opt in explicitly before RazorDocs maps the health routes or displays sidebar chrome.
+/// Development hosts show the route response and sidebar chrome by default so local failures are visible immediately.
+/// Other environments must opt in explicitly before RazorDocs returns health responses or displays sidebar chrome.
 /// </remarks>
 public sealed class RazorDocsHarvestHealthOptions
 {
     /// <summary>
-    /// Gets or sets when RazorDocs should map <c>{DocsRootPath}/_health</c> and
+    /// Gets or sets when RazorDocs should return health responses from <c>{DocsRootPath}/_health</c> and
     /// <c>{DocsRootPath}/_health.json</c>.
     /// </summary>
     /// <remarks>
-    /// The default is <see cref="RazorDocsHarvestHealthExposure.DevelopmentOnly"/>. Setting this to
-    /// <see cref="RazorDocsHarvestHealthExposure.Always"/> creates an operator-facing route in non-development hosts;
-    /// protect that route with host-owned authentication, authorization, or network controls when it is reachable by
-    /// untrusted users.
+    /// The default is <see cref="RazorDocsHarvestHealthExposure.DevelopmentOnly"/>. RazorDocs always reserves these route
+    /// patterns ahead of the docs catch-all route so they do not fall through to document lookup. Setting this to
+    /// <see cref="RazorDocsHarvestHealthExposure.Always"/> allows the controller actions
+    /// to return operator-facing responses in non-development hosts; protect those responses with host-owned
+    /// authentication, authorization, or network controls when they are reachable by untrusted users.
     /// </remarks>
     public RazorDocsHarvestHealthExposure ExposeRoutes { get; set; } = RazorDocsHarvestHealthExposure.DevelopmentOnly;
 

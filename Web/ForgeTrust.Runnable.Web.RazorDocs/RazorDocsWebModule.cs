@@ -250,15 +250,16 @@ public class RazorDocsWebModule : IRunnableWebModule
     /// root-mounted or overlaps published exact-version aliases.
     /// </para>
     /// <para>
-    /// The operator-facing harvest health routes are registered only when
-    /// <see cref="RazorDocsHarvestHealthVisibility.AreRoutesExposed(RazorDocsOptions, IHostEnvironment)"/> returns
-    /// <c>true</c>. By default that exposes the routes only in Development; production hosts must opt in with
-    /// <see cref="RazorDocsHarvestHealthOptions.ExposeRoutes"/>. When exposed, the route named
-    /// <c>razordocs_harvest_health</c> maps the current docs root health pattern from
-    /// <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
+    /// The operator-facing harvest health route patterns are always registered before the catch-all docs route so
+    /// <c>{DocsRootPath}/_health</c> and <c>{DocsRootPath}/_health.json</c> remain reserved operator paths rather than
+    /// falling through to document lookup. The route named <c>razordocs_harvest_health</c> maps the current docs root
+    /// health pattern from <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
     /// <c>razordocs_harvest_health_json</c> maps <see cref="DocsUrlBuilder.BuildHealthJsonUrl"/> to
-    /// <c>DocsController.HarvestHealthJson</c>. These routes are intended for local and operator verification, not as
-    /// unauthenticated public reader navigation.
+    /// <c>DocsController.HarvestHealthJson</c>. The controller actions still gate responses with
+    /// <see cref="RazorDocsHarvestHealthVisibility.AreRoutesExposed(RazorDocsOptions, IHostEnvironment)"/>: by default
+    /// they return health only in Development, while production hosts must opt in with
+    /// <see cref="RazorDocsHarvestHealthOptions.ExposeRoutes"/>. These routes are intended for local and operator
+    /// verification, not as unauthenticated public reader navigation.
     /// </para>
     /// </remarks>
     /// <param name="context">Startup context for the application and environment.</param>
@@ -268,9 +269,6 @@ public class RazorDocsWebModule : IRunnableWebModule
         var docsOptions = ResolveOptions(endpoints.ServiceProvider);
         var docsUrlBuilder = endpoints.ServiceProvider.GetService(typeof(DocsUrlBuilder)) as DocsUrlBuilder
                              ?? new DocsUrlBuilder(docsOptions);
-        var environment = endpoints.ServiceProvider.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment
-                          ?? new DefaultWebHostEnvironment();
-
         if (ShouldPreserveRootStylesheetPath(context))
         {
             // Published/exported standalone hosts can resolve the packaged stylesheet only under /_content.
@@ -355,26 +353,23 @@ public class RazorDocsWebModule : IRunnableWebModule
                 action = "SearchIndex"
             });
 
-        if (RazorDocsHarvestHealthVisibility.AreRoutesExposed(docsOptions, environment))
-        {
-            endpoints.MapControllerRoute(
-                name: "razordocs_harvest_health",
-                pattern: currentHealthPattern,
-                defaults: new
-                {
-                    controller = "Docs",
-                    action = "HarvestHealth"
-                });
+        endpoints.MapControllerRoute(
+            name: "razordocs_harvest_health",
+            pattern: currentHealthPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "HarvestHealth"
+            });
 
-            endpoints.MapControllerRoute(
-                name: "razordocs_harvest_health_json",
-                pattern: currentHealthJsonPattern,
-                defaults: new
-                {
-                    controller = "Docs",
-                    action = "HarvestHealthJson"
-                });
-        }
+        endpoints.MapControllerRoute(
+            name: "razordocs_harvest_health_json",
+            pattern: currentHealthJsonPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "HarvestHealthJson"
+            });
 
         endpoints.MapControllerRoute(
             name: "razordocs_section",
@@ -493,18 +488,4 @@ public class RazorDocsWebModule : IRunnableWebModule
         return route.TrimStart('/');
     }
 
-    private sealed class DefaultWebHostEnvironment : IWebHostEnvironment
-    {
-        public string ApplicationName { get; set; } = typeof(RazorDocsWebModule).Assembly.GetName().Name ?? "RazorDocs";
-
-        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
-
-        public string WebRootPath { get; set; } = AppContext.BaseDirectory;
-
-        public string EnvironmentName { get; set; } = Environments.Production;
-
-        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
-
-        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
-    }
 }
