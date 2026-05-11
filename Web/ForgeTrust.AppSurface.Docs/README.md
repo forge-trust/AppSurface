@@ -187,12 +187,43 @@ An all-failed snapshot logs one critical message when that snapshot is generated
 
 Health and docs are computed from the same cached snapshot. This is deliberate: a host that reads `GetDocsAsync()` and then `GetHarvestHealthAsync()` sees health for the docs it is serving, not a second harvest with different timing or failures. Use `InvalidateCache()` when an operator explicitly asks RazorDocs to refresh source-backed docs.
 
+### Operator Health Routes
+
+RazorDocs reserves a redacted operator health page at `{DocsRootPath}/_health` and a machine-readable JSON endpoint at `{DocsRootPath}/_health.json` ahead of the docs catch-all route. Both endpoints return health responses by default only when the host environment is `Development`; otherwise they return `404`. Non-development hosts must opt in with `RazorDocs:Harvest:Health:ExposeRoutes=Always`.
+
+The JSON response uses the camelCase wire form of `RazorDocsHarvestHealthResponse`:
+
+- `status`: `Healthy`, `Empty`, `Degraded`, or `Failed`.
+- `verification.ok`: `true` for `Healthy` and `Empty`; `false` for `Degraded` and `Failed`.
+- `verification.httpStatusCode`: `200` for `Healthy` and `Empty`; `503` for `Degraded` and `Failed`.
+- `generatedUtc`, harvester counts, total docs, per-harvester status, and redacted diagnostics.
+
+The response omits `RepositoryRoot`, diagnostic `Cause`, raw exception messages, stack traces, and absolute filesystem paths. Health routes set `Cache-Control: no-store, no-cache` so local and CI checks do not pass or fail on stale operator data.
+
+The sidebar health entry follows `RazorDocs:Harvest:Health:ShowChrome`, which is independent from route exposure. This lets a host expose `_health.json` for a script without advertising the health page in the docs chrome, or show status-only chrome while the reserved health endpoints still return `404`. When chrome is visible but `ExposeRoutes` hides responses for the current environment, RazorDocs renders a non-clickable status chip instead of a link.
+
+```json
+{
+  "RazorDocs": {
+    "Harvest": {
+      "Health": {
+        "ExposeRoutes": "DevelopmentOnly",
+        "ShowChrome": "DevelopmentOnly"
+      }
+    }
+  }
+}
+```
+
+Allowed exposure values are `DevelopmentOnly`, `Always`, and `Never`. If you set `ExposeRoutes=Always`, the reserved health endpoints become an operator surface in that environment. Protect them with host-owned authentication, authorization, or network controls when they are reachable by untrusted users.
+
 ### Pitfalls
 
 - Do not parse logs to infer harvest health. Use `GetHarvestHealthAsync()` and diagnostic codes.
 - Do not treat `Empty` as a failure. It means RazorDocs found no docs without a failed harvester.
 - Do not expect raw exception details in public diagnostics. Use host logs for stack traces and exception messages.
-- Do not assume this API exposes visible operator UI or an ASP.NET Core `IHealthCheck`. The first harvest-health slice is API and documentation only; operator UI is tracked in issue #238.
+- Do not assume the health routes are ASP.NET Core `IHealthCheck` endpoints. They report documentation harvest health, not whole-application liveness.
+- Do not set `ExposeRoutes=Always` on a public host without host-owned protection.
 
 ### Strict Startup Failure
 
@@ -303,9 +334,10 @@ var routes = app.Services.GetRequiredService<DocsUrlBuilder>().Routes;
 var home = routes.Home;
 var search = routes.Search;
 var searchIndexRefresh = routes.SearchIndexRefresh;
+var healthJson = routes.HealthJson;
 ```
 
-`RazorDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, and `Versions`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
+`RazorDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, and `HealthJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
 ### Option reference
 
@@ -321,6 +353,17 @@ var searchIndexRefresh = routes.SearchIndexRefresh;
   - When `true`, the preflight fails the host with `RazorDocsHarvestFailedException` only when aggregate harvest health is `Failed`.
   - Use this for release publishing, static export, and CI smoke hosts where publishing empty or untrustworthy docs is worse than a failed build.
   - Do not use this expecting `Empty` or `Degraded` to fail in v1. Empty docs can be intentional, and degraded docs can still be usable.
+- `RazorDocs:Harvest:Health:ExposeRoutes`
+  - Defaults to `DevelopmentOnly`.
+  - Controls whether `{DocsRootPath}/_health` and `{DocsRootPath}/_health.json` return health responses.
+  - RazorDocs always reserves the endpoint patterns before the docs catch-all route so health URLs do not fall through to document lookup.
+  - `Always` exposes the responses in non-development environments; protect the endpoints at the host boundary when they are publicly reachable.
+  - `Never` keeps the reserved endpoints returning `404`, including in development.
+- `RazorDocs:Harvest:Health:ShowChrome`
+  - Defaults to `DevelopmentOnly`.
+  - Controls whether the built-in sidebar shows health status chrome.
+  - This is independent from `ExposeRoutes` so machine-readable checks and visible docs chrome can be configured separately.
+  - If routes are hidden for the current environment, the sidebar renders status-only chrome without an `href`.
 - `RazorDocs:Routing:RouteRootPath`
   - Controls the route-family root for stable entry, archive, and exact-version routes.
   - Defaults to `/docs` when versioning is on.

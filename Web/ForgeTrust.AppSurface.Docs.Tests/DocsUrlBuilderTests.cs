@@ -40,6 +40,8 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs/versions", disabledBuilder.DocsVersionsRootPath);
         Assert.Equal("/docs/search", disabledBuilder.Routes.Search);
         Assert.Equal("/docs/search-index.json?refresh=1", disabledBuilder.Routes.SearchIndexRefresh);
+        Assert.Equal("/docs/_health", disabledBuilder.Routes.Health);
+        Assert.Equal("/docs/_health.json", disabledBuilder.Routes.HealthJson);
         Assert.Equal("/docs/versions", disabledBuilder.Routes.Versions);
         Assert.Equal("/docs", enabledBuilder.RouteRootPath);
         Assert.Equal("/docs/next", enabledBuilder.CurrentDocsRootPath);
@@ -89,6 +91,8 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/foo/bar", disabledBuilder.RouteRootPath);
         Assert.Equal("/foo/bar", disabledBuilder.CurrentDocsRootPath);
         Assert.Equal("/foo/bar/search", disabledBuilder.Routes.Search);
+        Assert.Equal("/foo/bar/_health", disabledBuilder.BuildHealthUrl());
+        Assert.Equal("/foo/bar/_health.json", disabledBuilder.BuildHealthJsonUrl());
         Assert.Equal("/foo/bar/versions", disabledBuilder.Routes.Versions);
         Assert.Equal("/foo/bar", enabledBuilder.RouteRootPath);
         Assert.Equal("/foo/bar/next", enabledBuilder.CurrentDocsRootPath);
@@ -141,6 +145,71 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/versions", builder.BuildVersionsUrl());
         Assert.Equal("/v/1.2.3", builder.BuildVersionRootUrl("1.2.3"));
         Assert.Equal("/next/search-index.json?refresh=1", builder.Routes.SearchIndexRefresh);
+        Assert.Equal("/next/_health", builder.Routes.Health);
+        Assert.Equal("/next/_health.json", builder.Routes.HealthJson);
+    }
+
+    [Fact]
+    public void Routes_ShouldSupportInitOnlyNamedConstruction()
+    {
+        var routes = new RazorDocsRouteReferences
+        {
+            Home = "/docs",
+            Search = "/docs/search",
+            SearchIndex = "/docs/search-index.json",
+            SearchIndexRefresh = "/docs/search-index.json?refresh=1",
+            Versions = "/docs/versions",
+            Health = "/docs/_health",
+            HealthJson = "/docs/_health.json"
+        };
+
+        Assert.Equal("/docs", routes.Home);
+        Assert.Equal("/docs/_health", routes.Health);
+        Assert.Equal("/docs/_health.json", routes.HealthJson);
+    }
+
+    [Fact]
+    public void Routes_ShouldPreserveConstructorAndDeconstructionCompatibility()
+    {
+        var routes = new RazorDocsRouteReferences(
+            "/docs",
+            "/docs/search",
+            "/docs/search-index.json",
+            "/docs/search-index.json?refresh=1",
+            "/docs/versions");
+
+        var (home, search, searchIndex, searchIndexRefresh, versions) = routes;
+
+        Assert.Equal("/docs", home);
+        Assert.Equal("/docs/search", search);
+        Assert.Equal("/docs/search-index.json", searchIndex);
+        Assert.Equal("/docs/search-index.json?refresh=1", searchIndexRefresh);
+        Assert.Equal("/docs/versions", versions);
+        Assert.Equal(string.Empty, routes.Health);
+        Assert.Equal(string.Empty, routes.HealthJson);
+    }
+
+    [Fact]
+    public void Routes_ShouldRoundTripHealthRoutes_ForFullConstructorAndDeconstruct()
+    {
+        var routes = new RazorDocsRouteReferences(
+            "/docs",
+            "/docs/search",
+            "/docs/search-index.json",
+            "/docs/search-index.json?refresh=1",
+            "/docs/versions",
+            "/docs/_health",
+            "/docs/_health.json");
+
+        var (home, search, searchIndex, searchIndexRefresh, versions, health, healthJson) = routes;
+
+        Assert.Equal("/docs", home);
+        Assert.Equal("/docs/search", search);
+        Assert.Equal("/docs/search-index.json", searchIndex);
+        Assert.Equal("/docs/search-index.json?refresh=1", searchIndexRefresh);
+        Assert.Equal("/docs/versions", versions);
+        Assert.Equal("/docs/_health", health);
+        Assert.Equal("/docs/_health.json", healthJson);
     }
 
     [Fact]
