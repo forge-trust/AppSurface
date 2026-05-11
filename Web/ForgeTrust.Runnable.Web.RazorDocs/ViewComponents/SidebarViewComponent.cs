@@ -11,6 +11,11 @@ namespace ForgeTrust.Runnable.Web.RazorDocs.ViewComponents;
 /// <summary>
 /// A view component that renders the sidebar navigation for public documentation sections.
 /// </summary>
+/// <remarks>
+/// The component returns a <see cref="DocSidebarViewModel"/> whose <see cref="DocSidebarViewModel.Sections"/> contain
+/// normalized public section links and whose <see cref="DocSidebarViewModel.HarvestHealth"/> is populated only when
+/// harvest health chrome is visible for the configured options and host environment.
+/// </remarks>
 public class SidebarViewComponent : ViewComponent
 {
     private readonly DocAggregator _aggregator;
@@ -24,9 +29,11 @@ public class SidebarViewComponent : ViewComponent
     /// </summary>
     /// <remarks>
     /// This is the convenience overload for callers that only have <see cref="RazorDocsOptions" /> available. It
-    /// creates a fresh <see cref="DocsUrlBuilder"/> from those options, which is suitable for direct construction in
-    /// tests or ad hoc usage but does not reuse any shared builder instance already registered in dependency
-    /// injection.
+    /// creates a fresh <see cref="DocsUrlBuilder"/> from those options and a fallback <see cref="IWebHostEnvironment"/>
+    /// initialized to <see cref="Environments.Production"/>. This is suitable for direct construction in tests or ad
+    /// hoc usage but does not reuse any shared builder instance or inherit any development chrome or local defaults
+    /// already registered in dependency injection. Pitfall: tests or ad hoc hosts that expect development behavior must
+    /// supply their own <see cref="IWebHostEnvironment"/> through the other constructor overload.
     /// </remarks>
     /// <param name="aggregator">The documentation aggregator used to retrieve document nodes.</param>
     /// <param name="options">Typed RazorDocs options used for optional namespace prefix simplification settings.</param>
@@ -73,9 +80,21 @@ public class SidebarViewComponent : ViewComponent
     }
 
     /// <summary>
-    /// Retrieves the normalized public sections and shapes them into the sidebar display model.
+    /// Retrieves the normalized public sections and optional harvest health chrome, then shapes them into the sidebar
+    /// display model.
     /// </summary>
-    /// <returns>A view result containing the section-first sidebar view model.</returns>
+    /// <remarks>
+    /// <see cref="InvokeAsync"/> returns a <see cref="DocSidebarViewModel"/> whose sections come from normalized public
+    /// section snapshots and whose <see cref="DocSidebarViewModel.HarvestHealth"/> value is resolved by
+    /// <see cref="ResolveHarvestHealthAsync"/>. Harvest health is controlled by
+    /// <see cref="RazorDocsHarvestHealthVisibility"/> and may be <c>null</c> when chrome is hidden. When present, it
+    /// contains a <see cref="DocSidebarHarvestHealthViewModel.Status"/>,
+    /// <see cref="DocSidebarHarvestHealthViewModel.Ok"/>, and an optional
+    /// <see cref="DocSidebarHarvestHealthViewModel.Href"/>. The href is omitted when chrome is visible but health
+    /// routes are not exposed. Health resolution uses <see cref="DocAggregator.GetHarvestHealthAsync(CancellationToken)"/>,
+    /// links with <see cref="DocsUrlBuilder.BuildHealthUrl"/>, and observes the current request's aborted token.
+    /// </remarks>
+    /// <returns>A view result containing the section-first sidebar view model and optional harvest health chrome.</returns>
     public async Task<IViewComponentResult> InvokeAsync()
     {
         var sections = await _aggregator.GetPublicSectionsAsync();
@@ -102,6 +121,19 @@ public class SidebarViewComponent : ViewComponent
         return View(new DocSidebarViewModel { Sections = sidebarSections, HarvestHealth = harvestHealth });
     }
 
+    /// <summary>
+    /// Resolves the optional harvest health chrome view model for the current sidebar request.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when <see cref="RazorDocsHarvestHealthVisibility.ShouldShowChrome(RazorDocsOptions, IHostEnvironment)"/>
+    /// hides chrome. Otherwise it reads the current harvest snapshot through
+    /// <see cref="DocAggregator.GetHarvestHealthAsync(CancellationToken)"/>, maps the status and verification result,
+    /// and supplies an href from <see cref="DocsUrlBuilder.BuildHealthUrl"/> only when
+    /// <see cref="RazorDocsHarvestHealthVisibility.AreRoutesExposed(RazorDocsOptions, IHostEnvironment)"/> exposes the
+    /// operator route. The aggregation wait respects <see cref="HttpContext.RequestAborted"/> when a view context is
+    /// available.
+    /// </remarks>
+    /// <returns>The sidebar harvest health view model, or <c>null</c> when chrome is hidden.</returns>
     private async Task<DocSidebarHarvestHealthViewModel?> ResolveHarvestHealthAsync()
     {
         if (!RazorDocsHarvestHealthVisibility.ShouldShowChrome(_options, _environment))
