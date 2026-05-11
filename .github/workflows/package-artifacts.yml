@@ -1,0 +1,46 @@
+name: Package Artifacts
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      package-version:
+        description: Exact prerelease package version to pack and validate.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Verify package artifacts
+        env:
+          PACKAGE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs['package-version'] || format('0.0.0-ci.{0}', github.run_number) }}
+        run: |
+          dotnet run --project tools/ForgeTrust.Runnable.PackageIndex/ForgeTrust.Runnable.PackageIndex.csproj -- \
+            verify-packages \
+            --package-version "$PACKAGE_VERSION" \
+            --artifacts-output "$RUNNER_TEMP/package-artifacts" \
+            --report "$RUNNER_TEMP/package-artifacts/package-validation-report.md"
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runnable-package-artifacts-${{ github.event_name == 'workflow_dispatch' && inputs['package-version'] || format('0.0.0-ci.{0}', github.run_number) }}
+          path: ${{ runner.temp }}/package-artifacts

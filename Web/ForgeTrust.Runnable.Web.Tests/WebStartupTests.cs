@@ -544,6 +544,7 @@ public class WebStartupTests
         startup.WithOptions(o =>
         {
             o.Cors.EnableCors = true;
+            o.Cors.EnableAllOriginsInDevelopment = false;
             o.Cors.AllowedOrigins = []; // Empty
         });
 
