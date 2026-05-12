@@ -155,20 +155,20 @@ Do not file suspected vulnerabilities, leaked secrets, or exploit details in pub
 
 ## Examples
 
-The [examples](examples) directory contains sample applications that demonstrate
+The [examples](examples/README.md) directory contains sample applications that demonstrate
 how to use this project.
 
-- [Console app example](examples/console-app) – builds a simple command line
+- [Console app example](examples/console-app/README.md) – builds a simple command line
   application using [CliFx](https://github.com/Tyrrrz/CliFx) for command
   definitions.
-- [Web app example](examples/web-app) – shows a minimal ASP.NET Core app that
+- [Web app example](examples/web-app/README.md) – shows a minimal ASP.NET Core app that
   composes middleware and endpoints from modules.
-- [Config validation example](examples/config-validation) – shows scalar
+- [Config validation example](examples/config-validation/README.md) – shows scalar
   validation on a strongly typed config wrapper and the startup failure shape.
 
 ## License
 
-AppSurface is licensed under the [Polyform Small Business License 1.0.0](./LICENSE).
+AppSurface is licensed under the [Polyform Small Business License 1.0.0](./licensing.md).
 
 Free for individuals and businesses with fewer than 100 people and under
 $1,000,000 USD prior-year revenue (inflation-adjusted). Larger companies

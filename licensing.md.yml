@@ -1,11 +1,13 @@
 title: AppSurface licensing
 summary: Explains the OSS license boundary, commercial purchase intent, and package-readiness signals.
-audience:
-  - adopters
+audience: adopters
+keywords:
   - maintainers
   - commercial buyers
+  - Polyform Small Business License
+  - commercial purchase
 status: draft
-related:
+related_pages:
   - packages/package-index.yml
   - packages/README.md
   - releases/upgrade-policy.md
