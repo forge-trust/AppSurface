@@ -1,6 +1,6 @@
 # AppSurface licensing
 
-AppSurface and RazorWire are intended for public OSS adoption and commercial purchase/support. Until the first tagged package release, treat the repository license as the source-of-truth grant for source use and treat commercial terms as a separate agreement from ForgeTrust.
+AppSurface and RazorWire are intended for public OSS adoption and commercial purchase/support. The current OSS grant is the Polyform Small Business License 1.0.0; the canonical license text lives in the repository [`LICENSE`](./LICENSE) file. Until the first tagged package release, treat the repository license as the source-of-truth grant for source use and treat commercial terms as a separate agreement from ForgeTrust.
 
 ## What the OSS license covers
 

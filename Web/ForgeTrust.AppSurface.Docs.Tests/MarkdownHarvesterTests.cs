@@ -111,6 +111,23 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldIncludeRootLicenseFile()
+    {
+        // Arrange
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, "LICENSE"), "# License\n\nLicense terms.");
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, "Guide.md"), "# Guide");
+
+        // Act
+        var results = await _harvester.HarvestAsync(_testRoot);
+
+        // Assert
+        var license = Assert.Single(results, node => string.Equals(node.Path, "LICENSE", StringComparison.Ordinal));
+        Assert.Equal("LICENSE", license.Title);
+        Assert.Contains("<h1 id=\"license\">License</h1>", license.Content);
+        Assert.Contains("License terms.", license.Content);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldParseFrontMatterMetadata_AndRemoveItFromRenderedHtml()
     {
         var content = """

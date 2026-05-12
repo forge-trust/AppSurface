@@ -830,6 +830,63 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_CdnMode_Should_Leave_Source_Navigation_Anchors_Unvalidated_And_Unrewritten()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new SourceNavigationAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            Assert.Contains("""<a href="./Program.cs">Program</a>""", indexHtml, StringComparison.Ordinal);
+            Assert.DoesNotContain("./Program.cs.html", indexHtml, StringComparison.Ordinal);
+            Assert.DoesNotContain(context.RouteOutcomes.Keys, route => route == "/Program.cs");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Not_Rewrite_Anchors_With_DataRwExportIgnore()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new ExportIgnoreAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            Assert.Contains("""<a href="./source.txt" data-rw-export-ignore="true">Source</a>""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""<a href="/about.html">About</a>""", indexHtml, StringComparison.Ordinal);
+            Assert.DoesNotContain("./source.txt.html", indexHtml, StringComparison.Ordinal);
+            Assert.DoesNotContain(context.RouteOutcomes.Keys, route => route == "/source.txt");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_HybridMode_Should_Continue_When_Managed_Dependency_Is_Missing()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -922,6 +979,44 @@ public class ExportEngineTests
 
         Assert.Equal("/docs", reference.Path);
         Assert.Equal("#usage", reference.Fragment);
+    }
+
+    [Fact]
+    public void ExtractReferences_Should_Ignore_Anchors_Marked_For_Export_Ignore()
+    {
+        var html = """
+            <a href="./source.txt" data-rw-export-ignore="true">Source</a>
+            <a data-rw-export-ignore href="./source.bin">Source</a>
+            <a href="./README.md">Readme</a>
+            """;
+
+        var reference = Assert.Single(_sut.ExtractReferences(
+            html,
+            "/docs/Web/ForgeTrust.AppSurface.Docs.Standalone/README.md",
+            htmlScope: true));
+
+        Assert.Equal(ExportReferenceKind.AnchorHref, reference.Kind);
+        Assert.Equal("./README.md", reference.RawValue);
+        Assert.Equal("/docs/Web/ForgeTrust.AppSurface.Docs.Standalone/README.md", reference.Path);
+    }
+
+    [Fact]
+    public void ExtractReferences_Should_Ignore_Relative_Source_Navigation_Anchors()
+    {
+        var html = """
+            <a href="./Program.cs">Program</a>
+            <a href="../Project.csproj?plain=1#top">Project</a>
+            <a href="/downloads/Program.cs">Download</a>
+            """;
+
+        var reference = Assert.Single(_sut.ExtractReferences(
+            html,
+            "/docs/Web/ForgeTrust.AppSurface.Docs.Standalone/README.md.html",
+            htmlScope: true));
+
+        Assert.Equal(ExportReferenceKind.AnchorHref, reference.Kind);
+        Assert.Equal("/downloads/Program.cs", reference.RawValue);
+        Assert.Equal("/downloads/Program.cs", reference.Path);
     }
 
     [Fact]
@@ -1345,6 +1440,40 @@ public class ExportEngineTests
             var path = request.RequestUri?.AbsolutePath ?? "/";
             return path == "/" || path == "/index"
                 ? Html("""<html><body><a href="/missing-page">Missing page</a></body></html>""")
+                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class SourceNavigationAnchorHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path == "/" || path == "/index"
+                ? Html("""<html><body><a href="./Program.cs">Program</a></body></html>""")
+                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class ExportIgnoreAnchorHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <a href="./source.txt" data-rw-export-ignore="true">Source</a>
+                        <a href="/about">About</a>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return path == "/about"
+                ? Html("<html><body><h1>About</h1></body></html>")
                 : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         }
     }

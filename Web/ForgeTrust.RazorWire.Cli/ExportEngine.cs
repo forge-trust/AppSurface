@@ -18,8 +18,29 @@ public class ExportEngine
     private static readonly Uri ManagedUrlBase = new("http://dummy");
 
     // Compiled Regexes for performance
-    private static readonly Regex AnchorHrefRegex = new(
-        @"<a[^>]*\shref\s*=\s*(['""])(.*?)\1",
+    private const string ExportIgnoreAttributeName = "data-rw-export-ignore";
+    private static readonly HashSet<string> SourceNavigationAnchorExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".cs",
+        ".cshtml",
+        ".csproj",
+        ".fs",
+        ".fsproj",
+        ".props",
+        ".razor",
+        ".sln",
+        ".slnx",
+        ".targets",
+        ".vb",
+        ".vbproj",
+    };
+
+    private static readonly Regex AnchorTagRegex = new(
+        @"<a\b[^>]*>",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ExportIgnoreAttributeRegex = new(
+        @"\s" + ExportIgnoreAttributeName + @"(?:\s*=\s*(?:""[^""]*""|'[^']*'|[^\s>]+))?(?=\s|/?>)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex TurboFrameSrcRegex = new(
@@ -828,11 +849,8 @@ public class ExportEngine
     /// <param name="currentRoute">The route used to resolve relative anchor URLs and record source provenance.</param>
     internal void ExtractLinks(string html, ExportContext context, string currentRoute = "/")
     {
-        var references = AnchorHrefRegex.Matches(html)
-            .Select(m => CreateReference(m.Groups[2].Value.Trim(), ExportReferenceKind.AnchorHref, currentRoute))
-            .Where(r => r is not null)
-            .Select(r => r!);
-
+        var references = new List<ExportReference>();
+        AddAnchorReferences(references, html, currentRoute);
         AddReferencesAndQueue(references, context);
     }
 
@@ -873,7 +891,9 @@ public class ExportEngine
     /// <param name="currentRoute">The normalized route that owns <paramref name="content"/>, used to resolve relative URLs and record provenance.</param>
     /// <param name="htmlScope">
     /// <c>true</c> scans HTML surfaces including anchors, Turbo Frames, scripts, supported link tags, image sources, <c>srcset</c>
-    /// candidates, style blocks, and style attributes. <c>false</c> scans only CSS <c>url(...)</c> references.
+    /// candidates, style blocks, and style attributes. Anchors marked with <c>data-rw-export-ignore</c>, and relative anchors
+    /// pointing at common source or project file extensions, are skipped so authoring-only source-navigation links can remain
+    /// clickable without becoming CDN dependencies. <c>false</c> scans only CSS <c>url(...)</c> references.
     /// </param>
     /// <returns>
     /// References with managed root-relative paths only. External URLs, protocol-relative URLs, hash-only references, data URLs,
@@ -885,7 +905,7 @@ public class ExportEngine
 
         if (htmlScope)
         {
-            AddReferencesFromMatches(references, AnchorHrefRegex.Matches(content), ExportReferenceKind.AnchorHref, currentRoute);
+            AddAnchorReferences(references, content, currentRoute);
             AddReferencesFromMatches(references, TurboFrameSrcRegex.Matches(content), ExportReferenceKind.TurboFrameSrc, currentRoute);
             AddReferencesFromMatches(references, ScriptSrcRegex.Matches(content), ExportReferenceKind.ScriptSrc, currentRoute);
             AddLinkReferences(references, content, currentRoute);
@@ -924,6 +944,46 @@ public class ExportEngine
         {
             AddReference(references, match.Groups[2].Value.Trim(), kind, currentRoute);
         }
+    }
+
+    private void AddAnchorReferences(ICollection<ExportReference> references, string html, string currentRoute)
+    {
+        foreach (var tag in AnchorTagRegex.Matches(html).Select(m => m.Value))
+        {
+            var hrefMatch = LinkHrefRegex.Match(tag);
+            if (!hrefMatch.Success)
+            {
+                continue;
+            }
+
+            var href = hrefMatch.Groups[2].Value.Trim();
+            if (ShouldIgnoreAnchorReference(tag, href))
+            {
+                _logger.LogDebug("Skipping source-navigation anchor href {Href} from {CurrentRoute}.", href, currentRoute);
+                continue;
+            }
+
+            AddReference(references, href, ExportReferenceKind.AnchorHref, currentRoute);
+        }
+    }
+
+    private static bool ShouldIgnoreAnchorReference(string tag, string href)
+    {
+        return ExportIgnoreAttributeRegex.IsMatch(tag) || IsSourceNavigationAnchorHref(href);
+    }
+
+    private static bool IsSourceNavigationAnchorHref(string href)
+    {
+        if (string.IsNullOrWhiteSpace(href)
+            || href.StartsWith('/')
+            || Uri.TryCreate(href, UriKind.Absolute, out _))
+        {
+            return false;
+        }
+
+        var pathEnd = href.IndexOfAny(['?', '#']);
+        var pathOnly = pathEnd >= 0 ? href[..pathEnd] : href;
+        return SourceNavigationAnchorExtensions.Contains(Path.GetExtension(pathOnly));
     }
 
     private void AddLinkReferences(ICollection<ExportReference> references, string html, string currentRoute)
@@ -1080,7 +1140,7 @@ public class ExportEngine
 
     private string RewriteHtmlReferences(string html, string currentRoute, ExportContext context)
     {
-        var rewritten = RewriteSimpleAttributeReferences(html, AnchorHrefRegex, ExportReferenceKind.AnchorHref, currentRoute, context);
+        var rewritten = RewriteAnchorReferences(html, currentRoute, context);
         rewritten = RewriteSimpleAttributeReferences(rewritten, TurboFrameSrcRegex, ExportReferenceKind.TurboFrameSrc, currentRoute, context);
         rewritten = RewriteSimpleAttributeReferences(rewritten, ScriptSrcRegex, ExportReferenceKind.ScriptSrc, currentRoute, context);
         rewritten = RewriteLinkReferences(rewritten, currentRoute, context);
@@ -1112,6 +1172,34 @@ public class ExportEngine
         return regex.Replace(
             html,
             match => RewriteMatchedRawValue(match, match.Groups[2].Value.Trim(), kind, currentRoute, context));
+    }
+
+    private string RewriteAnchorReferences(string html, string currentRoute, ExportContext context)
+    {
+        return AnchorTagRegex.Replace(
+            html,
+            match =>
+            {
+                var tag = match.Value;
+                var hrefMatch = LinkHrefRegex.Match(tag);
+                if (!hrefMatch.Success)
+                {
+                    return tag;
+                }
+
+                if (ShouldIgnoreAnchorReference(tag, hrefMatch.Groups[2].Value.Trim()))
+                {
+                    return tag;
+                }
+
+                var rewrittenHref = RewriteMatchedRawValue(
+                    hrefMatch,
+                    hrefMatch.Groups[2].Value.Trim(),
+                    ExportReferenceKind.AnchorHref,
+                    currentRoute,
+                    context);
+                return tag.Replace(hrefMatch.Value, rewrittenHref, StringComparison.Ordinal);
+            });
     }
 
     private string RewriteLinkReferences(string html, string currentRoute, ExportContext context)

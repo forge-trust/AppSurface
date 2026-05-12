@@ -12,7 +12,7 @@ This project is the thin executable wrapper around the reusable [ForgeTrust.AppS
 
 ## Entry Point
 
-The app boots through [`Program.cs`](./Program.cs), which delegates to `RazorDocsStandaloneHost`.
+The app boots through [Program.cs](./Program.cs), which delegates to `RazorDocsStandaloneHost`.
 `RazorDocsStandaloneHost` is the reusable host entry point for this executable:
 
 - `RunAsync(string[] args)` starts the standalone app and is what `Program.cs` uses.
