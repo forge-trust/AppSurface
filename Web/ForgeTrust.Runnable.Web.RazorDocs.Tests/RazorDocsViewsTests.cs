@@ -192,6 +192,10 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-content--markdown ul,", tailwindEntryStylesheet);
         Assert.Contains("list-style: disc;", tailwindEntryStylesheet);
         Assert.Contains("list-style: decimal;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown li", tailwindEntryStylesheet);
+        Assert.Contains("min-width: 0;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content pre", tailwindEntryStylesheet);
+        Assert.Contains("max-width: 100%;", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown blockquote", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown :not(pre) > code", tailwindEntryStylesheet);
     }
