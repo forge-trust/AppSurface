@@ -68,6 +68,21 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 - Do not add semantic classes to static package chrome when plain utilities are clearer and the styling is truly local.
 - Do not place non-search primitives in `wwwroot/docs/search.css` just because the layout loads search assets globally today. Use `wwwroot/css/app.css` for shared components so future theming can target one stable package layer.
 
+## Details Page Heading Ownership
+
+RazorDocs details pages render the page title in the package-owned shell for authored Markdown pages. The title comes from `DocDetailsViewModel.Title`, which resolves metadata `title` first, then a leading Markdown H1, then the harvested file or folder fallback.
+
+Because the shell already owns the semantic page H1, `Views/Docs/Details.cshtml` suppresses only a leading rendered Markdown `<h1>` from the harvested body before writing `.docs-content`. This keeps source Markdown portable for GitHub and editor previews, where a top `# Title` is still useful, without showing duplicate page headings in RazorDocs.
+
+The suppression is intentionally narrow:
+
+- It runs only when the details shell renders the H1. C# API reference pages keep their harvested body heading because the shell hides its top H1 for generated API content.
+- It removes only the first body element when that element is an H1. Later H1 elements remain visible because they are body structure, not duplicated chrome.
+- It happens at render time. `DocNode.Content`, search extraction, and outline generation still see the harvested document as produced by the harvester.
+- A leading Markdown H1 still participates in title resolution when explicit metadata `title` is absent, so README-style pages keep their authored title in the shell after the body H1 is suppressed.
+
+Pitfall: do not work around duplicate headings by removing the source `# Title` from README-style pages. That makes the file worse outside RazorDocs. Let the RazorDocs shell suppress the rendered duplicate instead.
+
 ## Syntax-highlighted code blocks
 
 RazorDocs renders fenced Markdown code blocks during Markdown harvest. Supported languages are highlighted server-side, so normal docs pages and exported docs do not need client-side Prism, highlight.js, or Shiki initialization after navigation.

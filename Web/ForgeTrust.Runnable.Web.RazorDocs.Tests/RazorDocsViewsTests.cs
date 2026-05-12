@@ -1587,6 +1587,43 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task DetailsView_ShouldSuppressLeadingMarkdownH1_WhenShellOwnsPageH1()
+    {
+        var doc = new DocNode(
+            "Quickstart",
+            "guides/quickstart.md",
+            "<h1 id=\"quickstart\">Quickstart</h1>\n<p>Start here.</p>");
+
+        var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var headings = document.QuerySelectorAll("h1").ToArray();
+
+        var heading = Assert.Single(headings);
+        Assert.Equal("Quickstart", heading.TextContent.Trim());
+        Assert.Null(heading.Id);
+        Assert.Contains("Start here.", html);
+        Assert.DoesNotContain("id=\"quickstart\"", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldKeepLeadingDocumentH1_WhenShellDoesNotOwnPageH1()
+    {
+        var doc = new DocNode(
+            "Example",
+            "src/Example.cs",
+            "<h1 id=\"example-api\">Example API</h1>\n<p>Example body</p>",
+            Metadata: new DocMetadata { NavGroup = "API Reference" });
+
+        var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var heading = Assert.Single(document.QuerySelectorAll("h1"));
+
+        Assert.Equal("example-api", heading.Id);
+        Assert.Equal("Example API", heading.TextContent.Trim());
+        Assert.Contains("Example body", html);
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldMarkMarkdownAndApiContent_ForSurfaceSpecificProseStyling()
     {
         using var services = CreateServiceProvider(CreateDocs());

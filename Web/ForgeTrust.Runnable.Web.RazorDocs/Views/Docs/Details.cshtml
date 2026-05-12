@@ -42,6 +42,10 @@
         })
         .ToList();
     var hasOutline = outlineItems.Count > 0;
+    var documentContent = ResolveGeneratedContentHrefs(Model.Document.Content);
+    var visibleDocumentContent = ForgeTrust.Runnable.Web.RazorDocs.Services.RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(
+        documentContent,
+        shellOwnsH1: !Model.IsCSharpApiDoc);
 }
 @functions {
     private static readonly System.Text.RegularExpressions.Regex RootedSymbolSourceLinkRegex = new(
@@ -373,7 +377,7 @@
 
         <div class="docs-content @(Model.IsApiSurfaceDoc ? "docs-content--api" : "docs-content--markdown")">
             @* Safe: Content is sanitized by DocAggregator before caching. *@
-            @Html.Raw(ResolveGeneratedContentHrefs(Model.Document.Content))
+            @Html.Raw(visibleDocumentContent)
         </div>
 
         @if (Model.HasWayfinding)

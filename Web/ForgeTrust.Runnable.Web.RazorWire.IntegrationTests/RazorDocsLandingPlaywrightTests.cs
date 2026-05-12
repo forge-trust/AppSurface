@@ -72,7 +72,7 @@ public sealed class RazorDocsLandingPlaywrightTests
             page,
             "/docs/examples/web-app/README.md.html",
             "Show me a working app, not just abstractions",
-            "web-app",
+            "Web app example",
             "EXAMPLE");
         await AssertFeaturedCardAsync(
             page,

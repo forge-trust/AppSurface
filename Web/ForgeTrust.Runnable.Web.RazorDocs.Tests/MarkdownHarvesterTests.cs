@@ -90,7 +90,7 @@ public class MarkdownHarvesterTests : IDisposable
 
         // Assert
         Assert.Single(results);
-        Assert.Contains(results, n => n.Title == ".hidden");
+        Assert.Contains(results, n => n.Title == "Hidden");
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public class MarkdownHarvesterTests : IDisposable
         var doc = results.Single();
 
         // Assert
-        Assert.Equal("Test", doc.Title);
+        Assert.Equal("Hello World", doc.Title);
         Assert.Contains("<h1 id=\"hello-world\">Hello World</h1>", doc.Content);
         Assert.Contains("<em>test</em>", doc.Content);
     }
@@ -792,7 +792,7 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
-    public async Task HarvestAsync_ShouldUseParentDirNameForREADME()
+    public async Task HarvestAsync_ShouldUseLeadingH1ForNestedREADME()
     {
         // Arrange
         var subDir = Path.Combine(_testRoot, "Components");
@@ -804,11 +804,11 @@ public class MarkdownHarvesterTests : IDisposable
 
         // Assert
         var doc = results.Single(n => n.Path.Contains("README.md"));
-        Assert.Equal("Components", doc.Title);
+        Assert.Equal("Components Guide", doc.Title);
     }
 
     [Fact]
-    public async Task HarvestAsync_ShouldReturnHomeForRootREADME()
+    public async Task HarvestAsync_ShouldUseLeadingH1ForRootREADME()
     {
         // Arrange
         await File.WriteAllTextAsync(Path.Combine(_testRoot, "README.md"), "# Project Home");
@@ -817,8 +817,24 @@ public class MarkdownHarvesterTests : IDisposable
         var results = (await _harvester.HarvestAsync(_testRoot)).ToList();
 
         // Assert
-        var doc = results.Single(n => n.Title == "Home");
-        Assert.Equal("Home", doc.Title);
+        var doc = results.Single(n => n.Path == "README.md");
+        Assert.Equal("Project Home", doc.Title);
+    }
+
+    [Fact]
+    public void ExtractLeadingTitle_ShouldReturnNull_WhenFirstBlockIsNotH1()
+    {
+        var document = Markdown.Parse("Intro first.\n\n# Later Title");
+
+        Assert.Null(MarkdownHarvester.ExtractLeadingTitle(document));
+    }
+
+    [Fact]
+    public void ExtractLeadingTitle_ShouldNormalizeInlineHeadingText()
+    {
+        var document = Markdown.Parse("# Hello `Runnable`   World");
+
+        Assert.Equal("Hello Runnable World", MarkdownHarvester.ExtractLeadingTitle(document));
     }
 
     [Fact]
