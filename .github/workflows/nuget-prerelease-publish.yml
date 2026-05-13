@@ -72,10 +72,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          required_reviewer_rules="$(gh api "repos/${GITHUB_REPOSITORY}/environments/nuget-prerelease" \
-            --jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length')"
-          prevent_self_review_rules="$(gh api "repos/${GITHUB_REPOSITORY}/environments/nuget-prerelease" \
-            --jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == true)] | length')"
+          if ! environment_json="$(gh api "repos/${GITHUB_REPOSITORY}/environments/nuget-prerelease")"; then
+            echo "Environment 'nuget-prerelease' must exist before prerelease publishing can run." >&2
+            exit 1
+          fi
+
+          required_reviewer_rules="$(jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' <<< "${environment_json}")"
+          prevent_self_review_rules="$(jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == true)] | length' <<< "${environment_json}")"
 
           if [[ "${required_reviewer_rules}" -lt 1 ]]; then
             echo "Environment 'nuget-prerelease' must exist with required reviewers before prerelease publishing can run." >&2

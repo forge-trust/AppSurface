@@ -42,6 +42,7 @@ dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurf
   verify-packages \
   --package-version 0.0.0-ci.local \
   --artifacts-output artifacts/packages \
+  --artifact-manifest artifacts/packages/package-artifact-manifest.json \
   --report artifacts/package-validation-report.md
 ```
 

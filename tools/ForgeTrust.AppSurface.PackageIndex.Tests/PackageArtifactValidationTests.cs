@@ -1464,6 +1464,24 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task CliWrapCommandRunner_ReturnsResultWhenProcessCannotStart()
+    {
+        var result = await new CliWrapCommandRunner().RunAsync(
+            new ExternalCommandRequest(
+                "definitely-not-a-real-package-index-command",
+                [],
+                _repositoryRoot,
+                "missing command",
+                "starting missing command",
+                30_000),
+            CancellationToken.None);
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Contains("missing command failed", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("definitely-not-a-real-package-index-command", result.StandardError, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PackagePrereleasePublishWorkflow_PushesArtifactsInManifestOrderAndWritesLedger()
     {
         await WriteFileAsync("packages/package-index.yml",

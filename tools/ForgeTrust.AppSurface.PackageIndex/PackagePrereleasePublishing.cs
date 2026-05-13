@@ -48,6 +48,17 @@ internal sealed class CliWrapCommandRunner : IExternalCommandRunner
                 string.Empty,
                 $"{request.OperationName} timed out after {request.TimeoutMilliseconds} ms while {request.TimeoutDescription}.");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new ExternalCommandResult(
+                -1,
+                string.Empty,
+                $"{request.OperationName} failed while {request.TimeoutDescription}: {ex.Message}");
+        }
     }
 }
 
