@@ -33,6 +33,6 @@ internal static partial class RazorDocsHeadingSuppressor
         return LeadingH1Regex().Replace(content, string.Empty, count: 1);
     }
 
-    [GeneratedRegex(@"\A[\uFEFF\s]*<h1\b[^>]*>.*?</h1>\s*", RegexOptions.IgnoreCase | RegexOptions.Singleline, matchTimeoutMilliseconds: 100)]
+    [GeneratedRegex(@"\A(?:[\uFEFF\s]|<!--.*?-->)*<h1\b[^>]*>.*?</h1>\s*", RegexOptions.IgnoreCase | RegexOptions.Singleline, matchTimeoutMilliseconds: 100)]
     private static partial Regex LeadingH1Regex();
 }

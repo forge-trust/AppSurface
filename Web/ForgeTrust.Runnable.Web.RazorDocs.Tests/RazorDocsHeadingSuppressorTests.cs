@@ -15,6 +15,16 @@ public class RazorDocsHeadingSuppressorTests
     }
 
     [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldRemoveLeadingCommentsAndH1_WhenShellOwnsH1()
+    {
+        var content = "<!-- docs:snippet start -->\n<h1 id=\"quickstart\">Quickstart</h1>\n<p>Body</p>";
+
+        var suppressed = RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal("<p>Body</p>", suppressed);
+    }
+
+    [Fact]
     public void SuppressLeadingMarkdownH1_ShouldKeepLeadingH1_WhenShellDoesNotOwnH1()
     {
         var content = "<h1 id=\"api\">API Reference</h1>\n<p>Body</p>";

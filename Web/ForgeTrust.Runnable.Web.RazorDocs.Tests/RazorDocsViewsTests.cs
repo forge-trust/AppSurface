@@ -1610,6 +1610,25 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public async Task DetailsView_ShouldSuppressLeadingMarkdownH1AfterComment_WhenShellOwnsMetadataTitle()
+    {
+        var doc = new DocNode(
+            "Quickstart",
+            "guides/quickstart.md",
+            "<!-- docs:snippet start -->\n<h1 id=\"quickstart\">Quickstart</h1>\n<p>Start here.</p>",
+            Metadata: new DocMetadata { Title = "Metadata Quickstart" });
+
+        var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var heading = Assert.Single(document.QuerySelectorAll("h1"));
+
+        Assert.Equal("Metadata Quickstart", heading.TextContent.Trim());
+        Assert.Null(document.QuerySelector(".docs-content h1"));
+        Assert.Contains("Start here.", html);
+        Assert.DoesNotContain("id=\"quickstart\"", html);
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldKeepLeadingDocumentH1_WhenShellDoesNotOwnPageH1()
     {
         var doc = new DocNode(

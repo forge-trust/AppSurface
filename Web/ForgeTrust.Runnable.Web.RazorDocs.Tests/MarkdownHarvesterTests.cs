@@ -822,11 +822,39 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldUseLeadingH1AfterHtmlComment()
+    {
+        // Arrange
+        var content = """
+            <!-- docs:snippet start -->
+            # Commented Title
+
+            Body.
+            """;
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, "Commented.md"), content);
+
+        // Act
+        var results = (await _harvester.HarvestAsync(_testRoot)).ToList();
+
+        // Assert
+        var doc = results.Single();
+        Assert.Equal("Commented Title", doc.Title);
+    }
+
+    [Fact]
     public void ExtractLeadingTitle_ShouldReturnNull_WhenFirstBlockIsNotH1()
     {
         var document = Markdown.Parse("Intro first.\n\n# Later Title");
 
         Assert.Null(MarkdownHarvester.ExtractLeadingTitle(document));
+    }
+
+    [Fact]
+    public void ExtractLeadingTitle_ShouldSkipLeadingHtmlComments()
+    {
+        var document = Markdown.Parse("<!-- docs:snippet start -->\n\n# Commented Title");
+
+        Assert.Equal("Commented Title", MarkdownHarvester.ExtractLeadingTitle(document));
     }
 
     [Fact]

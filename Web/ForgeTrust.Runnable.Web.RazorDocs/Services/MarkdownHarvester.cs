@@ -379,13 +379,26 @@ public class MarkdownHarvester : IDocHarvester
     {
         ArgumentNullException.ThrowIfNull(document);
 
-        if (document.FirstOrDefault() is not HeadingBlock { Level: 1 } heading)
+        var firstReaderFacingBlock = document.FirstOrDefault(block => !IsLeadingHtmlCommentBlock(block));
+        if (firstReaderFacingBlock is not HeadingBlock { Level: 1 } heading)
         {
             return null;
         }
 
         var title = NormalizeHeadingText(ExtractInlineText(heading.Inline));
         return string.IsNullOrWhiteSpace(title) ? null : title;
+    }
+
+    private static bool IsLeadingHtmlCommentBlock(Block block)
+    {
+        if (block is not HtmlBlock htmlBlock)
+        {
+            return false;
+        }
+
+        var html = htmlBlock.Lines.ToString();
+        return html.TrimStart().StartsWith("<!--", StringComparison.Ordinal)
+               && html.TrimEnd().EndsWith("-->", StringComparison.Ordinal);
     }
 
     /// <summary>
