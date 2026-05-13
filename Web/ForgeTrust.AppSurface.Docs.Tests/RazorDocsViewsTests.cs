@@ -149,8 +149,15 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-trust-bar", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-link", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-toggle-context", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-context-row--previous", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-toggle-context--rolling", tailwindEntryStylesheet);
+        Assert.Contains("@media (prefers-reduced-motion: reduce)", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-toggle", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-label", tailwindEntryStylesheet);
+        Assert.Contains("@media (max-width: 79.999rem)", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] {\n        position: sticky;", tailwindEntryStylesheet);
+        Assert.DoesNotContain(".docs-outline-shell {\n    order: -1;\n    position: sticky;", tailwindEntryStylesheet);
 
         Assert.DoesNotContain(".docs-page-badge", searchStylesheet);
         Assert.DoesNotContain(".docs-metadata-chip", searchStylesheet);
@@ -159,6 +166,7 @@ public class RazorDocsViewsTests
         Assert.DoesNotContain(".docs-trust-bar", searchStylesheet);
         Assert.DoesNotContain(".docs-outline-shell", searchStylesheet);
         Assert.DoesNotContain(".docs-outline-link", searchStylesheet);
+        Assert.DoesNotContain(".docs-outline-toggle-context", searchStylesheet);
     }
 
     [Fact]
@@ -174,6 +182,12 @@ public class RazorDocsViewsTests
         Assert.Contains("document.addEventListener(\"turbo:frame-load\"", outlineClient);
         Assert.Contains("activeObserver?.disconnect()", outlineClient);
         Assert.Contains("aria-current", outlineClient);
+        Assert.Contains("data-doc-outline-context", outlineClient);
+        Assert.Contains("function setOutlineContext", outlineClient);
+        Assert.Contains("data-doc-outline-previous", outlineClient);
+        Assert.Contains("data-doc-outline-next", outlineClient);
+        Assert.Contains("prefers-reduced-motion: reduce", outlineClient);
+        Assert.Contains("outlineRollDirection", outlineClient);
         Assert.Contains("typeof AbortController === \"function\"", outlineClient);
         Assert.Contains("function addLifecycleEventListener", outlineClient);
         Assert.Contains("removeEventListener", outlineClient);
@@ -2307,6 +2321,13 @@ public class RazorDocsViewsTests
         Assert.Contains("docs-detail-layout--with-outline", html);
         Assert.NotNull(document.QuerySelector("#docs-page-outline.docs-outline-shell"));
         Assert.NotNull(document.QuerySelector(".docs-outline-toggle[aria-controls='docs-page-outline-panel']"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-toggle-label"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-toggle-context[data-doc-outline-context][aria-hidden='true']"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-context-row--previous[data-doc-outline-previous][hidden]"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-context-row--current[data-doc-outline-current]"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-context-row--next[data-doc-outline-next][hidden]"));
+        Assert.Equal("Prev", document.QuerySelector("[data-doc-outline-previous] .docs-outline-context-kicker")?.TextContent.Trim());
+        Assert.Equal("Next", document.QuerySelector("[data-doc-outline-next] .docs-outline-context-kicker")?.TextContent.Trim());
         Assert.NotNull(document.QuerySelector("#docs-page-outline-panel[aria-label='On this page']"));
         Assert.NotNull(document.QuerySelector("a.docs-outline-link[href='#install']"));
         Assert.NotNull(document.QuerySelector("a.docs-outline-link--level-3[href='#verify']"));

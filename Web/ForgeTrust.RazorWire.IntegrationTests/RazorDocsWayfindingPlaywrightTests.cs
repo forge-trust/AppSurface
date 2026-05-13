@@ -653,6 +653,163 @@ public sealed class RazorDocsWayfindingPlaywrightTests
     }
 
     [Fact]
+    public async Task MobileOutline_StickyContextTracksNeighborSections()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var initialState = await page.EvaluateAsync<MobileOutlineContextState>(
+            """
+            () => {
+              const shell = document.getElementById('docs-page-outline');
+              const context = shell?.querySelector('[data-doc-outline-context]');
+              const links = Array.from(shell?.querySelectorAll("a[data-doc-outline-link='true']") ?? []);
+              return {
+                activeIndex: context?.dataset.outlineActiveIndex ?? '',
+                current: shell?.querySelector('[data-doc-outline-current]')?.textContent?.trim() ?? '',
+                previous: shell?.querySelector('[data-doc-outline-previous] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
+                next: shell?.querySelector('[data-doc-outline-next] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
+                previousHidden: Boolean(shell?.querySelector('[data-doc-outline-previous]')?.hidden),
+                nextHidden: Boolean(shell?.querySelector('[data-doc-outline-next]')?.hidden),
+                firstLink: links[0]?.textContent?.trim() ?? '',
+                secondLink: links[1]?.textContent?.trim() ?? '',
+                thirdLink: links[2]?.textContent?.trim() ?? '',
+                shellHeight: shell?.getBoundingClientRect().height ?? 0,
+                position: shell ? getComputedStyle(shell).position : ''
+              };
+            }
+            """);
+
+        Assert.Equal("sticky", initialState.Position);
+        Assert.True(initialState.ShellHeight is >= 44 and <= 76);
+        Assert.Equal("0", initialState.ActiveIndex);
+        Assert.Equal(initialState.FirstLink, initialState.Current);
+        Assert.True(initialState.PreviousHidden);
+        Assert.False(initialState.NextHidden);
+        Assert.Equal(initialState.SecondLink, initialState.Next);
+
+        await page.EvaluateAsync(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              const link = document.querySelectorAll("#docs-page-outline a[data-doc-outline-link='true']")[2];
+              const targetId = link?.getAttribute('href')?.slice(1);
+              const target = targetId ? document.getElementById(targetId) : null;
+              if (!main || !target) {
+                return;
+              }
+
+              const rootTop = main.getBoundingClientRect().top;
+              const targetTop = target.getBoundingClientRect().top;
+              main.scrollTo(0, main.scrollTop + targetTop - rootTop + 90);
+            }
+            """);
+
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('[data-doc-outline-context]')?.dataset.outlineActiveIndex === '2'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var scrolledState = await page.EvaluateAsync<MobileOutlineContextState>(
+            """
+            () => {
+              const shell = document.getElementById('docs-page-outline');
+              const context = shell?.querySelector('[data-doc-outline-context]');
+              const links = Array.from(shell?.querySelectorAll("a[data-doc-outline-link='true']") ?? []);
+              return {
+                activeIndex: context?.dataset.outlineActiveIndex ?? '',
+                current: shell?.querySelector('[data-doc-outline-current]')?.textContent?.trim() ?? '',
+                previous: shell?.querySelector('[data-doc-outline-previous] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
+                next: shell?.querySelector('[data-doc-outline-next] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
+                previousHidden: Boolean(shell?.querySelector('[data-doc-outline-previous]')?.hidden),
+                nextHidden: Boolean(shell?.querySelector('[data-doc-outline-next]')?.hidden),
+                firstLink: links[0]?.textContent?.trim() ?? '',
+                secondLink: links[1]?.textContent?.trim() ?? '',
+                thirdLink: links[2]?.textContent?.trim() ?? '',
+                shellHeight: shell?.getBoundingClientRect().height ?? 0,
+                position: shell ? getComputedStyle(shell).position : '',
+                rollDirection: context?.dataset.outlineRollDirection ?? '',
+                motion: context?.dataset.outlineMotion ?? ''
+              };
+            }
+            """);
+
+        Assert.Equal("2", scrolledState.ActiveIndex);
+        Assert.Equal(scrolledState.SecondLink, scrolledState.Previous);
+        Assert.Equal(scrolledState.ThirdLink, scrolledState.Current);
+        Assert.False(scrolledState.NextHidden);
+        Assert.Equal("down", scrolledState.RollDirection);
+        Assert.Equal("rolling", scrolledState.Motion);
+    }
+
+    [Fact]
+    public async Task MobileOutline_ReducedMotionUpdatesContextWithoutRollingAnimation()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ReducedMotion = ReducedMotion.Reduce,
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        await page.EvaluateAsync(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              const link = document.querySelectorAll("#docs-page-outline a[data-doc-outline-link='true']")[2];
+              const targetId = link?.getAttribute('href')?.slice(1);
+              const target = targetId ? document.getElementById(targetId) : null;
+              if (!main || !target) {
+                return;
+              }
+
+              const rootTop = main.getBoundingClientRect().top;
+              const targetTop = target.getBoundingClientRect().top;
+              main.scrollTo(0, main.scrollTop + targetTop - rootTop + 90);
+            }
+            """);
+
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('[data-doc-outline-context]')?.dataset.outlineActiveIndex === '2'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        Assert.Equal(
+            "reduced",
+            await page.GetAttributeAsync("[data-doc-outline-context]", "data-outline-motion"));
+        Assert.False(await page.Locator("[data-doc-outline-context]").EvaluateAsync<bool>(
+            "element => element.classList.contains('docs-outline-toggle-context--rolling')"));
+    }
+
+    [Fact]
     public async Task MobileSidebar_NavigatesToNeighborPage_AndRestoresOpenButtonFocusOnEscape()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
@@ -729,6 +886,35 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         public int MaxScrollTop { get; init; }
 
         public int DocumentScrollTop { get; init; }
+    }
+
+    private sealed class MobileOutlineContextState
+    {
+        public string ActiveIndex { get; init; } = string.Empty;
+
+        public string Current { get; init; } = string.Empty;
+
+        public string Previous { get; init; } = string.Empty;
+
+        public string Next { get; init; } = string.Empty;
+
+        public bool PreviousHidden { get; init; }
+
+        public bool NextHidden { get; init; }
+
+        public string FirstLink { get; init; } = string.Empty;
+
+        public string SecondLink { get; init; } = string.Empty;
+
+        public string ThirdLink { get; init; } = string.Empty;
+
+        public double ShellHeight { get; init; }
+
+        public string Position { get; init; } = string.Empty;
+
+        public string RollDirection { get; init; } = string.Empty;
+
+        public string Motion { get; init; } = string.Empty;
     }
 
     private const string ScrollMainContentToBottomScript =

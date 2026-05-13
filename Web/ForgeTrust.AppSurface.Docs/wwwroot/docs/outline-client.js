@@ -9,11 +9,14 @@
     const outlineLinkSelector = "a[data-doc-outline-link='true']";
     const compactMediaQuery = "(max-width: 79.999rem)";
     const outlineClickScrollDurationMs = 620;
+    const outlineContextRollDurationMs = 180;
 
     let lifecycleController = null;
     let activeObserver = null;
     let activeLinkAnimationFrame = 0;
     let scrollAnimationFrame = 0;
+    let contextRollTimeout = 0;
+    let lastActiveIndex = -1;
     let fallbackDisposers = [];
 
     function decodeHash(hash) {
@@ -48,24 +51,97 @@
         toggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
     }
 
-    function setActiveLink(links, link, currentLabel) {
+    function clearContextRollTimeout() {
+        if (contextRollTimeout === 0) {
+            return;
+        }
+
+        window.clearTimeout(contextRollTimeout);
+        contextRollTimeout = 0;
+    }
+
+    function setContextRow(row, text) {
+        if (!row) {
+            return;
+        }
+
+        const title = row.querySelector?.("[data-doc-outline-context-title]");
+        if (title) {
+            title.textContent = text;
+        } else {
+            row.textContent = text;
+        }
+
+        row.hidden = !text;
+    }
+
+    function setOutlineContext(context, links, activeIndex) {
+        if (!context?.current) {
+            return;
+        }
+
+        const currentText = activeIndex >= 0 ? links[activeIndex]?.textContent?.trim() ?? "" : "";
+        const previousText = activeIndex > 0 ? links[activeIndex - 1]?.textContent?.trim() ?? "" : "";
+        const nextText = activeIndex >= 0 && activeIndex < links.length - 1
+            ? links[activeIndex + 1]?.textContent?.trim() ?? ""
+            : "";
+
+        setContextRow(context.previous, previousText);
+        setContextRow(context.current, currentText);
+        setContextRow(context.next, nextText);
+
+        if (!context.container) {
+            return;
+        }
+
+        const previousActiveIndex = lastActiveIndex >= 0
+            ? lastActiveIndex
+            : Number.parseInt(context.container.dataset.outlineActiveIndex ?? "", 10);
+
+        context.container.dataset.outlineActiveIndex = activeIndex >= 0 ? String(activeIndex) : "";
+
+        if (activeIndex < 0 || !Number.isFinite(previousActiveIndex) || activeIndex === previousActiveIndex) {
+            lastActiveIndex = activeIndex;
+            context.container.dataset.outlineMotion = "idle";
+            return;
+        }
+
+        const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+        context.container.dataset.outlineRollDirection = activeIndex > previousActiveIndex ? "down" : "up";
+        lastActiveIndex = activeIndex;
+
+        if (reduceMotion) {
+            context.container.dataset.outlineMotion = "reduced";
+            context.container.classList.remove("docs-outline-toggle-context--rolling");
+            return;
+        }
+
+        context.container.dataset.outlineMotion = "rolling";
+        clearContextRollTimeout();
+        context.container.classList.remove("docs-outline-toggle-context--rolling");
+        void context.container.offsetWidth;
+        context.container.classList.add("docs-outline-toggle-context--rolling");
+        contextRollTimeout = window.setTimeout(() => {
+            context.container?.classList.remove("docs-outline-toggle-context--rolling");
+            contextRollTimeout = 0;
+        }, outlineContextRollDurationMs);
+    }
+
+    function setActiveLink(links, link, context) {
+        const activeIndex = link ? links.indexOf(link) : -1;
+
         for (const candidate of links) {
             const isActive = candidate === link;
             candidate.classList.toggle("docs-outline-link--active", isActive);
 
             if (isActive) {
                 candidate.setAttribute("aria-current", "location");
-                if (currentLabel) {
-                    currentLabel.textContent = candidate.textContent?.trim() ?? "";
-                }
             } else {
                 candidate.removeAttribute("aria-current");
             }
         }
 
-        if (!link && currentLabel) {
-            currentLabel.textContent = "";
-        }
+        setOutlineContext(context, links, activeIndex);
 
         keepOutlineLinkVisible(link);
     }
@@ -110,9 +186,9 @@
         return entries.find(entry => getLinkTargetId(entry.link) === targetId) ?? null;
     }
 
-    function refreshHashActiveLink(entries, links, expectedLink, currentLabel) {
+    function refreshHashActiveLink(entries, links, expectedLink, context) {
         if (getActiveEntryFromHash(entries)?.link === expectedLink) {
-            setActiveLink(links, expectedLink, currentLabel);
+            setActiveLink(links, expectedLink, context);
         }
     }
 
@@ -249,26 +325,26 @@
         activeLinkAnimationFrame = 0;
     }
 
-    function updateActiveLinkFromScrollPosition(entries, links, root, currentLabel) {
+    function updateActiveLinkFromScrollPosition(entries, links, root, context) {
         const activeEntry = getActiveEntryFromScrollPosition(entries, root);
         if (activeEntry) {
-            setActiveLink(links, activeEntry.link, currentLabel);
+            setActiveLink(links, activeEntry.link, context);
         }
     }
 
-    function scheduleActiveLinkRefresh(entries, links, root, currentLabel) {
+    function scheduleActiveLinkRefresh(entries, links, root, context) {
         if (activeLinkAnimationFrame !== 0) {
             return;
         }
 
         if (typeof window.requestAnimationFrame !== "function") {
-            updateActiveLinkFromScrollPosition(entries, links, root, currentLabel);
+            updateActiveLinkFromScrollPosition(entries, links, root, context);
             return;
         }
 
         activeLinkAnimationFrame = window.requestAnimationFrame(() => {
             activeLinkAnimationFrame = 0;
-            updateActiveLinkFromScrollPosition(entries, links, root, currentLabel);
+            updateActiveLinkFromScrollPosition(entries, links, root, context);
         });
     }
 
@@ -328,9 +404,11 @@
         cleanupLifecycleEventListeners();
         cancelActiveLinkRefresh();
         cancelScrollAnimation();
+        clearContextRollTimeout();
         disconnectActiveObserver();
         lifecycleController?.abort();
         lifecycleController = null;
+        lastActiveIndex = -1;
     }
 
     function initOutline() {
@@ -344,7 +422,12 @@
         const mainContent = document.getElementById("main-content");
         const primary = shell.parentElement?.querySelector(".docs-detail-primary");
         const toggle = shell.querySelector("[data-doc-outline-toggle='true']");
-        const currentLabel = shell.querySelector("[data-doc-outline-current]");
+        const outlineContext = {
+            container: shell.querySelector("[data-doc-outline-context]"),
+            current: shell.querySelector("[data-doc-outline-current]"),
+            previous: shell.querySelector("[data-doc-outline-previous]"),
+            next: shell.querySelector("[data-doc-outline-next]")
+        };
         const links = Array.from(shell.querySelectorAll(outlineLinkSelector))
             .filter(link => link instanceof HTMLAnchorElement);
 
@@ -386,7 +469,7 @@
                 }
 
                 event.preventDefault();
-                setActiveLink(links, link, currentLabel);
+                setActiveLink(links, link, outlineContext);
 
                 if (compactMedia?.matches) {
                     setExpanded(shell, toggle, false);
@@ -400,15 +483,15 @@
                 }
 
                 for (const delay of [120, 360, 720]) {
-                    window.setTimeout(() => refreshHashActiveLink(entries, links, link, currentLabel), delay);
+                    window.setTimeout(() => refreshHashActiveLink(entries, links, link, outlineContext), delay);
                 }
             });
         }
 
-        setActiveLink(links, getInitialActiveLink(entries), currentLabel);
+        setActiveLink(links, getInitialActiveLink(entries), outlineContext);
 
         addLifecycleEventListener(window, "hashchange", () => {
-            setActiveLink(links, getActiveEntryFromHash(entries)?.link ?? null, currentLabel);
+            setActiveLink(links, getActiveEntryFromHash(entries)?.link ?? null, outlineContext);
         });
 
         if (!("IntersectionObserver" in window) || !mainContent) {
@@ -416,7 +499,7 @@
         }
 
         addLifecycleEventListener(mainContent, "scroll", () => {
-            scheduleActiveLinkRefresh(entries, links, mainContent, currentLabel);
+            scheduleActiveLinkRefresh(entries, links, mainContent, outlineContext);
         });
         addLifecycleEventListener(mainContent, "wheel", cancelScrollAnimation);
         addLifecycleEventListener(mainContent, "touchstart", cancelScrollAnimation);
@@ -424,7 +507,7 @@
         activeObserver = new IntersectionObserver(
             observedEntries => {
                 if (observedEntries.some(entry => entry.isIntersecting)) {
-                    scheduleActiveLinkRefresh(entries, links, mainContent, currentLabel);
+                    scheduleActiveLinkRefresh(entries, links, mainContent, outlineContext);
                 }
             },
             {
