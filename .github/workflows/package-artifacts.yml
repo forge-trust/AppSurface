@@ -37,6 +37,7 @@ jobs:
             verify-packages \
             --package-version "$PACKAGE_VERSION" \
             --artifacts-output "$RUNNER_TEMP/package-artifacts" \
+            --artifact-manifest "$RUNNER_TEMP/package-artifacts/package-artifact-manifest.json" \
             --report "$RUNNER_TEMP/package-artifacts/package-validation-report.md"
 
       - name: Upload package artifacts

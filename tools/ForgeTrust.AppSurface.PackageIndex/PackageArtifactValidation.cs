@@ -81,13 +81,24 @@ internal sealed class PackageArtifactValidator
             throw new PackageIndexException($"Unexpected package artifact '{unexpected.PackageId}' at '{unexpected.PackagePath}'.");
         }
 
+        var inspectedByPackageId = inspectedPackages.ToDictionary(
+            package => package.PackageId,
+            package => package,
+            StringComparer.OrdinalIgnoreCase);
+
         return new PackageArtifactValidationReport(
             packageVersion,
-            plan.Entries.Select(entry => new PackageArtifactValidationReportEntry(
-                entry.PackageId,
-                entry.ProjectPath,
-                entry.Decision,
-                entry.ExpectedDependencyPackageIds)).ToArray());
+            plan.Entries.Select(entry =>
+            {
+                var inspected = inspectedByPackageId[entry.PackageId];
+                return new PackageArtifactValidationReportEntry(
+                    entry.PackageId,
+                    entry.ProjectPath,
+                    entry.Decision,
+                    entry.ExpectedDependencyPackageIds,
+                    inspected.PackagePath,
+                    entry.IsTool);
+            }).ToArray());
     }
 
     private static void ValidatePackage(
@@ -497,11 +508,15 @@ internal sealed record PackageArtifactValidationReport(
 /// <param name="ProjectPath">Project that produced the package.</param>
 /// <param name="Decision">Publish decision from the manifest.</param>
 /// <param name="ExpectedDependencyPackageIds">Expected same-version package dependency ids.</param>
+/// <param name="ArtifactPath">Validated <c>.nupkg</c> artifact path.</param>
+/// <param name="IsTool">Whether the package is a .NET tool package.</param>
 internal sealed record PackageArtifactValidationReportEntry(
     string PackageId,
     string ProjectPath,
     PackagePublishDecision Decision,
-    IReadOnlyList<string> ExpectedDependencyPackageIds);
+    IReadOnlyList<string> ExpectedDependencyPackageIds,
+    string ArtifactPath = "",
+    bool IsTool = false);
 
 /// <summary>
 /// Metadata and payload facts inspected from one NuGet package artifact.
