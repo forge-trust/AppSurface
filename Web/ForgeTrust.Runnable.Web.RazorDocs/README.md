@@ -78,7 +78,8 @@ The suppression is intentionally narrow:
 
 - It runs only when the details shell renders the H1. C# API reference pages keep their harvested body heading because the shell hides its top H1 for generated API content.
 - It removes only the first body element when that element is an H1. Later H1 elements remain visible because they are body structure, not duplicated chrome.
-- It happens at render time. `DocNode.Content`, search extraction, and outline generation still see the harvested document as produced by the harvester.
+- Namespace README intros apply the same rule before the README HTML is wrapped in `.doc-namespace-intro`, so `# Namespace` stays useful in source while the generated namespace shell remains the only page H1.
+- For ordinary Markdown pages, suppression happens at render time. `DocNode.Content`, search extraction, and outline generation still see the harvested document as produced by the harvester.
 - A leading Markdown H1 still participates in title resolution when explicit metadata `title` is absent, so README-style pages keep their authored title in the shell after the body H1 is suppressed.
 
 Pitfall: do not work around duplicate headings by removing the source `# Title` from README-style pages. That makes the file worse outside RazorDocs. Let the RazorDocs shell suppress the rendered duplicate instead.
@@ -619,6 +620,7 @@ Negative examples:
 
 - The generated namespace page keeps its `Namespaces/{Dotted.Namespace}` route.
 - README HTML is inserted into the namespace page as the namespace intro.
+- A leading README H1 is suppressed during merge because the namespace page shell already renders the page H1.
 - The standalone README node is removed after a successful merge so readers do not see duplicate pages.
 - README metadata can override the namespace page metadata, but derived Markdown defaults are ignored when they would accidentally replace API-reference classification.
 - README-relative links are resolved from the README source path before the standalone README page is removed.

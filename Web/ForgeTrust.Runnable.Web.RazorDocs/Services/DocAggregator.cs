@@ -1968,7 +1968,8 @@ public class DocAggregator
     /// <returns>The merged HTML content.</returns>
     internal static string MergeNamespaceIntroIntoContent(string namespaceContent, string readmeContent)
     {
-        var introSection = $"<section class=\"doc-namespace-intro\">{readmeContent}</section>";
+        var introContent = RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(readmeContent, shellOwnsH1: true);
+        var introSection = $"<section class=\"doc-namespace-intro\">{introContent}</section>";
         const string namespaceGroupsClassMarker = "doc-namespace-groups";
 
         var classMarkerIndex = namespaceContent.IndexOf(namespaceGroupsClassMarker, StringComparison.Ordinal);
