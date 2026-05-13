@@ -83,7 +83,8 @@ in repository settings with required reviewers and prevent self-review enabled.
 Add `NUGET_API_KEY` only as an environment secret there. Verify that no repository
 or organization `NUGET_API_KEY` secret exists, because a repo/org secret with the
 same name would weaken the intended environment-only secret boundary. The workflow
-fails closed if the environment is missing or has no required-reviewer protection.
+fails closed if the environment is missing, has no required-reviewer protection, or
+does not prevent self-review.
 
 The PackageIndex tool owns the package contract for the workflow:
 

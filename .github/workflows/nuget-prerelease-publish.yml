@@ -74,9 +74,16 @@ jobs:
 
           required_reviewer_rules="$(gh api "repos/${GITHUB_REPOSITORY}/environments/nuget-prerelease" \
             --jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length')"
+          prevent_self_review_rules="$(gh api "repos/${GITHUB_REPOSITORY}/environments/nuget-prerelease" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == true)] | length')"
 
           if [[ "${required_reviewer_rules}" -lt 1 ]]; then
             echo "Environment 'nuget-prerelease' must exist with required reviewers before prerelease publishing can run." >&2
+            exit 1
+          fi
+
+          if [[ "${prevent_self_review_rules}" -lt 1 ]]; then
+            echo "Environment 'nuget-prerelease' must prevent self-review before prerelease publishing can run." >&2
             exit 1
           fi
 
