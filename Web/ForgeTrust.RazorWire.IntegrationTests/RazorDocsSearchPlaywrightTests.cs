@@ -295,7 +295,7 @@ public sealed class RazorDocsSearchPlaywrightTests
             BuildControlledSearchPayload(
                 SearchDoc("guide/start", "Getting Started Dependencies", "guide", "Guide", "guide", "Learn how to manage dependencies.", breadcrumbs: ["Guides", "Getting Started"]),
                 SearchDoc("api/packages", "Package API", "api-reference", "API Reference", "api-reference", "Reference for package APIs.", breadcrumbs: ["API", "Packages"]),
-                SearchDoc("examples/dependency", "Dependency Example", "example", "Example", "example", "A runnable dependency example.", breadcrumbs: ["Samples", "Dependency"]),
+                SearchDoc("examples/dependency", "Dependency Example", "example", "Example", "example", "A working dependency example.", breadcrumbs: ["Samples", "Dependency"]),
                 SearchDoc("support/dependencies", "Dependency Troubleshooting", "troubleshooting", "Troubleshooting", "troubleshooting", "Resolve dependency build issues.", breadcrumbs: ["Support", "Build"]),
                 SearchDoc("releases/2-1-0", "Release Notes 2.1.0", "release-note", "Release", "release", "Dependency fixes in the latest release.", breadcrumbs: ["Release Notes", "2.1.0"])));
 
