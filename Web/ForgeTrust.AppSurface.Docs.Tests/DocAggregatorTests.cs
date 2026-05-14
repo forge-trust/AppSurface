@@ -3198,6 +3198,32 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDocsAsync_ShouldSuppressLeadingNamespaceReadmeH1_WhenReadmeIsMerged()
+    {
+        // Arrange
+        var namespaceContent = "<section class='doc-namespace-groups'><h4>Namespaces</h4></section><section class='doc-type'>Type body</section>";
+        var harvestedDocs = new List<DocNode>
+        {
+            new("Web", "Namespaces/ForgeTrust.Web", namespaceContent),
+            new(
+                "Web",
+                "docs/ForgeTrust.Web/README.md",
+                "<!-- docs:snippet start -->\n<h1 id=\"web\">Web</h1>\n<p>Namespace intro</p>")
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        // Act
+        var docs = await _aggregator.GetDocsAsync();
+
+        // Assert
+        var namespaceDoc = docs.Single(d => d.Path == "Namespaces/ForgeTrust.Web");
+        Assert.Contains("<section class=\"doc-namespace-intro\"><p>Namespace intro</p>", namespaceDoc.Content);
+        Assert.DoesNotContain("<h1 id=\"web\">Web</h1>", namespaceDoc.Content);
+        Assert.DoesNotContain("docs:snippet", namespaceDoc.Content);
+        Assert.DoesNotContain(docs, d => d.Path == "docs/ForgeTrust.Web/README.md");
+    }
+
+    [Fact]
     public async Task GetDocsAsync_ShouldPreserveSymbolSourceProvenance_WhenNamespaceReadmeIsMerged()
     {
         var namespaceContent = "<section class='doc-namespace-groups'><h4>Namespaces</h4></section><section class='doc-type'>Type body</section>";

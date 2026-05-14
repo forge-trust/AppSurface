@@ -37,11 +37,10 @@ public sealed class RazorDocsStyleTokenPlaywrightTests
             Timeout = 15_000
         });
 
-        var filterValue = await page.Locator("[data-rw-facet-key='pageType']:not([disabled])")
-            .First
-            .EvaluateAsync<string>("element => element.getAttribute('data-rw-facet-value') || ''");
+        var pageTypeFacet = page.Locator("[data-rw-facet-key='pageType']:not([disabled])").First;
+        var filterValue = await pageTypeFacet.GetAttributeAsync("data-rw-facet-value");
         Assert.False(string.IsNullOrWhiteSpace(filterValue));
-        await page.ClickAsync($"[data-rw-facet-key='pageType'][data-rw-facet-value='{filterValue}']");
+        await pageTypeFacet.ClickAsync();
         await page.WaitForSelectorAsync("#docs-search-page-active-filters .docs-search-page-active-filter", new PageWaitForSelectorOptions
         {
             State = WaitForSelectorState.Visible,

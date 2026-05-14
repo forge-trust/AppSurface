@@ -12,7 +12,7 @@ Need install guidance first? Start with the [AppSurface v0.1 package chooser](..
 - [**ForgeTrust.AppSurface.Docs.Standalone**](./ForgeTrust.AppSurface.Docs.Standalone/README.md) – AppSurface host for exporting and serving RazorDocs.
 - [**ForgeTrust.RazorWire**](./ForgeTrust.RazorWire/README.md) – Reactive web components, real-time streaming, CDN-default static export, and convention-based failed form UX.
 - [**ForgeTrust.AppSurface.Web.Scalar**](./ForgeTrust.AppSurface.Web.Scalar/README.md) – Scalar API Reference UI integration.
-- [**ForgeTrust.AppSurface.Web.Tests**](./ForgeTrust.AppSurface.Web.Tests/README.md) – Test suite for web components.
+- `ForgeTrust.AppSurface.Web.Tests` – Test suite for web components.
 
 ---
 [🏠 Back to Root](../README.md)

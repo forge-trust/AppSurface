@@ -234,6 +234,10 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-content--markdown ul,", tailwindEntryStylesheet);
         Assert.Contains("list-style: disc;", tailwindEntryStylesheet);
         Assert.Contains("list-style: decimal;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown li", tailwindEntryStylesheet);
+        Assert.Contains("min-width: 0;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content pre", tailwindEntryStylesheet);
+        Assert.Contains("max-width: 100%;", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown blockquote", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown :not(pre) > code", tailwindEntryStylesheet);
     }
@@ -1774,6 +1778,62 @@ public class RazorDocsViewsTests
             c => c.Details("src/Example.cs"));
 
         Assert.DoesNotContain("text-3xl font-bold text-white tracking-tight", html);
+        Assert.Contains("Example body", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldSuppressLeadingMarkdownH1_WhenShellOwnsPageH1()
+    {
+        var doc = new DocNode(
+            "Quickstart",
+            "guides/quickstart.md",
+            "<h1 id=\"quickstart\">Quickstart</h1>\n<p>Start here.</p>");
+
+        var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var headings = document.QuerySelectorAll("h1").ToArray();
+
+        var heading = Assert.Single(headings);
+        Assert.Equal("Quickstart", heading.TextContent.Trim());
+        Assert.Null(heading.Id);
+        Assert.Contains("Start here.", html);
+        Assert.DoesNotContain("id=\"quickstart\"", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldSuppressLeadingMarkdownH1AfterComment_WhenShellOwnsMetadataTitle()
+    {
+        var doc = new DocNode(
+            "Quickstart",
+            "guides/quickstart.md",
+            "<!-- docs:snippet start -->\n<h1 id=\"quickstart\">Quickstart</h1>\n<p>Start here.</p>",
+            Metadata: new DocMetadata { Title = "Metadata Quickstart" });
+
+        var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var heading = Assert.Single(document.QuerySelectorAll("h1"));
+
+        Assert.Equal("Metadata Quickstart", heading.TextContent.Trim());
+        Assert.Null(document.QuerySelector(".docs-content h1"));
+        Assert.Contains("Start here.", html);
+        Assert.DoesNotContain("id=\"quickstart\"", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldKeepLeadingDocumentH1_WhenShellDoesNotOwnPageH1()
+    {
+        var doc = new DocNode(
+            "Example",
+            "src/Example.cs",
+            "<h1 id=\"example-api\">Example API</h1>\n<p>Example body</p>",
+            Metadata: new DocMetadata { NavGroup = "API Reference" });
+
+        var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var heading = Assert.Single(document.QuerySelectorAll("h1"));
+
+        Assert.Equal("example-api", heading.Id);
+        Assert.Equal("Example API", heading.TextContent.Trim());
         Assert.Contains("Example body", html);
     }
 

@@ -11,6 +11,8 @@ internal static class Program
     private const string VerifyPackagesCommand = "verify-packages";
     private const string VerifyCommand = "verify";
     private const string GateCommand = "gate";
+    private const string PublishPrereleaseCommand = "publish-prerelease";
+    private const string SmokeInstallCommand = "smoke-install";
 
     private static readonly string Usage = """
         ForgeTrust.AppSurface.PackageIndex
@@ -25,6 +27,10 @@ internal static class Program
           verify      Check that packages/README.md is already up to date.
           verify-packages
                       Pack and validate prerelease .nupkg artifacts without publishing them.
+          publish-prerelease
+                      Publish validated prerelease package artifacts to NuGet from a protected workflow job.
+          smoke-install
+                      Restore published prerelease packages from a clean NuGet configuration.
           gate        Validate release metadata, package class rules, and stale brand strings.
 
         Options:
@@ -33,9 +39,19 @@ internal static class Program
           --output <path>       Generated chooser path. Defaults to packages/README.md.
           --artifacts-output <path>
                                 Package artifact output directory. Defaults to artifacts/packages.
+          --artifacts-input <path>
+                                Validated package artifact input directory. Defaults to artifacts/packages.
+          --artifact-manifest <path>
+                                Machine-readable validated artifact manifest path. Defaults to artifacts/package-artifact-manifest.json.
           --package-version <version>
                                 Required prerelease package version for verify-packages.
           --report <path>       Package artifact report path. Defaults to artifacts/package-validation-report.md.
+          --publish-log <path>  Publish ledger path. Defaults to artifacts/package-publish-log.md.
+          --source <url>        NuGet source URL. Defaults to https://api.nuget.org/v3/index.json.
+          --api-key-env <name>  Environment variable containing the NuGet API key. Defaults to NUGET_API_KEY.
+          --smoke-work-dir <path>
+                                Isolated smoke install work directory. Defaults to artifacts/package-smoke.
+          --smoke-report <path> Smoke install report path. Defaults to artifacts/package-smoke-report.md.
           -h, --help            Show this help.
         """;
 
@@ -62,6 +78,8 @@ internal static class Program
     /// <param name="currentDirectory">Working directory used to resolve default repository-relative paths after help handling.</param>
     /// <param name="cancellationToken">Cancellation token propagated to generator operations.</param>
     /// <param name="verifyPackagesAsync">Optional package artifact workflow override used by tests.</param>
+    /// <param name="publishPrereleaseAsync">Optional prerelease publish workflow override used by tests.</param>
+    /// <param name="smokeInstallAsync">Optional smoke install workflow override used by tests.</param>
     /// <returns><c>0</c> when the command succeeds; otherwise a non-zero exit code.</returns>
     internal static async Task<int> RunAsync(
         string[] args,
@@ -69,7 +87,9 @@ internal static class Program
         TextWriter standardError,
         string currentDirectory,
         CancellationToken cancellationToken = default,
-        Func<PackageArtifactRequest, CancellationToken, Task<PackageArtifactValidationReport>>? verifyPackagesAsync = null)
+        Func<PackageArtifactRequest, CancellationToken, Task<PackageArtifactValidationReport>>? verifyPackagesAsync = null,
+        Func<PackagePrereleasePublishRequest, CancellationToken, Task<PackagePublishLedger>>? publishPrereleaseAsync = null,
+        Func<PackageSmokeInstallRequest, CancellationToken, Task<PackageSmokeInstallReport>>? smokeInstallAsync = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(standardOut);
@@ -98,7 +118,12 @@ internal static class Program
             }
 
             var normalizedCommand = command.ToLowerInvariant();
-            if (normalizedCommand is not GenerateCommand and not VerifyCommand and not VerifyPackagesCommand and not GateCommand)
+            if (normalizedCommand is not GenerateCommand
+                and not VerifyCommand
+                and not VerifyPackagesCommand
+                and not GateCommand
+                and not PublishPrereleaseCommand
+                and not SmokeInstallCommand)
             {
                 await standardError.WriteLineAsync($"Unknown command '{command}'.");
                 await standardError.WriteLineAsync(Usage);
@@ -129,6 +154,28 @@ internal static class Program
                 await standardOut.WriteLineAsync(
                     $"Validated {artifactReport.Entries.Count} package artifacts for {packageRequest.PackageVersion}. Report: {reportPath}.");
                 return 0;
+            }
+
+            if (normalizedCommand == PublishPrereleaseCommand)
+            {
+                var publishRequest = options.CreatePackagePrereleasePublishRequest();
+                publishPrereleaseAsync ??= RunPackagePrereleasePublishWorkflowAsync;
+                var ledger = await publishPrereleaseAsync(publishRequest, cancellationToken);
+                var reportPath = FormatDisplayPath(publishRequest.RepositoryRoot, publishRequest.PublishLogPath);
+                await standardOut.WriteLineAsync(
+                    $"Published {ledger.Entries.Count(entry => entry.Status is PackagePublishStatus.Pushed or PackagePublishStatus.DuplicateReported)} package artifacts for {ledger.PackageVersion}. Log: {reportPath}.");
+                return ledger.Entries.Any(entry => entry.Status == PackagePublishStatus.Failed) ? 1 : 0;
+            }
+
+            if (normalizedCommand == SmokeInstallCommand)
+            {
+                var smokeRequest = options.CreatePackageSmokeInstallRequest();
+                smokeInstallAsync ??= RunPackageSmokeInstallWorkflowAsync;
+                var smokeReport = await smokeInstallAsync(smokeRequest, cancellationToken);
+                var reportPath = FormatDisplayPath(smokeRequest.RepositoryRoot, smokeRequest.ReportPath);
+                await standardOut.WriteLineAsync(
+                    $"Smoke installed {smokeReport.Entries.Count(entry => entry.Status == PackageSmokeInstallStatus.Restored)} published prerelease packages for {smokeReport.PackageVersion}. Report: {reportPath}.");
+                return smokeReport.Entries.Any(entry => entry.Status == PackageSmokeInstallStatus.Failed) ? 1 : 0;
             }
 
             if (normalizedCommand == VerifyCommand)
@@ -171,6 +218,39 @@ internal static class Program
         return await workflow.RunAsync(packageRequest, cancellationToken);
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Default CLI dependency wiring is covered by package prerelease workflow tests.")]
+    private static async Task<PackagePublishLedger> RunPackagePrereleasePublishWorkflowAsync(
+        PackagePrereleasePublishRequest request,
+        CancellationToken cancellationToken)
+    {
+        var workflow = new PackagePrereleasePublishWorkflow(
+            new PackagePublishPlanResolver(
+                new PackageProjectScanner(),
+                new DotNetProjectMetadataProvider(),
+                new PackageManifestLoader()),
+            new PackageArtifactManifestReader(),
+            new CliWrapCommandRunner(),
+            new PackagePublishLedgerRenderer());
+        return await workflow.RunAsync(request, cancellationToken);
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Default CLI dependency wiring is covered by package smoke workflow tests.")]
+    private static async Task<PackageSmokeInstallReport> RunPackageSmokeInstallWorkflowAsync(
+        PackageSmokeInstallRequest request,
+        CancellationToken cancellationToken)
+    {
+        var workflow = new PackageSmokeInstallWorkflow(
+            new PackageArtifactManifestReader(),
+            new PackagePublishPlanResolver(
+                new PackageProjectScanner(),
+                new DotNetProjectMetadataProvider(),
+                new PackageManifestLoader()),
+            new CliWrapCommandRunner(),
+            new PackageSmokeInstallReportRenderer(),
+            Task.Delay);
+        return await workflow.RunAsync(request, cancellationToken);
+    }
+
     private static string FormatDisplayPath(string repositoryRoot, string path)
     {
         var normalizedRoot = Path.GetFullPath(repositoryRoot);
@@ -196,11 +276,25 @@ internal static class Program
 /// <param name="ArtifactsOutputPath">Resolved package artifact output directory.</param>
 /// <param name="ReportPath">Resolved package artifact validation report path.</param>
 /// <param name="PackageVersion">Optional package version supplied for package artifact verification.</param>
+/// <param name="ArtifactsInputPath">Resolved package artifact input directory for protected publish jobs.</param>
+/// <param name="ArtifactManifestPath">Resolved machine-readable package artifact manifest path.</param>
+/// <param name="PublishLogPath">Resolved protected publish ledger path.</param>
+/// <param name="Source">NuGet source URL used for publish and smoke install.</param>
+/// <param name="ApiKeyEnvironmentVariable">Environment variable name that supplies the NuGet API key.</param>
+/// <param name="SmokeWorkDirectory">Resolved isolated smoke install work directory.</param>
+/// <param name="SmokeReportPath">Resolved smoke install report path.</param>
 internal sealed record CommandLineOptions(
     PackageIndexRequest Request,
     string ArtifactsOutputPath,
     string ReportPath,
-    string? PackageVersion)
+    string? PackageVersion,
+    string ArtifactsInputPath,
+    string ArtifactManifestPath,
+    string PublishLogPath,
+    string Source,
+    string ApiKeyEnvironmentVariable,
+    string SmokeWorkDirectory,
+    string SmokeReportPath)
 {
     /// <summary>
     /// Parses path-related CLI options into a resolved chooser request.
@@ -215,8 +309,15 @@ internal sealed record CommandLineOptions(
         string? manifestPath = null;
         string? outputPath = null;
         string? artifactsOutputPath = null;
+        string? artifactsInputPath = null;
+        string? artifactManifestPath = null;
         string? packageVersion = null;
         string? reportPath = null;
+        string? publishLogPath = null;
+        string? source = null;
+        string? apiKeyEnvironmentVariable = null;
+        string? smokeWorkDirectory = null;
+        string? smokeReportPath = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -245,6 +346,18 @@ internal sealed record CommandLineOptions(
                 continue;
             }
 
+            if (string.Equals(argument, "--artifacts-input", StringComparison.Ordinal))
+            {
+                artifactsInputPath = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--artifact-manifest", StringComparison.Ordinal))
+            {
+                artifactManifestPath = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
             if (string.Equals(argument, "--package-version", StringComparison.Ordinal))
             {
                 packageVersion = ReadRequiredValue(args, ref index, argument);
@@ -257,6 +370,36 @@ internal sealed record CommandLineOptions(
                 continue;
             }
 
+            if (string.Equals(argument, "--publish-log", StringComparison.Ordinal))
+            {
+                publishLogPath = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--source", StringComparison.Ordinal))
+            {
+                source = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--api-key-env", StringComparison.Ordinal))
+            {
+                apiKeyEnvironmentVariable = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--smoke-work-dir", StringComparison.Ordinal))
+            {
+                smokeWorkDirectory = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--smoke-report", StringComparison.Ordinal))
+            {
+                smokeReportPath = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
             throw new PackageIndexException($"Unknown option '{argument}'.");
         }
 
@@ -264,13 +407,25 @@ internal sealed record CommandLineOptions(
         var resolvedManifestPath = ResolvePath(manifestPath, repoRoot, Path.Combine(repoRoot, "packages", "package-index.yml"));
         var resolvedOutputPath = ResolvePath(outputPath, repoRoot, Path.Combine(repoRoot, "packages", "README.md"));
         var resolvedArtifactsOutputPath = ResolvePath(artifactsOutputPath, repoRoot, Path.Combine(repoRoot, "artifacts", "packages"));
+        var resolvedArtifactsInputPath = ResolvePath(artifactsInputPath, repoRoot, resolvedArtifactsOutputPath);
+        var resolvedArtifactManifestPath = ResolvePath(artifactManifestPath, repoRoot, Path.Combine(repoRoot, "artifacts", "package-artifact-manifest.json"));
         var resolvedReportPath = ResolvePath(reportPath, repoRoot, Path.Combine(repoRoot, "artifacts", "package-validation-report.md"));
+        var resolvedPublishLogPath = ResolvePath(publishLogPath, repoRoot, Path.Combine(repoRoot, "artifacts", "package-publish-log.md"));
+        var resolvedSmokeWorkDirectory = ResolvePath(smokeWorkDirectory, repoRoot, Path.Combine(repoRoot, "artifacts", "package-smoke"));
+        var resolvedSmokeReportPath = ResolvePath(smokeReportPath, repoRoot, Path.Combine(repoRoot, "artifacts", "package-smoke-report.md"));
 
         return new CommandLineOptions(
             new PackageIndexRequest(repoRoot, resolvedManifestPath, resolvedOutputPath),
             resolvedArtifactsOutputPath,
             resolvedReportPath,
-            packageVersion);
+            packageVersion,
+            resolvedArtifactsInputPath,
+            resolvedArtifactManifestPath,
+            resolvedPublishLogPath,
+            string.IsNullOrWhiteSpace(source) ? "https://api.nuget.org/v3/index.json" : source,
+            string.IsNullOrWhiteSpace(apiKeyEnvironmentVariable) ? "NUGET_API_KEY" : apiKeyEnvironmentVariable,
+            resolvedSmokeWorkDirectory,
+            resolvedSmokeReportPath);
     }
 
     /// <summary>
@@ -290,7 +445,39 @@ internal sealed record CommandLineOptions(
             Request.ManifestPath,
             ArtifactsOutputPath,
             ReportPath,
-            PackageVersion);
+            PackageVersion,
+            ArtifactManifestPath);
+    }
+
+    /// <summary>
+    /// Converts parsed CLI options into a protected prerelease publish request.
+    /// </summary>
+    /// <returns>The prerelease publish request.</returns>
+    internal PackagePrereleasePublishRequest CreatePackagePrereleasePublishRequest()
+    {
+        return new PackagePrereleasePublishRequest(
+            Request.RepositoryRoot,
+            Request.ManifestPath,
+            ArtifactsInputPath,
+            ArtifactManifestPath,
+            PublishLogPath,
+            Source,
+            ApiKeyEnvironmentVariable);
+    }
+
+    /// <summary>
+    /// Converts parsed CLI options into a package smoke install request.
+    /// </summary>
+    /// <returns>The package smoke install request.</returns>
+    internal PackageSmokeInstallRequest CreatePackageSmokeInstallRequest()
+    {
+        return new PackageSmokeInstallRequest(
+            Request.RepositoryRoot,
+            Request.ManifestPath,
+            ArtifactManifestPath,
+            SmokeWorkDirectory,
+            SmokeReportPath,
+            Source);
     }
 
     private static string ReadRequiredValue(string[] args, ref int index, string argument)

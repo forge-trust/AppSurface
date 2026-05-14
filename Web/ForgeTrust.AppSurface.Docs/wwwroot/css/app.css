@@ -1000,6 +1000,7 @@ body {
 }
 
 .docs-content--markdown li {
+    min-width: 0;
     padding-left: 0.15rem;
 }
 
@@ -1105,6 +1106,8 @@ body {
     border-radius: 0.5rem;
     padding: 0.9rem;
     border: 1px solid var(--docs-color-border-default);
+    box-sizing: border-box;
+    max-width: 100%;
     white-space: pre;
     overflow-wrap: normal;
     margin: 0.65rem 0 0.85rem;

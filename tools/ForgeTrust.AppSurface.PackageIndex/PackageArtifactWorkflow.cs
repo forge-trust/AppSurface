@@ -12,6 +12,7 @@ internal sealed class PackageArtifactWorkflow
     private readonly PackagePublishPlanResolver _planResolver;
     private readonly ICommandRunner _commandRunner;
     private readonly PackageArtifactValidator _validator;
+    private readonly PackageArtifactManifestWriter _artifactManifestWriter;
 
     /// <summary>
     /// Creates a package artifact workflow.
@@ -27,6 +28,7 @@ internal sealed class PackageArtifactWorkflow
         _planResolver = planResolver;
         _commandRunner = commandRunner;
         _validator = validator;
+        _artifactManifestWriter = new PackageArtifactManifestWriter();
     }
 
     /// <summary>
@@ -114,6 +116,11 @@ internal sealed class PackageArtifactWorkflow
             request.ReportPath,
             PackageArtifactReportRenderer.RenderMarkdown(report),
             cancellationToken);
+        await _artifactManifestWriter.WriteAsync(
+            report,
+            request.ArtifactsOutputPath,
+            request.ArtifactManifestPath,
+            cancellationToken);
 
         return report;
     }
@@ -139,6 +146,11 @@ internal sealed class PackageArtifactWorkflow
         if (string.IsNullOrWhiteSpace(request.ReportPath))
         {
             throw new PackageIndexException("Package artifact report path must be provided.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ArtifactManifestPath))
+        {
+            throw new PackageIndexException("Package artifact manifest path must be provided.");
         }
     }
 
@@ -194,9 +206,11 @@ internal sealed class PackageArtifactWorkflow
 /// <param name="ArtifactsOutputPath">Directory that receives produced <c>.nupkg</c> artifacts.</param>
 /// <param name="ReportPath">Markdown validation report path.</param>
 /// <param name="PackageVersion">Exact prerelease package version to pack and validate.</param>
+/// <param name="ArtifactManifestPath">Machine-readable validation manifest path for the publish workflow.</param>
 internal sealed record PackageArtifactRequest(
     string RepositoryRoot,
     string ManifestPath,
     string ArtifactsOutputPath,
     string ReportPath,
-    string PackageVersion);
+    string PackageVersion,
+    string ArtifactManifestPath);
