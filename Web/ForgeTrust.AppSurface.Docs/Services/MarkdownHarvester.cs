@@ -127,8 +127,10 @@ public class MarkdownHarvester : IDocHarvester
                     title = string.IsNullOrEmpty(parentDir) ? "Home" : Path.GetFileName(parentDir);
                 }
 
-                var resolvedTitle = explicitMetadata?.Title ?? title;
                 var document = Markdown.Parse(markdownBody, _pipeline);
+                var resolvedTitle = string.IsNullOrWhiteSpace(explicitMetadata?.Title)
+                    ? ResolveImplicitTitle(relativePath, document, title)
+                    : explicitMetadata!.Title!.Trim();
                 var html = Markdown.ToHtml(document, _pipeline);
                 var metadata = DocMetadataFactory.CreateMarkdownMetadata(
                     relativePath,
@@ -165,6 +167,18 @@ public class MarkdownHarvester : IDocHarvester
         {
             yield return rootLicensePath;
         }
+    }
+
+    private static string ResolveImplicitTitle(string relativePath, MarkdownDocument document, string fallbackTitle)
+    {
+        return IsRootLicensePath(relativePath)
+            ? fallbackTitle
+            : ExtractLeadingTitle(document) ?? fallbackTitle;
+    }
+
+    private static bool IsRootLicensePath(string relativePath)
+    {
+        return relativePath.Equals("LICENSE", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -371,6 +385,44 @@ public class MarkdownHarvester : IDocHarvester
             .Where(item => item is not null)
             .Select(item => item!)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Extracts the document title from a leading Markdown H1 when one exists.
+    /// </summary>
+    /// <param name="document">The parsed Markdown document whose first block may be a page-title H1.</param>
+    /// <returns>
+    /// The normalized heading text from the leading H1, or <c>null</c> when the document starts with another block or
+    /// the H1 has no readable text.
+    /// </returns>
+    /// <remarks>
+    /// This mirrors details-page H1 suppression: only the leading H1 can become package-owned page chrome. Later H1
+    /// elements remain body structure and do not replace filename or metadata title fallback behavior.
+    /// </remarks>
+    internal static string? ExtractLeadingTitle(MarkdownDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        var firstReaderFacingBlock = document.FirstOrDefault(block => !IsLeadingHtmlCommentBlock(block));
+        if (firstReaderFacingBlock is not HeadingBlock { Level: 1 } heading)
+        {
+            return null;
+        }
+
+        var title = NormalizeHeadingText(ExtractInlineText(heading.Inline));
+        return string.IsNullOrWhiteSpace(title) ? null : title;
+    }
+
+    private static bool IsLeadingHtmlCommentBlock(Block block)
+    {
+        if (block is not HtmlBlock htmlBlock)
+        {
+            return false;
+        }
+
+        var html = htmlBlock.Lines.ToString();
+        return html.TrimStart().StartsWith("<!--", StringComparison.Ordinal)
+               && html.TrimEnd().EndsWith("-->", StringComparison.Ordinal);
     }
 
     /// <summary>
