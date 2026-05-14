@@ -39,6 +39,7 @@ jobs:
             exit 1
           fi
 
+          git fetch --force origin "refs/tags/${tag_name}:refs/tags/${tag_name}"
           tag_type="$(git cat-file -t "refs/tags/${tag_name}")"
           if [[ "${tag_type}" != "tag" ]]; then
             echo "Prerelease publish requires an annotated tag. '${tag_name}' is ${tag_type}." >&2
