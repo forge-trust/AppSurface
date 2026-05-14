@@ -496,18 +496,26 @@
                  class="docs-outline-panel"
                  aria-label="On this page">
                 <div class="docs-outline-label">On this page</div>
+                <span class="docs-section-copy-status" data-doc-section-copy-status aria-live="polite"></span>
                 <ol class="docs-outline-list">
                     @foreach (var item in outlineItems)
                     {
                         var linkClass = item.Level > 2
                             ? "docs-outline-link docs-outline-link--level-3"
                             : "docs-outline-link";
-                        <li>
+                        <li class="docs-outline-item">
                             <a href="#@item.Id"
                                data-doc-outline-link="true"
                                class="@linkClass">
                                 @item.Title
                             </a>
+                            <button type="button"
+                                    class="docs-section-copy docs-outline-copy"
+                                    data-doc-section-copy="@item.Id"
+                                    data-doc-section-copy-title="@item.Title"
+                                    aria-label="Copy link to @item.Title">
+                                <span aria-hidden="true">#</span>
+                            </button>
                         </li>
                     }
                 </ol>

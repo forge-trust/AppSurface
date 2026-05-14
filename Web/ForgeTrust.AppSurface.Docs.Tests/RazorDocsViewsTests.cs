@@ -168,6 +168,9 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-outline-context-row[data-outline-empty=\"true\"]", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-toggle-context--rolling", tailwindEntryStylesheet);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-copy", tailwindEntryStylesheet);
+        Assert.Contains(".docs-section-copy", tailwindEntryStylesheet);
+        Assert.Contains(".docs-section-copy-fallback", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-toggle", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-label", tailwindEntryStylesheet);
         Assert.Contains("@media (max-width: 79.999rem)", tailwindEntryStylesheet);
@@ -194,6 +197,7 @@ public class RazorDocsViewsTests
         Assert.DoesNotContain(".docs-outline-shell", searchStylesheet);
         Assert.DoesNotContain(".docs-outline-link", searchStylesheet);
         Assert.DoesNotContain(".docs-outline-toggle-context", searchStylesheet);
+        Assert.DoesNotContain(".docs-section-copy", searchStylesheet);
     }
 
     [Fact]
@@ -266,6 +270,11 @@ public class RazorDocsViewsTests
         Assert.Contains("function addLifecycleEventListener", outlineClient);
         Assert.Contains("removeEventListener", outlineClient);
         Assert.Contains("addListener", outlineClient);
+        Assert.Contains("navigator.clipboard.writeText", outlineClient);
+        Assert.Contains("function enhanceContentCopyTargets", outlineClient);
+        Assert.Contains("function clearCopyArtifacts", outlineClient);
+        Assert.Contains("data-doc-section-copy-inserted", outlineClient);
+        Assert.Contains("data-doc-section-copy-fallback", outlineClient);
     }
 
     [Fact]
@@ -2406,7 +2415,12 @@ public class RazorDocsViewsTests
         Assert.NotNull(document.QuerySelector("#docs-page-outline-panel[aria-label='On this page']"));
         Assert.NotNull(document.QuerySelector("a.docs-outline-link[href='#install']"));
         Assert.NotNull(document.QuerySelector("a.docs-outline-link--level-3[href='#verify']"));
+        Assert.NotNull(document.QuerySelector(".docs-section-copy-status[data-doc-section-copy-status][aria-live='polite']"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-item > button.docs-outline-copy[data-doc-section-copy='install'][data-doc-section-copy-title='Install'][aria-label='Copy link to Install']"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-item > button.docs-outline-copy[data-doc-section-copy='verify'][data-doc-section-copy-title='Verify'][aria-label='Copy link to Verify']"));
+        Assert.Equal(2, document.QuerySelectorAll("#docs-page-outline button[data-doc-section-copy]").Length);
         Assert.Null(document.QuerySelector("a.docs-outline-link[href='#missing-title']"));
+        Assert.Null(document.QuerySelector("button[data-doc-section-copy='missing-title']"));
         Assert.DoesNotContain("Missing fragment", html);
         Assert.Single(document.QuerySelectorAll("#docs-page-outline nav"));
         Assert.True(
