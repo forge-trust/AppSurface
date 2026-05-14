@@ -1102,9 +1102,9 @@ public class DocsController : Controller
         return new SearchPageViewModel(
             Title: "Search Documentation",
             Orientation: "Search across guides, examples, and API reference, or browse by filter when you are not sure what the corpus contains yet.",
-            StarterHint: "Try a starter query, or open filters to browse by page type, component, audience, or status before typing.",
+            StarterHint: "Try a starter query, or browse the index by page type, component, audience, or status before typing.",
             SearchPlaceholder: "Search by topic, component, or page type",
-            SuggestedQueries: ["getting started", "example", "api reference"],
+            SuggestedQueries: ["getting started", "RazorWire forms", "API reference", "release notes", "troubleshooting"],
             FailureFallbackLinks: BuildSearchFallbackLinks(docs));
     }
 

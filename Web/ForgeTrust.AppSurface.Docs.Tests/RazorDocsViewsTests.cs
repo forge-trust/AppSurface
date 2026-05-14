@@ -98,11 +98,16 @@ public class RazorDocsViewsTests
         Assert.Contains("function renderPageTypeBadge(item)", searchClient);
         Assert.Contains("docs-search-option-title-row", searchClient);
         Assert.Contains("docs-page-badge", searchClient);
-        Assert.Contains("function createSearchResultArticle(doc, queryTokens)", searchClient);
+        Assert.Contains("function normalizePageTypeAlias(value)", searchClient);
+        Assert.Contains("function isPageTypeInGroup(doc, group)", searchClient);
+        Assert.Contains("function getPageTypeDisplayLabel(doc)", searchClient);
+        Assert.Contains("function createSearchResultArticle(doc, queryTokens, options = {})", searchClient);
         Assert.Contains("docs-search-result-badges", searchClient);
-        Assert.Contains("createSearchResultBadge(formatFacetValue(doc.pageType))", searchClient);
+        Assert.Contains("function createSearchResultPageTypeBadge(doc)", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.component))", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
+        Assert.Contains("docs-search-result-meta-line", searchClient);
+        Assert.Contains("docs-search-page-starter-docs", searchClient);
     }
 
     [Fact]
@@ -2976,7 +2981,11 @@ public class RazorDocsViewsTests
         Assert.Contains("id=\"docs-search-page-filters-toggle\"", html);
         Assert.Contains("id=\"docs-search-page-filters-panel\"", html);
         Assert.Contains("id=\"docs-search-page-starter\"", html);
+        Assert.Contains("id=\"docs-search-page-starter-docs\"", html);
         Assert.Contains("data-rw-search-suggestion=\"getting started\"", html);
+        Assert.Contains("data-rw-search-suggestion=\"API reference\"", html);
+        Assert.Contains("data-rw-search-suggestion=\"release notes\"", html);
+        Assert.Contains("data-rw-search-suggestion=\"troubleshooting\"", html);
         Assert.Contains("id=\"docs-search-page-failure\"", html);
         Assert.Contains("id=\"docs-search-page-failure-template\"", html);
         Assert.Contains("id=\"docs-search-page-retry\"", html);

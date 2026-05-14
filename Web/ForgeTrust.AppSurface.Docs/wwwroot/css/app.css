@@ -137,7 +137,8 @@ body {
 
 .docs-page-badge--guide,
 .docs-page-badge--how-to,
-.docs-page-badge--start-here {
+.docs-page-badge--start-here,
+.docs-page-badge--release {
     border-color: var(--docs-color-border-accent);
     background: var(--docs-color-accent-fill-soft);
     color: var(--docs-color-accent-muted);
