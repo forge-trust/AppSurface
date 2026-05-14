@@ -68,10 +68,11 @@ v<major>.<minor>.<patch>-<preview|alpha|beta|rc>.<positive-number>
 
 Examples: `v0.4.0-preview.1`, `v0.4.0-rc.2`.
 
-The workflow resolves annotated tags to the tagged commit with
-`refs/tags/<tag>^{commit}`, verifies that commit is reachable from `origin/main`,
-and then checks that `build.yml` and `package-gate.yml` have successful completed
-runs for that exact commit before any protected publish job can start.
+The workflow force-fetches the exact remote tag ref before validation, resolves
+annotated tags to the tagged commit with `refs/tags/<tag>^{commit}`, verifies that
+commit is reachable from `origin/main`, and then checks that `build.yml` and
+`package-gate.yml` have successful completed runs for that exact commit before any
+protected publish job can start.
 
 Publishing is gated by the GitHub Environment named `nuget-prerelease` and by a
 nuget.org Trusted Publishing policy. The publish job requests a short-lived NuGet
