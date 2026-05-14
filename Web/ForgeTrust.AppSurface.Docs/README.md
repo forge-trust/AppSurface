@@ -53,6 +53,26 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 - `wwwroot/css/app.css` is the Tailwind entry point for the generated package stylesheet (`site.gen.css`). It owns shared RazorDocs component primitives and wrapper-scoped document body styling because the generated stylesheet is loaded on every docs page before any search-specific assets.
 - `wwwroot/docs/search.css` owns the search shell, interactive search controls, JavaScript-rendered result states, empty/failure states, and search skeletons. It should not define shared page badges, metadata chips, provenance strips, trust bars, or other primitives required by non-search docs pages.
 
+### Internal Style Tokens
+
+`wwwroot/css/app.css` declares RazorDocs' shared dark-slate style tokens on `:root` with `--docs-*` custom properties. These tokens describe the current flagship visual system: slate surfaces, muted borders, readable text, cyan accents, focus rings, active fills, code chrome, table chrome, and skeleton treatments.
+
+The tokens are internal package implementation details. They ship in browser CSS because RazorDocs CSS ships to the browser, but hosts should not treat them as a supported override API yet. Future theming work can promote a documented public contract once the host customization model is designed.
+
+Use tokens when a value is either:
+
+- repeated across two or more unrelated selector groups
+- part of a documented repeated state such as focus, active selection, muted text, default border, raised surface, code chrome, table chrome, or skeleton loading
+
+Leave a raw literal local when naming it would lie about its scope. Allowed local categories are:
+
+- syntax-highlight token colors such as keyword, string, comment, number, type, member, operator, inserted, and deleted spans
+- API signature token colors used only to distinguish return values, parameters, modifiers, literals, and similar generated reference fragments
+- one-off semantic page-type badge variants such as example, API/reference, glossary, FAQ, internals, and troubleshooting
+- browser or generated-content details that do not represent a reusable design primitive
+
+Do not add broad fallbacks such as `var(--docs-color-text-default, #e2e8f0)` unless a generated asset, load-order, or host-embedding test proves the fallback is needed. The package-owned shared stylesheet should consume the internal tokens directly. `wwwroot/docs/search.css` is the exception: exact published release trees are allowed to carry only `search.css` as their required CSS asset, so it defines `--docs-search-*` fallback aliases that read the shared `--docs-*` tokens when available and preserve a self-contained search UI when the generated package stylesheet is absent.
+
 ### Terms
 
 - **Package chrome**: one-off layout and presentation markup that RazorDocs owns directly, such as page shells, spacing, and framing.
@@ -67,6 +87,8 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 - Do not assume every child inside a semantic search container needs its own semantic class; local typography and spacing inside one view can still stay inline.
 - Do not add semantic classes to static package chrome when plain utilities are clearer and the styling is truly local.
 - Do not place non-search primitives in `wwwroot/docs/search.css` just because the layout loads search assets globally today. Use `wwwroot/css/app.css` for shared components so future theming can target one stable package layer.
+- Do not introduce new hardcoded slate/cyan literals inside shared selector groups. Add or reuse a `--docs-*` token instead.
+- Do not move syntax-highlight colors into the shared token layer until RazorDocs has a public code-theme story. Code block chrome can use shared tokens; syntax spans stay local.
 
 ## Syntax-highlighted code blocks
 
@@ -453,7 +475,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
   - The payload must remain valid JSON with a top-level `documents` array so version-local search can load safely.
   - Every `documents[]` entry must include non-empty string `path` and `title` properties.
   - Missing or blank `path`/`title` values cause RazorDocs to reject the published release tree during startup validation.
-- `search.css` at the tree root
+- `search.css` at the tree root. The bundled search stylesheet carries search-local fallbacks for the shared style tokens so exact release search controls remain styled even when a historical/static export does not include `site.gen.css`.
 - `search-client.js` at the tree root
 - `outline-client.js` at the tree root for outline-aware exports whose HTML references the page-local outline runtime
 - `minisearch.min.js` at the tree root
