@@ -1,10 +1,10 @@
 # Pre-1.0 upgrade policy
 
-Runnable is still before `v1.0.0`, so rapid change is expected. That does not mean changes should be surprising. This policy explains how Runnable will talk about risk and where migration guidance belongs before the first stable release.
+AppSurface is still before `v1.0.0`, so rapid change is expected. That does not mean changes should be surprising. This policy explains how AppSurface will talk about risk and where migration guidance belongs before the first stable release.
 
 ## Core policy
 
-- Runnable releases the monorepo in unison. One version applies to the whole repository.
+- AppSurface releases the monorepo in unison. One version applies to the whole repository.
 - Breaking and behavior-changing updates are allowed before `v1.0.0`, but they must be called out in the public release surface.
 - Migration guidance must have a durable home. The short form belongs in [`CHANGELOG.md`](../CHANGELOG.md), and the detailed walkthrough belongs in the matching release note.
 
@@ -18,7 +18,7 @@ Runnable is still before `v1.0.0`, so rapid change is expected. That does not me
 
 - API changes that alter signatures, defaults, ordering requirements, or expected lifecycle behavior
 - CLI changes that alter commands, flags, defaults, or output that users depend on
-- Example changes that replace the recommended way to compose Runnable
+- Example changes that replace the recommended way to compose AppSurface
 - Docs-facing behavior changes that affect how consumers discover, configure, or trust the product
 
 ## What does not count as a migration note by itself

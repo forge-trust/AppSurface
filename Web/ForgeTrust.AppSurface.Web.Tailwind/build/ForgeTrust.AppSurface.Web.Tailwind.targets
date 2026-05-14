@@ -1,0 +1,125 @@
+<Project>
+  <PropertyGroup>
+    <TailwindEnabled Condition="'$(TailwindEnabled)' == ''">true</TailwindEnabled>
+    <TailwindInputPath Condition="'$(TailwindInputPath)' == ''">wwwroot/css/app.css</TailwindInputPath>
+    <TailwindOutputPath Condition="'$(TailwindOutputPath)' == ''">wwwroot/css/site.gen.css</TailwindOutputPath>
+    <TailwindCliPath Condition="'$(TailwindCliPath)' == ''"></TailwindCliPath>
+    <_TailwindVersionFilePackage>$(MSBuildThisFileDirectory)tailwind.version</_TailwindVersionFilePackage>
+    <_TailwindVersionFileSource>$(MSBuildThisFileDirectory)..\tailwind.version</_TailwindVersionFileSource>
+    <_TailwindVersionFile Condition="Exists('$(_TailwindVersionFilePackage)')">$(_TailwindVersionFilePackage)</_TailwindVersionFile>
+    <_TailwindVersionFile Condition="'$(_TailwindVersionFile)' == '' and Exists('$(_TailwindVersionFileSource)')">$(_TailwindVersionFileSource)</_TailwindVersionFile>
+    <_TailwindOutputPathNormalized>$([System.String]::Copy('$(TailwindOutputPath)').Replace('\', '/'))</_TailwindOutputPathNormalized>
+    <_TailwindOutputPathNormalized Condition="$([System.String]::Copy('$(_TailwindOutputPathNormalized)').StartsWith('./'))">$([System.String]::Copy('$(_TailwindOutputPathNormalized)').Substring(2))</_TailwindOutputPathNormalized>
+    <_TailwindOutputIsWebRootAsset>false</_TailwindOutputIsWebRootAsset>
+    <_TailwindOutputIsWebRootAsset Condition="'$(_TailwindOutputPathNormalized)' == 'wwwroot' or $([System.String]::Copy('$(_TailwindOutputPathNormalized)').StartsWith('wwwroot/'))">true</_TailwindOutputIsWebRootAsset>
+    <_TailwindUsesSdkDefaultContentItems>true</_TailwindUsesSdkDefaultContentItems>
+    <_TailwindUsesSdkDefaultContentItems Condition="'$(EnableDefaultItems)' == 'false' or '$(EnableDefaultContentItems)' == 'false'">false</_TailwindUsesSdkDefaultContentItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <_TailwindTemplates Include="**/*.cshtml;**/*.html;**/*.razor" Exclude="bin/**;obj/**" />
+    <_TailwindConfigs Include="tailwind.config.js" Condition="Exists('tailwind.config.js')" />
+    <_TailwindConfigs Include="postcss.config.js" Condition="Exists('postcss.config.js')" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TailwindEnabled)' == 'true' and '$(_TailwindOutputIsWebRootAsset)' == 'true' and ('$(_TailwindUsesSdkDefaultContentItems)' == 'false' or !Exists('$(TailwindOutputPath)'))">
+    <!--
+      Declare the generated output as project content up front so a clean build can include it in the
+      static web asset manifest once RunTailwindBuild materializes the file under wwwroot/. Keep the
+      explicit item for consumers that disable the SDK's default content globs because they do not pick
+      up existing wwwroot files on subsequent incremental builds.
+    -->
+    <Content Include="$(TailwindOutputPath)">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Pack>false</Pack>
+      <Visible>false</Visible>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="ValidateTailwindBuildPaths"
+          BeforeTargets="RunTailwindBuild"
+          Condition="'$(TailwindEnabled)' == 'true' AND Exists('$(TailwindInputPath)')">
+    <PropertyGroup>
+      <_TailwindInputPathFull>$([System.IO.Path]::GetFullPath('$(TailwindInputPath)', '$(MSBuildProjectDirectory)'))</_TailwindInputPathFull>
+      <_TailwindOutputPathFull>$([System.IO.Path]::GetFullPath('$(TailwindOutputPath)', '$(MSBuildProjectDirectory)'))</_TailwindOutputPathFull>
+      <_TailwindInputPathComparable>$(_TailwindInputPathFull)</_TailwindInputPathComparable>
+      <_TailwindOutputPathComparable>$(_TailwindOutputPathFull)</_TailwindOutputPathComparable>
+      <_TailwindInputPathComparable Condition="$([MSBuild]::IsOSPlatform('Windows'))">$([System.String]::Copy('$(_TailwindInputPathFull)').ToUpperInvariant())</_TailwindInputPathComparable>
+      <_TailwindOutputPathComparable Condition="$([MSBuild]::IsOSPlatform('Windows'))">$([System.String]::Copy('$(_TailwindOutputPathFull)').ToUpperInvariant())</_TailwindOutputPathComparable>
+      <_TailwindSameInputOutput>$([System.String]::Copy('$(_TailwindInputPathComparable)').Equals('$(_TailwindOutputPathComparable)'))</_TailwindSameInputOutput>
+    </PropertyGroup>
+
+    <Error Text="TailwindInputPath and TailwindOutputPath must point to different files."
+           Condition="'$(_TailwindSameInputOutput)' == 'True'" />
+  </Target>
+
+  <Target Name="RunTailwindBuild" AfterTargets="ResolveProjectReferences" BeforeTargets="PrepareResources;Compile"
+          Condition="'$(TailwindEnabled)' == 'true' AND Exists('$(TailwindInputPath)')"
+          Inputs="$(TailwindInputPath);@(_TailwindTemplates);@(_TailwindConfigs)"
+          Outputs="$(TailwindOutputPath)">
+    <PropertyGroup>
+      <!-- Source-tree consumers import only this targets file, so resolve TailwindVersion here as well. -->
+      <TailwindVersion Condition="'$(TailwindVersion)' == '' and Exists('$(_TailwindVersionFile)')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(_TailwindVersionFile)')), '^[^\r\n]+').Value)</TailwindVersion>
+
+      <!-- Tailwind runs during the build, so select the CLI for the current build host instead of RuntimeIdentifier. -->
+      <!-- Tailwind v4.1.18 only publishes a Windows x64 binary, so Windows Arm64 uses x64 emulation. -->
+      <_TailwindTargetRid Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64'">win-x64</_TailwindTargetRid>
+      <_TailwindTargetRid Condition="'$(_TailwindTargetRid)' == '' and $([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64'">win-x64</_TailwindTargetRid>
+      <_TailwindTargetRid Condition="'$(_TailwindTargetRid)' == '' and $([MSBuild]::IsOSPlatform('OSX')) and '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64'">osx-arm64</_TailwindTargetRid>
+      <_TailwindTargetRid Condition="'$(_TailwindTargetRid)' == '' and $([MSBuild]::IsOSPlatform('OSX')) and '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64'">osx-x64</_TailwindTargetRid>
+      <_TailwindTargetRid Condition="'$(_TailwindTargetRid)' == '' and $([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64'">linux-arm64</_TailwindTargetRid>
+      <_TailwindTargetRid Condition="'$(_TailwindTargetRid)' == '' and $([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64'">linux-x64</_TailwindTargetRid>
+
+      <_TailwindRuntimeBinaryName Condition="'$(_TailwindTargetRid)' == 'win-x64'">tailwindcss-windows-x64.exe</_TailwindRuntimeBinaryName>
+      <_TailwindRuntimeBinaryName Condition="'$(_TailwindTargetRid)' == 'osx-arm64'">tailwindcss-macos-arm64</_TailwindRuntimeBinaryName>
+      <_TailwindRuntimeBinaryName Condition="'$(_TailwindTargetRid)' == 'osx-x64'">tailwindcss-macos-x64</_TailwindRuntimeBinaryName>
+      <_TailwindRuntimeBinaryName Condition="'$(_TailwindTargetRid)' == 'linux-arm64'">tailwindcss-linux-arm64</_TailwindRuntimeBinaryName>
+      <_TailwindRuntimeBinaryName Condition="'$(_TailwindTargetRid)' == 'linux-x64'">tailwindcss-linux-x64</_TailwindRuntimeBinaryName>
+
+      <!-- 1. Use an explicit CLI override when provided. -->
+      <_TailwindCliPathFull Condition="'$(TailwindCliPath)' != ''">$([System.IO.Path]::GetFullPath('$(TailwindCliPath)', '$(MSBuildProjectDirectory)'))</_TailwindCliPathFull>
+      <_TailwindToolPath Condition="'$(_TailwindCliPathFull)' != '' and Exists('$(_TailwindCliPathFull)')">$(_TailwindCliPathFull)</_TailwindToolPath>
+
+      <!-- 2. Check in the NuGet package runtimes folder -->
+      <_TailwindToolPathRuntime>$(MSBuildThisFileDirectory)../runtimes/$(_TailwindTargetRid)/native/$(_TailwindRuntimeBinaryName)</_TailwindToolPathRuntime>
+      <_TailwindToolPath Condition="'$(_TailwindToolPath)' == '' and Exists('$(_TailwindToolPathRuntime)')">$(_TailwindToolPathRuntime)</_TailwindToolPath>
+
+      <!-- 3. Check in the project-local runtimes folder (deployed native assets) -->
+      <_TailwindLocalRuntimePath>$(ProjectDir)runtimes/$(_TailwindTargetRid)/native/$(_TailwindRuntimeBinaryName)</_TailwindLocalRuntimePath>
+      <_TailwindToolPath Condition="'$(_TailwindToolPath)' == '' and Exists('$(_TailwindLocalRuntimePath)')">$(_TailwindLocalRuntimePath)</_TailwindToolPath>
+
+      <!-- 4. Fallback to base folder if not in runtimes -->
+      <_TailwindToolPathBase>$(MSBuildThisFileDirectory)../tailwindcss</_TailwindToolPathBase>
+      <_TailwindToolPath Condition="'$(_TailwindToolPath)' == '' and $([MSBuild]::IsOSPlatform('Windows')) and Exists('$(_TailwindToolPathBase).exe')">$(_TailwindToolPathBase).exe</_TailwindToolPath>
+      <_TailwindToolPath Condition="'$(_TailwindToolPath)' == '' and Exists('$(_TailwindToolPathBase)')">$(_TailwindToolPathBase)</_TailwindToolPath>
+
+      <!-- 5. During repo-local development, runtime project builds place the downloaded binary under obj/.
+           Current builds use a version-scoped cache folder; keep the legacy flat path as a fallback so
+           existing local obj outputs still work after upgrading the package. -->
+      <_TailwindToolPathDevVersioned>$(MSBuildThisFileDirectory)../runtimes/obj/ForgeTrust.AppSurface.Web.Tailwind.Runtime.$(_TailwindTargetRid)/$(Configuration)/$(TargetFramework)/tailwind-$(TailwindVersion)/$(_TailwindRuntimeBinaryName)</_TailwindToolPathDevVersioned>
+      <_TailwindToolPath Condition="'$(_TailwindToolPath)' == '' and Exists('$(_TailwindToolPathDevVersioned)')">$(_TailwindToolPathDevVersioned)</_TailwindToolPath>
+      <_TailwindToolPathDevLegacy>$(MSBuildThisFileDirectory)../runtimes/obj/ForgeTrust.AppSurface.Web.Tailwind.Runtime.$(_TailwindTargetRid)/$(Configuration)/$(TargetFramework)/$(_TailwindRuntimeBinaryName)</_TailwindToolPathDevLegacy>
+      <_TailwindToolPath Condition="'$(_TailwindToolPath)' == '' and Exists('$(_TailwindToolPathDevLegacy)')">$(_TailwindToolPathDevLegacy)</_TailwindToolPath>
+
+      <_TailwindExecArgs>-i &quot;$(TailwindInputPath)&quot; -o &quot;$(TailwindOutputPath)&quot; --minify</_TailwindExecArgs>
+      <_TailwindToolPathLower Condition="'$(_TailwindToolPath)' != ''">$([System.String]::Copy('$(_TailwindToolPath)').ToLowerInvariant())</_TailwindToolPathLower>
+      <_TailwindExecCommand>&quot;$(_TailwindToolPath)&quot; $(_TailwindExecArgs)</_TailwindExecCommand>
+      <_TailwindExecCommand Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$(_TailwindToolPathLower)' != '' and ($([System.String]::Copy('$(_TailwindToolPathLower)').EndsWith('.cmd')) Or $([System.String]::Copy('$(_TailwindToolPathLower)').EndsWith('.bat')))">cmd.exe /d /c &quot;&quot;$(_TailwindToolPath)&quot; $(_TailwindExecArgs)&quot;</_TailwindExecCommand>
+      <_TailwindExecCommand Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$(_TailwindToolPathLower)' != '' and $([System.String]::Copy('$(_TailwindToolPathLower)').EndsWith('.ps1'))">powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File &quot;$(_TailwindToolPath)&quot; $(_TailwindExecArgs)</_TailwindExecCommand>
+    </PropertyGroup>
+
+    <Error Text="Tailwind CSS could not determine a supported runtime identifier for the current build host."
+           Condition="'$(_TailwindToolPath)' == '' and '$(_TailwindTargetRid)' == ''" />
+    <Error Text="Tailwind CSS version could not be resolved. Set TailwindVersion explicitly or ensure build/tailwind.version is available next to ForgeTrust.AppSurface.Web.Tailwind.targets."
+           Condition="'$(_TailwindToolPath)' == '' and '$(TailwindVersion)' == ''" />
+    <Error Text="TailwindCliPath was set to '$(TailwindCliPath)', but the resolved file '$(_TailwindCliPathFull)' does not exist."
+           Condition="'$(TailwindCliPath)' != '' and !Exists('$(_TailwindCliPathFull)')" />
+    <Error Text="Tailwind CLI binary not found. Please ensure a 'ForgeTrust.AppSurface.Web.Tailwind.Runtime.*' package for your platform is installed or set TailwindCliPath to a local Tailwind CLI binary."
+           Condition="'$(_TailwindToolPath)' == '' or !Exists('$(_TailwindToolPath)')" />
+
+    <Message Importance="High" Text="Tailwind CSS: Running build for $(TailwindInputPath) -> $(TailwindOutputPath)" />
+    <Exec Command="$(_TailwindExecCommand)"
+          WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+</Project>

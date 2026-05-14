@@ -1,15 +1,15 @@
-# Runnable
+# AppSurface
 
 > ⚠️ **Under Construction:** This library is actively being developed and is not intended for production use yet.
-> Monorepo for the ForgeTrust.Runnable projects
+> Monorepo for the ForgeTrust.AppSurface projects
 
-ForgeTrust.Runnable is a collection of .NET libraries designed to provide a lightweight, modular startup pipeline for both console and web applications.
+ForgeTrust.AppSurface is a collection of .NET libraries designed to provide a lightweight, modular startup pipeline for both console and web applications.
 
-If you are deciding which package to install first, start with the [Runnable v0.1 package chooser](./packages/README.md).
+If you are deciding which package to install first, start with the [AppSurface v0.1 package chooser](./packages/README.md).
 
 ## Vision
 
-The primary vision of Runnable is to simplify application bootstrapping by encouraging **composition through small, focused modules**. Instead of monolithic startup classes or scattered configuration logic, Runnable allows developers to encapsulate features into reusable modules that handle:
+The primary vision of AppSurface is to simplify application bootstrapping by encouraging **composition through small, focused modules**. Instead of monolithic startup classes or scattered configuration logic, AppSurface allows developers to encapsulate features into reusable modules that handle:
 
 -   Dependency Injection (DI) registration
 -   Host configuration
@@ -23,7 +23,7 @@ This approach aims to:
 ## Key Design Goals
 
 1.  **Modularity**: Everything should be a module that does one thing well. Take what you need and don't get burdened by what you don't.
-2.  **Consistency**: A unified `RunnableStartup` pipeline for different project types.
+2.  **Consistency**: A unified `AppSurfaceStartup` pipeline for different project types.
 3.  **Flexibility**: Open for integration with external libraries (Autofac, OpenApi, etc.) and stick to framework provided abstractions where possible.
 4.  **Performance**: Designed to have minimal overhead on the application startup and execution.
 5.  **Ease of Use**: Simple APIs and clear patterns to make getting started frictionless.
@@ -33,8 +33,8 @@ This approach aims to:
 ## Caching Conventions
 
 - Use `IMemo` for application and service-layer caching (for example, web modules and domain services).
-- Use direct `IMemoryCache` only inside caching infrastructure (the `ForgeTrust.Runnable.Caching` package) or framework integration points where `IMemo` cannot be injected.
-- If a module depends on `RunnableCachingModule`, do not call `AddMemoryCache()` again in that module.
+- Use direct `IMemoryCache` only inside caching infrastructure (the `ForgeTrust.AppSurface.Caching` package) or framework integration points where `IMemo` cannot be injected.
+- If a module depends on `AppSurfaceCachingModule`, do not call `AddMemoryCache()` again in that module.
 - Prefer one cache boundary per data snapshot. In RazorDocs, `DocAggregator` owns both docs aggregation and search-index payload caching so downstream controllers consume one shared snapshot.
 
 
@@ -42,27 +42,32 @@ This approach aims to:
 
 ### [Packages](./packages/README.md)
 
-- [**Runnable v0.1 package chooser**](./packages/README.md) - the generated install map for direct-install packages, support/runtime packages, and proof-host surfaces.
+- [**AppSurface v0.1 package chooser**](./packages/README.md) - the generated install map for direct-install packages, support/runtime packages, and proof-host surfaces.
 
-### [Core](./ForgeTrust.Runnable.Core/README.md)
-- [**ForgeTrust.Runnable.Core**](./ForgeTrust.Runnable.Core/README.md) – Core abstractions for defining modules and starting an application via `RunnableStartup` and `StartupContext`.
+### [Core](./ForgeTrust.AppSurface.Core/README.md)
+
+- [**ForgeTrust.AppSurface.Core**](./ForgeTrust.AppSurface.Core/README.md) – Core abstractions for defining modules and starting an application via `AppSurfaceStartup` and `StartupContext`.
 
 ### [Console](./Console/README.md)
-- [**ForgeTrust.Runnable.Console**](./Console/ForgeTrust.Runnable.Console/README.md) – Helpers for building command line apps with [CliFx](https://github.com/Tyrrrz/CliFx) including a `CriticalService` based command runner and helpers for configuring services.
+
+- [**ForgeTrust.AppSurface.Console**](./Console/ForgeTrust.AppSurface.Console/README.md) – Helpers for building command line apps with [CliFx](https://github.com/Tyrrrz/CliFx) including a `CriticalService`-based command runner and helpers for configuring services.
 
 ### [Web](./Web/README.md)
-- [**ForgeTrust.Runnable.Web**](./Web/ForgeTrust.Runnable.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register middleware and endpoints, and includes conventional browser status pages plus opt-in production 500 pages.
-- [**ForgeTrust.Runnable.Web.OpenApi**](./Web/ForgeTrust.Runnable.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation using `AddEndpointsApiExplorer` and `WithOpenApi`.
-- [**ForgeTrust.Runnable.Web.RazorWire**](./Web/ForgeTrust.Runnable.Web.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and export tooling for server-rendered web apps.
-- [**ForgeTrust.Runnable.Web.RazorDocs**](./Web/ForgeTrust.Runnable.Web.RazorDocs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, and optional published-version archive surfaces.
-- [**ForgeTrust.Runnable.Web.RazorDocs.Standalone**](./Web/ForgeTrust.Runnable.Web.RazorDocs.Standalone/README.md) – Thin runnable host for exporting or serving RazorDocs as an application.
-- [**ForgeTrust.Runnable.Web.Scalar**](./Web/ForgeTrust.Runnable.Web.Scalar/README.md) – Optional module that serves the Scalar API reference UI and depends on the OpenAPI module.
+
+- [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register middleware and endpoints, and includes conventional browser status pages plus opt-in production 500 pages.
+- [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation using `AddEndpointsApiExplorer` and `WithOpenApi`.
+- [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
+- [**ForgeTrust.AppSurface.Docs**](./Web/ForgeTrust.AppSurface.Docs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, and optional published-version archive surfaces.
+- [**ForgeTrust.AppSurface.Docs.Standalone**](./Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) – Thin export host for exporting or serving RazorDocs as an application.
+- [**ForgeTrust.AppSurface.Web.Scalar**](./Web/ForgeTrust.AppSurface.Web.Scalar/README.md) – Optional module that serves the Scalar API reference UI and depends on the OpenAPI module.
 
 ### [Dependency](./Dependency/README.md)
-- [**ForgeTrust.Runnable.Dependency.Autofac**](./Dependency/ForgeTrust.Runnable.Dependency.Autofac/README.md) – Optional integration with the Autofac IoC container so modules can participate in Autofac service registration.
+
+- [**ForgeTrust.AppSurface.Dependency.Autofac**](./Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) – Optional integration with the Autofac IoC container so modules can participate in Autofac service registration.
 
 ### [Aspire](./Aspire/README.md)
-- [**ForgeTrust.Runnable.Aspire**](./Aspire/ForgeTrust.Runnable.Aspire/README.md) – Integration with .NET Aspire to provide a modular approach to defining distributed applications and service defaults.
+
+- [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Integration with .NET Aspire to provide a modular approach to defining distributed applications and service defaults.
 
 These packages are designed to work together so that features can be shared
 across different application types while maintaining a consistent startup
@@ -88,12 +93,12 @@ Expected response:
 Hello World from the root!
 ```
 
-That example is the smallest concrete path through `ForgeTrust.Runnable.Web`: a root module, one mapped endpoint, and the Runnable startup pipeline doing the hosting work.
+That example is the smallest concrete path through `ForgeTrust.AppSurface.Web`: a root module, one mapped endpoint, and the AppSurface startup pipeline doing the hosting work.
 
 If you are evaluating packages from your own app project rather than running this repo, start with the generated package chooser in [packages/README.md](./packages/README.md). Use the package matrix to pick the module your app actually needs, then run the matching install command from your app project, for example:
 
 ```bash
-dotnet add package ForgeTrust.Runnable.Web --project <path-to-your-app.csproj>
+dotnet add package ForgeTrust.AppSurface.Web --project <path-to-your-app.csproj>
 ```
 
 Add optional modules only when the generated chooser points you to them.
@@ -113,7 +118,7 @@ Run merged solution coverage (product assemblies only):
 
 This command:
 - Runs each solution test project.
-- Collects coverage only for `ForgeTrust.Runnable.*` modules.
+- Collects coverage only for `ForgeTrust.AppSurface.*` modules.
 - Excludes test modules (`*.Tests` and `*.IntegrationTests`) from coverage.
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
@@ -132,7 +137,7 @@ The RazorWire MVC example includes a failed-form UX page at `/Reactivity/FormFai
 
 ## Release notes and upgrade policy
 
-Runnable is preparing to release the entire monorepo in unison. The public release contract now lives in the repository so teams can see what is queued for the next version, how pre-1.0 changes are handled, and where future migration notes will live.
+AppSurface is preparing to release the entire monorepo in unison. The public release contract now lives in the repository so teams can see what is queued for the next version, how pre-1.0 changes are handled, and where future migration notes will live.
 
 - [Package chooser](./packages/README.md) - the generated first-install map for web, console, Aspire, and optional package add-ons.
 - [Release hub](./releases/README.md) - start here for the narrative release surface.
@@ -143,27 +148,27 @@ Runnable is preparing to release the entire monorepo in unison. The public relea
 
 ## Feedback and contributing
 
-Runnable uses GitHub issue forms to keep bug reports, feature requests, and docs/developer-experience feedback concrete enough to reproduce or evaluate. If an example, README, quickstart, or package API leaves you stuck, start with the [contribution guide](./CONTRIBUTING.md), [choose an issue template](https://github.com/forge-trust/Runnable/issues/new/choose), and file the form that matches the problem.
+AppSurface uses GitHub issue forms to keep bug reports, feature requests, and docs/developer-experience feedback concrete enough to reproduce or evaluate. If an example, README, quickstart, or package API leaves you stuck, start with the [contribution guide](./CONTRIBUTING.md), [choose an issue template](https://github.com/forge-trust/AppSurface/issues/new/choose), and file the form that matches the problem.
 
 Use docs/DX feedback for confusing guidance, missing concepts, broken links, snippet drift, or first-run friction. Use feature requests for focused product capabilities, API shapes, workflows, or examples. Use bug reports when runtime behavior, generated output, or package APIs do something unexpected.
 Do not file suspected vulnerabilities, leaked secrets, or exploit details in public issues; follow the [security policy](./SECURITY.md) instead.
 
 ## Examples
 
-The [examples](examples) directory contains sample applications that demonstrate
+The [examples](examples/README.md) directory contains sample applications that demonstrate
 how to use this project.
 
-- [Console app example](examples/console-app) – builds a simple command line
+- [Console app example](examples/console-app/README.md) – builds a simple command line
   application using [CliFx](https://github.com/Tyrrrz/CliFx) for command
   definitions.
-- [Web app example](examples/web-app) – shows a minimal ASP.NET Core app that
+- [Web app example](examples/web-app/README.md) – shows a minimal ASP.NET Core app that
   composes middleware and endpoints from modules.
-- [Config validation example](examples/config-validation) – shows scalar
+- [Config validation example](examples/config-validation/README.md) – shows scalar
   validation on a strongly typed config wrapper and the startup failure shape.
 
 ## License
 
-Runnable is licensed under the [Polyform Small Business License 1.0.0](./LICENSE).
+AppSurface is licensed under the [Polyform Small Business License 1.0.0](./licensing.md).
 
 Free for individuals and businesses with fewer than 100 people and under
 $1,000,000 USD prior-year revenue (inflation-adjusted). Larger companies

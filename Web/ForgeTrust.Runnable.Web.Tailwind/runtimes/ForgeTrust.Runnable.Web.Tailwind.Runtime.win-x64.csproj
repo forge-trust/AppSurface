@@ -1,9 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TailwindRid>win-x64</TailwindRid>
-    <PackageId>ForgeTrust.Runnable.Web.Tailwind.Runtime.win-x64</PackageId>
-    <Title>ForgeTrust Runnable Tailwind Runtime (Windows x64)</Title>
-    <Description>Tailwind CSS standalone binary for Windows x64.</Description>
-  </PropertyGroup>
-  <Import Project="Tailwind.Runtime.Common.targets" />
-</Project>

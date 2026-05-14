@@ -7,26 +7,26 @@
         "resolved": "1.6.17",
         "contentHash": "Le+kehlmrlQfuDFUt1zZ2dVwrhFQtKREdKBo+rexOwaCoYP0/qpgT9tLxCsZjsgR5Itk1UKPcbgO+FyaNid/bA=="
       },
-      "forgetrust.runnable.core": {
+      "forgetrust.appsurface.core": {
         "type": "Project"
       },
-      "forgetrust.runnable.web": {
+      "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.Runnable.Core": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Core": "[1.0.0, )"
         }
       },
-      "forgetrust.runnable.web.openapi": {
+      "forgetrust.appsurface.web.openapi": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.Runnable.Web": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web": "[1.0.0, )",
           "Microsoft.AspNetCore.OpenApi": "[9.0.8, )"
         }
       },
-      "forgetrust.runnable.web.scalar": {
+      "forgetrust.appsurface.web.scalar": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.Runnable.Web.OpenApi": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web.OpenApi": "[1.0.0, )",
           "Scalar.AspNetCore": "[2.6.8, )"
         }
       },

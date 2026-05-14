@@ -1,7 +1,7 @@
 ﻿using CliFx;
 using CliFx.Attributes;
 using CliFx.Infrastructure;
-using ForgeTrust.Runnable.Config;
+using ForgeTrust.AppSurface.Config;
 
 namespace ConsoleAppExample;
 

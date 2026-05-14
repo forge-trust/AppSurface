@@ -1,14 +1,14 @@
-# Runnable Glossary
+# AppSurface Glossary
 
-This glossary defines the terms needed to read the Runnable package docs and examples. Package READMEs remain the source of truth for full API behavior.
+This glossary defines the terms needed to read the AppSurface package docs and examples. Package READMEs remain the source of truth for full API behavior.
 
-## RunnableStartup
+## AppSurfaceStartup
 
-`RunnableStartup` is the startup pipeline that composes modules on top of the .NET Generic Host. Use the package-specific entry points, such as `WebApp<TModule>`, unless you need deeper host customization.
+`AppSurfaceStartup` is the startup pipeline that composes modules on top of the .NET Generic Host. Use the package-specific entry points, such as `WebApp<TModule>`, unless you need deeper host customization.
 
 ## Root Module
 
-The root module is the module type passed to a Runnable entry point. It is the starting point for module composition.
+The root module is the module type passed to an AppSurface entry point. It is the starting point for module composition.
 
 Example:
 
@@ -24,7 +24,7 @@ A dependent module is another module registered by a module through `RegisterDep
 
 ## Host Module
 
-A host module participates in .NET host setup through the core module lifecycle. `IRunnableHostModule` is the core contract for modules that can configure services and host behavior.
+A host module participates in .NET host setup through the core module lifecycle. `IAppSurfaceHostModule` is the core contract for modules that can configure services and host behavior.
 
 ## StartupContext
 
@@ -34,20 +34,20 @@ Keep display labels and host identity separate. Static web assets use host ident
 
 ## Package Module
 
-A package module is a Runnable module shipped by a package, such as the Web, Console, Aspire, or optional web modules. Install package modules only when the [package chooser](../packages/README.md) says they match the app.
+A package module is an AppSurface module shipped by a package, such as the Web, Console, Aspire, or optional web modules. Install package modules only when the [package chooser](../packages/README.md) says they match the app.
 
 ## Web Module
 
-A web module participates in ASP.NET Core startup through `IRunnableWebModule`. It can configure web options, register middleware, and map endpoints.
+A web module participates in ASP.NET Core startup through `IAppSurfaceWebModule`. It can configure web options, register middleware, and map endpoints.
 
-The base web package is [ForgeTrust.Runnable.Web](../Web/ForgeTrust.Runnable.Web/README.md).
+The base web package is [ForgeTrust.AppSurface.Web](../Web/ForgeTrust.AppSurface.Web/README.md).
 
 ## Console Startup
 
-Console startup is the Runnable path for CLI commands and worker-style processes. Start with the [Console package docs](../Console/ForgeTrust.Runnable.Console/README.md) when the app is command-oriented instead of web-oriented.
+Console startup is the AppSurface path for CLI commands and worker-style processes. Start with the [Console package docs](../Console/ForgeTrust.AppSurface.Console/README.md) when the app is command-oriented instead of web-oriented.
 
 ## Package Chooser
 
-The package chooser is the generated install map for the coordinated Runnable package family. Use it before adding optional modules.
+The package chooser is the generated install map for the coordinated AppSurface package family. Use it before adding optional modules.
 
-Read it here: [Runnable v0.1 package chooser](../packages/README.md)
+Read it here: [AppSurface v0.1 package chooser](../packages/README.md)

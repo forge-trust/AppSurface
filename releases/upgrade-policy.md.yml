@@ -1,5 +1,5 @@
 title: Pre-1.0 upgrade policy
-summary: Stability and migration contract for Runnable before the first tagged release.
+summary: Stability and migration contract for AppSurface before the first tagged release.
 page_type: guide
 nav_group: Releases
 order: 30
@@ -8,8 +8,8 @@ breadcrumbs:
   - Pre-1.0 upgrade policy
 trust:
   status: Pre-1.0 policy
-  summary: Runnable can still make breaking changes before v1.0.0, but those changes must be called out publicly and paired with clear migration guidance.
-  freshness: Updated when Runnable changes the release contract or clarifies what belongs in public migration notes.
+  summary: AppSurface can still make breaking changes before v1.0.0, but those changes must be called out publicly and paired with clear migration guidance.
+  freshness: Updated when AppSurface changes the release contract or clarifies what belongs in public migration notes.
   change_scope: Repository-wide. The same policy applies to packages, CLI tooling, examples, and docs-facing behavior.
   migration:
     label: See the current unreleased note

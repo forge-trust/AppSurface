@@ -7,11 +7,24 @@
     <IsTestProject Condition="$(_NormalizedProjectName.EndsWith('.tests')) OR $(_NormalizedProjectDir.Contains('/tests/')) OR $(_NormalizedProjectDir.Contains('.tests'))">true</IsTestProject>
     <IsBenchmarkProject Condition="$(_NormalizedProjectDir.Contains('/benchmarks/')) OR $(_NormalizedProjectName.Contains('benchmarks'))">true</IsBenchmarkProject>
     <IsExampleProject Condition="$(_NormalizedProjectDir.Contains('/examples/'))">true</IsExampleProject>
-    <IsTailwindRuntimeProject Condition="$(_NormalizedProjectDir.Contains('/web/forgetrust.runnable.web.tailwind/runtimes')) AND $(_NormalizedProjectName.StartsWith('forgetrust.runnable.web.tailwind.runtime.'))">true</IsTailwindRuntimeProject>
-    
+    <IsTailwindRuntimeProject Condition="$(_NormalizedProjectDir.Contains('/web/forgetrust.appsurface.web.tailwind/runtimes')) AND $(_NormalizedProjectName.StartsWith('forgetrust.appsurface.web.tailwind.runtime.'))">true</IsTailwindRuntimeProject>
+
+    <Authors Condition="'$(Authors)' == ''">Forge Trust</Authors>
+    <Company Condition="'$(Company)' == ''">Forge Trust</Company>
+    <PackageDescription Condition="'$(PackageDescription)' == '' and '$(Description)' == ''">$(MSBuildProjectName) package for AppSurface application composition.</PackageDescription>
+    <PackageLicenseFile Condition="'$(PackageLicenseFile)' == ''">LICENSE</PackageLicenseFile>
+    <PackageProjectUrl Condition="'$(PackageProjectUrl)' == ''">https://github.com/forge-trust/AppSurface</PackageProjectUrl>
+    <PackageTags Condition="'$(PackageTags)' == ''">appsurface;dotnet;modular;startup</PackageTags>
+    <RepositoryType Condition="'$(RepositoryType)' == ''">git</RepositoryType>
+    <RepositoryUrl Condition="'$(RepositoryUrl)' == ''">https://github.com/forge-trust/AppSurface</RepositoryUrl>
+    <VersionPrefix Condition="'$(VersionPrefix)' == ''">0.1.0</VersionPrefix>
+    <IsPackable Condition="'$(IsBenchmarkProject)' == 'true' OR '$(IsExampleProject)' == 'true'">false</IsPackable>
     <GenerateDocumentationFile Condition="'$(IsTestProject)' != 'true' AND '$(IsBenchmarkProject)' != 'true' AND '$(IsExampleProject)' != 'true'">true</GenerateDocumentationFile>
     <WarningsAsErrors Condition="'$(IsTestProject)' != 'true' AND '$(IsBenchmarkProject)' != 'true' AND '$(IsExampleProject)' != 'true'">$(WarningsAsErrors);CS1591</WarningsAsErrors>
     <BaseIntermediateOutputPath Condition="'$(IsTailwindRuntimeProject)' == 'true'">obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath Condition="'$(IsTailwindRuntimeProject)' == 'true'">$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
   </PropertyGroup>
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)LICENSE')" />
+  </ItemGroup>
 </Project>

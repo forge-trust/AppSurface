@@ -1,6 +1,6 @@
 sequence_key: razorwire-proof
 order: 20
 related_pages:
-  - Web/ForgeTrust.Runnable.Web.RazorWire/README.md
-  - Web/ForgeTrust.Runnable.Web.RazorWire/Docs/form-failures.md
-  - Web/ForgeTrust.Runnable.Web.RazorWire/Docs/antiforgery.md
+  - Web/ForgeTrust.RazorWire/README.md
+  - Web/ForgeTrust.RazorWire/Docs/form-failures.md
+  - Web/ForgeTrust.RazorWire/Docs/antiforgery.md

@@ -11,6 +11,7 @@
     <PackageVersion Include="Autofac" Version="8.0.0" />
     <PackageVersion Include="Autofac.Extensions.DependencyInjection" Version="9.0.0" />
     <PackageVersion Include="CliFx" Version="2.3.6" />
+    <PackageVersion Include="CliWrap" Version="3.10.1" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="coverlet.msbuild" Version="6.0.4" />
     <PackageVersion Include="FakeItEasy" Version="9.0.0" />

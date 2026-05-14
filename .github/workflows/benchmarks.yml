@@ -39,7 +39,7 @@ jobs:
 
       - name: Run benchmarks (JSON)
         run: |
-          dotnet run --project 'benchmarks/RunnableBenchmarks/RunnableBenchmarks.csproj' -c Release -- --filter '*'
+          dotnet run --project 'benchmarks/AppSurfaceBenchmarks/AppSurfaceBenchmarks.csproj' -c Release -- --filter '*'
 
       - name: Publish BenchmarkDotNet artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -61,7 +61,7 @@ jobs:
         with:
           branch: ${{ github.ref_name }}
           comment-on-threshold: true
-          name: Runnable
+          name: AppSurface
           output-file-path: '${{ steps.get-repo-name.outputs.repo-name }}/data.json'
           repo: '${{ github.repository_owner }}/benchmarks'
           repo-token: ${{ secrets.BENCHMARKS_TOKEN }}

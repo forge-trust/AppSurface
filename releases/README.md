@@ -1,6 +1,6 @@
 # Release notes and change management
 
-Runnable now treats release notes as a product surface instead of a post-ship afterthought. This folder is the public record that answers three questions quickly:
+AppSurface now treats release notes as a product surface instead of a post-ship afterthought. This folder is the public record that answers three questions quickly:
 
 1. What is changing next?
 2. How risky is it to adopt?
@@ -10,8 +10,8 @@ It also acts as a concrete RazorDocs example for teams that want stronger releas
 
 ## Start here
 
-- [Package chooser](../packages/README.md) is the fastest install map for deciding which Runnable package to add first.
-- [Unreleased](./unreleased.md) is the living proof artifact for the next coordinated Runnable version.
+- [Package chooser](../packages/README.md) is the fastest install map for deciding which AppSurface package to add first.
+- [Unreleased](./unreleased.md) is the living proof artifact for the next coordinated AppSurface version.
 - [Changelog](../CHANGELOG.md) is the compact ledger that points to unreleased and tagged stories.
 - [Pre-1.0 upgrade policy](./upgrade-policy.md) explains the stability contract before `v1.0.0`.
 - [Release authoring checklist](./release-authoring-checklist.md) is the maintainer workflow for turning the unreleased page into a tagged release.
@@ -28,7 +28,7 @@ Every release note should make upgrade risk obvious near the top. Call out wheth
 
 ### Archive third
 
-Once Runnable starts cutting tags, the long-form release note will live in this folder and the compact summary will live in [`CHANGELOG.md`](../CHANGELOG.md). Tagged notes become the durable archive for migration details and release narrative.
+Once AppSurface starts cutting tags, the long-form release note will live in this folder and the compact summary will live in [`CHANGELOG.md`](../CHANGELOG.md). Tagged notes become the durable archive for migration details and release narrative.
 
 ## What belongs in the release surface
 

@@ -1,0 +1,74 @@
+<Project>
+  <Import Project="../Tailwind.Common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <PackageType>Dependency</PackageType>
+    <PackageDescription Condition="'$(PackageDescription)' == '' and '$(Description)' != ''">$(Description)</PackageDescription>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <!-- TailwindRid should be set by the importing project -->
+    <TailwindBinaryName Condition="'$(TailwindRid)' == 'win-x64'">tailwindcss-windows-x64.exe</TailwindBinaryName>
+    <TailwindBinaryName Condition="'$(TailwindRid)' == 'osx-arm64'">tailwindcss-macos-arm64</TailwindBinaryName>
+    <TailwindBinaryName Condition="'$(TailwindRid)' == 'osx-x64'">tailwindcss-macos-x64</TailwindBinaryName>
+    <TailwindBinaryName Condition="'$(TailwindRid)' == 'linux-x64'">tailwindcss-linux-x64</TailwindBinaryName>
+    <TailwindBinaryName Condition="'$(TailwindRid)' == 'linux-arm64'">tailwindcss-linux-arm64</TailwindBinaryName>
+
+    <TailwindDownloadUrl>$(TailwindBaseUrl)/$(TailwindBinaryName)</TailwindDownloadUrl>
+    <_TailwindCacheDir>$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/tailwind-$(TailwindVersion)/</_TailwindCacheDir>
+    <_TailwindBinaryPath>$(_TailwindCacheDir)$(TailwindBinaryName)</_TailwindBinaryPath>
+    <ChecksumFile>$(_TailwindCacheDir)sha256sums.txt</ChecksumFile>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddTailwindRuntimeBinaryToPackage</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="obj/**/*.cs" />
+    <EmbeddedResource Remove="obj/**" />
+    <None Remove="obj/**" />
+  </ItemGroup>
+
+  <Target
+    Name="ResolveTailwindBinary"
+    BeforeTargets="Build"
+    Outputs="$(_TailwindBinaryPath)">
+    <Error Text="TailwindRid must be set by the importing project."
+           Condition="'$(TailwindRid)' == ''" />
+    <Error Text="Unsupported TailwindRid '$(TailwindRid)'. No TailwindBinaryName mapping was found."
+           Condition="'$(TailwindRid)' != '' and '$(TailwindBinaryName)' == ''" />
+
+    <MakeDir Directories="$(_TailwindCacheDir)" Condition="!Exists('$(_TailwindCacheDir)')" />
+
+    <DownloadFile SourceUrl="$(TailwindSumsUrl)" DestinationFolder="$(_TailwindCacheDir)" DestinationFileName="sha256sums.txt" Condition="!Exists('$(ChecksumFile)')" />
+
+    <FindChecksum ChecksumFile="$(ChecksumFile)" BinaryName="$(TailwindBinaryName)">
+      <Output TaskParameter="Hash" PropertyName="ExpectedHash" />
+    </FindChecksum>
+
+    <Error Text="Could not find expected SHA-256 hash for '$(TailwindBinaryName)' in '$(ChecksumFile)'." Condition="'$(ExpectedHash)' == ''" />
+
+    <DownloadFile SourceUrl="$(TailwindDownloadUrl)" DestinationFolder="$(_TailwindCacheDir)" DestinationFileName="$(TailwindBinaryName)" Condition="!Exists('$(_TailwindBinaryPath)')" />
+
+    <GetFileHash Files="$(_TailwindBinaryPath)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="ComputedHashes" />
+    </GetFileHash>
+
+    <PropertyGroup>
+      <_ComputedHash>%(ComputedHashes.FileHash)</_ComputedHash>
+    </PropertyGroup>
+
+    <Message Importance="High" Text="Tailwind CLI: Expected Hash: [$(ExpectedHash.ToLower())]" />
+    <Message Importance="High" Text="Tailwind CLI: Computed Hash: [$(_ComputedHash.ToLower())]" />
+
+    <Error Text="Tailwind CLI checksum mismatch! Expected: $(ExpectedHash), Computed: $(_ComputedHash)" Condition="'$(ExpectedHash.ToLower())' != '$(_ComputedHash.ToLower())'" />
+
+    <Exec Command="chmod +x &quot;$(_TailwindBinaryPath)&quot;" Condition="!$([MSBuild]::IsOSPlatform('Windows'))" />
+  </Target>
+
+  <Target
+    Name="AddTailwindRuntimeBinaryToPackage"
+    DependsOnTargets="ResolveTailwindBinary">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="$(_TailwindBinaryPath)" PackagePath="runtimes/$(TailwindRid)/native" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -4,8 +4,8 @@ This directory contains libraries and tools for building command-line applicatio
 
 ## Contents
 
-- [**ForgeTrust.Runnable.Console**](./ForgeTrust.Runnable.Console/README.md) – CLI bootstrapping with CliFx.
-- [**ForgeTrust.Runnable.Console.Tests**](./ForgeTrust.Runnable.Console.Tests) – Unit tests for console logic.
+- [**ForgeTrust.AppSurface.Console**](./ForgeTrust.AppSurface.Console/README.md) – CLI bootstrapping with CliFx.
+- `ForgeTrust.AppSurface.Console.Tests` – Unit tests for console logic.
 
 ---
 [🏠 Back to Root](../README.md)

@@ -1,9 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TailwindRid>osx-x64</TailwindRid>
-    <PackageId>ForgeTrust.Runnable.Web.Tailwind.Runtime.osx-x64</PackageId>
-    <Title>ForgeTrust Runnable Tailwind Runtime (macOS x64)</Title>
-    <Description>Tailwind CSS standalone binary for macOS x64.</Description>
-  </PropertyGroup>
-  <Import Project="Tailwind.Runtime.Common.targets" />
-</Project>

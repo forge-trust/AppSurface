@@ -1,5 +1,5 @@
 title: Unreleased
-summary: Living proof artifact for the next coordinated Runnable release. This page is intentionally provisional until a version is tagged.
+summary: Living proof artifact for the next coordinated AppSurface release. This page is intentionally provisional until a version is tagged.
 page_type: release-note
 nav_group: Releases
 order: 15
@@ -8,7 +8,7 @@ breadcrumbs:
   - Unreleased
 trust:
   status: Unreleased
-  summary: This page tracks merged work that is intended for the next coordinated Runnable release. The grouping and wording can still change before the tag is cut.
+  summary: This page tracks merged work that is intended for the next coordinated AppSurface release. The grouping and wording can still change before the tag is cut.
   freshness: Updated as changes land on main. Treat it as current but provisional.
   change_scope: Repository-wide. Packages, CLI tooling, examples, and docs-facing behavior all roll into the same next version.
   migration:

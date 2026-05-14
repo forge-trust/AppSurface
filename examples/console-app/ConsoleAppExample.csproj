@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../Console/ForgeTrust.Runnable.Console/ForgeTrust.Runnable.Console.csproj"/>
-    <ProjectReference Include="../../Config/ForgeTrust.Runnable.Config/ForgeTrust.Runnable.Config.csproj" />
+    <ProjectReference Include="../../Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj"/>
+    <ProjectReference Include="../../Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.json">

@@ -1,0 +1,71 @@
+<Solution>
+  <Folder Name="/Aspire/">
+    <Project Path="Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj" />
+    <Project Path="Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" />
+  </Folder>
+  <Folder Name="/Benchmarks/">
+    <Project Path="benchmarks/AbpSimpleController/AbpSimpleController.csproj" />
+    <Project Path="benchmarks/DependencyInjectionControllers/DependencyInjectionControllers.csproj" />
+    <Project Path="benchmarks/ManyDependencyInjectionControllers/ManyDependencyInjectionControllers.csproj" />
+    <Project Path="benchmarks/AppSurfaceBenchmarks/AppSurfaceBenchmarks.csproj" />
+    <Project Path="benchmarks/SimpleApiController/SimpleApiController.csproj" />
+  </Folder>
+  <Folder Name="/Caching/">
+    <Project Path="Caching/ForgeTrust.AppSurface.Caching/ForgeTrust.AppSurface.Caching.csproj" />
+    <Project Path="Caching/ForgeTrust.AppSurface.Caching.Tests/ForgeTrust.AppSurface.Caching.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Config/">
+    <Project Path="Config/ForgeTrust.AppSurface.Config.Tests/ForgeTrust.AppSurface.Config.Tests.csproj" />
+    <Project Path="Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />
+  </Folder>
+  <Folder Name="/Console/">
+    <Project Path="Console/ForgeTrust.AppSurface.Console.Tests/ForgeTrust.AppSurface.Console.Tests.csproj" />
+    <Project Path="Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj" />
+  </Folder>
+  <Folder Name="/Dependency/">
+    <Project Path="Dependency/ForgeTrust.AppSurface.Dependency.Autofac.Tests/ForgeTrust.AppSurface.Dependency.Autofac.Tests.csproj" />
+    <Project Path="Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj" />
+  </Folder>
+  <Folder Name="/Examples/">
+    <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
+    <Project Path="examples/console-app/ConsoleAppExample.csproj" />
+    <Project Path="examples/web-app/WebAppExample.csproj" />
+  </Folder>
+  <Folder Name="/Examples/razorwire-mvc/">
+    <Project Path="examples/razorwire-mvc/RazorWireWebExample.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/ForgeTrust.AppSurface.MarkdownSnippets.Tests/ForgeTrust.AppSurface.MarkdownSnippets.Tests.csproj" />
+    <Project Path="tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj" />
+    <Project Path="tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj" />
+    <Project Path="tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj" />
+  </Folder>
+  <Folder Name="/Web/">
+    <Project Path="Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj" />
+    <Project Path="Web/ForgeTrust.RazorWire.Cli.Tests/ForgeTrust.RazorWire.Cli.Tests.csproj" />
+    <Project Path="Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj" />
+    <Project Path="Web/ForgeTrust.RazorWire.Tests/ForgeTrust.RazorWire.Tests.csproj" />
+    <Project Path="Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.OpenApi.Tests/ForgeTrust.AppSurface.Web.OpenApi.Tests.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Scalar.Tests/ForgeTrust.AppSurface.Web.Scalar.Tests.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Scalar/ForgeTrust.AppSurface.Web.Scalar.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind.Tests/ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Tests/ForgeTrust.AppSurface.Web.Tests.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
+  </Folder>
+  <Folder Name="/Web/ForgeTrust.AppSurface.Web.Tailwind/" />
+  <Folder Name="/Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/">
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64.csproj" />
+  </Folder>
+  <Project Path="ForgeTrust.AppSurface.Core.Tests/ForgeTrust.AppSurface.Core.Tests.csproj" />
+  <Project Path="ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
+</Solution>

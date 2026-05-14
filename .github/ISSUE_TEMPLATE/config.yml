@@ -1,14 +1,14 @@
 blank_issues_enabled: false
 contact_links:
   - name: Private vulnerability report
-    url: https://github.com/forge-trust/Runnable/blob/main/SECURITY.md
+    url: https://github.com/forge-trust/AppSurface/blob/main/SECURITY.md
     about: Report suspected vulnerabilities privately instead of opening a public issue.
-  - name: Runnable contribution guide
-    url: https://github.com/forge-trust/Runnable/blob/main/CONTRIBUTING.md
+  - name: AppSurface contribution guide
+    url: https://github.com/forge-trust/AppSurface/blob/main/CONTRIBUTING.md
     about: Read how to file focused feedback, propose docs changes, and prepare pull requests.
   - name: Start with the package chooser
-    url: https://github.com/forge-trust/Runnable/blob/main/packages/README.md
-    about: Use this when you are deciding which Runnable package to install first.
+    url: https://github.com/forge-trust/AppSurface/blob/main/packages/README.md
+    about: Use this when you are deciding which AppSurface package to install first.
   - name: Read the release and upgrade contract
-    url: https://github.com/forge-trust/Runnable/blob/main/releases/README.md
+    url: https://github.com/forge-trust/AppSurface/blob/main/releases/README.md
     about: Use this when you are evaluating adoption risk or migration guidance.

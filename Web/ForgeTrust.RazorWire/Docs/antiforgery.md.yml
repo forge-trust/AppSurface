@@ -1,0 +1,8 @@
+title: Security & Anti-Forgery
+page_type: troubleshooting
+sequence_key: razorwire-proof
+order: 30
+related_pages:
+  - Web/ForgeTrust.RazorWire/README.md
+  - Web/ForgeTrust.RazorWire/Docs/form-failures.md
+  - Web/ForgeTrust.RazorWire/DESIGN.md

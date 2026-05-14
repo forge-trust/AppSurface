@@ -1,8 +1,0 @@
-title: Failed Form UX
-page_type: guide
-sequence_key: razorwire-proof
-order: 25
-related_pages:
-  - Web/ForgeTrust.Runnable.Web.RazorWire/README.md
-  - Web/ForgeTrust.Runnable.Web.RazorWire/Docs/antiforgery.md
-  - examples/razorwire-mvc/README.md
