@@ -127,6 +127,9 @@ The empty state should guide without feeling promotional.
 - Include a one-sentence orientation
 - Show clickable suggestion chips
 - Explain that filters can also be used for browse mode before typing
+- Show representative starter rows after the index loads so the page proves the corpus shape before the user knows the exact query
+- Treat starter rows as discovery aids in the same single editorial stream, not as grouped dashboard columns
+- Omit missing representative page types cleanly; do not render empty placeholders for Guide, API Reference, Example, Troubleshooting, or Release when the corpus lacks one
 
 ### Results
 
@@ -137,6 +140,8 @@ Results should be a high-information list.
 - Badges are compact metadata, not visual decoration
 - Snippets should stay short and readable
 - Highlight matches with restrained `<mark>` styling
+- Blank snippets should be omitted instead of replaced with filler text
+- Page-type badges should use the shared badge vocabulary, including `Release` for release-note metadata aliases
 
 ### Filters
 
@@ -165,7 +170,7 @@ Desktop details pages with an outline should use an article-first composition:
 2. quiet page-local outline rail
 3. active section marker visible enough to scan without competing with reading
 
-The persistent rail appears only on wide desktop (`>=1280px`) so the article column stays readable. Below that breakpoint, use one collapsed `On this page` control above the article. Do not render separate desktop and mobile outlines.
+The persistent rail appears only on wide desktop (`>=1280px`) so the article column stays readable. Below that breakpoint, use one sticky collapsed `On this page` control above the article. Do not render separate desktop and mobile outlines.
 
 Visual rules:
 
@@ -175,11 +180,13 @@ Visual rules:
 - Keep H2 links stronger and H3 links quieter/indented.
 - Use small row radii only. Do not wrap the whole rail in a large rounded card.
 - Preserve the existing RazorDocs global sidebar; do not replace it with icon-only chrome for this pattern.
+- On compact viewports, the collapsed outline may show previous, current, and next section context. The current section is dominant; previous and next stay smaller and quieter so the control remains a reader aid instead of a second header.
 
 Interaction rules:
 
 - The active outline link uses `aria-current="location"`.
 - Mobile outline links collapse the outline after navigation so the reader returns to content.
+- Compact context rows can use a subtle vertical rolling cue when the active section changes. Animate text rows only, keep the shell fixed-height, and disable the cue under `prefers-reduced-motion: reduce`.
 - JavaScript enhances server-rendered hash links. It must not create a hidden-only outline when scripts fail.
 
 ## Interaction Rules

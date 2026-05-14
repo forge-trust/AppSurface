@@ -13,7 +13,7 @@ trust:
   change_scope: Repository-wide. The same policy applies to packages, CLI tooling, examples, and docs-facing behavior.
   migration:
     label: See the current unreleased note
-    href: /docs/releases/unreleased.md.html
+    href: /docs/releases/unreleased
   archive: Version-specific migration steps belong in tagged release pages, while this page stays stable as the standing policy.
   sources:
     - CHANGELOG.md

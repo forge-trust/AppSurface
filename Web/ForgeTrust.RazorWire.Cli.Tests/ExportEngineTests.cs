@@ -701,6 +701,40 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_CdnMode_Should_Append_Html_For_Dotted_Extensionless_Page_Routes()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new DottedPageRouteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var packageHtmlPath = Path.Combine(tempDir, "docs", "web", "forgetrust.razorwire.html");
+            var childHtmlPath = Path.Combine(tempDir, "docs", "web", "forgetrust.razorwire", "docs.html");
+
+            Assert.Contains("href=\"/docs/web/forgetrust.razorwire.html\"", indexHtml);
+            Assert.True(File.Exists(packageHtmlPath), "Expected dotted page route to export as an HTML artifact.");
+            Assert.True(File.Exists(childHtmlPath), "Expected child route under dotted slug to export without colliding with its parent.");
+
+            var packageHtml = await File.ReadAllTextAsync(packageHtmlPath);
+            Assert.Contains("href=\"/docs/web/forgetrust.razorwire/docs.html\"", packageHtml);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_HybridMode_Should_Preserve_Extensionless_Managed_Urls()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -1374,6 +1408,42 @@ public class ExportEngineTests
             if (path.StartsWith("/img/", StringComparison.Ordinal))
             {
                 return Bytes("image/png");
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class DottedPageRouteHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <a href="/docs/web/forgetrust.razorwire">RazorWire package</a>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            if (path == "/docs/web/forgetrust.razorwire")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <a href="/docs/web/forgetrust.razorwire/docs">API docs</a>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            if (path == "/docs/web/forgetrust.razorwire/docs")
+            {
+                return Html("<html><body><h1>API docs</h1></body></html>");
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));

@@ -2,7 +2,7 @@
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
     ViewData["Title"] = Model.Title;
-    var docsOutlineClientUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("outline-client.js"));
+    var docsOutlineClientUrl = $"{Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("outline-client.js"))}?v=rolling-context";
     var trust = Model.Document.Metadata?.Trust;
     var trustStatus = string.IsNullOrWhiteSpace(trust?.Status) ? null : trust!.Status!.Trim();
     var trustSummary = string.IsNullOrWhiteSpace(trust?.Summary) ? null : trust!.Summary!.Trim();
@@ -468,11 +468,29 @@
                data-outline-expanded="true">
             <button class="docs-outline-toggle"
                     type="button"
+                    aria-label="On this page: @Model.Title"
                     aria-expanded="true"
                     aria-controls="docs-page-outline-panel"
                     data-doc-outline-toggle="true">
-                <span>On this page</span>
-                <span class="docs-outline-toggle-current" data-doc-outline-current aria-hidden="true"></span>
+                <span class="docs-outline-toggle-label">@Model.Title</span>
+                <span class="docs-outline-toggle-context"
+                      data-doc-outline-context
+                      aria-hidden="true">
+                    <span class="docs-outline-context-row docs-outline-context-row--previous"
+                          data-doc-outline-previous
+                          hidden>
+                        <span class="docs-outline-context-kicker">Prev</span>
+                        <span data-doc-outline-context-title></span>
+                    </span>
+                    <span class="docs-outline-context-row docs-outline-context-row--current"
+                          data-doc-outline-current></span>
+                    <span class="docs-outline-context-row docs-outline-context-row--next"
+                          data-doc-outline-next
+                          hidden>
+                        <span class="docs-outline-context-kicker">Next</span>
+                        <span data-doc-outline-context-title></span>
+                    </span>
+                </span>
             </button>
             <nav id="docs-page-outline-panel"
                  class="docs-outline-panel"

@@ -98,11 +98,16 @@ public class RazorDocsViewsTests
         Assert.Contains("function renderPageTypeBadge(item)", searchClient);
         Assert.Contains("docs-search-option-title-row", searchClient);
         Assert.Contains("docs-page-badge", searchClient);
-        Assert.Contains("function createSearchResultArticle(doc, queryTokens)", searchClient);
+        Assert.Contains("function normalizePageTypeAlias(value)", searchClient);
+        Assert.Contains("function isPageTypeInGroup(doc, group)", searchClient);
+        Assert.Contains("function getPageTypeDisplayLabel(doc)", searchClient);
+        Assert.Contains("function createSearchResultArticle(doc, queryTokens, options = {})", searchClient);
         Assert.Contains("docs-search-result-badges", searchClient);
-        Assert.Contains("createSearchResultBadge(formatFacetValue(doc.pageType))", searchClient);
+        Assert.Contains("function createSearchResultPageTypeBadge(doc)", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.component))", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
+        Assert.Contains("docs-search-result-meta-line", searchClient);
+        Assert.Contains("docs-search-page-starter-docs", searchClient);
     }
 
     [Fact]
@@ -154,8 +159,32 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-trust-bar", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-link", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-toggle-context", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-toggle-label", tailwindEntryStylesheet);
+        Assert.Contains("max-width: clamp(8rem, 36%, 18rem);", tailwindEntryStylesheet);
+        Assert.Contains("flex: 0 1 clamp(8rem, 36%, 18rem);", tailwindEntryStylesheet);
+        Assert.Contains("text-overflow: ellipsis;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-context-row--previous", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-context-row[data-outline-empty=\"true\"]", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-toggle-context--rolling", tailwindEntryStylesheet);
+        Assert.Contains("@media (prefers-reduced-motion: reduce)", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-toggle", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-label", tailwindEntryStylesheet);
+        Assert.Contains("@media (max-width: 79.999rem)", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] {", tailwindEntryStylesheet);
+        Assert.Contains("position: sticky;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-outline-compact-bleed: 1rem;", tailwindEntryStylesheet);
+        Assert.Contains("width: calc(100% + (var(--docs-outline-compact-bleed) * 2));", tailwindEntryStylesheet);
+        Assert.Contains("margin-right: calc(var(--docs-outline-compact-bleed) * -1);", tailwindEntryStylesheet);
+        Assert.Contains("border-top: 0;", tailwindEntryStylesheet);
+        Assert.Contains("border-radius: 0;", tailwindEntryStylesheet);
+        Assert.Contains("@media (min-width: 40rem) and (max-width: 79.999rem)", tailwindEntryStylesheet);
+        Assert.Contains("--docs-outline-compact-bleed: 1.5rem;", tailwindEntryStylesheet);
+        Assert.Contains("@media (max-width: 47.999rem)", tailwindEntryStylesheet);
+        Assert.Contains("top: 3.8125rem;", tailwindEntryStylesheet);
+        Assert.Contains("@media (min-width: 64rem) and (max-width: 79.999rem)", tailwindEntryStylesheet);
+        Assert.Contains("--docs-outline-compact-bleed: 2rem;", tailwindEntryStylesheet);
+        Assert.DoesNotContain(".docs-outline-shell {\n    order: -1;\n    position: sticky;", tailwindEntryStylesheet);
 
         Assert.DoesNotContain(".docs-page-badge", searchStylesheet);
         Assert.DoesNotContain(".docs-metadata-chip", searchStylesheet);
@@ -164,6 +193,7 @@ public class RazorDocsViewsTests
         Assert.DoesNotContain(".docs-trust-bar", searchStylesheet);
         Assert.DoesNotContain(".docs-outline-shell", searchStylesheet);
         Assert.DoesNotContain(".docs-outline-link", searchStylesheet);
+        Assert.DoesNotContain(".docs-outline-toggle-context", searchStylesheet);
     }
 
     [Fact]
@@ -216,6 +246,22 @@ public class RazorDocsViewsTests
         Assert.Contains("document.addEventListener(\"turbo:frame-load\"", outlineClient);
         Assert.Contains("activeObserver?.disconnect()", outlineClient);
         Assert.Contains("aria-current", outlineClient);
+        Assert.Contains("data-doc-outline-context", outlineClient);
+        Assert.Contains("const clientVersion = \"rolling-context\";", outlineClient);
+        Assert.Contains("existingClient?.version === clientVersion", outlineClient);
+        Assert.Contains("existingClient?.destroy?.();", outlineClient);
+        Assert.Contains("destroy: destroyClient", outlineClient);
+        Assert.Contains("document.removeEventListener(\"turbo:load\"", outlineClient);
+        Assert.Contains("document.removeEventListener(\"turbo:frame-load\"", outlineClient);
+        Assert.Contains("function resetStaleOutlineShell", outlineClient);
+        Assert.Contains("shell.dataset.outlineClientVersion = clientVersion;", outlineClient);
+        Assert.Contains("version: clientVersion", outlineClient);
+        Assert.Contains("function setOutlineContext", outlineClient);
+        Assert.Contains("data-doc-outline-previous", outlineClient);
+        Assert.Contains("data-doc-outline-next", outlineClient);
+        Assert.Contains("row.dataset.outlineEmpty = text ? \"false\" : \"true\";", outlineClient);
+        Assert.Contains("prefers-reduced-motion: reduce", outlineClient);
+        Assert.Contains("outlineRollDirection", outlineClient);
         Assert.Contains("typeof AbortController === \"function\"", outlineClient);
         Assert.Contains("function addLifecycleEventListener", outlineClient);
         Assert.Contains("removeEventListener", outlineClient);
@@ -348,7 +394,7 @@ public class RazorDocsViewsTests
         Assert.Contains("Follow the composition model.", html);
         Assert.Contains("Guide", html);
         Assert.Contains("docs-page-badge--guide", html);
-        Assert.Contains("href=\"/docs/guides/composition.md.html\"", html);
+        Assert.Contains("href=\"/docs/guides/composition\"", html);
     }
 
     [Fact]
@@ -391,7 +437,7 @@ public class RazorDocsViewsTests
             httpContext => httpContext.Request.PathBase = "/tenant");
 
         Assert.Contains("href=\"/tenant/docs/sections/start-here\"", html);
-        Assert.Contains("href=\"/tenant/docs/guides/composition.md.html\"", html);
+        Assert.Contains("href=\"/tenant/docs/guides/composition\"", html);
     }
 
     [Fact]
@@ -488,21 +534,21 @@ public class RazorDocsViewsTests
 
         Assert.Equal(
             "API Reference",
-            document.QuerySelector("a.group[href='/docs/guides/api.md.html'] span.docs-page-badge")?.TextContent.Trim());
+            document.QuerySelector("a.group[href='/docs/guides/api'] span.docs-page-badge")?.TextContent.Trim());
         Assert.Equal(
             "How-To",
-            document.QuerySelector("a.group[href='/docs/guides/how-to.md.html'] span.docs-page-badge")?.TextContent.Trim());
+            document.QuerySelector("a.group[href='/docs/guides/how-to'] span.docs-page-badge")?.TextContent.Trim());
         Assert.Equal(
             "Start Here",
-            document.QuerySelector("a.group[href='/docs/guides/start.md.html'] span.docs-page-badge")?.TextContent.Trim());
+            document.QuerySelector("a.group[href='/docs/guides/start'] span.docs-page-badge")?.TextContent.Trim());
         Assert.Equal(
             "Custom Reference",
-            document.QuerySelector("a.group[href='/docs/guides/custom.md.html'] span.docs-page-badge")?.TextContent.Trim());
+            document.QuerySelector("a.group[href='/docs/guides/custom'] span.docs-page-badge")?.TextContent.Trim());
         Assert.Contains(
             "docs-page-badge--neutral",
-            document.QuerySelector("a.group[href='/docs/guides/custom.md.html'] span.docs-page-badge")?.ClassName ?? string.Empty);
+            document.QuerySelector("a.group[href='/docs/guides/custom'] span.docs-page-badge")?.ClassName ?? string.Empty);
 
-        var untypedCard = document.QuerySelector("a.group[href='/docs/guides/plain.md.html']");
+        var untypedCard = document.QuerySelector("a.group[href='/docs/guides/plain']");
         Assert.NotNull(untypedCard);
         Assert.Null(untypedCard!.QuerySelector("span.docs-page-badge"));
         Assert.Null(untypedCard.QuerySelector("p.mt-3"));
@@ -693,7 +739,7 @@ public class RazorDocsViewsTests
         var result = await InvokeDocsActionAsync(services, "Section", controller => controller.Section("concepts"));
 
         var redirect = Assert.IsType<RedirectResult>(result);
-        Assert.Equal("/docs/concepts/landing.md.html", redirect.Url);
+        Assert.Equal("/docs/concepts/landing", redirect.Url);
     }
 
     [Fact]
@@ -886,21 +932,21 @@ public class RazorDocsViewsTests
                                 new DocSectionLinkViewModel
                                 {
                                     Title = "Guide",
-                                    Href = "/docs/guides/guide.md.html",
+                                    Href = "/docs/guides/guide",
                                     IsCurrent = true,
                                     Children =
                                     [
                                         new DocSectionLinkViewModel
                                         {
                                             Title = "Run",
-                                            Href = "/docs/guides/guide.md.html#run",
+                                            Href = "/docs/guides/guide#run",
                                             IsCurrent = true,
                                             Children =
                                             [
                                                 new DocSectionLinkViewModel
                                                 {
                                                     Title = "Verify",
-                                                    Href = "/docs/guides/guide.md.html#verify"
+                                                    Href = "/docs/guides/guide#verify"
                                                 }
                                             ]
                                         }
@@ -920,8 +966,8 @@ public class RazorDocsViewsTests
 
         Assert.Contains("href=\"/docs/sections/how-to-guides\"", html);
         Assert.Contains("aria-current=\"location\"", html);
-        Assert.Contains("href=\"/docs/guides/guide.md.html\"", html);
-        Assert.Contains("href=\"/docs/guides/guide.md.html#verify\"", html);
+        Assert.Contains("href=\"/docs/guides/guide\"", html);
+        Assert.Contains("href=\"/docs/guides/guide#verify\"", html);
         Assert.Contains("aria-current=\"page\"", html);
         Assert.DoesNotContain("aria-current=&quot;page&quot;", html);
         Assert.DoesNotContain("aria-current=&quot;location&quot;", html);
@@ -952,14 +998,14 @@ public class RazorDocsViewsTests
                                 new DocSectionLinkViewModel
                                 {
                                     Title = "Guide",
-                                    Href = "/docs/guides/guide.md.html",
+                                    Href = "/docs/guides/guide",
                                     IsCurrent = true,
                                     Children =
                                     [
                                         new DocSectionLinkViewModel
                                         {
                                             Title = "Run",
-                                            Href = "/docs/guides/guide.md.html#run",
+                                            Href = "/docs/guides/guide#run",
                                             IsCurrent = true
                                         }
                                     ]
@@ -978,8 +1024,8 @@ public class RazorDocsViewsTests
             pathBase: "/some-base");
 
         Assert.Contains("href=\"/some-base/docs/sections/how-to-guides\"", html);
-        Assert.Contains("href=\"/some-base/docs/guides/guide.md.html\"", html);
-        Assert.Contains("href=\"/some-base/docs/guides/guide.md.html#run\"", html);
+        Assert.Contains("href=\"/some-base/docs/guides/guide\"", html);
+        Assert.Contains("href=\"/some-base/docs/guides/guide#run\"", html);
     }
 
     [Fact]
@@ -1260,13 +1306,13 @@ public class RazorDocsViewsTests
             Slug = "how-to-guides",
             VisiblePages =
             [
-                new("Guide", "docs/guide.md", "<p>Guide</p>", CanonicalPath: "docs/guide.md.html"),
+                new("Guide", "docs/guide.md", "<p>Guide</p>", CanonicalPath: "docs/guide"),
                 new(
                     "Build",
                     "docs/guide.md#Build",
                     string.Empty,
                     ParentPath: "DOCS/GUIDE.MD",
-                    CanonicalPath: "docs/guide.md.html#Build")
+                    CanonicalPath: "docs/guide#Build")
             ]
         };
 
@@ -1409,7 +1455,7 @@ public class RazorDocsViewsTests
             pathBase: "/some-base");
 
         Assert.Contains("href=\"/some-base/docs/sections/api-reference\"", html);
-        Assert.Contains("href=\"/some-base/docs/guides/intro.md.html\"", html);
+        Assert.Contains("href=\"/some-base/docs/guides/intro\"", html);
     }
 
     [Fact]
@@ -1632,11 +1678,11 @@ public class RazorDocsViewsTests
         var html = await RenderDocsViewAsync(
             services,
             "Details",
-            controller => controller.Details(landingDoc.Path),
+            controller => controller.Details("concepts/landing"),
             httpContext => httpContext.Request.PathBase = "/tenant");
 
         Assert.Contains("href=\"/tenant/docs/sections/concepts\"", html);
-        Assert.Contains("href=\"/tenant/docs/concepts/deep-dive.md.html\"", html);
+        Assert.Contains("href=\"/tenant/docs/concepts/deep-dive\"", html);
     }
 
     [Fact]
@@ -1717,7 +1763,7 @@ public class RazorDocsViewsTests
         var doc = new DocNode(
             "Linked Guide",
             "guides/linked-guide.md",
-            "<p><a href=\"/docs/guides/intro.md.html\">Intro guide</a></p>",
+            "<p><a href=\"/docs/guides/intro\">Intro guide</a></p>",
             Metadata: new DocMetadata
             {
                 NavGroup = "How-to Guides"
@@ -1726,7 +1772,7 @@ public class RazorDocsViewsTests
         var html = await RenderDetailsViewWithPathBaseAsync(doc, "/some-base");
 
         Assert.Contains("href=\"/some-base/docs/sections/how-to-guides\"", html);
-        Assert.Contains("href=\"/some-base/docs/guides/intro.md.html\"", html);
+        Assert.Contains("href=\"/some-base/docs/guides/intro\"", html);
     }
 
     [Fact]
@@ -1775,7 +1821,7 @@ public class RazorDocsViewsTests
         var html = await RenderDocsViewAsync(
             services,
             "Details",
-            c => c.Details("src/Example.cs"));
+            c => c.Details("src/Example.cs.html"));
 
         Assert.DoesNotContain("text-3xl font-bold text-white tracking-tight", html);
         Assert.Contains("Example body", html);
@@ -1845,11 +1891,11 @@ public class RazorDocsViewsTests
         var markdownHtml = await RenderDocsViewAsync(
             services,
             "Details",
-            c => c.Details("guides/intro.md"));
+            c => c.Details("guides/intro"));
         var apiHtml = await RenderDocsViewAsync(
             services,
             "Details",
-            c => c.Details("src/Example.cs"));
+            c => c.Details("src/Example.cs.html"));
 
         Assert.Contains("class=\"docs-content docs-content--markdown\"", markdownHtml);
         Assert.Contains("class=\"docs-content docs-content--api\"", apiHtml);
@@ -1901,7 +1947,7 @@ public class RazorDocsViewsTests
         var html = await RenderDocsViewAsync(
             services,
             "Details",
-            c => c.Details("Namespaces"));
+            c => c.Details("Namespaces.html"));
 
         Assert.Contains("aria-label=\"Breadcrumb\"", html);
         Assert.Contains(">Namespaces</span>", html);
@@ -2172,7 +2218,7 @@ public class RazorDocsViewsTests
         var html = await RenderDetailsViewAsync(doc);
 
         Assert.Contains(">quickstart.md</span>", html);
-        Assert.DoesNotContain("href=\"/docs/quickstart.md.html\"", html);
+        Assert.DoesNotContain("href=\"/docs/quickstart\"", html);
     }
 
     [Fact]
@@ -2349,6 +2395,14 @@ public class RazorDocsViewsTests
         Assert.Contains("docs-detail-layout--with-outline", html);
         Assert.NotNull(document.QuerySelector("#docs-page-outline.docs-outline-shell"));
         Assert.NotNull(document.QuerySelector(".docs-outline-toggle[aria-controls='docs-page-outline-panel']"));
+        Assert.Equal("On this page: Quickstart", document.QuerySelector(".docs-outline-toggle")?.GetAttribute("aria-label"));
+        Assert.Equal("Quickstart", document.QuerySelector(".docs-outline-toggle-label")?.TextContent.Trim());
+        Assert.NotNull(document.QuerySelector(".docs-outline-toggle-context[data-doc-outline-context][aria-hidden='true']"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-context-row--previous[data-doc-outline-previous][hidden]"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-context-row--current[data-doc-outline-current]"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-context-row--next[data-doc-outline-next][hidden]"));
+        Assert.Equal("Prev", document.QuerySelector("[data-doc-outline-previous] .docs-outline-context-kicker")?.TextContent.Trim());
+        Assert.Equal("Next", document.QuerySelector("[data-doc-outline-next] .docs-outline-context-kicker")?.TextContent.Trim());
         Assert.NotNull(document.QuerySelector("#docs-page-outline-panel[aria-label='On this page']"));
         Assert.NotNull(document.QuerySelector("a.docs-outline-link[href='#install']"));
         Assert.NotNull(document.QuerySelector("a.docs-outline-link--level-3[href='#verify']"));
@@ -2358,7 +2412,7 @@ public class RazorDocsViewsTests
         Assert.True(
             document.QuerySelector(".docs-detail-primary")!.CompareDocumentPosition(document.QuerySelector("#docs-page-outline")!)
                 .HasFlag(DocumentPositions.Following));
-        Assert.NotNull(document.QuerySelector("script[src='/docs/outline-client.js'][data-doc-outline-client='true']"));
+        Assert.NotNull(document.QuerySelector("script[src='/docs/outline-client.js?v=rolling-context'][data-doc-outline-client='true']"));
         Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", html);
         Assert.DoesNotContain("rounded-2xl border border-slate-800 bg-slate-900/60", html);
 
@@ -2369,7 +2423,7 @@ public class RazorDocsViewsTests
             pathBase: "/tenant");
         var tenantDocument = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(tenantHtml);
 
-        Assert.NotNull(tenantDocument.QuerySelector("script[src='/tenant/docs/outline-client.js'][data-doc-outline-client='true']"));
+        Assert.NotNull(tenantDocument.QuerySelector("script[src='/tenant/docs/outline-client.js?v=rolling-context'][data-doc-outline-client='true']"));
         Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", tenantHtml);
     }
 
@@ -2450,13 +2504,13 @@ public class RazorDocsViewsTests
             previousPage: new DocPageLinkViewModel
             {
                 Title = "Intro",
-                Href = "/docs/guides/intro.md.html",
+                Href = "/docs/guides/intro",
                 Summary = "Start here."
             },
             nextPage: new DocPageLinkViewModel
             {
                 Title = "Troubleshooting",
-                Href = "/docs/guides/troubleshooting.md.html",
+                Href = "/docs/guides/troubleshooting",
                 Summary = "Recover quickly."
             },
             relatedPages:
@@ -2464,7 +2518,7 @@ public class RazorDocsViewsTests
                 new DocPageLinkViewModel
                 {
                     Title = "Reference",
-                    Href = "/docs/guides/reference.md.html"
+                    Href = "/docs/guides/reference"
                 }
             ]);
 
@@ -2489,13 +2543,13 @@ public class RazorDocsViewsTests
             previousPage: new DocPageLinkViewModel
             {
                 Title = "Intro",
-                Href = "/docs/guides/intro.md.html",
+                Href = "/docs/guides/intro",
                 PageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge("guide")
             },
             nextPage: new DocPageLinkViewModel
             {
                 Title = "Troubleshooting",
-                Href = "/docs/guides/troubleshooting.md.html",
+                Href = "/docs/guides/troubleshooting",
                 PageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge("troubleshooting")
             },
             relatedPages:
@@ -2503,7 +2557,7 @@ public class RazorDocsViewsTests
                 new DocPageLinkViewModel
                 {
                     Title = "Reference",
-                    Href = "/docs/guides/reference.md.html",
+                    Href = "/docs/guides/reference",
                     Summary = "Read the reference.",
                     PageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge("api-reference")
                 }
@@ -2532,7 +2586,7 @@ public class RazorDocsViewsTests
                 new DocPageLinkViewModel
                 {
                     Title = "Reference",
-                    Href = "/docs/guides/reference.md.html",
+                    Href = "/docs/guides/reference",
                     Summary = "Read the reference.",
                     PageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge("api-reference")
                 }
@@ -2569,7 +2623,7 @@ public class RazorDocsViewsTests
                     Migration = new DocTrustLink
                     {
                         Label = "Read the upgrade policy",
-                        Href = "/docs/releases/upgrade-policy.md.html"
+                        Href = "/docs/releases/upgrade-policy"
                     }
                 }
             });
@@ -2583,7 +2637,7 @@ public class RazorDocsViewsTests
         Assert.Contains("Repository-wide.", trustBar.TextContent);
         Assert.Contains("CHANGELOG.md", trustBar.TextContent);
 
-        var migrationLink = trustBar.QuerySelector("a.docs-trust-bar-link[href='/docs/releases/upgrade-policy.md.html']");
+        var migrationLink = trustBar.QuerySelector("a.docs-trust-bar-link[href='/docs/releases/upgrade-policy']");
         Assert.NotNull(migrationLink);
         Assert.Equal("doc-content", migrationLink!.GetAttribute("data-turbo-frame"));
         Assert.Equal("advance", migrationLink.GetAttribute("data-turbo-action"));
@@ -2721,8 +2775,8 @@ public class RazorDocsViewsTests
             doc,
             contributorProvenance: new DocContributorProvenanceViewModel
             {
-                SourceHref = "/docs/guides/quickstart.md.html",
-                EditHref = "/docs/guides/quickstart.edit.md.html"
+                SourceHref = "/docs/guides/quickstart",
+                EditHref = "/docs/guides/quickstart.edit"
             },
             contributorSourceUsesTurbo: true,
             contributorEditUsesTurbo: true);
@@ -2733,8 +2787,8 @@ public class RazorDocsViewsTests
             model);
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
 
-        var sourceLink = document.QuerySelector("a.docs-provenance-link--primary[href='/docs/guides/quickstart.md.html']");
-        var editLink = document.QuerySelector("a.docs-provenance-link--secondary[href='/docs/guides/quickstart.edit.md.html']");
+        var sourceLink = document.QuerySelector("a.docs-provenance-link--primary[href='/docs/guides/quickstart']");
+        var editLink = document.QuerySelector("a.docs-provenance-link--secondary[href='/docs/guides/quickstart.edit']");
 
         Assert.NotNull(sourceLink);
         Assert.NotNull(editLink);
@@ -2758,7 +2812,7 @@ public class RazorDocsViewsTests
                 {
                     Migration = new DocTrustLink
                     {
-                        Href = "/docs/releases/unreleased.md.html",
+                        Href = "/docs/releases/unreleased",
                         Label = "Migration notes"
                     }
                 }
@@ -2767,8 +2821,8 @@ public class RazorDocsViewsTests
             doc,
             contributorProvenance: new DocContributorProvenanceViewModel
             {
-                SourceHref = "/docs/guides/quickstart.md.html",
-                EditHref = "/docs/guides/quickstart.edit.md.html"
+                SourceHref = "/docs/guides/quickstart",
+                EditHref = "/docs/guides/quickstart.edit"
             },
             contributorSourceUsesTurbo: true,
             contributorEditUsesTurbo: true) with
@@ -2783,8 +2837,8 @@ public class RazorDocsViewsTests
             configureHttpContext: httpContext => httpContext.Request.PathBase = "/tenant");
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
 
-        var sourceLink = document.QuerySelector("a.docs-provenance-link--primary[href='/tenant/docs/guides/quickstart.md.html']");
-        var editLink = document.QuerySelector("a.docs-provenance-link--secondary[href='/tenant/docs/guides/quickstart.edit.md.html']");
+        var sourceLink = document.QuerySelector("a.docs-provenance-link--primary[href='/tenant/docs/guides/quickstart']");
+        var editLink = document.QuerySelector("a.docs-provenance-link--secondary[href='/tenant/docs/guides/quickstart.edit']");
 
         Assert.NotNull(sourceLink);
         Assert.NotNull(editLink);
@@ -2792,7 +2846,7 @@ public class RazorDocsViewsTests
         Assert.Equal("advance", sourceLink.GetAttribute("data-turbo-action"));
         Assert.Equal("doc-content", editLink!.GetAttribute("data-turbo-frame"));
         Assert.Equal("advance", editLink.GetAttribute("data-turbo-action"));
-        Assert.NotNull(document.QuerySelector("a.docs-trust-bar-link[href='/tenant/docs/releases/unreleased.md.html']"));
+        Assert.NotNull(document.QuerySelector("a.docs-trust-bar-link[href='/tenant/docs/releases/unreleased']"));
     }
 
     [Fact]
@@ -2976,7 +3030,11 @@ public class RazorDocsViewsTests
         Assert.Contains("id=\"docs-search-page-filters-toggle\"", html);
         Assert.Contains("id=\"docs-search-page-filters-panel\"", html);
         Assert.Contains("id=\"docs-search-page-starter\"", html);
+        Assert.Contains("id=\"docs-search-page-starter-docs\"", html);
         Assert.Contains("data-rw-search-suggestion=\"getting started\"", html);
+        Assert.Contains("data-rw-search-suggestion=\"API reference\"", html);
+        Assert.Contains("data-rw-search-suggestion=\"release notes\"", html);
+        Assert.Contains("data-rw-search-suggestion=\"troubleshooting\"", html);
         Assert.Contains("id=\"docs-search-page-failure\"", html);
         Assert.Contains("id=\"docs-search-page-failure-template\"", html);
         Assert.Contains("id=\"docs-search-page-retry\"", html);
@@ -3397,9 +3455,9 @@ public class RazorDocsViewsTests
             new("Namespaces", "Namespaces", "<p>root</p>", null, false, "Namespaces.html"),
             new("Web", "Namespaces/ForgeTrust.AppSurface.Web", "<p>web</p>", null, false, "Namespaces/ForgeTrust.AppSurface.Web.html"),
             new("AspireApp", "Namespaces/ForgeTrust.AppSurface.Web#AspireApp", string.Empty, "Namespaces/ForgeTrust.AppSurface.Web", false, "Namespaces/ForgeTrust.AppSurface.Web.html#AspireApp"),
-            new("Guide", "docs/guide.md", "<p>guide</p>", null, false, "docs/guide.md.html"),
-            new("Build", "docs/guide.md#Build", string.Empty, "docs/guide.md", false, "docs/guide.md.html#Build"),
-            new("Run", "docs/guide.md#Run", string.Empty, "docs/guide.md", false, "docs/guide.md.html#Run")
+            new("Guide", "docs/guide.md", "<p>guide</p>", null, false, "docs/guide"),
+            new("Build", "docs/guide.md#Build", string.Empty, "docs/guide.md", false, "docs/guide#Build"),
+            new("Run", "docs/guide.md#Run", string.Empty, "docs/guide.md", false, "docs/guide#Run")
         };
         using var services = CreateServiceProvider(docs);
 
@@ -3420,9 +3478,9 @@ public class RazorDocsViewsTests
         Assert.Contains("href=\"/docs/Namespaces.html\"", canonicalHtml);
         Assert.Contains("href=\"/docs/Namespaces/ForgeTrust.AppSurface.Web.html\"", canonicalHtml);
         Assert.DoesNotContain("href=\"/docs/Namespaces/ForgeTrust.AppSurface.Web.html#AspireApp\"", canonicalHtml);
-        Assert.Contains("href=\"/docs/docs/guide.md.html\"", canonicalHtml);
-        Assert.Contains("href=\"/docs/docs/guide.md.html#Build\"", canonicalHtml);
-        Assert.Contains("href=\"/docs/docs/guide.md.html#Run\"", canonicalHtml);
+        Assert.Contains("href=\"/docs/docs/guide\"", canonicalHtml);
+        Assert.Contains("href=\"/docs/docs/guide#Build\"", canonicalHtml);
+        Assert.Contains("href=\"/docs/docs/guide#Run\"", canonicalHtml);
 
         var nullPrefixHtml = await RenderViewAsync(
             services,
@@ -3893,7 +3951,7 @@ public class RazorDocsViewsTests
         return await RenderDocsViewAsync(
             services,
             "Details",
-            controller => controller.Details(doc.Path));
+            controller => controller.Details(ToTestPublicRoute(doc, additionalDocs)));
     }
 
     private static async Task<string> RenderDetailsViewWithPathBaseAsync(DocNode doc, string pathBase, params DocNode[] additionalDocs)
@@ -3903,8 +3961,21 @@ public class RazorDocsViewsTests
         return await RenderDocsViewAsync(
             services,
             "Details",
-            controller => controller.Details(doc.Path),
+            controller => controller.Details(ToTestPublicRoute(doc, additionalDocs)),
             httpContext => httpContext.Request.PathBase = pathBase);
+    }
+
+    private static string ToTestPublicRoute(DocNode doc, IReadOnlyList<DocNode> additionalDocs)
+    {
+        var catalog = DocRouteIdentityCatalog.Create(
+            [doc, .. additionalDocs],
+            new DocsUrlBuilder(new RazorDocsOptions()));
+        if (catalog.TryGetPublicRoutePath(doc.Path, out var publicRoutePath))
+        {
+            return publicRoutePath;
+        }
+
+        return doc.Path.Trim().Replace('\\', '/').Trim('/');
     }
 
     private static object AdaptViewModel(string viewName, object model, ViewDataDictionary viewData)
