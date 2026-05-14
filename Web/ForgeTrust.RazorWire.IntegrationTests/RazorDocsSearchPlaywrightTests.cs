@@ -404,18 +404,38 @@ public sealed class RazorDocsSearchPlaywrightTests
         await RouteSearchPayloadAsync(
             page,
             BuildControlledSearchPayload(
-                SearchDoc("guide/start", "Getting Started", "guide", "Guide", "guide", "Start here.")));
+                SearchDoc(
+                    "guide/start",
+                    "Getting Started",
+                    "guide",
+                    "Guide",
+                    "guide",
+                    "Start here.",
+                    component: "razordocs",
+                    audience: "developer",
+                    status: "stable")));
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/search?q=no-such-query&pageType=guide");
+        await page.GotoAsync($"{_fixture.DocsUrl}/search?q=no-such-query&pageType=guide&component=razordocs&audience=developer&status=stable");
         await WaitForSearchPageSettledAsync(page);
 
-        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Current search: query \"no-such-query\", Page Type: Guide.");
+        await ExpectVisibleTextAsync(
+            page,
+            "#docs-search-page-results",
+            "Current search: query \"no-such-query\", Page Type: Guide, Component: Razordocs, Audience: Developer, Status: Stable.");
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Clear filters");
         Assert.False(await page.GetByText("Search is temporarily unavailable").IsVisibleAsync());
 
         await page.GetByRole(AriaRole.Button, new PageGetByRoleOptions { Name = "Clear filters", Exact = true }).ClickAsync();
         await page.WaitForFunctionAsync(
-            "() => !new URLSearchParams(window.location.search).get('pageType')",
+            """
+            () => {
+              const params = new URLSearchParams(window.location.search);
+              return !params.get('pageType')
+                && !params.get('component')
+                && !params.get('audience')
+                && !params.get('status');
+            }
+            """,
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
