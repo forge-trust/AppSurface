@@ -704,6 +704,30 @@ public sealed class RazorWireMvcPlaywrightTests
             Timeout = 30_000,
             State = WaitForSelectorState.Attached
         });
+        await page.WaitForFunctionAsync(
+            @"() => {
+                const form = document.querySelector('[data-counter-form]');
+                if (!(form instanceof HTMLFormElement)) {
+                    return false;
+                }
+
+                const token = form.querySelector(""input[name='__RequestVerificationToken']"");
+                const marker = form.querySelector(""input[name='__RazorWireForm']"");
+                const clientCount = form.querySelector('#client-count-input');
+                const submit = form.querySelector(""button[type='submit']"");
+
+                return form.getAttribute('data-rw-form') === 'true'
+                    && token instanceof HTMLInputElement
+                    && token.value.trim().length > 0
+                    && marker instanceof HTMLInputElement
+                    && marker.value === '1'
+                    && clientCount instanceof HTMLInputElement
+                    && clientCount.value.trim().length > 0
+                    && submit instanceof HTMLButtonElement
+                    && !submit.disabled;
+            }",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
     }
 
     private static async Task<IResponse> SubmitAndWaitForPostAsync(IPage page, string formSelector, string path)
