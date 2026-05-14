@@ -220,6 +220,48 @@ public class RazorDocsWebModuleTests
     }
 
     [Fact]
+    public void ConfigureEndpoints_ShouldMapBareRootRedirect_WhenRazorDocsIsTheRootModule()
+    {
+        var envFake = A.Fake<IEnvironmentProvider>();
+        var context = new StartupContext(Array.Empty<string>(), _module, "RazorDocsStandalone", envFake);
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var rootRedirect = Assert.Single(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText is "/" or "");
+        var methods = Assert.Single(rootRedirect.Metadata.OfType<HttpMethodMetadata>());
+        Assert.Contains(HttpMethods.Get, methods.HttpMethods);
+        Assert.Contains(HttpMethods.Head, methods.HttpMethods);
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotMapBareRootRedirect_WhenRazorDocsIsEmbedded()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        Assert.DoesNotContain(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText is "/" or "");
+    }
+
+    [Fact]
     public void ConfigureEndpoints_ShouldReserveHealthRoutes_WhenWebHostEnvironmentIsMissing()
     {
         var context = CreateStartupContext();
