@@ -681,7 +681,9 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             () => {
               const shell = document.getElementById('docs-page-outline');
               const context = shell?.querySelector('[data-doc-outline-context]');
+              const main = document.getElementById('main-content');
               const links = Array.from(shell?.querySelectorAll("a[data-doc-outline-link='true']") ?? []);
+              const mainRect = main?.getBoundingClientRect();
               return {
                 activeIndex: context?.dataset.outlineActiveIndex ?? '',
                 current: shell?.querySelector('[data-doc-outline-current]')?.textContent?.trim() ?? '',
@@ -699,7 +701,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
                 shellHeight: shell?.getBoundingClientRect().height ?? 0,
                 shellLeft: shell?.getBoundingClientRect().left ?? 0,
                 shellRight: shell?.getBoundingClientRect().right ?? 0,
-                layoutViewportWidth: document.documentElement.clientWidth || window.innerWidth,
+                mainLeft: mainRect?.left ?? 0,
+                mainRight: mainRect?.right ?? 0,
                 borderRadius: shell ? getComputedStyle(shell).borderRadius : '',
                 position: shell ? getComputedStyle(shell).position : '',
                 top: shell ? getComputedStyle(shell).top : ''
@@ -709,8 +712,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
 
         Assert.Equal("sticky", initialState.Position);
         Assert.Equal("61px", initialState.Top);
-        Assert.Equal(0, initialState.ShellLeft, precision: 1);
-        Assert.Equal(initialState.LayoutViewportWidth, initialState.ShellRight, precision: 1);
+        Assert.Equal(initialState.MainLeft, initialState.ShellLeft, precision: 1);
+        Assert.Equal(initialState.MainRight, initialState.ShellRight, precision: 1);
         Assert.Equal("0px", initialState.BorderRadius);
         Assert.True(initialState.ShellHeight is >= 44 and <= 76);
         Assert.Equal("0", initialState.ActiveIndex);
@@ -749,7 +752,9 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             () => {
               const shell = document.getElementById('docs-page-outline');
               const context = shell?.querySelector('[data-doc-outline-context]');
+              const main = document.getElementById('main-content');
               const links = Array.from(shell?.querySelectorAll("a[data-doc-outline-link='true']") ?? []);
+              const mainRect = main?.getBoundingClientRect();
               return {
                 activeIndex: context?.dataset.outlineActiveIndex ?? '',
                 current: shell?.querySelector('[data-doc-outline-current]')?.textContent?.trim() ?? '',
@@ -767,7 +772,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
                 shellHeight: shell?.getBoundingClientRect().height ?? 0,
                 shellLeft: shell?.getBoundingClientRect().left ?? 0,
                 shellRight: shell?.getBoundingClientRect().right ?? 0,
-                layoutViewportWidth: document.documentElement.clientWidth || window.innerWidth,
+                mainLeft: mainRect?.left ?? 0,
+                mainRight: mainRect?.right ?? 0,
                 borderRadius: shell ? getComputedStyle(shell).borderRadius : '',
                 position: shell ? getComputedStyle(shell).position : '',
                 top: shell ? getComputedStyle(shell).top : '',
@@ -784,8 +790,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Equal(initialState.ShellHeight, scrolledState.ShellHeight, precision: 1);
         Assert.False(scrolledState.NextHidden);
         Assert.Equal("61px", scrolledState.Top);
-        Assert.Equal(0, scrolledState.ShellLeft, precision: 1);
-        Assert.Equal(scrolledState.LayoutViewportWidth, scrolledState.ShellRight, precision: 1);
+        Assert.Equal(scrolledState.MainLeft, scrolledState.ShellLeft, precision: 1);
+        Assert.Equal(scrolledState.MainRight, scrolledState.ShellRight, precision: 1);
         Assert.Equal("down", scrolledState.RollDirection);
         Assert.Equal("rolling", scrolledState.Motion);
     }
@@ -1010,7 +1016,9 @@ public sealed class RazorDocsWayfindingPlaywrightTests
 
         public double ShellRight { get; init; }
 
-        public double LayoutViewportWidth { get; init; }
+        public double MainLeft { get; init; }
+
+        public double MainRight { get; init; }
 
         public string BorderRadius { get; init; } = string.Empty;
 

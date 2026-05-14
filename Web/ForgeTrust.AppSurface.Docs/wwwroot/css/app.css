@@ -439,7 +439,7 @@ body {
 }
 
 .docs-outline-toggle-current {
-    color: #67e8f9;
+    color: var(--docs-color-accent);
     font-size: 0.8rem;
     font-weight: 700;
     line-height: 1.1;
@@ -477,7 +477,7 @@ body {
 
 .docs-outline-context-row--previous,
 .docs-outline-context-row--next {
-    color: #94a3b8;
+    color: var(--docs-color-text-subtle);
     font-size: 0.68rem;
     font-weight: 600;
     line-height: 1;
@@ -486,7 +486,7 @@ body {
 
 .docs-outline-context-kicker {
     margin-right: 0.24rem;
-    color: #64748b;
+    color: var(--docs-color-text-faint);
     font-size: 0.58rem;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -625,7 +625,7 @@ body {
         border-right: 0;
         border-left: 0;
         border-radius: 0;
-        background: rgba(2, 6, 23, 0.9);
+        background: var(--docs-color-surface-overlay-strong);
         backdrop-filter: blur(10px);
     }
 }
@@ -639,9 +639,6 @@ body {
 @media (max-width: 47.999rem) {
     .docs-outline-shell[data-outline-enhanced="true"] {
         top: 3.8125rem;
-        width: 100vw;
-        margin-right: calc(50% - 50vw);
-        margin-left: calc(50% - 50vw);
     }
 }
 
