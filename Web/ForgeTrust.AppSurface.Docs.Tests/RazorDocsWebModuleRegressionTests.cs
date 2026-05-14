@@ -137,6 +137,8 @@ public class RazorDocsWebModuleRegressionTests
             Assert.False(string.IsNullOrWhiteSpace(body));
             Assert.Contains("#docs-search-input", body);
             Assert.Contains(".docs-search-page-results", body);
+            Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #020617);", body);
+            Assert.Contains("var(--docs-search-color-border-default)", body);
         }
         finally
         {
@@ -176,6 +178,8 @@ public class RazorDocsWebModuleRegressionTests
             Assert.Equal("text/css", response.Content.Headers.ContentType?.MediaType);
             Assert.False(string.IsNullOrWhiteSpace(body));
             Assert.Contains(".docs-content", body);
+            Assert.Contains("--docs-color-surface-canvas", body);
+            Assert.Contains("var(--docs-color-border-default)", body);
         }
         finally
         {
@@ -255,6 +259,8 @@ public class RazorDocsWebModuleRegressionTests
             Assert.Equal("text/css", stylesheetResponse.Content.Headers.ContentType?.MediaType);
             Assert.False(string.IsNullOrWhiteSpace(stylesheet));
             Assert.Contains(".docs-content", stylesheet);
+            Assert.Contains("--docs-color-surface-canvas", stylesheet);
+            Assert.Contains("var(--docs-color-border-default)", stylesheet);
 
             using var referencedAssetResponse = await client.GetAsync(ReferencedRazorWireScriptPath);
             var referencedAsset = await referencedAssetResponse.Content.ReadAsStringAsync();
