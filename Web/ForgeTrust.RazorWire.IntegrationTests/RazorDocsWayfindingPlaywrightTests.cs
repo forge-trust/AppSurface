@@ -699,7 +699,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
                 shellHeight: shell?.getBoundingClientRect().height ?? 0,
                 shellLeft: shell?.getBoundingClientRect().left ?? 0,
                 shellRight: shell?.getBoundingClientRect().right ?? 0,
-                viewportWidth: window.innerWidth,
+                layoutViewportWidth: document.documentElement.clientWidth || window.innerWidth,
                 borderRadius: shell ? getComputedStyle(shell).borderRadius : '',
                 position: shell ? getComputedStyle(shell).position : '',
                 top: shell ? getComputedStyle(shell).top : ''
@@ -710,7 +710,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Equal("sticky", initialState.Position);
         Assert.Equal("61px", initialState.Top);
         Assert.Equal(0, initialState.ShellLeft, precision: 1);
-        Assert.Equal(initialState.ViewportWidth, initialState.ShellRight, precision: 1);
+        Assert.Equal(initialState.LayoutViewportWidth, initialState.ShellRight, precision: 1);
         Assert.Equal("0px", initialState.BorderRadius);
         Assert.True(initialState.ShellHeight is >= 44 and <= 76);
         Assert.Equal("0", initialState.ActiveIndex);
@@ -767,7 +767,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
                 shellHeight: shell?.getBoundingClientRect().height ?? 0,
                 shellLeft: shell?.getBoundingClientRect().left ?? 0,
                 shellRight: shell?.getBoundingClientRect().right ?? 0,
-                viewportWidth: window.innerWidth,
+                layoutViewportWidth: document.documentElement.clientWidth || window.innerWidth,
                 borderRadius: shell ? getComputedStyle(shell).borderRadius : '',
                 position: shell ? getComputedStyle(shell).position : '',
                 top: shell ? getComputedStyle(shell).top : '',
@@ -785,7 +785,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.False(scrolledState.NextHidden);
         Assert.Equal("61px", scrolledState.Top);
         Assert.Equal(0, scrolledState.ShellLeft, precision: 1);
-        Assert.Equal(scrolledState.ViewportWidth, scrolledState.ShellRight, precision: 1);
+        Assert.Equal(scrolledState.LayoutViewportWidth, scrolledState.ShellRight, precision: 1);
         Assert.Equal("down", scrolledState.RollDirection);
         Assert.Equal("rolling", scrolledState.Motion);
     }
@@ -1010,7 +1010,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
 
         public double ShellRight { get; init; }
 
-        public double ViewportWidth { get; init; }
+        public double LayoutViewportWidth { get; init; }
 
         public string BorderRadius { get; init; } = string.Empty;
 
