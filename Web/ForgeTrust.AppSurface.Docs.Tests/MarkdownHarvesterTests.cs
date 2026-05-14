@@ -877,9 +877,9 @@ public class MarkdownHarvesterTests : IDisposable
     [Fact]
     public void ExtractLeadingTitle_ShouldNormalizeInlineHeadingText()
     {
-        var document = Markdown.Parse("# Hello `Runnable`   World");
+        var document = Markdown.Parse("# Hello `AppSurface`   World");
 
-        Assert.Equal("Hello Runnable World", MarkdownHarvester.ExtractLeadingTitle(document));
+        Assert.Equal("Hello AppSurface World", MarkdownHarvester.ExtractLeadingTitle(document));
     }
 
     [Fact]

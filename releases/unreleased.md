@@ -121,6 +121,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorDocs harvesting now excludes test-project docs and generated example-app API reference from the docs surface while keeping authored example README walkthroughs public.
 - RazorDocs now includes a repository root `LICENSE` file as a docs artifact when present, so repo-relative license links remain revision-correct and still pass CDN static export validation.
 - RazorDocs now documents the namespace README merge contract with positive and negative examples, while detail-page titles wrap on narrow screens so long package names do not clip on mobile.
+- RazorDocs details pages now suppress duplicated leading Markdown H1s when the generated shell owns the page heading, including leading comment markers and merged namespace README intros.
 - RazorDocs now has an authored consumer landing page for teams evaluating how to use RazorDocs in their own repositories, and the root docs landing features it through `featured_page_groups` instead of hardcoded controller copy.
 - RazorDocs now treats `Releases` as a first-class public section and suppresses breadcrumb links to generated parent routes that do not correspond to published docs pages, keeping static export warnings focused on actionable broken links.
 - RazorDocs wayfinding coverage now waits for docs content replacement before asserting sequence-link destinations, keeping the details-page proof path deterministic in CI.
