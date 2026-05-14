@@ -30,6 +30,20 @@ If a new surface starts to feel like a feature grid, a landing page, or an AI-ge
 - Borders and separators should do most of the structure work
 - Avoid adding extra accent colors unless the feature truly needs semantic differentiation
 
+### Style Tokens
+
+RazorDocs expresses the flagship dark-slate system through internal `--docs-*` CSS custom properties in `wwwroot/css/app.css`.
+
+The token layer exists so contributors can preserve the same visual language without rediscovering which hardcoded slate, cyan, or translucent fill belongs to each shared primitive. Token names should describe the design job: surface, border, text, accent, focus, active state, code chrome, table chrome, or skeleton. Do not name tokens after Tailwind hues unless the hue itself is the contract, which it usually is not.
+
+Default rule:
+
+1. If a color or treatment appears across unrelated shared selector groups, use or add a token.
+2. If a color represents a repeated state such as focus, active, muted, raised, loading, or default border, use or add a token.
+3. If a color is local to syntax highlighting, generated API signature colorization, or a one-off semantic badge family, keep it local and document the category.
+
+These tokens are not a public theming API yet. Hosts should not rely on overriding `--docs-*` names until a future theming feature explicitly documents that contract. Inside RazorDocs, though, shared package chrome and search-specific UI should consume the same root token layer so future theming can change the system deliberately. Search CSS may route through `--docs-search-*` aliases with fallbacks because exact published release trees can serve `search.css` without the generated package stylesheet.
+
 ### Surfaces
 
 - Prefer layered panels, separators, and subtle fills over heavy boxed cards
