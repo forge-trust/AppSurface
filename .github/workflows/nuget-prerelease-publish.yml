@@ -39,6 +39,7 @@ jobs:
             exit 1
           fi
 
+          git fetch --force origin "refs/tags/${tag_name}:refs/tags/${tag_name}"
           tag_type="$(git cat-file -t "refs/tags/${tag_name}")"
           if [[ "${tag_type}" != "tag" ]]; then
             echo "Prerelease publish requires an annotated tag. '${tag_name}' is ${tag_type}." >&2
@@ -168,6 +169,9 @@ jobs:
       - pack-and-verify
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
     environment: nuget-prerelease
 
     steps:
@@ -188,9 +192,26 @@ jobs:
           name: appsurface-prerelease-packages-${{ needs.validate-tag.outputs.package-version }}
           path: ${{ runner.temp }}/package-artifacts
 
+      - name: Validate NuGet trusted publishing configuration
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${NUGET_USER}" ]]; then
+            echo "Environment or repository variable 'NUGET_USER' must contain the nuget.org profile name used by the trusted publishing policy." >&2
+            exit 1
+          fi
+
+      - name: Request NuGet trusted publishing token
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Publish packages to NuGet
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \

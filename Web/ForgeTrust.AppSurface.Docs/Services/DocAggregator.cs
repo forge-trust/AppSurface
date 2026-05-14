@@ -1964,11 +1964,17 @@ public class DocAggregator
     /// Inserts README content into a namespace overview page after the auto-generated namespace groups.
     /// </summary>
     /// <param name="namespaceContent">The auto-generated HTML content for the namespace page.</param>
-    /// <param name="readmeContent">The HTML content from the README file.</param>
-    /// <returns>The merged HTML content.</returns>
+    /// <param name="readmeContent">
+    /// The HTML content from the README file. A leading rendered Markdown H1 is removed before the README is wrapped
+    /// because namespace overview pages render their primary H1 in the surrounding details shell.
+    /// </param>
+    /// <returns>
+    /// The merged HTML content, with any leading README H1 omitted from the namespace intro section.
+    /// </returns>
     internal static string MergeNamespaceIntroIntoContent(string namespaceContent, string readmeContent)
     {
-        var introSection = $"<section class=\"doc-namespace-intro\">{readmeContent}</section>";
+        var introContent = RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(readmeContent, shellOwnsH1: true);
+        var introSection = $"<section class=\"doc-namespace-intro\">{introContent}</section>";
         const string namespaceGroupsClassMarker = "doc-namespace-groups";
 
         var classMarkerIndex = namespaceContent.IndexOf(namespaceGroupsClassMarker, StringComparison.Ordinal);

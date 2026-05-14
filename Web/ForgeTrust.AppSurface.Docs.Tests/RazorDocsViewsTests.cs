@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Docs.Controllers;
@@ -25,6 +26,10 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public class RazorDocsViewsTests
 {
+    private static readonly Regex RawCssColorLiteralRegex = new(
+        @"#[0-9a-fA-F]{3,8}\b|rgba?\(",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     [Fact]
     public void Layout_ShouldContain_SearchShellMarkers()
     {
@@ -167,6 +172,43 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public void Stylesheets_ShouldDeclareAndConsumeInternalDocsStyleTokens()
+    {
+        var tailwindEntryStylesheet = ReadTailwindEntryStylesheetMarkup();
+        var searchStylesheet = ReadSearchStylesheetMarkup();
+
+        Assert.Contains(":root {", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-surface-canvas: #020617;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-border-default: #334155;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-text-default: #e2e8f0;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-accent-strong: #22d3ee;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-focus-ring-inset:", tailwindEntryStylesheet);
+
+        Assert.Contains("border: 1px solid var(--docs-color-border-default);", tailwindEntryStylesheet);
+        Assert.Contains("color: var(--docs-color-accent);", tailwindEntryStylesheet);
+        Assert.Contains("outline: var(--docs-focus-outline);", tailwindEntryStylesheet);
+
+        Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #020617);", searchStylesheet);
+        Assert.Contains("--docs-search-focus-ring-inset: var(--docs-focus-ring-inset,", searchStylesheet);
+        Assert.Contains("background: var(--docs-search-color-surface-canvas);", searchStylesheet);
+        Assert.Contains("border: 1px solid var(--docs-search-color-border-default);", searchStylesheet);
+        Assert.Contains("box-shadow: var(--docs-search-focus-ring-inset);", searchStylesheet);
+        Assert.Contains(
+            "background: linear-gradient(90deg, var(--docs-search-color-skeleton-edge), var(--docs-search-color-skeleton-mid), var(--docs-search-color-skeleton-edge));",
+            searchStylesheet);
+    }
+
+    [Fact]
+    public void Stylesheets_ShouldKeepRawColorLiteralsClassified()
+    {
+        var tailwindEntryStylesheet = RemoveRootTokenBlock(ReadTailwindEntryStylesheetMarkup());
+        var searchStylesheet = RemoveRootTokenBlock(ReadSearchStylesheetMarkup());
+
+        Assert.Empty(FindUnclassifiedRawColorLiterals(tailwindEntryStylesheet));
+        Assert.Empty(FindUnclassifiedRawColorLiterals(searchStylesheet));
+    }
+
+    [Fact]
     public void OutlineClient_ShouldUseMainContentRoot_AndRebindAfterFrameNavigation()
     {
         var outlineClient = ReadOutlineClientMarkup();
@@ -197,6 +239,10 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-content--markdown ul,", tailwindEntryStylesheet);
         Assert.Contains("list-style: disc;", tailwindEntryStylesheet);
         Assert.Contains("list-style: decimal;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content--markdown li", tailwindEntryStylesheet);
+        Assert.Contains("min-width: 0;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-content pre", tailwindEntryStylesheet);
+        Assert.Contains("max-width: 100%;", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown blockquote", tailwindEntryStylesheet);
         Assert.Contains(".docs-content--markdown :not(pre) > code", tailwindEntryStylesheet);
     }
@@ -1737,6 +1783,62 @@ public class RazorDocsViewsTests
             c => c.Details("src/Example.cs"));
 
         Assert.DoesNotContain("text-3xl font-bold text-white tracking-tight", html);
+        Assert.Contains("Example body", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldSuppressLeadingMarkdownH1_WhenShellOwnsPageH1()
+    {
+        var doc = new DocNode(
+            "Quickstart",
+            "guides/quickstart.md",
+            "<h1 id=\"quickstart\">Quickstart</h1>\n<p>Start here.</p>");
+
+        var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var headings = document.QuerySelectorAll("h1").ToArray();
+
+        var heading = Assert.Single(headings);
+        Assert.Equal("Quickstart", heading.TextContent.Trim());
+        Assert.Null(heading.Id);
+        Assert.Contains("Start here.", html);
+        Assert.DoesNotContain("id=\"quickstart\"", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldSuppressLeadingMarkdownH1AfterComment_WhenShellOwnsMetadataTitle()
+    {
+        var doc = new DocNode(
+            "Quickstart",
+            "guides/quickstart.md",
+            "<!-- docs:snippet start -->\n<h1 id=\"quickstart\">Quickstart</h1>\n<p>Start here.</p>",
+            Metadata: new DocMetadata { Title = "Metadata Quickstart" });
+
+        var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var heading = Assert.Single(document.QuerySelectorAll("h1"));
+
+        Assert.Equal("Metadata Quickstart", heading.TextContent.Trim());
+        Assert.Null(document.QuerySelector(".docs-content h1"));
+        Assert.Contains("Start here.", html);
+        Assert.DoesNotContain("id=\"quickstart\"", html);
+    }
+
+    [Fact]
+    public async Task DetailsView_ShouldKeepLeadingDocumentH1_WhenShellDoesNotOwnPageH1()
+    {
+        var doc = new DocNode(
+            "Example",
+            "src/Example.cs",
+            "<h1 id=\"example-api\">Example API</h1>\n<p>Example body</p>",
+            Metadata: new DocMetadata { NavGroup = "API Reference" });
+
+        var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var heading = Assert.Single(document.QuerySelectorAll("h1"));
+
+        Assert.Equal("example-api", heading.Id);
+        Assert.Equal("Example API", heading.TextContent.Trim());
         Assert.Contains("Example body", html);
     }
 
@@ -3568,6 +3670,78 @@ public class RazorDocsViewsTests
             "search.css");
 
         return File.ReadAllText(stylesheetPath);
+    }
+
+    private static string RemoveRootTokenBlock(string stylesheet)
+    {
+        var rootStart = stylesheet.IndexOf(":root {", StringComparison.Ordinal);
+        if (rootStart < 0)
+        {
+            return stylesheet;
+        }
+
+        var depth = 0;
+        for (var index = rootStart; index < stylesheet.Length; index++)
+        {
+            if (stylesheet[index] == '{')
+            {
+                depth++;
+            }
+            else if (stylesheet[index] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return stylesheet.Remove(rootStart, index - rootStart + 1);
+                }
+            }
+        }
+
+        return stylesheet;
+    }
+
+    private static IReadOnlyList<string> FindUnclassifiedRawColorLiterals(string stylesheet)
+    {
+        var unclassified = new List<string>();
+
+        foreach (Match match in RawCssColorLiteralRegex.Matches(stylesheet))
+        {
+            var selector = FindSelectorForCssDeclaration(stylesheet, match.Index);
+            if (IsClassifiedRawColorSelector(selector))
+            {
+                continue;
+            }
+
+            var line = stylesheet[..match.Index].Count(c => c == '\n') + 1;
+            unclassified.Add($"{line}: {selector} uses {match.Value}");
+        }
+
+        return unclassified;
+    }
+
+    private static string FindSelectorForCssDeclaration(string stylesheet, int declarationIndex)
+    {
+        var blockStart = stylesheet.LastIndexOf('{', declarationIndex);
+        if (blockStart < 0)
+        {
+            return string.Empty;
+        }
+
+        var previousBlockEnd = stylesheet.LastIndexOf('}', Math.Max(0, blockStart - 1));
+        var selectorStart = previousBlockEnd < 0 ? 0 : previousBlockEnd + 1;
+        return stylesheet[selectorStart..blockStart].Trim();
+    }
+
+    private static bool IsClassifiedRawColorSelector(string selector)
+    {
+        return selector.Contains(".docs-page-badge--example", StringComparison.Ordinal)
+               || selector.Contains(".docs-page-badge--api-reference", StringComparison.Ordinal)
+               || selector.Contains(".docs-page-badge--glossary", StringComparison.Ordinal)
+               || selector.Contains(".docs-page-badge--faq", StringComparison.Ordinal)
+               || selector.Contains(".docs-page-badge--internals", StringComparison.Ordinal)
+               || selector.Contains(".docs-page-badge--troubleshooting", StringComparison.Ordinal)
+               || selector.Contains(".docs-content .doc-signature", StringComparison.Ordinal)
+               || selector.Contains(".docs-content .doc-token", StringComparison.Ordinal);
     }
 
     private static async Task<string> RenderDocsViewAsync(

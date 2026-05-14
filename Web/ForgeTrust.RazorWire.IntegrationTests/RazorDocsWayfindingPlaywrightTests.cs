@@ -129,7 +129,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         await page.WaitForFunctionAsync(
             """
             () => window.__rwFrameNavigationSentinel === "alive"
-              && document.querySelector("#doc-content .docs-content h1")?.textContent?.trim() === "RazorWire MVC Example"
+              && document.querySelector("#doc-content h1")?.textContent?.trim() === "RazorWire MVC Example"
               && document.getElementById("docs-page-outline")?.dataset.outlineEnhanced === "true"
             """,
             null,
