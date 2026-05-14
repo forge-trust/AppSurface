@@ -70,7 +70,11 @@ public sealed class RazorDocsStyleTokenPlaywrightTests
         AssertCssColor(searchStyles[4], "207, 250, 254");
         AssertCssColor(searchStyles[5], "34, 211, 238");
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             State = WaitForSelectorState.Visible,

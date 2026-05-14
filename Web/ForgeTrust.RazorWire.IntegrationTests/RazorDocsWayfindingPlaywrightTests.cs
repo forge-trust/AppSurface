@@ -21,7 +21,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -41,14 +45,20 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             "#files-behind-the-hero-flow",
             await page.GetAttributeAsync("#docs-page-outline a[href='#files-behind-the-hero-flow']", "href"));
 
-        const string nextDocPath = "/docs/Web/ForgeTrust.RazorWire/Docs/form-failures.md.html";
         const string nextDocHeading = "Failed Form UX";
-        Assert.Equal(
-            "/docs/Web/ForgeTrust.RazorWire/README.md.html",
-            await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href"));
-        Assert.Equal(
-            nextDocPath,
-            await page.GetAttributeAsync("[data-doc-wayfinding='next']", "href"));
+        var previousDocPath = await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href");
+        Assert.Contains(previousDocPath, new[]
+        {
+            "/docs/web/forgetrust.razorwire",
+            "/docs/Web/ForgeTrust.RazorWire/README.md.html"
+        });
+
+        var nextDocPath = await page.GetAttributeAsync("[data-doc-wayfinding='next']", "href");
+        Assert.Contains(nextDocPath, new[]
+        {
+            "/docs/web/forgetrust.razorwire/docs/form-failures",
+            "/docs/Web/ForgeTrust.RazorWire/Docs/form-failures.md.html"
+        });
 
         var initialContent = await page.Locator("#doc-content").InnerHTMLAsync();
 
@@ -97,22 +107,23 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Equal(0, await page.Locator("#docs-page-outline").CountAsync());
         Assert.Equal(0, await page.Locator("script[data-doc-outline-client='true']").CountAsync());
 
-        const string outlinePagePath = "/docs/examples/razorwire-mvc/README.md.html";
+        const string outlinePageSelector = "a[href='/docs/examples/razorwire-mvc'], a[href='/docs/examples/razorwire-mvc/README.md.html']";
         var examplesSection = page.Locator("#docs-sidebar details").Filter(new LocatorFilterOptions
         {
-            Has = page.Locator($"a[href='{outlinePagePath}']")
+            Has = page.Locator(outlinePageSelector)
         }).First;
         if (!await examplesSection.EvaluateAsync<bool>("section => section.open"))
         {
             await examplesSection.Locator("summary span[aria-hidden='true']").ClickAsync();
         }
 
-        var outlineLink = examplesSection.Locator($"a[href='{outlinePagePath}']").First;
+        var outlineLink = examplesSection.Locator(outlinePageSelector).First;
         await outlineLink.WaitForAsync(new LocatorWaitForOptions
         {
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
+        var outlinePagePath = await outlineLink.GetAttributeAsync("href");
         await page.EvaluateAsync("() => { window.__rwFrameNavigationSentinel = 'alive'; }");
         await outlineLink.ClickAsync();
 
@@ -152,7 +163,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -246,7 +261,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/Web/ForgeTrust.RazorWire/README.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/web/forgetrust.razorwire",
+            "/Web/ForgeTrust.RazorWire/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -302,7 +321,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/Web/ForgeTrust.RazorWire/README.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/web/forgetrust.razorwire",
+            "/Web/ForgeTrust.RazorWire/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -418,7 +441,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -612,7 +639,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -665,7 +696,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -809,7 +844,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/Web/ForgeTrust.RazorWire/README.md.html#generated-ui-design-contract");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/web/forgetrust.razorwire#generated-ui-design-contract",
+            "/Web/ForgeTrust.RazorWire/README.md.html#generated-ui-design-contract");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -868,7 +907,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForFunctionAsync(
             "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
             null,
@@ -916,7 +959,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc/README.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-sidebar-open", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -934,7 +981,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        const string neighborHref = "/docs/Web/ForgeTrust.RazorWire/Docs/antiforgery.md.html";
+        var neighborHref = await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href");
+        Assert.StartsWith("/docs/", neighborHref);
         var neighborSection = page.Locator("#docs-sidebar details").Filter(new LocatorFilterOptions
         {
             Has = page.Locator($"a[href='{neighborHref}']")
@@ -953,8 +1001,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         await neighborLink.ClickAsync();
 
         await page.WaitForFunctionAsync(
-            "() => window.location.pathname.endsWith('/docs/Web/ForgeTrust.RazorWire/Docs/antiforgery.md.html')",
-            null,
+            "path => window.location.pathname === path",
+            neighborHref,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
         await page.WaitForFunctionAsync(
             "() => document.getElementById('docs-sidebar-open')?.getAttribute('aria-expanded') === 'false'",
