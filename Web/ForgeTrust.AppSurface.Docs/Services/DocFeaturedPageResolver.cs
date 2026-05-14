@@ -56,16 +56,15 @@ public sealed class DocFeaturedPageResolver
     /// A list of resolved featured-page groups ordered by authored group order, then authored position. The method returns
     /// an empty list when <paramref name="landingDoc"/> is <c>null</c>, when the landing doc has no
     /// <c>featured_page_groups</c>, or when every authored group is filtered out during resolution. Groups with no visible
-    /// destinations after validation are omitted. Duplicate destinations are suppressed across all groups, so a page
-    /// resolved earlier in authored order will not appear again later in the landing. Browser-facing
+    /// destinations after validation are omitted. Destinations that resolve to docs without a public
+    /// <see cref="DocNode.CanonicalPath"/> are skipped with a warning because collision losers and reserved routes are
+    /// intentionally not linkable. Duplicate destinations are suppressed across all groups, so a page resolved earlier in
+    /// authored order will not appear again later in the landing. Browser-facing
     /// <see cref="DocLandingFeaturedPageViewModel.Href"/> values are rooted at the current live docs surface from
     /// <see cref="DocsUrlBuilder"/>, not hardcoded to <c>/docs</c>, and authored canonical input paths are matched
     /// against that same configured live docs root before the configured route-family root and legacy stable
     /// <c>/docs</c> prefix fallback are considered.
     /// </returns>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown when a resolved featured destination is missing <see cref="DocNode.CanonicalPath"/>.
-    /// </exception>
     public IReadOnlyList<DocLandingFeaturedPageGroupViewModel> ResolveGroups(
         DocNode? landingDoc,
         IReadOnlyList<DocNode> docs)

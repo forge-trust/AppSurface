@@ -453,6 +453,25 @@ public class DocAggregator
         return snapshot.PathResolver.Resolve(path);
     }
 
+    /// <summary>
+    /// Resolves a requested browser-facing docs route against the current snapshot route catalog.
+    /// </summary>
+    /// <param name="path">
+    /// The non-null request path to resolve. Callers may pass a docs-relative route such as
+    /// <c>packages</c>, a rooted docs path such as <c>/docs/packages</c>, or a source-shaped path that should remain
+    /// internal-only.
+    /// </param>
+    /// <param name="cancellationToken">An optional token observed while waiting for the cached docs snapshot.</param>
+    /// <returns>
+    /// A <see cref="DocRouteResolution"/> whose kind tells callers whether the request is the canonical public route,
+    /// a declared alias that should redirect to <see cref="DocRouteResolution.PublicRoutePath"/>, an internal source
+    /// match, a collision or reserved-route loser, or an unresolved path.
+    /// </returns>
+    /// <remarks>
+    /// This method does not redirect or mutate the snapshot. It awaits <c>GetCachedDocsSnapshotAsync</c>, then delegates
+    /// to <see cref="DocRouteIdentityCatalog.ResolvePublicRoute(string)"/> so controllers and link builders branch on
+    /// the same route identity semantics.
+    /// </remarks>
     internal async Task<DocRouteResolution> ResolvePublicRouteAsync(string path, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(path);

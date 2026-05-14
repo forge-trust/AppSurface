@@ -108,6 +108,61 @@ public sealed class DocRouteIdentityCatalogTests
     }
 
     [Fact]
+    public void Create_ShouldRejectDotDirectoryCanonicalSlugSegments()
+    {
+        var catalog = CreateCatalog(
+            new DocNode(
+                "Intro",
+                "docs/intro.md",
+                "<p>Intro</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "guides/../intro"
+                }));
+
+        var resolution = catalog.ResolvePublicRoute("guides/intro");
+
+        Assert.Equal(DocRouteResolutionKind.NotFound, resolution.Kind);
+        Assert.False(catalog.TryGetPublicRoutePath("docs/intro.md", out _));
+        Assert.Contains(
+            catalog.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug);
+    }
+
+    [Fact]
+    public void Create_ShouldNotLinkUnsafeCanonicalSlugAsRootFragment()
+    {
+        var catalog = CreateCatalog(
+            new DocNode(
+                "Intro",
+                "docs/intro.md#overview",
+                "<p>Intro</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "../intro"
+                }));
+
+        Assert.False(catalog.TryGetPublicRoutePath("docs/intro.md#overview", out _));
+        Assert.Contains(
+            catalog.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug);
+    }
+
+    [Fact]
+    public void Create_ShouldRejectDotDirectorySourceRouteSegments()
+    {
+        var catalog = CreateCatalog(new DocNode("Intro", "guides/../intro.md", "<p>Intro</p>"));
+
+        var resolution = catalog.ResolvePublicRoute("guides/intro");
+
+        Assert.Equal(DocRouteResolutionKind.NotFound, resolution.Kind);
+        Assert.False(catalog.TryGetPublicRoutePath("guides/../intro.md", out _));
+        Assert.Contains(
+            catalog.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug);
+    }
+
+    [Fact]
     public void Create_ShouldChooseDeterministicWinnerForDocRouteCollisions()
     {
         var catalog = CreateCatalog(

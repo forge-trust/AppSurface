@@ -1551,7 +1551,33 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task Details_ShouldReturnNotFound_WhenDocRequestedByLegacySourcePath()
+    public async Task Details_ShouldRedirectDeclaredSourceAlias_ToCanonicalPath()
+    {
+        // Arrange
+        var docs = new List<DocNode>
+        {
+            new(
+                "Legacy",
+                "legacy-path.md",
+                "content",
+                Metadata: new DocMetadata
+                {
+                    RedirectAliases = ["legacy-path.md"]
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        // Act
+        var result = await _controller.Details("legacy-path.md");
+
+        // Assert
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
+        Assert.True(redirect.Permanent);
+        Assert.Equal("/docs/legacy-path", redirect.Url);
+    }
+
+    [Fact]
+    public async Task Details_ShouldReturnNotFound_WhenUndeclaredLegacySourcePathRequested()
     {
         // Arrange
         var docs = new List<DocNode> { new("Legacy", "legacy-path.md", "content") };
@@ -1587,7 +1613,7 @@ public class DocsControllerTests : IDisposable
 
         var result = await _controller.Details("legacy-path.md.html");
 
-        var redirect = Assert.IsType<RedirectResult>(result);
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
         Assert.True(redirect.Permanent);
         Assert.Equal("/docs/legacy-path?utm=dogfood", redirect.Url);
     }
@@ -1934,6 +1960,42 @@ public class DocsControllerTests : IDisposable
         Assert.Equal(1, model.FailureFallbackLinks.Count(link => link.Href == sharedHref));
         Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Browse guides");
         Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "Open an example");
+    }
+
+    [Fact]
+    public async Task Search_ShouldSkipFallbackDocsWithoutPublicRoutes()
+    {
+        var docs = new List<DocNode>
+        {
+            new(
+                "Winner",
+                "guides/winner.md",
+                "<p>Winner body</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "guides/shared",
+                    PageType = "guide",
+                    Order = 2
+                }),
+            new(
+                "Collision loser",
+                "guides/loser.md",
+                "<p>Loser body</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "guides/shared",
+                    PageType = "guide",
+                    Order = 1
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        var result = await _controller.Search();
+
+        var viewResult = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
+        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "Browse guides");
+        Assert.Contains(model.FailureFallbackLinks, link => link.Href == "/docs" && !link.UsesDocsFrame);
     }
 
     [Fact]

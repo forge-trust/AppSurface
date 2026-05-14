@@ -233,8 +233,8 @@ internal sealed class DocRouteIdentityCatalog
     private static bool TryReturnPublicLinkableRoute(DocRouteIdentity identity, out string publicRoutePath)
     {
         if (identity.IsPublicCanonicalWinner
-            || string.IsNullOrWhiteSpace(identity.PublicRoutePath)
-            || identity.PublicRoutePath.Contains('#', StringComparison.Ordinal))
+            || HasNonRootFragment(identity.PublicRoutePath)
+            || IsDocsHomeFragment(identity))
         {
             publicRoutePath = identity.PublicRoutePath;
             return true;
@@ -242,6 +242,19 @@ internal sealed class DocRouteIdentityCatalog
 
         publicRoutePath = string.Empty;
         return false;
+    }
+
+    private static bool HasNonRootFragment(string? publicRoutePath)
+    {
+        return !string.IsNullOrWhiteSpace(publicRoutePath)
+               && publicRoutePath.IndexOf('#', StringComparison.Ordinal) > 0;
+    }
+
+    private static bool IsDocsHomeFragment(DocRouteIdentity identity)
+    {
+        return !string.IsNullOrWhiteSpace(identity.PublicRoutePath)
+               && identity.PublicRoutePath.StartsWith("#", StringComparison.Ordinal)
+               && identity.SourcePath.TrimStart().StartsWith("#", StringComparison.Ordinal);
     }
 
     internal static string NormalizeRouteLookupPath(string path)
@@ -423,10 +436,7 @@ internal sealed class DocRouteIdentityCatalog
         if (!string.IsNullOrWhiteSpace(doc.Metadata?.CanonicalSlug))
         {
             var normalized = NormalizeCanonicalRoutePath(doc.Metadata.CanonicalSlug!, diagnostics, sourcePath);
-            if (!string.IsNullOrWhiteSpace(normalized))
-            {
-                return (AppendFragment(normalized, sourcePath), false);
-            }
+            return (AppendFragment(normalized, sourcePath), false);
         }
 
         var fragment = GetFragmentWithHash(sourcePath);
@@ -453,6 +463,15 @@ internal sealed class DocRouteIdentityCatalog
             })
             .Where(segment => segment.Length > 0)
             .ToArray();
+        if (normalizedSegments.Any(IsUnsafeRelativeRouteSegment))
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug,
+                $"Doc source '{sourcePath}' resolved to an unsafe public route segment.",
+                "Route segments named '.' or '..' are ambiguous for clients, proxies, and static export paths.",
+                "Set canonical_slug to a docs-relative route without dot-directory segments."));
+            return (string.Empty, hadLossy);
+        }
 
         var routePath = string.Join('/', normalizedSegments);
         if (string.IsNullOrWhiteSpace(routePath) && !IsRootReadme(sourceWithoutFragment))
@@ -497,6 +516,16 @@ internal sealed class DocRouteIdentityCatalog
             })
             .Where(segment => segment.Length > 0)
             .ToArray();
+        if (segments.Any(IsUnsafeRelativeRouteSegment))
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug,
+                $"{fieldName} for '{sourcePath}' contains an unsafe dot-directory route segment.",
+                "Route segments named '.' or '..' are ambiguous for clients, proxies, and static export paths.",
+                $"Set {fieldName} to a docs-relative route without dot-directory segments."));
+            return string.Empty;
+        }
+
         var routePath = string.Join('/', segments);
         if (string.IsNullOrWhiteSpace(routePath))
         {
@@ -518,6 +547,12 @@ internal sealed class DocRouteIdentityCatalog
         }
 
         return routePath;
+    }
+
+    private static bool IsUnsafeRelativeRouteSegment(string segment)
+    {
+        return string.Equals(segment, ".", StringComparison.Ordinal)
+               || string.Equals(segment, "..", StringComparison.Ordinal);
     }
 
     private static string NormalizeRedirectAliasPath(

@@ -274,7 +274,7 @@ public class DocsController : Controller
         else if (routeResolution.Kind == DocRouteResolutionKind.AliasRedirect)
         {
             var redirectPath = _docsUrlBuilder.BuildDocUrl(routeResolution.PublicRoutePath ?? string.Empty);
-            return RedirectPermanent(PathBaseAware(redirectPath) + HttpContext.Request.QueryString);
+            return LocalRedirectPermanent(PathBaseAware(redirectPath) + HttpContext.Request.QueryString);
         }
 
         if ((routeResolution.Kind != DocRouteResolutionKind.Canonical || string.IsNullOrWhiteSpace(routeResolution.SourcePath))
@@ -1214,7 +1214,7 @@ public class DocsController : Controller
         string title,
         string description)
     {
-        if (doc is null)
+        if (doc is null || string.IsNullOrWhiteSpace(doc.CanonicalPath))
         {
             return;
         }
