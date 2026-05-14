@@ -73,17 +73,26 @@ The workflow resolves annotated tags to the tagged commit with
 and then checks that `build.yml` and `package-gate.yml` have successful completed
 runs for that exact commit before any protected publish job can start.
 
-Publishing is gated by the GitHub Environment named `nuget-prerelease`. Store the
-NuGet API token only as that environment's `NUGET_API_KEY` secret. The publish job
-passes the key through the environment variable consumed by the PackageIndex tool;
-do not add a repository-level NuGet API secret and do not pass the key as an input
-or workflow-dispatch parameter.
+Publishing is gated by the GitHub Environment named `nuget-prerelease` and by a
+nuget.org Trusted Publishing policy. The publish job requests a short-lived NuGet
+API key through GitHub Actions OIDC immediately before it runs
+`publish-prerelease`; do not create or store a long-lived `NUGET_API_KEY` secret
+at the repository, organization, or environment level.
 
 Before creating the first prerelease tag, create the `nuget-prerelease` environment
-in repository settings with required reviewers and prevent self-review enabled.
-Add `NUGET_API_KEY` only as an environment secret there. Verify that no repository
-or organization `NUGET_API_KEY` secret exists, because a repo/org secret with the
-same name would weaken the intended environment-only secret boundary. The workflow
+in repository settings with required reviewers and prevent self-review enabled. Add
+`NUGET_USER` as an environment or repository variable containing the nuget.org
+profile name, not an email address. On nuget.org, add a Trusted Publishing policy
+for the package owner with these GitHub Actions details:
+
+- Repository Owner: `forge-trust`
+- Repository: `AppSurface`
+- Workflow File: `nuget-prerelease-publish.yml`
+- Environment: `nuget-prerelease`
+
+NuGet's policy UI expects only the workflow file name, not the
+`.github/workflows/` path. Keep the policy environment-scoped so a token exchange
+is valid only after the GitHub environment approval gate has passed. The workflow
 fails closed if the environment is missing, has no required-reviewer protection, or
 does not prevent self-review.
 
