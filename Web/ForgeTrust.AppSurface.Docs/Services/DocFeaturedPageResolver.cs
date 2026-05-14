@@ -209,6 +209,16 @@ public sealed class DocFeaturedPageResolver
             return null;
         }
 
+        if (destination.CanonicalPath is null)
+        {
+            _logger.LogWarning(
+                "Skipping featured docs landing entry '{FeaturedPath}' on {LandingPath} at {FieldPath} because the destination page has no public route.",
+                definition.Path,
+                landingDoc.Path,
+                $"{fieldPath}.path");
+            return null;
+        }
+
         var destinationLinkPath = GetSnapshotCanonicalPath(destination);
         if (!seenPaths.Add(destinationLinkPath))
         {

@@ -13,7 +13,7 @@ trust:
   change_scope: Repository-wide. Every package and AppSurface surface in this monorepo shares the same release version.
   migration:
     label: Read the pre-1.0 upgrade policy
-    href: /docs/releases/upgrade-policy.md.html
+    href: /docs/releases/upgrade-policy
   archive: Tagged sections will link to long-form release notes under /docs/releases/ once versions start shipping.
   sources:
     - releases/unreleased.md

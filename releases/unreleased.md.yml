@@ -13,7 +13,7 @@ trust:
   change_scope: Repository-wide. Packages, CLI tooling, examples, and docs-facing behavior all roll into the same next version.
   migration:
     label: Read the pre-1.0 upgrade policy
-    href: /docs/releases/upgrade-policy.md.html
+    href: /docs/releases/upgrade-policy
   archive: When a version is tagged, the final narrative moves into a versioned release note and the compact summary is recorded in CHANGELOG.md.
   sources:
     - Pull request titles follow Conventional Commits.

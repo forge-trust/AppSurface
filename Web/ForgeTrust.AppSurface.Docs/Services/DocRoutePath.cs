@@ -1,17 +1,17 @@
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Normalizes harvested documentation source paths into the canonical browser-facing routes used by RazorDocs.
+/// Normalizes harvested non-Markdown source paths into legacy browser-facing routes used by RazorDocs.
 /// </summary>
 internal static class DocRoutePath
 {
     /// <summary>
-    /// Constructs a canonical browser-facing path for a harvested documentation source path.
+    /// Constructs a legacy browser-facing path for a harvested non-Markdown documentation source path.
     /// </summary>
     /// <param name="sourcePath">The harvested source path, optionally including a fragment.</param>
     /// <returns>
-    /// The canonical docs route path, including the <c>.html</c> suffix RazorDocs serves to browsers and any original
-    /// fragment identifier.
+    /// The legacy docs route path, including the <c>.html</c> suffix used by generated API docs and any original
+    /// fragment identifier. Markdown public routes are owned by <see cref="DocRouteIdentityCatalog"/>.
     /// </returns>
     internal static string BuildCanonicalPath(string sourcePath)
     {

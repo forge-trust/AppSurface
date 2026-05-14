@@ -566,7 +566,7 @@ public sealed class SidebarViewComponentTests
             [
                 CreateDoc("Overview", "concepts/overview.md", "Concepts")
             ]);
-        SetRequestPath(component, "/docs/concepts/overview.md.html");
+        SetRequestPath(component, "/docs/concepts/overview");
         using (memo)
         using (cache)
         {
@@ -587,7 +587,7 @@ public sealed class SidebarViewComponentTests
             [
                 CreateDoc("Overview", "concepts/overview.md", "Concepts")
             ]);
-        SetRequestPath(component, "/docs/concepts/overview.md.html/");
+        SetRequestPath(component, "/docs/concepts/overview/");
         using (memo)
         using (cache)
         {
@@ -672,7 +672,7 @@ public sealed class SidebarViewComponentTests
                 CreateDoc("Overview", "concepts/overview.md", "Concepts")
             ],
             options);
-        SetRequestPath(component, "/concepts/overview.md.html");
+        SetRequestPath(component, "/concepts/overview");
         using (memo)
         using (cache)
         {
@@ -681,7 +681,7 @@ public sealed class SidebarViewComponentTests
             var section = Assert.Single(model.Sections);
             var link = Assert.Single(Assert.Single(section.Groups).Links);
             Assert.Equal("/sections/concepts", section.Href);
-            Assert.Equal("/concepts/overview.md.html", link.Href);
+            Assert.Equal("/concepts/overview", link.Href);
             Assert.True(section.IsActive);
             Assert.True(section.IsExpanded);
             Assert.True(link.IsCurrent);
@@ -703,7 +703,7 @@ public sealed class SidebarViewComponentTests
                 CreateDoc("Overview", "concepts/overview.md", "Concepts")
             ],
             options);
-        SetRequestPath(component, "/concepts/overview.md.html/");
+        SetRequestPath(component, "/concepts/overview/");
         using (memo)
         using (cache)
         {
@@ -712,7 +712,7 @@ public sealed class SidebarViewComponentTests
             var section = Assert.Single(model.Sections);
             var link = Assert.Single(Assert.Single(section.Groups).Links);
             Assert.Equal("/sections/concepts", section.Href);
-            Assert.Equal("/concepts/overview.md.html", link.Href);
+            Assert.Equal("/concepts/overview", link.Href);
             Assert.True(section.IsActive);
             Assert.True(section.IsExpanded);
             Assert.True(link.IsCurrent);
@@ -822,7 +822,7 @@ public sealed class SidebarViewComponentTests
             [
                 CreateDoc("Quickstart", "guides/start.md", "Start Here")
             ]);
-        SetRequestPath(component, "/docs/missing.md.html");
+        SetRequestPath(component, "/docs/missing");
         using (memo)
         using (cache)
         {

@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
@@ -91,6 +92,35 @@ public sealed class DocContentLinkRewriterTests
         var rewritten = Rewrite(DefaultDocsRootPath, "releases/unreleased.md", html, "releases/upgrade-policy.md");
 
         Assert.Contains("href=\"/docs/releases/upgrade-policy.md.html\"", rewritten);
+        Assert.Contains("data-turbo-frame=\"doc-content\"", rewritten);
+        Assert.Contains("data-turbo-action=\"advance\"", rewritten);
+    }
+
+    [Fact]
+    public void RewriteInternalDocLinks_ShouldCanonicalizeDeclaredAliasLinks()
+    {
+        var html = "<p><a href=\"/docs/old/intro\">Old intro</a></p>";
+        var catalog = DocRouteIdentityCatalog.Create(
+            [
+                new DocNode(
+                    "Intro",
+                    "intro.md",
+                    "<p>Intro</p>",
+                    Metadata: new DocMetadata
+                    {
+                        CanonicalSlug = "start/intro",
+                        RedirectAliases = ["old/intro"]
+                    })
+            ],
+            new DocsUrlBuilder(new RazorDocsOptions()));
+
+        var rewritten = DocContentLinkRewriter.RewriteInternalDocLinks(
+            "README.md",
+            html,
+            DefaultDocsRootPath,
+            catalog);
+
+        Assert.Contains("href=\"/docs/start/intro\"", rewritten);
         Assert.Contains("data-turbo-frame=\"doc-content\"", rewritten);
         Assert.Contains("data-turbo-action=\"advance\"", rewritten);
     }

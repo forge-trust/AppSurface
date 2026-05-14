@@ -178,6 +178,12 @@ RazorDocs currently emits these codes:
 - `DocHarvestDiagnosticCodes.HarvesterFailed` (`razordocs.harvest.harvester_failed`)
 - `DocHarvestDiagnosticCodes.NoHarvesters` (`razordocs.harvest.no_harvesters`)
 - `DocHarvestDiagnosticCodes.AllFailed` (`razordocs.harvest.all_failed`)
+- `DocHarvestDiagnosticCodes.DocReservedRouteCollision` (`razordocs.routes.reserved_collision`)
+- `DocHarvestDiagnosticCodes.DocRouteCollision` (`razordocs.routes.doc_collision`)
+- `DocHarvestDiagnosticCodes.DocRedirectAliasCollision` (`razordocs.routes.redirect_alias_collision`)
+- `DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug` (`razordocs.routes.invalid_canonical_slug`)
+- `DocHarvestDiagnosticCodes.DocInvalidRedirectAlias` (`razordocs.routes.invalid_redirect_alias`)
+- `DocHarvestDiagnosticCodes.DocLossySlugNormalization` (`razordocs.routes.lossy_slug_normalization`)
 
 An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
 
@@ -338,6 +344,41 @@ var healthJson = routes.HealthJson;
 ```
 
 `RazorDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, and `HealthJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
+
+### Document route identity
+
+RazorDocs assigns each cached snapshot a route identity catalog. The catalog keeps source identity separate from browser-facing route identity, so authors can keep Markdown source links portable while readers see structured URLs.
+
+Default route behavior:
+
+- Markdown files publish without `.md.html`. For example, `start-here/appsurface-evaluator.md` publishes at `{DocsRootPath}/start-here/appsurface-evaluator`.
+- `README.md`, `README.markdown`, `index.md`, and `index.markdown` collapse to their containing directory. For example, `packages/README.md` publishes at `{DocsRootPath}/packages`.
+- The repository-root README represents the docs home and appears in search as `{DocsRootPath}`. It is not rendered through `/README.md`.
+- Generated API docs and other non-Markdown docs keep the existing `.html` route shape, such as `{DocsRootPath}/Namespaces/ForgeTrust.AppSurface.Web.html`.
+- Fragments stay fragments. A harvested source path like `guides/intro.md#setup` publishes as `{DocsRootPath}/guides/intro#setup`.
+
+RazorDocs reserves document routes that belong to chrome, health, search, sections, versions, and assets. The reserved set includes the docs home, `search`, `search-index.json`, `_health`, `_health.json`, `search.css`, `search-client.js`, `outline-client.js`, `minisearch.min.js`, `versions`, and the `sections/` and `v/` route prefixes. Docs that resolve to reserved routes remain internally available for source lookup, but they are not public document winners and emit route diagnostics.
+
+Markdown route segments are normalized deterministically: Unicode is folded where possible, non-spacing marks are removed, ASCII letters are lower-cased, dots are preserved, and unsafe separators become hyphens. When that conversion is lossy, RazorDocs emits `DocLossySlugNormalization` so authors can decide whether to set an explicit route.
+
+Use `canonical_slug` when the source path is not the right reader-facing URL:
+
+```yaml
+title: Should I Use AppSurface?
+canonical_slug: start-here/evaluator
+```
+
+Use `redirect_aliases` for deliberate migrations:
+
+```yaml
+title: Should I Use AppSurface?
+canonical_slug: start-here/evaluator
+redirect_aliases:
+  - start-here/appsurface-evaluator
+  - start-here/appsurface-evaluator.md.html
+```
+
+`canonical_slug` and `redirect_aliases` are docs-root-relative route paths. Do not include a query string, fragment, leading docs root, or host name. Canonical slugs use the same deterministic segment normalization as source-derived Markdown routes. Redirect aliases preserve their literal authored route text after separator cleanup, so legacy URLs such as `Old_Path/Guide.md.html` keep their existing shape instead of being slugified. Aliases redirect permanently to the public canonical route and preserve the request query string. Source-shaped routes such as `/docs/foo.md` and `/docs/foo.md.html` are not served unless explicitly declared as redirect aliases.
 
 ### Option reference
 
@@ -750,26 +791,26 @@ Field behavior and pitfalls:
 
 ## Docs Link Authoring
 
-RazorDocs rewrites links inside harvested Markdown so authors can use source-friendly paths while readers stay on canonical docs-surface routes such as `{DocsRootPath}/...html` with Turbo history support.
+RazorDocs rewrites links inside harvested Markdown so authors can use source-friendly paths while readers stay on public docs-surface routes such as `{DocsRootPath}/start-here/appsurface-evaluator` with Turbo history support.
 
 ### Authoring contract
 
 - Link to another harvested doc with its source path, such as `./guide.md`, `../CHANGELOG.md`, or `/releases/unreleased.md`.
-- Link to an already canonical docs route only when the target is a harvested doc, such as `/docs/releases/unreleased.md.html`, `/docs/next/releases/unreleased.md.html`, or a custom-root equivalent like `/foo/bar/releases/unreleased.md.html`.
+- Link to an already public docs route only when the target is a harvested doc, such as `/docs/releases/unreleased`, `/docs/next/releases/unreleased`, or a custom-root equivalent like `/foo/bar/releases/unreleased`.
 - Use ordinary site URLs, such as `/privacy.html` or `../status.html`, for non-doc pages. RazorDocs leaves those links untouched.
 - Use browser-facing URLs for metadata fields that render plain anchors without content rewriting, such as `trust.migration.href`.
 
-### Manifest-backed rewriting
+### Catalog-backed rewriting
 
-During aggregation, RazorDocs builds a manifest from the harvested documentation nodes. Link rewriting consults that manifest before converting any source or canonical-looking link into the active docs surface.
+During aggregation, RazorDocs builds a route identity catalog from the harvested documentation nodes. Link rewriting consults that catalog before converting any source or public-looking link into the active docs surface.
 
-This means a link is rewritten only when the target exists in the harvested docs set. A missing `./guide.md`, an ambiguous canonical docs route like `/docs/missing.md.html`, or a normal site page like `../privacy.html` remains authored as-is instead of being guessed into a broken docs route.
+This means a link is rewritten only when the target exists in the harvested docs set. A missing `./guide.md`, an ambiguous docs route like `/docs/missing`, or a normal site page like `../privacy.html` remains authored as-is instead of being guessed into a broken docs route.
 
 ### Pitfalls
 
 - Do not rely on file extensions alone. A `.md`, `.cs`, or `.html` suffix does not make a link a RazorDocs target unless the target was harvested.
 - If a doc link is not rewritten, first confirm the target file is included by the active harvester and not excluded by directory policy.
-- Canonical docs-surface links are safe for exported docs, but source-relative Markdown links are usually easier to keep portable in GitHub and editor previews.
+- Public docs-surface links are safe for exported docs, but source-relative Markdown links are usually easier to keep portable in GitHub and editor previews.
 
 ## Landing Curation
 
@@ -962,7 +1003,7 @@ trust:
   change_scope: Repository-wide.
   migration:
     label: Read the upgrade policy
-    href: /docs/releases/upgrade-policy.md.html
+    href: /docs/releases/upgrade-policy
   archive: Tagged release notes will keep the final narrative once the version ships.
   sources:
     - CHANGELOG.md

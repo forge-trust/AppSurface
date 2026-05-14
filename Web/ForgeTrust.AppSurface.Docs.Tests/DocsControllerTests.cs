@@ -118,7 +118,7 @@ public class DocsControllerTests : IDisposable
         var featuredPage = SingleFeaturedPage(model);
         Assert.Equal("How does composition work?", featuredPage.Question);
         Assert.Equal("Composition", featuredPage.Title);
-        Assert.Equal("/docs/guides/composition.md.html", featuredPage.Href);
+        Assert.Equal("/docs/guides/composition", featuredPage.Href);
         Assert.Equal("guide", featuredPage.PageType);
         Assert.Equal("See the composition model.", featuredPage.SupportingText);
     }
@@ -510,7 +510,7 @@ public class DocsControllerTests : IDisposable
         var result = await _controller.Section("concepts");
 
         var redirect = Assert.IsType<RedirectResult>(result);
-        Assert.Equal("/docs/concepts/landing.md.html", redirect.Url);
+        Assert.Equal("/docs/concepts/landing", redirect.Url);
     }
 
     [Fact]
@@ -630,7 +630,7 @@ public class DocsControllerTests : IDisposable
         var result = await _controller.Section("concepts");
 
         var redirect = Assert.IsType<RedirectResult>(result);
-        Assert.Equal("/some-base/docs/concepts/landing.md.html", redirect.Url);
+        Assert.Equal("/some-base/docs/concepts/landing", redirect.Url);
     }
 
     [Fact]
@@ -798,7 +798,7 @@ public class DocsControllerTests : IDisposable
                             new DocFeaturedPageDefinition
                             {
                                 Question = "Duplicate",
-                                Path = "guides/composition.md.html"
+                                Path = "guides/composition"
                             })
                     ]
                 }),
@@ -847,7 +847,7 @@ public class DocsControllerTests : IDisposable
         var secondarySection = Assert.Single(model.SecondarySections);
         var keyRoute = Assert.Single(secondarySection.KeyRoutes);
         Assert.Equal("Concept Landing", keyRoute.Title);
-        Assert.Equal("/docs/concepts/landing.md.html", keyRoute.Href);
+        Assert.Equal("/docs/concepts/landing", keyRoute.Href);
     }
 
     [Fact]
@@ -866,7 +866,7 @@ public class DocsControllerTests : IDisposable
                         FeaturedGroup(
                             new DocFeaturedPageDefinition
                             {
-                                Path = "guides/composition.md.html",
+                                Path = "guides/composition",
                                 SupportingCopy = "Authored copy wins."
                             })
                     ]
@@ -1002,7 +1002,7 @@ public class DocsControllerTests : IDisposable
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<DocLandingViewModel>(viewResult.Model);
         var featuredPage = SingleFeaturedPage(model);
-        Assert.Equal("/docs/guides/composition.md.html", featuredPage.Href);
+        Assert.Equal("/docs/guides/composition", featuredPage.Href);
     }
 
     [Fact]
@@ -1050,7 +1050,7 @@ public class DocsControllerTests : IDisposable
             var viewResult = Assert.IsType<ViewResult>(result);
             var model = Assert.IsType<DocLandingViewModel>(viewResult.Model);
             var featuredPage = SingleFeaturedPage(model);
-            Assert.Equal("/docs/next/guides/composition.md.html", featuredPage.Href);
+            Assert.Equal("/docs/next/guides/composition", featuredPage.Href);
         }
     }
 
@@ -1082,7 +1082,7 @@ public class DocsControllerTests : IDisposable
                         FeaturedGroup(
                             new DocFeaturedPageDefinition
                             {
-                                Path = "/docs/next/guides/composition.md.html"
+                                Path = "/docs/next/guides/composition"
                             })
                     ]
                 }),
@@ -1099,7 +1099,7 @@ public class DocsControllerTests : IDisposable
             var viewResult = Assert.IsType<ViewResult>(result);
             var model = Assert.IsType<DocLandingViewModel>(viewResult.Model);
             var featuredPage = SingleFeaturedPage(model);
-            Assert.Equal("/docs/next/guides/composition.md.html", featuredPage.Href);
+            Assert.Equal("/docs/next/guides/composition", featuredPage.Href);
         }
     }
 
@@ -1136,7 +1136,7 @@ public class DocsControllerTests : IDisposable
         var featuredPage = SingleFeaturedPage(model);
         Assert.Equal("Guide Root", featuredPage.Question);
         Assert.Equal("Guide Root", featuredPage.Title);
-        Assert.Equal("/docs/guides/intro.md.html", featuredPage.Href);
+        Assert.Equal("/docs/guides/intro", featuredPage.Href);
     }
 
     [Fact]
@@ -1171,7 +1171,7 @@ public class DocsControllerTests : IDisposable
         var featuredPage = SingleFeaturedPage(model);
         Assert.Equal("Guide Rich Fragment", featuredPage.Question);
         Assert.Equal("Guide Rich Fragment", featuredPage.Title);
-        Assert.Equal("/docs/guides/advanced.md.html#setup", featuredPage.Href);
+        Assert.Equal("/docs/guides/advanced#setup", featuredPage.Href);
     }
 
     [Fact]
@@ -1182,7 +1182,7 @@ public class DocsControllerTests : IDisposable
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
         // Act
-        var result = await _controller.Details("target-path");
+        var result = await _controller.Details("target-path.html");
 
         // Assert
         var viewResult = Assert.IsType<ViewResult>(result);
@@ -1198,7 +1198,7 @@ public class DocsControllerTests : IDisposable
         {
             new(
                 "Start Here",
-                "README.md",
+                "start-here/README.md",
                 "<p>Start here</p>",
                 Metadata: new DocMetadata
                 {
@@ -1238,7 +1238,7 @@ public class DocsControllerTests : IDisposable
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var result = await _controller.Details("README.md");
+        var result = await _controller.Details("start-here");
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -1250,7 +1250,7 @@ public class DocsControllerTests : IDisposable
         var featuredPage = Assert.Single(featuredGroup.Pages);
         Assert.Equal("Install next?", featuredPage.Question);
         Assert.Equal("Install", featuredPage.Title);
-        Assert.Equal("/docs/guides/install.md.html", featuredPage.Href);
+        Assert.Equal("/docs/guides/install", featuredPage.Href);
 
         var sectionGroup = Assert.Single(model.SectionGroups);
         Assert.Equal(
@@ -1266,7 +1266,7 @@ public class DocsControllerTests : IDisposable
         {
             new(
                 "Start Here",
-                "README.md",
+                "start-here/README.md",
                 "<p>Start here</p>",
                 Metadata: new DocMetadata
                 {
@@ -1284,7 +1284,7 @@ public class DocsControllerTests : IDisposable
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var result = await _controller.Details("README.md");
+        var result = await _controller.Details("start-here");
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -1302,7 +1302,7 @@ public class DocsControllerTests : IDisposable
         {
             new(
                 "Start Here",
-                "README.md",
+                "start-here/README.md",
                 "<p>Start here</p>",
                 Metadata: new DocMetadata
                 {
@@ -1338,7 +1338,7 @@ public class DocsControllerTests : IDisposable
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var result = await _controller.Details("README.md");
+        var result = await _controller.Details("start-here");
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -1380,7 +1380,7 @@ public class DocsControllerTests : IDisposable
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var result = await _controller.Details("releases/unreleased.md");
+        var result = await _controller.Details("releases/unreleased");
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -1425,7 +1425,7 @@ public class DocsControllerTests : IDisposable
         using (memo)
         using (cache)
         {
-            var result = await controller.Details("guides/start.md");
+            var result = await controller.Details("guides/start");
 
             var viewResult = Assert.IsType<ViewResult>(result);
             var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -1452,7 +1452,7 @@ public class DocsControllerTests : IDisposable
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var result = await _controller.Details("Web/ForgeTrust.AppSurface.Web/README.md");
+        var result = await _controller.Details("web/forgetrust.appsurface.web");
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -1485,7 +1485,32 @@ public class DocsControllerTests : IDisposable
         var docs = new List<DocNode> { new("Title", "target-path", "content") };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var result = await _controller.Details("target-path/index.partial.html");
+        var result = await _controller.Details("target-path.html/index.partial.html");
+
+        var partial = Assert.IsType<PartialViewResult>(result);
+        Assert.Equal("RazorWire/_TurboFrame", partial.ViewName);
+        var frame = Assert.IsType<TurboFrameViewModel>(partial.Model);
+        Assert.Equal("DetailsFrame", frame.PartialView);
+        Assert.Equal("doc-content", frame.Id);
+    }
+
+    [Fact]
+    public async Task Details_ShouldReturnTurboFramePartial_WhenAliasPartialPathRequested()
+    {
+        var docs = new List<DocNode>
+        {
+            new(
+                "Legacy",
+                "legacy-path.md",
+                "content",
+                Metadata: new DocMetadata
+                {
+                    RedirectAliases = ["old-path"]
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        var result = await _controller.Details("old-path.partial.html");
 
         var partial = Assert.IsType<PartialViewResult>(result);
         Assert.Equal("RazorWire/_TurboFrame", partial.ViewName);
@@ -1516,7 +1541,7 @@ public class DocsControllerTests : IDisposable
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
         // Act
-        var result = await _controller.Details("target-path.md.html");
+        var result = await _controller.Details("target-path");
 
         // Assert
         var viewResult = Assert.IsType<ViewResult>(result);
@@ -1526,7 +1551,7 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task Details_ShouldReturnView_WhenDocRequestedByLegacySourcePath()
+    public async Task Details_ShouldReturnNotFound_WhenDocRequestedByLegacySourcePath()
     {
         // Arrange
         var docs = new List<DocNode> { new("Legacy", "legacy-path.md", "content") };
@@ -1536,10 +1561,35 @@ public class DocsControllerTests : IDisposable
         var result = await _controller.Details("legacy-path.md");
 
         // Assert
-        var viewResult = Assert.IsType<ViewResult>(result);
-        var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
-        Assert.Equal("Legacy", model.Title);
-        Assert.Equal("Legacy", model.Document.Title);
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task Details_ShouldRedirectDeclaredAlias_ToCanonicalPath()
+    {
+        var docs = new List<DocNode>
+        {
+            new(
+                "Legacy",
+                "legacy-path.md",
+                "content",
+                Metadata: new DocMetadata
+                {
+                    RedirectAliases = ["legacy-path.md.html"]
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.QueryString = new QueryString("?utm=dogfood");
+        _controller.ControllerContext = CreateControllerContext(httpContext);
+        _controller.Url = new UrlHelper(_controller.ControllerContext);
+
+        var result = await _controller.Details("legacy-path.md.html");
+
+        var redirect = Assert.IsType<RedirectResult>(result);
+        Assert.True(redirect.Permanent);
+        Assert.Equal("/docs/legacy-path?utm=dogfood", redirect.Url);
     }
 
     [Fact]
@@ -1548,7 +1598,7 @@ public class DocsControllerTests : IDisposable
         var docs = new List<DocNode> { new("Guide", "guides/intro.md", "content") };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var result = await _controller.Details("guides\\intro.md");
+        var result = await _controller.Details("guides\\intro");
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -1573,7 +1623,7 @@ public class DocsControllerTests : IDisposable
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var result = await _controller.Details("guides/intro.md");
+        var result = await _controller.Details("guides/intro");
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -1602,7 +1652,7 @@ public class DocsControllerTests : IDisposable
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var result = await _controller.Details("guides/quickstart.md");
+        var result = await _controller.Details("guides/quickstart");
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -1726,7 +1776,7 @@ public class DocsControllerTests : IDisposable
         {
             new(
                 "Guide",
-                "guides/start",
+                "guides/start.md",
                 "<p>Guide body</p>",
                 Metadata: new DocMetadata
                 {
@@ -1760,7 +1810,7 @@ public class DocsControllerTests : IDisposable
         var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
         Assert.Equal("Search Documentation", model.Title);
         Assert.Equal(3, model.FailureFallbackLinks.Count);
-        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Browse guides" && link.UsesDocsFrame);
+        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Browse guides" && link.Href == "/docs/guides/start" && link.UsesDocsFrame);
         Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Open an example" && link.UsesDocsFrame);
         Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Explore API reference" && link.UsesDocsFrame);
     }
@@ -1840,7 +1890,7 @@ public class DocsControllerTests : IDisposable
         {
             new(
                 "Hidden guide",
-                "guides/hidden-guide",
+                "guides/hidden-guide.md",
                 "<p>Guide body</p>",
                 Metadata: new DocMetadata
                 {
@@ -1855,6 +1905,7 @@ public class DocsControllerTests : IDisposable
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
         Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Href == "/docs/guides/hidden-guide");
+        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Href == "/docs/guides/hidden-guide.md");
         Assert.Contains(model.FailureFallbackLinks, link => link.Href == "/docs" && !link.UsesDocsFrame);
     }
 
@@ -1865,7 +1916,7 @@ public class DocsControllerTests : IDisposable
         {
             new(
                 "Shared Example",
-                "guides/shared-example",
+                "guides/shared-example.md",
                 "<p>Shared body</p>",
                 Metadata: new DocMetadata
                 {
@@ -1932,7 +1983,7 @@ public class DocsControllerTests : IDisposable
         {
             new(
                 "Home",
-                "README.md",
+                "home.md",
                 "<p>Home</p>",
                 Metadata: new DocMetadata
                 {
@@ -1969,7 +2020,7 @@ public class DocsControllerTests : IDisposable
         using (memo)
         using (cache)
         {
-            var result = await controller.Details("README.md");
+            var result = await controller.Details("home");
 
             var viewResult = Assert.IsType<ViewResult>(result);
             var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -1984,7 +2035,7 @@ public class DocsControllerTests : IDisposable
         {
             new(
                 "Home",
-                "README.md",
+                "home.md",
                 "<p>Home</p>",
                 Metadata: new DocMetadata
                 {
@@ -2000,7 +2051,7 @@ public class DocsControllerTests : IDisposable
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
-        var result = await _controller.Details("README.md");
+        var result = await _controller.Details("home");
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -2014,7 +2065,7 @@ public class DocsControllerTests : IDisposable
         {
             new(
                 "Home",
-                "README.md",
+                "home.md",
                 "<p>Home</p>",
                 Metadata: new DocMetadata
                 {
@@ -2039,7 +2090,7 @@ public class DocsControllerTests : IDisposable
         using (memo)
         using (cache)
         {
-            var result = await controller.Details("README.md");
+            var result = await controller.Details("home");
 
             var viewResult = Assert.IsType<ViewResult>(result);
             var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -2054,7 +2105,7 @@ public class DocsControllerTests : IDisposable
         {
             new(
                 "Home",
-                "README.md",
+                "home.md",
                 "<p>Home</p>",
                 Metadata: new DocMetadata
                 {
@@ -2089,7 +2140,7 @@ public class DocsControllerTests : IDisposable
         using (memo)
         using (cache)
         {
-            var result = await controller.Details("README.md");
+            var result = await controller.Details("home");
 
             var viewResult = Assert.IsType<ViewResult>(result);
             var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
@@ -2191,8 +2242,8 @@ public class DocsControllerTests : IDisposable
                 item => item.GetProperty("isSectionLanding").GetBoolean(),
                 StringComparer.OrdinalIgnoreCase);
 
-        Assert.False(documents["guides/alpha.md"]);
-        Assert.True(documents["guides/beta.md"]);
+        Assert.False(documents["guides/alpha"]);
+        Assert.True(documents["guides/beta"]);
     }
 
     [Fact]
@@ -2677,7 +2728,7 @@ public class DocsControllerTests : IDisposable
             .GetProperty("path")
             .GetString();
 
-        Assert.Equal("/docs/guides/space%20path#member%20name", firstPath);
+        Assert.Equal("/docs/guides/space%20path.html#member%20name", firstPath);
     }
 
     [Fact]
@@ -2685,7 +2736,7 @@ public class DocsControllerTests : IDisposable
     {
         var docs = new List<DocNode>
         {
-            new("Getting Started", "guides/start", "<p>content</p>")
+            new("Getting Started", "guides/start.md", "<p>content</p>")
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
@@ -2714,7 +2765,7 @@ public class DocsControllerTests : IDisposable
     {
         var docs = new List<DocNode>
         {
-            new("Getting Started", "guides/start", "<p>content</p>")
+            new("Getting Started", "guides/start.md", "<p>content</p>")
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
@@ -2739,7 +2790,7 @@ public class DocsControllerTests : IDisposable
     {
         var docs = new List<DocNode>
         {
-            new("Getting Started", "guides/start", "<p>content</p>")
+            new("Getting Started", "guides/start.md", "<p>content</p>")
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
@@ -2986,8 +3037,8 @@ public class DocsControllerTests : IDisposable
     {
         var docs = new List<DocNode>
         {
-            new("", "guides/empty", "<script>alert('x')</script><style>body{}</style>"),
-            new("Kept", "guides/kept", "<p>Visible body</p>")
+            new("", "guides/empty.md", "<script>alert('x')</script><style>body{}</style>"),
+            new("Kept", "guides/kept.md", "<p>Visible body</p>")
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
@@ -2999,7 +3050,7 @@ public class DocsControllerTests : IDisposable
         Assert.Equal(2, items.Count);
 
         var synthesizedTitleDocument = Assert.Single(items, item => item.GetProperty("path").GetString() == "/docs/guides/empty");
-        Assert.Equal("empty", synthesizedTitleDocument.GetProperty("title").GetString());
+        Assert.Equal("empty.md", synthesizedTitleDocument.GetProperty("title").GetString());
 
         var keptDocument = Assert.Single(items, item => item.GetProperty("path").GetString() == "/docs/guides/kept");
         Assert.Equal("Kept", keptDocument.GetProperty("title").GetString());

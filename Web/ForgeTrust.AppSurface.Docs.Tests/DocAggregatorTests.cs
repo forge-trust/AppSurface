@@ -501,7 +501,7 @@ public class DocAggregatorTests : IDisposable
 
         var result = (await _aggregator.GetDocsAsync()).Single(doc => doc.Path == "releases/README.md");
 
-        Assert.Contains("href=\"/docs/releases/unreleased.md.html\"", result.Content);
+        Assert.Contains("href=\"/docs/releases/unreleased\"", result.Content);
         Assert.Contains("data-turbo-frame=\"doc-content\"", result.Content);
         Assert.Contains("data-turbo-action=\"advance\"", result.Content);
         Assert.Contains("href=\"https://example.com/releases\"", result.Content);
@@ -525,7 +525,7 @@ public class DocAggregatorTests : IDisposable
         var document = new HtmlParser().ParseDocument(result.Content);
         var anchor = Assert.Single(document.QuerySelectorAll("a"));
 
-        Assert.Equal("/docs/guide.md.html", anchor.GetAttribute("href"));
+        Assert.Equal("/docs/guide", anchor.GetAttribute("href"));
         Assert.Equal("1 > 0", anchor.GetAttribute("title"));
         Assert.Equal("guide", anchor.TextContent);
     }
@@ -547,8 +547,8 @@ public class DocAggregatorTests : IDisposable
         var result = (await _aggregator.GetDocsAsync()).Single(doc => doc.Path == "releases/README.md");
 
         Assert.Contains("href=\"./missing.md\"", result.Content);
-        Assert.Contains("href=\"/docs/releases/unreleased.md.html\"", result.Content);
-        Assert.DoesNotContain("href=\"/docs/releases/missing.md.html\"", result.Content);
+        Assert.Contains("href=\"/docs/releases/unreleased\"", result.Content);
+        Assert.DoesNotContain("href=\"/docs/releases/missing\"", result.Content);
     }
 
     [Fact]
@@ -582,7 +582,7 @@ public class DocAggregatorTests : IDisposable
 
         Assert.NotNull(chooser);
         Assert.Contains(
-            "href=\"/docs/Web/ForgeTrust.AppSurface.Web.OpenApi/README.md.html\"",
+            "href=\"/docs/web/forgetrust.appsurface.web.openapi\"",
             chooser!.Content);
     }
 
@@ -677,7 +677,7 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
-    public async Task GetDocsAsync_ShouldExposeCanonicalHtmlPaths_AndResolveByCanonicalPath()
+    public async Task GetDocsAsync_ShouldExposePublicRoutePaths_AndResolveByCanonicalPath()
     {
         // Arrange
         var harvestedDocs = new List<DocNode>
@@ -689,11 +689,11 @@ public class DocAggregatorTests : IDisposable
 
         // Act
         var docs = await _aggregator.GetDocsAsync();
-        var byCanonical = await _aggregator.GetDocByPathAsync("docs/readme.md.html");
+        var byCanonical = await _aggregator.GetDocByPathAsync("docs");
         var byCanonicalWithoutAnchor = await _aggregator.GetDocByPathAsync("docs/service.cs.html");
 
         // Assert
-        Assert.Contains(docs, d => d.Path == "docs/readme.md" && d.CanonicalPath == "docs/readme.md.html");
+        Assert.Contains(docs, d => d.Path == "docs/readme.md" && d.CanonicalPath == "docs");
         Assert.Contains(
             docs,
             d => d.Path == "docs/service.cs#MethodId" && d.CanonicalPath == "docs/service.cs.html#MethodId");
@@ -746,8 +746,8 @@ public class DocAggregatorTests : IDisposable
         var docs = await _aggregator.GetDocsAsync();
 
         // Assert
-        Assert.Contains(docs, d => d.Path == " " && d.CanonicalPath == "index.html");
-        Assert.Contains(docs, d => d.Path == "#overview" && d.CanonicalPath == "index.html#overview");
+        Assert.Contains(docs, d => d.Title == "Home" && string.IsNullOrEmpty(d.CanonicalPath));
+        Assert.Contains(docs, d => d.Title == "AnchoredHome" && d.CanonicalPath == "#overview");
     }
 
     [Fact]
@@ -819,6 +819,38 @@ public class DocAggregatorTests : IDisposable
         Assert.NotSame(first, second);
         Assert.NotSame(first!.VisiblePages, second!.VisiblePages);
         Assert.Equal(first.VisiblePages.Select(doc => doc.Path), second.VisiblePages.Select(doc => doc.Path));
+    }
+
+    [Fact]
+    public async Task GetPublicSectionsAsync_ShouldSkipDocsWithoutPublicCanonicalRoutes()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Search",
+                "search.md",
+                "<p>Search</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "Start Here",
+                    SectionLanding = true
+                }),
+            new(
+                "Guide",
+                "guides/guide.md",
+                "<p>Guide</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "Start Here"
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var section = Assert.Single(await _aggregator.GetPublicSectionsAsync());
+
+        Assert.Null(section.LandingDoc);
+        var visibleDoc = Assert.Single(section.VisiblePages);
+        Assert.Equal("guides/guide.md", visibleDoc.Path);
     }
 
     [Fact]
@@ -947,8 +979,8 @@ public class DocAggregatorTests : IDisposable
         Assert.NotNull(details);
         Assert.Equal("Example", details!.Document.Title);
         Assert.Equal("Install", Assert.Single(details.Outline).Title);
-        Assert.Equal("/docs/guides/intro.md.html", details.PreviousPage?.Href);
-        Assert.Equal("/docs/guides/troubleshooting.md.html", details.NextPage?.Href);
+        Assert.Equal("/docs/guides/intro", details.PreviousPage?.Href);
+        Assert.Equal("/docs/guides/troubleshooting", details.NextPage?.Href);
         Assert.Empty(details.RelatedPages);
     }
 
@@ -1012,7 +1044,7 @@ public class DocAggregatorTests : IDisposable
         var noMetadata = await _aggregator.GetDocDetailsAsync("guides/no-metadata.md");
         var noOrder = await _aggregator.GetDocDetailsAsync("guides/no-order.md");
         var empty = await _aggregator.GetDocDetailsAsync("guides/empty.md");
-        var anchor = await _aggregator.GetDocDetailsAsync("guides/anchor.md.html#section");
+        var anchor = await _aggregator.GetDocDetailsAsync("guides/anchor#section");
 
         Assert.Null(noKey?.PreviousPage);
         Assert.Null(noKey?.NextPage);
@@ -1106,8 +1138,8 @@ public class DocAggregatorTests : IDisposable
         var last = await _aggregator.GetDocDetailsAsync("guides/last.md");
 
         Assert.Null(first?.PreviousPage);
-        Assert.Equal("/docs/guides/last.md.html", first?.NextPage?.Href);
-        Assert.Equal("/docs/guides/first.md.html", last?.PreviousPage?.Href);
+        Assert.Equal("/docs/guides/last", first?.NextPage?.Href);
+        Assert.Equal("/docs/guides/first", last?.PreviousPage?.Href);
         Assert.Null(last?.NextPage);
     }
 
@@ -1165,7 +1197,7 @@ public class DocAggregatorTests : IDisposable
 
         var relatedPage = Assert.Single(details!.RelatedPages);
         Assert.Equal("Visible Destination", relatedPage.Title);
-        Assert.Equal("/docs/guides/visible.md.html", relatedPage.Href);
+        Assert.Equal("/docs/guides/visible", relatedPage.Href);
         Assert.Null(relatedPage.Summary);
     }
 
@@ -1220,7 +1252,7 @@ public class DocAggregatorTests : IDisposable
                 "<p>Current</p>",
                 Metadata: new DocMetadata
                 {
-                    RelatedPages = ["/docs/guides/related.md.html"]
+                    RelatedPages = ["/docs/guides/related"]
                 }),
             new(
                 "Related",
@@ -1237,7 +1269,7 @@ public class DocAggregatorTests : IDisposable
 
         var relatedPage = Assert.Single(details!.RelatedPages);
         Assert.Equal("Related", relatedPage.Title);
-        Assert.Equal("/docs/guides/related.md.html", relatedPage.Href);
+        Assert.Equal("/docs/guides/related", relatedPage.Href);
         Assert.Equal("Follow the next step.", relatedPage.Summary);
     }
 
@@ -1252,7 +1284,7 @@ public class DocAggregatorTests : IDisposable
                 "<p>Current</p>",
                 Metadata: new DocMetadata
                 {
-                    RelatedPages = ["/docs/next/guides/related.md.html"]
+                    RelatedPages = ["/docs/next/guides/related"]
                 }),
             new(
                 "Related",
@@ -1285,7 +1317,7 @@ public class DocAggregatorTests : IDisposable
 
         var relatedPage = Assert.Single(details!.RelatedPages);
         Assert.Equal("Related", relatedPage.Title);
-        Assert.Equal("/docs/next/guides/related.md.html", relatedPage.Href);
+        Assert.Equal("/docs/next/guides/related", relatedPage.Href);
         Assert.Equal("Follow the next preview step.", relatedPage.Summary);
     }
 
@@ -1300,7 +1332,7 @@ public class DocAggregatorTests : IDisposable
                 "<p>Current</p>",
                 Metadata: new DocMetadata
                 {
-                    RelatedPages = ["/foo/bar/guides/related.md.html"]
+                    RelatedPages = ["/foo/bar/guides/related"]
                 }),
             new(
                 "Related",
@@ -1338,7 +1370,7 @@ public class DocAggregatorTests : IDisposable
 
         var relatedPage = Assert.Single(details!.RelatedPages);
         Assert.Equal("Related", relatedPage.Title);
-        Assert.Equal("/foo/bar/next/guides/related.md.html", relatedPage.Href);
+        Assert.Equal("/foo/bar/next/guides/related", relatedPage.Href);
         Assert.Equal("Follow the mounted docs step.", relatedPage.Summary);
     }
 
@@ -1366,7 +1398,7 @@ public class DocAggregatorTests : IDisposable
 
         var relatedPage = Assert.Single(details!.RelatedPages);
         Assert.Equal("No Metadata", relatedPage.Title);
-        Assert.Equal("/docs/guides/no-metadata.md.html", relatedPage.Href);
+        Assert.Equal("/docs/guides/no-metadata", relatedPage.Href);
         Assert.Null(relatedPage.Summary);
         Assert.Null(relatedPage.PageTypeBadge);
     }
@@ -2479,7 +2511,7 @@ public class DocAggregatorTests : IDisposable
         var payload = await _aggregator.GetSearchIndexPayloadAsync();
 
         var indexedDocument = Assert.Single(payload.Documents);
-        Assert.Equal("/docs/guides/guide.md", indexedDocument.Path);
+        Assert.Equal("/docs/guides/guide", indexedDocument.Path);
         Assert.Equal(string.Empty, indexedDocument.BodyText);
         Assert.Equal(string.Empty, indexedDocument.Snippet);
         Assert.Equal("Guide summary.", indexedDocument.Summary);
@@ -2517,7 +2549,74 @@ public class DocAggregatorTests : IDisposable
         var payload = await aggregator.GetSearchIndexPayloadAsync();
 
         var indexedDocument = Assert.Single(payload.Documents);
-        Assert.Equal("/docs/next/guides/guide.md", indexedDocument.Path);
+        Assert.Equal("/docs/next/guides/guide", indexedDocument.Path);
+        Assert.Equal("guides/guide.md", indexedDocument.SourcePath);
+    }
+
+    [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldSkipReservedRouteCollisions()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new("Search", "search.md", "<p>Search body</p>"),
+            new("Guide", "guides/guide.md", "<p>Guide body</p>")
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+
+        Assert.DoesNotContain(payload.Documents, document => document.SourcePath == "search.md");
+        var indexedDocument = Assert.Single(payload.Documents);
+        Assert.Equal("guides/guide.md", indexedDocument.SourcePath);
+        Assert.Equal("/docs/guides/guide", indexedDocument.Path);
+    }
+
+    [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldSkipRouteCollisionLosers()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "First",
+                "guides/first.md",
+                "<p>First body</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "guides/same"
+                }),
+            new(
+                "Second",
+                "guides/second.md",
+                "<p>Second body</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "guides/same"
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+
+        var indexedDocument = Assert.Single(payload.Documents);
+        Assert.Equal("guides/first.md", indexedDocument.SourcePath);
+        Assert.Equal("/docs/guides/same", indexedDocument.Path);
+    }
+
+    [Fact]
+    public async Task GetDocsAsync_ShouldRewriteMarkdownLinks_ToPublicRoutePaths()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new("Home", "README.md", """<p><a href="./guides/guide.md">Guide</a></p>"""),
+            new("Guide", "guides/guide.md", "<p>Guide body</p>")
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var docs = await _aggregator.GetDocsAsync();
+
+        var home = Assert.Single(docs, doc => doc.Path == "README.md");
+        Assert.Contains("href=\"/docs/guides/guide\"", home.Content);
+        Assert.DoesNotContain(".md.html", home.Content);
     }
 
     [Fact]
@@ -2536,7 +2635,7 @@ public class DocAggregatorTests : IDisposable
 
         var indexedDocument = Assert.Single(payload.Documents);
         Assert.Equal("untitled-guide.md", indexedDocument.Title);
-        Assert.Equal("/docs/guides/untitled-guide.md", indexedDocument.Path);
+        Assert.Equal("/docs/guides/untitled-guide", indexedDocument.Path);
     }
 
     [Fact]
@@ -3013,6 +3112,23 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldExposeRouteIdentityDiagnostics()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new("Search", "search.md", "<p>Search</p>")
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var health = await _aggregator.GetHarvestHealthAsync();
+
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.DocReservedRouteCollision
+                          && !diagnostic.Problem.Contains(Path.GetTempPath(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldCancelCallerWait_WithoutPoisoningSharedSnapshot()
     {
         var releaseHarvester = new TaskCompletionSource<IReadOnlyList<DocNode>>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -3043,7 +3159,7 @@ public class DocAggregatorTests : IDisposable
 
         var docs = await _aggregator.GetDocsAsync();
 
-        Assert.Contains(docs, d => d.Title == "RootFile" && d.CanonicalPath == "readme.md.html");
+        Assert.Contains(docs, d => d.Title == "RootFile" && d.CanonicalPath == string.Empty);
     }
 
     [Fact]
@@ -3059,10 +3175,10 @@ public class DocAggregatorTests : IDisposable
 
         var docs = await _aggregator.GetDocsAsync();
 
-        Assert.Contains(docs, d => d.Path == "docs/readme.md" && d.CanonicalPath == "docs/readme.md.html");
-        Assert.Contains(docs, d => d.Path == "docs/readme_md.md" && d.CanonicalPath == "docs/readme_md.md.html");
-        Assert.Contains(docs, d => d.Path == "docs/api.v2.md" && d.CanonicalPath == "docs/api.v2.md.html");
-        Assert.NotEqual("docs/readme.md.html", "docs/readme_md.md.html");
+        Assert.Contains(docs, d => d.Path == "docs/readme.md" && d.CanonicalPath == "docs");
+        Assert.Contains(docs, d => d.Path == "docs/readme_md.md" && d.CanonicalPath == "docs/readme-md");
+        Assert.Contains(docs, d => d.Path == "docs/api.v2.md" && d.CanonicalPath == "docs/api.v2");
+        Assert.NotEqual("docs", "docs/readme-md");
     }
 
     [Fact]
@@ -3192,8 +3308,8 @@ public class DocAggregatorTests : IDisposable
         Assert.Contains("doc-namespace-intro", namespaceDoc.Content);
         Assert.Contains("Namespace intro", namespaceDoc.Content);
         Assert.Contains("href=\"./README.md\"", namespaceDoc.Content);
-        Assert.Contains("href=\"/docs/docs/ForgeTrust.Web/guide.md.html\"", namespaceDoc.Content);
-        Assert.DoesNotContain("href=\"/docs/docs/ForgeTrust.Web/README.md.html\"", namespaceDoc.Content);
+        Assert.Contains("href=\"/docs/docs/forgetrust.web/guide\"", namespaceDoc.Content);
+        Assert.DoesNotContain("href=\"/docs/docs/ForgeTrust.Web/README\"", namespaceDoc.Content);
         Assert.Contains("</section><section class=\"doc-namespace-intro\">", namespaceDoc.Content);
     }
 
@@ -3880,7 +3996,7 @@ public class DocAggregatorTests : IDisposable
 
         var chooser = docs.Single(d => d.Path == "packages/README.md");
         Assert.Contains(
-            "href=\"/docs/Web/ForgeTrust.AppSurface.Web.OpenApi/README.md.html\"",
+            "href=\"/docs/web/forgetrust.appsurface.web.openapi\"",
             chooser.Content);
     }
 

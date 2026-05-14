@@ -19,7 +19,7 @@ public sealed class RazorDocsPackageChooserPlaywrightTests
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/packages/README.md.html");
+        await page.GotoAsync($"{_fixture.DocsUrl}/packages");
         await page.WaitForFunctionAsync(
             "() => document.querySelector('h1')?.textContent?.trim() === 'AppSurface v0.1 package chooser'",
             null,
@@ -39,9 +39,9 @@ public sealed class RazorDocsPackageChooserPlaywrightTests
         Assert.Contains("v0.1 chooser", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", await page.InnerTextAsync(".docs-content"), StringComparison.Ordinal);
         Assert.Equal(
-            "/docs/examples/web-app/README.md.html",
-            await page.GetAttributeAsync(".docs-content a[href='/docs/examples/web-app/README.md.html']", "href"));
-        Assert.NotNull(await page.GetAttributeAsync(".docs-content a[href='/docs/releases/README.md.html']", "href"));
+            "/docs/examples/web-app",
+            await page.GetAttributeAsync(".docs-content a[href='/docs/examples/web-app']", "href"));
+        Assert.NotNull(await page.GetAttributeAsync(".docs-content a[href='/docs/releases']", "href"));
 
         var openApiRow = page.Locator(".docs-content table tbody tr:has-text('ForgeTrust.AppSurface.Web.OpenApi')").First;
         await openApiRow.WaitForAsync(new LocatorWaitForOptions
@@ -58,18 +58,18 @@ public sealed class RazorDocsPackageChooserPlaywrightTests
             State = WaitForSelectorState.Visible
         });
         Assert.Equal(
-            "/docs/Web/ForgeTrust.AppSurface.Web.OpenApi/README.md.html",
+            "/docs/web/forgetrust.appsurface.web.openapi",
             await openApiReadmeLink.GetAttributeAsync("href"));
         await openApiReadmeLink.ClickAsync();
         await page.WaitForFunctionAsync(
             """
-            () => window.location.pathname === '/docs/Web/ForgeTrust.AppSurface.Web.OpenApi/README.md.html'
+            () => window.location.pathname === '/docs/web/forgetrust.appsurface.web.openapi'
               && document.querySelector('h1')?.textContent?.trim() === 'ForgeTrust.AppSurface.Web.OpenApi'
             """,
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         Assert.Equal(
-            "/docs/Web/ForgeTrust.AppSurface.Web.OpenApi/README.md.html",
+            "/docs/web/forgetrust.appsurface.web.openapi",
             new Uri(page.Url).AbsolutePath);
         Assert.Equal("ForgeTrust.AppSurface.Web.OpenApi", (await page.TextContentAsync("h1"))?.Trim());
     }
@@ -87,7 +87,7 @@ public sealed class RazorDocsPackageChooserPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/packages/README.md.html");
+        await page.GotoAsync($"{_fixture.DocsUrl}/packages");
         await page.WaitForSelectorAsync(".docs-content table", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
