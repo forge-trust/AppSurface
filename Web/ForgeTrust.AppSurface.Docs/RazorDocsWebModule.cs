@@ -389,11 +389,6 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "Details"
             });
-
-        // Maintain fallback for legacy if necessary, but preferred is /docs
-        endpoints.MapControllerRoute(
-            name: "razordocs_default",
-            pattern: "{controller=Docs}/{action=Index}/{path?}");
     }
 
     private static void MapLegacyAssetRedirect(IEndpointRouteBuilder endpoints, string route, string targetPath)
