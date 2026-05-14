@@ -13,8 +13,8 @@ internal static class RazorDocsRouteHelper
     /// <param name="page">The Playwright page that will be navigated for each candidate.</param>
     /// <param name="docsUrl">The absolute RazorDocs host URL prefix to combine with each relative path.</param>
     /// <param name="relativePaths">
-    /// Ordered root-relative path candidates. Candidates are tried in the supplied order, and callers should pass at
-    /// least one value because an empty list always fails.
+    /// Ordered root-relative path candidates. Candidates are tried in the supplied order, and each candidate must be
+    /// non-empty. Callers should pass at least one value because an empty list always fails.
     /// </param>
     /// <returns>A task that completes after <paramref name="page"/> has navigated to the first candidate whose response status is less than 400.</returns>
     /// <remarks>
@@ -22,11 +22,18 @@ internal static class RazorDocsRouteHelper
     /// environments. Each failed response or navigation exception is recorded in the final diagnostic message. A failed
     /// candidate may still leave the page at its attempted URL before the next candidate is tried.
     /// </remarks>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="relativePaths"/> is null.</exception>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="relativePaths"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="page"/> or <paramref name="relativePaths"/> is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="docsUrl"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="relativePaths"/> is empty or contains a null, empty, or whitespace candidate.</exception>
     /// <exception cref="InvalidOperationException">Thrown when no candidate returns a non-null response with status less than 400.</exception>
     public static async Task GotoFirstAvailableAsync(IPage page, string docsUrl, params string[] relativePaths)
     {
+        ArgumentNullException.ThrowIfNull(page);
+        if (string.IsNullOrWhiteSpace(docsUrl))
+        {
+            throw new ArgumentException("A non-empty RazorDocs base URL is required.", nameof(docsUrl));
+        }
+
         ArgumentNullException.ThrowIfNull(relativePaths);
 
         if (relativePaths.Length == 0)
@@ -36,8 +43,16 @@ internal static class RazorDocsRouteHelper
 
         var attempts = new List<string>(relativePaths.Length);
 
-        foreach (var relativePath in relativePaths)
+        for (var index = 0; index < relativePaths.Length; index++)
         {
+            var relativePath = relativePaths[index];
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                throw new ArgumentException(
+                    $"Route candidate at index {index} must be non-empty.",
+                    nameof(relativePaths));
+            }
+
             try
             {
                 var response = await page.GotoAsync($"{docsUrl}{relativePath}");
