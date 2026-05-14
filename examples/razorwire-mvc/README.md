@@ -118,6 +118,8 @@ The reactivity page includes two additional form flows:
 - `Views/Reactivity/_UserRegistration.cshtml` posts to `RegisterUser` and swaps the register and message forms.
 - `Views/Reactivity/_MessageForm.cshtml` posts to `PublishMessage` and prepends messages into the live feed.
 
+`RegisterUser` stores the display name in a `razorwire-username` cookie with `Secure`, `HttpOnly`, and `SameSite=Lax` set. Keep that shape when copying the sample into an application: the cookie is only a convenience for the demo identity, but browsers can otherwise send it over cleartext HTTP. Outside localhost-style development, serve the flow over HTTPS before depending on the cookie. During local development, use the printed `localhost` URL rather than swapping in `127.0.0.1`; browsers treat those as different cookie hosts, and some will reject `Secure` cookies from an HTTP loopback IP.
+
 Those flows are richer than the counter demo, but the counter is the cleanest first proof because it does not depend on stream-hub context to feel convincing.
 
 ### Failed Form UX
