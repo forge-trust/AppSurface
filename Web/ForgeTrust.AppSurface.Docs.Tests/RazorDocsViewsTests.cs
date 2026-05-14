@@ -253,6 +253,8 @@ public class RazorDocsViewsTests
         Assert.Contains("destroy: destroyClient", outlineClient);
         Assert.Contains("document.removeEventListener(\"turbo:load\"", outlineClient);
         Assert.Contains("document.removeEventListener(\"turbo:frame-load\"", outlineClient);
+        Assert.Contains("function resetStaleOutlineShell", outlineClient);
+        Assert.Contains("shell.dataset.outlineClientVersion = clientVersion;", outlineClient);
         Assert.Contains("version: clientVersion", outlineClient);
         Assert.Contains("function setOutlineContext", outlineClient);
         Assert.Contains("data-doc-outline-previous", outlineClient);
@@ -2393,6 +2395,7 @@ public class RazorDocsViewsTests
         Assert.Contains("docs-detail-layout--with-outline", html);
         Assert.NotNull(document.QuerySelector("#docs-page-outline.docs-outline-shell"));
         Assert.NotNull(document.QuerySelector(".docs-outline-toggle[aria-controls='docs-page-outline-panel']"));
+        Assert.Equal("On this page: Quickstart", document.QuerySelector(".docs-outline-toggle")?.GetAttribute("aria-label"));
         Assert.Equal("Quickstart", document.QuerySelector(".docs-outline-toggle-label")?.TextContent.Trim());
         Assert.NotNull(document.QuerySelector(".docs-outline-toggle-context[data-doc-outline-context][aria-hidden='true']"));
         Assert.NotNull(document.QuerySelector(".docs-outline-context-row--previous[data-doc-outline-previous][hidden]"));

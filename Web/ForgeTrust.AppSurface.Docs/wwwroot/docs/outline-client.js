@@ -441,14 +441,25 @@
         teardown();
     }
 
+    function resetStaleOutlineShell(shell) {
+        if (shell.dataset.outlineEnhanced !== "true" || shell.dataset.outlineClientVersion === clientVersion) {
+            return shell;
+        }
+
+        const freshShell = shell.cloneNode(true);
+        shell.replaceWith(freshShell);
+        return freshShell;
+    }
+
     function initOutline() {
         teardown();
 
-        const shell = document.querySelector(outlineSelector);
+        let shell = document.querySelector(outlineSelector);
         if (!(shell instanceof HTMLElement)) {
             return;
         }
 
+        shell = resetStaleOutlineShell(shell);
         const mainContent = document.getElementById("main-content");
         const primary = shell.parentElement?.querySelector(".docs-detail-primary");
         const toggle = shell.querySelector("[data-doc-outline-toggle='true']");
@@ -472,6 +483,7 @@
 
         lifecycleController = createLifecycleController();
         shell.dataset.outlineEnhanced = "true";
+        shell.dataset.outlineClientVersion = clientVersion;
 
         const compactMedia = window.matchMedia ? window.matchMedia(compactMediaQuery) : null;
         const syncViewportState = () => {
