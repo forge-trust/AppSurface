@@ -22,10 +22,13 @@ internal static class RazorDocsRouteHelper
     /// environments. Each failed response or navigation exception is recorded in the final diagnostic message. A failed
     /// candidate may still leave the page at its attempted URL before the next candidate is tried.
     /// </remarks>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="relativePaths"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="relativePaths"/> is empty.</exception>
     /// <exception cref="InvalidOperationException">Thrown when no candidate returns a non-null response with status less than 400.</exception>
     public static async Task GotoFirstAvailableAsync(IPage page, string docsUrl, params string[] relativePaths)
     {
+        ArgumentNullException.ThrowIfNull(relativePaths);
+
         if (relativePaths.Length == 0)
         {
             throw new ArgumentException("At least one RazorDocs route candidate is required.", nameof(relativePaths));

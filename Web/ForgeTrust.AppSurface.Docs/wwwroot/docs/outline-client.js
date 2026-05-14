@@ -67,6 +67,16 @@
         contextRollTimeout = 0;
     }
 
+    function resetContextMotion(container) {
+        if (!(container instanceof HTMLElement)) {
+            return;
+        }
+
+        container.classList.remove("docs-outline-toggle-context--rolling");
+        container.dataset.outlineMotion = "idle";
+        delete container.dataset.outlineRollDirection;
+    }
+
     function setContextRow(row, text) {
         if (!row) {
             return;
@@ -130,7 +140,7 @@
         void context.container.offsetWidth;
         context.container.classList.add("docs-outline-toggle-context--rolling");
         contextRollTimeout = window.setTimeout(() => {
-            context.container?.classList.remove("docs-outline-toggle-context--rolling");
+            resetContextMotion(context.container);
             contextRollTimeout = 0;
         }, outlineContextRollDurationMs);
     }
@@ -413,6 +423,7 @@
         cancelActiveLinkRefresh();
         cancelScrollAnimation();
         clearContextRollTimeout();
+        resetContextMotion(document.querySelector("[data-doc-outline-context]"));
         disconnectActiveObserver();
         lifecycleController?.abort();
         lifecycleController = null;
