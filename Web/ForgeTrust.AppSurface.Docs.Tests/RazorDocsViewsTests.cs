@@ -159,8 +159,32 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-trust-bar", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-link", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-toggle-context", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-toggle-label", tailwindEntryStylesheet);
+        Assert.Contains("max-width: clamp(8rem, 36%, 18rem);", tailwindEntryStylesheet);
+        Assert.Contains("flex: 0 1 clamp(8rem, 36%, 18rem);", tailwindEntryStylesheet);
+        Assert.Contains("text-overflow: ellipsis;", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-context-row--previous", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-context-row[data-outline-empty=\"true\"]", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-toggle-context--rolling", tailwindEntryStylesheet);
+        Assert.Contains("@media (prefers-reduced-motion: reduce)", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-toggle", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-label", tailwindEntryStylesheet);
+        Assert.Contains("@media (max-width: 79.999rem)", tailwindEntryStylesheet);
+        Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] {", tailwindEntryStylesheet);
+        Assert.Contains("position: sticky;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-outline-compact-bleed: 1rem;", tailwindEntryStylesheet);
+        Assert.Contains("width: calc(100% + (var(--docs-outline-compact-bleed) * 2));", tailwindEntryStylesheet);
+        Assert.Contains("margin-right: calc(var(--docs-outline-compact-bleed) * -1);", tailwindEntryStylesheet);
+        Assert.Contains("border-top: 0;", tailwindEntryStylesheet);
+        Assert.Contains("border-radius: 0;", tailwindEntryStylesheet);
+        Assert.Contains("@media (min-width: 40rem) and (max-width: 79.999rem)", tailwindEntryStylesheet);
+        Assert.Contains("--docs-outline-compact-bleed: 1.5rem;", tailwindEntryStylesheet);
+        Assert.Contains("@media (max-width: 47.999rem)", tailwindEntryStylesheet);
+        Assert.Contains("top: 3.8125rem;", tailwindEntryStylesheet);
+        Assert.Contains("@media (min-width: 64rem) and (max-width: 79.999rem)", tailwindEntryStylesheet);
+        Assert.Contains("--docs-outline-compact-bleed: 2rem;", tailwindEntryStylesheet);
+        Assert.DoesNotContain(".docs-outline-shell {\n    order: -1;\n    position: sticky;", tailwindEntryStylesheet);
 
         Assert.DoesNotContain(".docs-page-badge", searchStylesheet);
         Assert.DoesNotContain(".docs-metadata-chip", searchStylesheet);
@@ -169,6 +193,7 @@ public class RazorDocsViewsTests
         Assert.DoesNotContain(".docs-trust-bar", searchStylesheet);
         Assert.DoesNotContain(".docs-outline-shell", searchStylesheet);
         Assert.DoesNotContain(".docs-outline-link", searchStylesheet);
+        Assert.DoesNotContain(".docs-outline-toggle-context", searchStylesheet);
     }
 
     [Fact]
@@ -221,6 +246,22 @@ public class RazorDocsViewsTests
         Assert.Contains("document.addEventListener(\"turbo:frame-load\"", outlineClient);
         Assert.Contains("activeObserver?.disconnect()", outlineClient);
         Assert.Contains("aria-current", outlineClient);
+        Assert.Contains("data-doc-outline-context", outlineClient);
+        Assert.Contains("const clientVersion = \"rolling-context\";", outlineClient);
+        Assert.Contains("existingClient?.version === clientVersion", outlineClient);
+        Assert.Contains("existingClient?.destroy?.();", outlineClient);
+        Assert.Contains("destroy: destroyClient", outlineClient);
+        Assert.Contains("document.removeEventListener(\"turbo:load\"", outlineClient);
+        Assert.Contains("document.removeEventListener(\"turbo:frame-load\"", outlineClient);
+        Assert.Contains("function resetStaleOutlineShell", outlineClient);
+        Assert.Contains("shell.dataset.outlineClientVersion = clientVersion;", outlineClient);
+        Assert.Contains("version: clientVersion", outlineClient);
+        Assert.Contains("function setOutlineContext", outlineClient);
+        Assert.Contains("data-doc-outline-previous", outlineClient);
+        Assert.Contains("data-doc-outline-next", outlineClient);
+        Assert.Contains("row.dataset.outlineEmpty = text ? \"false\" : \"true\";", outlineClient);
+        Assert.Contains("prefers-reduced-motion: reduce", outlineClient);
+        Assert.Contains("outlineRollDirection", outlineClient);
         Assert.Contains("typeof AbortController === \"function\"", outlineClient);
         Assert.Contains("function addLifecycleEventListener", outlineClient);
         Assert.Contains("removeEventListener", outlineClient);
@@ -2354,6 +2395,14 @@ public class RazorDocsViewsTests
         Assert.Contains("docs-detail-layout--with-outline", html);
         Assert.NotNull(document.QuerySelector("#docs-page-outline.docs-outline-shell"));
         Assert.NotNull(document.QuerySelector(".docs-outline-toggle[aria-controls='docs-page-outline-panel']"));
+        Assert.Equal("On this page: Quickstart", document.QuerySelector(".docs-outline-toggle")?.GetAttribute("aria-label"));
+        Assert.Equal("Quickstart", document.QuerySelector(".docs-outline-toggle-label")?.TextContent.Trim());
+        Assert.NotNull(document.QuerySelector(".docs-outline-toggle-context[data-doc-outline-context][aria-hidden='true']"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-context-row--previous[data-doc-outline-previous][hidden]"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-context-row--current[data-doc-outline-current]"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-context-row--next[data-doc-outline-next][hidden]"));
+        Assert.Equal("Prev", document.QuerySelector("[data-doc-outline-previous] .docs-outline-context-kicker")?.TextContent.Trim());
+        Assert.Equal("Next", document.QuerySelector("[data-doc-outline-next] .docs-outline-context-kicker")?.TextContent.Trim());
         Assert.NotNull(document.QuerySelector("#docs-page-outline-panel[aria-label='On this page']"));
         Assert.NotNull(document.QuerySelector("a.docs-outline-link[href='#install']"));
         Assert.NotNull(document.QuerySelector("a.docs-outline-link--level-3[href='#verify']"));
@@ -2363,7 +2412,7 @@ public class RazorDocsViewsTests
         Assert.True(
             document.QuerySelector(".docs-detail-primary")!.CompareDocumentPosition(document.QuerySelector("#docs-page-outline")!)
                 .HasFlag(DocumentPositions.Following));
-        Assert.NotNull(document.QuerySelector("script[src='/docs/outline-client.js'][data-doc-outline-client='true']"));
+        Assert.NotNull(document.QuerySelector("script[src='/docs/outline-client.js?v=rolling-context'][data-doc-outline-client='true']"));
         Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", html);
         Assert.DoesNotContain("rounded-2xl border border-slate-800 bg-slate-900/60", html);
 
@@ -2374,7 +2423,7 @@ public class RazorDocsViewsTests
             pathBase: "/tenant");
         var tenantDocument = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(tenantHtml);
 
-        Assert.NotNull(tenantDocument.QuerySelector("script[src='/tenant/docs/outline-client.js'][data-doc-outline-client='true']"));
+        Assert.NotNull(tenantDocument.QuerySelector("script[src='/tenant/docs/outline-client.js?v=rolling-context'][data-doc-outline-client='true']"));
         Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", tenantHtml);
     }
 

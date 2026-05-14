@@ -1,20 +1,30 @@
 (() => {
     const clientKey = "__razorDocsOutlineClient";
-    if (window[clientKey]?.init) {
-        window[clientKey].init();
+    const clientVersion = "rolling-context";
+    const existingClient = window[clientKey];
+    if (existingClient?.version === clientVersion && existingClient.init) {
+        existingClient.init();
         return;
     }
+
+    existingClient?.destroy?.();
 
     const outlineSelector = "#docs-page-outline";
     const outlineLinkSelector = "a[data-doc-outline-link='true']";
     const compactMediaQuery = "(max-width: 79.999rem)";
     const outlineClickScrollDurationMs = 620;
+    const outlineContextRollDurationMs = 180;
 
     let lifecycleController = null;
     let activeObserver = null;
     let activeLinkAnimationFrame = 0;
     let scrollAnimationFrame = 0;
+    let contextRollTimeout = 0;
+    let lastActiveIndex = -1;
     let fallbackDisposers = [];
+    let turboLoadHandler = null;
+    let turboFrameLoadHandler = null;
+    let domContentLoadedHandler = null;
 
     function decodeHash(hash) {
         if (!hash) {
@@ -48,24 +58,108 @@
         toggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
     }
 
-    function setActiveLink(links, link, currentLabel) {
+    function clearContextRollTimeout() {
+        if (contextRollTimeout === 0) {
+            return;
+        }
+
+        window.clearTimeout(contextRollTimeout);
+        contextRollTimeout = 0;
+    }
+
+    function resetContextMotion(container) {
+        if (!(container instanceof HTMLElement)) {
+            return;
+        }
+
+        container.classList.remove("docs-outline-toggle-context--rolling");
+        container.dataset.outlineMotion = "idle";
+        delete container.dataset.outlineRollDirection;
+    }
+
+    function setContextRow(row, text) {
+        if (!row) {
+            return;
+        }
+
+        const title = row.querySelector?.("[data-doc-outline-context-title]");
+        if (title) {
+            title.textContent = text;
+        } else {
+            row.textContent = text;
+        }
+
+        row.hidden = false;
+        row.dataset.outlineEmpty = text ? "false" : "true";
+    }
+
+    function setOutlineContext(context, links, activeIndex) {
+        if (!context?.current) {
+            return;
+        }
+
+        const currentText = activeIndex >= 0 ? links[activeIndex]?.textContent?.trim() ?? "" : "";
+        const previousText = activeIndex > 0 ? links[activeIndex - 1]?.textContent?.trim() ?? "" : "";
+        const nextText = activeIndex >= 0 && activeIndex < links.length - 1
+            ? links[activeIndex + 1]?.textContent?.trim() ?? ""
+            : "";
+
+        setContextRow(context.previous, previousText);
+        setContextRow(context.current, currentText);
+        setContextRow(context.next, nextText);
+
+        if (!context.container) {
+            return;
+        }
+
+        const previousActiveIndex = lastActiveIndex >= 0
+            ? lastActiveIndex
+            : Number.parseInt(context.container.dataset.outlineActiveIndex ?? "", 10);
+
+        context.container.dataset.outlineActiveIndex = activeIndex >= 0 ? String(activeIndex) : "";
+
+        if (activeIndex < 0 || !Number.isFinite(previousActiveIndex) || activeIndex === previousActiveIndex) {
+            lastActiveIndex = activeIndex;
+            context.container.dataset.outlineMotion = "idle";
+            return;
+        }
+
+        const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+        context.container.dataset.outlineRollDirection = activeIndex > previousActiveIndex ? "down" : "up";
+        lastActiveIndex = activeIndex;
+
+        if (reduceMotion) {
+            context.container.dataset.outlineMotion = "reduced";
+            context.container.classList.remove("docs-outline-toggle-context--rolling");
+            return;
+        }
+
+        context.container.dataset.outlineMotion = "rolling";
+        clearContextRollTimeout();
+        context.container.classList.remove("docs-outline-toggle-context--rolling");
+        void context.container.offsetWidth;
+        context.container.classList.add("docs-outline-toggle-context--rolling");
+        contextRollTimeout = window.setTimeout(() => {
+            resetContextMotion(context.container);
+            contextRollTimeout = 0;
+        }, outlineContextRollDurationMs);
+    }
+
+    function setActiveLink(links, link, context) {
+        const activeIndex = link ? links.indexOf(link) : -1;
+
         for (const candidate of links) {
             const isActive = candidate === link;
             candidate.classList.toggle("docs-outline-link--active", isActive);
 
             if (isActive) {
                 candidate.setAttribute("aria-current", "location");
-                if (currentLabel) {
-                    currentLabel.textContent = candidate.textContent?.trim() ?? "";
-                }
             } else {
                 candidate.removeAttribute("aria-current");
             }
         }
 
-        if (!link && currentLabel) {
-            currentLabel.textContent = "";
-        }
+        setOutlineContext(context, links, activeIndex);
 
         keepOutlineLinkVisible(link);
     }
@@ -110,9 +204,9 @@
         return entries.find(entry => getLinkTargetId(entry.link) === targetId) ?? null;
     }
 
-    function refreshHashActiveLink(entries, links, expectedLink, currentLabel) {
+    function refreshHashActiveLink(entries, links, expectedLink, context) {
         if (getActiveEntryFromHash(entries)?.link === expectedLink) {
-            setActiveLink(links, expectedLink, currentLabel);
+            setActiveLink(links, expectedLink, context);
         }
     }
 
@@ -249,26 +343,26 @@
         activeLinkAnimationFrame = 0;
     }
 
-    function updateActiveLinkFromScrollPosition(entries, links, root, currentLabel) {
+    function updateActiveLinkFromScrollPosition(entries, links, root, context) {
         const activeEntry = getActiveEntryFromScrollPosition(entries, root);
         if (activeEntry) {
-            setActiveLink(links, activeEntry.link, currentLabel);
+            setActiveLink(links, activeEntry.link, context);
         }
     }
 
-    function scheduleActiveLinkRefresh(entries, links, root, currentLabel) {
+    function scheduleActiveLinkRefresh(entries, links, root, context) {
         if (activeLinkAnimationFrame !== 0) {
             return;
         }
 
         if (typeof window.requestAnimationFrame !== "function") {
-            updateActiveLinkFromScrollPosition(entries, links, root, currentLabel);
+            updateActiveLinkFromScrollPosition(entries, links, root, context);
             return;
         }
 
         activeLinkAnimationFrame = window.requestAnimationFrame(() => {
             activeLinkAnimationFrame = 0;
-            updateActiveLinkFromScrollPosition(entries, links, root, currentLabel);
+            updateActiveLinkFromScrollPosition(entries, links, root, context);
         });
     }
 
@@ -328,23 +422,64 @@
         cleanupLifecycleEventListeners();
         cancelActiveLinkRefresh();
         cancelScrollAnimation();
+        clearContextRollTimeout();
+        resetContextMotion(document.querySelector("[data-doc-outline-context]"));
         disconnectActiveObserver();
         lifecycleController?.abort();
         lifecycleController = null;
+        lastActiveIndex = -1;
+    }
+
+    function removeDocumentLifecycleEventListeners() {
+        if (turboLoadHandler) {
+            document.removeEventListener("turbo:load", turboLoadHandler);
+            turboLoadHandler = null;
+        }
+
+        if (turboFrameLoadHandler) {
+            document.removeEventListener("turbo:frame-load", turboFrameLoadHandler);
+            turboFrameLoadHandler = null;
+        }
+
+        if (domContentLoadedHandler) {
+            document.removeEventListener("DOMContentLoaded", domContentLoadedHandler);
+            domContentLoadedHandler = null;
+        }
+    }
+
+    function destroyClient() {
+        removeDocumentLifecycleEventListeners();
+        teardown();
+    }
+
+    function resetStaleOutlineShell(shell) {
+        if (shell.dataset.outlineEnhanced !== "true" || shell.dataset.outlineClientVersion === clientVersion) {
+            return shell;
+        }
+
+        const freshShell = shell.cloneNode(true);
+        shell.replaceWith(freshShell);
+        return freshShell;
     }
 
     function initOutline() {
         teardown();
 
-        const shell = document.querySelector(outlineSelector);
+        let shell = document.querySelector(outlineSelector);
         if (!(shell instanceof HTMLElement)) {
             return;
         }
 
+        shell = resetStaleOutlineShell(shell);
         const mainContent = document.getElementById("main-content");
         const primary = shell.parentElement?.querySelector(".docs-detail-primary");
         const toggle = shell.querySelector("[data-doc-outline-toggle='true']");
-        const currentLabel = shell.querySelector("[data-doc-outline-current]");
+        const outlineContext = {
+            container: shell.querySelector("[data-doc-outline-context]"),
+            current: shell.querySelector("[data-doc-outline-current]"),
+            previous: shell.querySelector("[data-doc-outline-previous]"),
+            next: shell.querySelector("[data-doc-outline-next]")
+        };
         const links = Array.from(shell.querySelectorAll(outlineLinkSelector))
             .filter(link => link instanceof HTMLAnchorElement);
 
@@ -359,6 +494,7 @@
 
         lifecycleController = createLifecycleController();
         shell.dataset.outlineEnhanced = "true";
+        shell.dataset.outlineClientVersion = clientVersion;
 
         const compactMedia = window.matchMedia ? window.matchMedia(compactMediaQuery) : null;
         const syncViewportState = () => {
@@ -386,7 +522,7 @@
                 }
 
                 event.preventDefault();
-                setActiveLink(links, link, currentLabel);
+                setActiveLink(links, link, outlineContext);
 
                 if (compactMedia?.matches) {
                     setExpanded(shell, toggle, false);
@@ -400,15 +536,15 @@
                 }
 
                 for (const delay of [120, 360, 720]) {
-                    window.setTimeout(() => refreshHashActiveLink(entries, links, link, currentLabel), delay);
+                    window.setTimeout(() => refreshHashActiveLink(entries, links, link, outlineContext), delay);
                 }
             });
         }
 
-        setActiveLink(links, getInitialActiveLink(entries), currentLabel);
+        setActiveLink(links, getInitialActiveLink(entries), outlineContext);
 
         addLifecycleEventListener(window, "hashchange", () => {
-            setActiveLink(links, getActiveEntryFromHash(entries)?.link ?? null, currentLabel);
+            setActiveLink(links, getActiveEntryFromHash(entries)?.link ?? null, outlineContext);
         });
 
         if (!("IntersectionObserver" in window) || !mainContent) {
@@ -416,7 +552,7 @@
         }
 
         addLifecycleEventListener(mainContent, "scroll", () => {
-            scheduleActiveLinkRefresh(entries, links, mainContent, currentLabel);
+            scheduleActiveLinkRefresh(entries, links, mainContent, outlineContext);
         });
         addLifecycleEventListener(mainContent, "wheel", cancelScrollAnimation);
         addLifecycleEventListener(mainContent, "touchstart", cancelScrollAnimation);
@@ -424,7 +560,7 @@
         activeObserver = new IntersectionObserver(
             observedEntries => {
                 if (observedEntries.some(entry => entry.isIntersecting)) {
-                    scheduleActiveLinkRefresh(entries, links, mainContent, currentLabel);
+                    scheduleActiveLinkRefresh(entries, links, mainContent, outlineContext);
                 }
             },
             {
@@ -438,17 +574,28 @@
         }
     }
 
-    window[clientKey] = { init: initOutline };
+    window[clientKey] = {
+        destroy: destroyClient,
+        init: initOutline,
+        version: clientVersion
+    };
 
-    document.addEventListener("turbo:load", initOutline);
-    document.addEventListener("turbo:frame-load", event => {
+    turboLoadHandler = initOutline;
+    turboFrameLoadHandler = event => {
         if (event.target?.id === "doc-content") {
             initOutline();
         }
-    });
+    };
+
+    document.addEventListener("turbo:load", turboLoadHandler);
+    document.addEventListener("turbo:frame-load", turboFrameLoadHandler);
 
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", initOutline);
+        domContentLoadedHandler = () => {
+            domContentLoadedHandler = null;
+            initOutline();
+        };
+        document.addEventListener("DOMContentLoaded", domContentLoadedHandler, { once: true });
     } else {
         initOutline();
     }

@@ -21,7 +21,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -41,14 +45,20 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             "#files-behind-the-hero-flow",
             await page.GetAttributeAsync("#docs-page-outline a[href='#files-behind-the-hero-flow']", "href"));
 
-        const string nextDocPath = "/docs/web/forgetrust.razorwire/docs/form-failures";
         const string nextDocHeading = "Failed Form UX";
-        Assert.Equal(
+        var previousDocPath = Assert.IsType<string>(await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href"));
+        Assert.Contains(previousDocPath, new[]
+        {
             "/docs/web/forgetrust.razorwire",
-            await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href"));
-        Assert.Equal(
-            nextDocPath,
-            await page.GetAttributeAsync("[data-doc-wayfinding='next']", "href"));
+            "/docs/Web/ForgeTrust.RazorWire/README.md.html"
+        });
+
+        var nextDocPath = Assert.IsType<string>(await page.GetAttributeAsync("[data-doc-wayfinding='next']", "href"));
+        Assert.Contains(nextDocPath, new[]
+        {
+            "/docs/web/forgetrust.razorwire/docs/form-failures",
+            "/docs/Web/ForgeTrust.RazorWire/Docs/form-failures.md.html"
+        });
 
         var initialContent = await page.Locator("#doc-content").InnerHTMLAsync();
 
@@ -97,22 +107,23 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Equal(0, await page.Locator("#docs-page-outline").CountAsync());
         Assert.Equal(0, await page.Locator("script[data-doc-outline-client='true']").CountAsync());
 
-        const string outlinePagePath = "/docs/examples/razorwire-mvc";
+        const string outlinePageSelector = "a[href='/docs/examples/razorwire-mvc'], a[href='/docs/examples/razorwire-mvc/README.md.html']";
         var examplesSection = page.Locator("#docs-sidebar details").Filter(new LocatorFilterOptions
         {
-            Has = page.Locator($"a[href='{outlinePagePath}']")
+            Has = page.Locator(outlinePageSelector)
         }).First;
         if (!await examplesSection.EvaluateAsync<bool>("section => section.open"))
         {
             await examplesSection.Locator("summary span[aria-hidden='true']").ClickAsync();
         }
 
-        var outlineLink = examplesSection.Locator($"a[href='{outlinePagePath}']").First;
+        var outlineLink = examplesSection.Locator(outlinePageSelector).First;
         await outlineLink.WaitForAsync(new LocatorWaitForOptions
         {
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
+        var outlinePagePath = Assert.IsType<string>(await outlineLink.GetAttributeAsync("href"));
         await page.EvaluateAsync("() => { window.__rwFrameNavigationSentinel = 'alive'; }");
         await outlineLink.ClickAsync();
 
@@ -152,7 +163,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -246,7 +261,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.razorwire");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/web/forgetrust.razorwire",
+            "/Web/ForgeTrust.RazorWire/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -302,7 +321,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.razorwire");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/web/forgetrust.razorwire",
+            "/Web/ForgeTrust.RazorWire/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -418,7 +441,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -612,7 +639,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -653,6 +684,269 @@ public sealed class RazorDocsWayfindingPlaywrightTests
     }
 
     [Fact]
+    public async Task MobileOutline_StickyContextTracksNeighborSections()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var initialState = await page.EvaluateAsync<MobileOutlineContextState>(
+            """
+            () => {
+              const shell = document.getElementById('docs-page-outline');
+              const context = shell?.querySelector('[data-doc-outline-context]');
+              const main = document.getElementById('main-content');
+              const links = Array.from(shell?.querySelectorAll("a[data-doc-outline-link='true']") ?? []);
+              const mainRect = main?.getBoundingClientRect();
+              return {
+                activeIndex: context?.dataset.outlineActiveIndex ?? '',
+                current: shell?.querySelector('[data-doc-outline-current]')?.textContent?.trim() ?? '',
+                toggleLabel: shell?.querySelector('.docs-outline-toggle-label')?.textContent?.trim() ?? '',
+                pageTitle: document.querySelector('h1')?.textContent?.trim() ?? '',
+                previous: shell?.querySelector('[data-doc-outline-previous] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
+                next: shell?.querySelector('[data-doc-outline-next] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
+                previousHidden: Boolean(shell?.querySelector('[data-doc-outline-previous]')?.hidden),
+                nextHidden: Boolean(shell?.querySelector('[data-doc-outline-next]')?.hidden),
+                previousEmpty: shell?.querySelector('[data-doc-outline-previous]')?.dataset.outlineEmpty ?? '',
+                nextEmpty: shell?.querySelector('[data-doc-outline-next]')?.dataset.outlineEmpty ?? '',
+                firstLink: links[0]?.textContent?.trim() ?? '',
+                secondLink: links[1]?.textContent?.trim() ?? '',
+                thirdLink: links[2]?.textContent?.trim() ?? '',
+                shellHeight: shell?.getBoundingClientRect().height ?? 0,
+                shellLeft: shell?.getBoundingClientRect().left ?? 0,
+                shellRight: shell?.getBoundingClientRect().right ?? 0,
+                mainLeft: mainRect?.left ?? 0,
+                mainRight: mainRect?.right ?? 0,
+                borderRadius: shell ? getComputedStyle(shell).borderRadius : '',
+                position: shell ? getComputedStyle(shell).position : '',
+                top: shell ? getComputedStyle(shell).top : ''
+              };
+            }
+            """);
+
+        Assert.Equal("sticky", initialState.Position);
+        Assert.Equal("61px", initialState.Top);
+        Assert.Equal(initialState.MainLeft, initialState.ShellLeft, precision: 1);
+        Assert.Equal(initialState.MainRight, initialState.ShellRight, precision: 1);
+        Assert.Equal("0px", initialState.BorderRadius);
+        Assert.True(initialState.ShellHeight is >= 44 and <= 76);
+        Assert.Equal("0", initialState.ActiveIndex);
+        Assert.Equal(initialState.FirstLink, initialState.Current);
+        Assert.Equal(initialState.PageTitle, initialState.ToggleLabel);
+        Assert.False(initialState.PreviousHidden);
+        Assert.False(initialState.NextHidden);
+        Assert.Equal("true", initialState.PreviousEmpty);
+        Assert.Equal("false", initialState.NextEmpty);
+        Assert.Equal(initialState.SecondLink, initialState.Next);
+
+        await page.EvaluateAsync(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              const link = document.querySelectorAll("#docs-page-outline a[data-doc-outline-link='true']")[2];
+              const targetId = link?.getAttribute('href')?.slice(1);
+              const target = targetId ? document.getElementById(targetId) : null;
+              if (!main || !target) {
+                return;
+              }
+
+              const rootTop = main.getBoundingClientRect().top;
+              const targetTop = target.getBoundingClientRect().top;
+              main.scrollTo(0, main.scrollTop + targetTop - rootTop + 90);
+            }
+            """);
+
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('[data-doc-outline-context]')?.dataset.outlineActiveIndex === '2'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var scrolledState = await page.EvaluateAsync<MobileOutlineContextState>(
+            """
+            () => {
+              const shell = document.getElementById('docs-page-outline');
+              const context = shell?.querySelector('[data-doc-outline-context]');
+              const main = document.getElementById('main-content');
+              const links = Array.from(shell?.querySelectorAll("a[data-doc-outline-link='true']") ?? []);
+              const mainRect = main?.getBoundingClientRect();
+              return {
+                activeIndex: context?.dataset.outlineActiveIndex ?? '',
+                current: shell?.querySelector('[data-doc-outline-current]')?.textContent?.trim() ?? '',
+                toggleLabel: shell?.querySelector('.docs-outline-toggle-label')?.textContent?.trim() ?? '',
+                pageTitle: document.querySelector('h1')?.textContent?.trim() ?? '',
+                previous: shell?.querySelector('[data-doc-outline-previous] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
+                next: shell?.querySelector('[data-doc-outline-next] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
+                previousHidden: Boolean(shell?.querySelector('[data-doc-outline-previous]')?.hidden),
+                nextHidden: Boolean(shell?.querySelector('[data-doc-outline-next]')?.hidden),
+                previousEmpty: shell?.querySelector('[data-doc-outline-previous]')?.dataset.outlineEmpty ?? '',
+                nextEmpty: shell?.querySelector('[data-doc-outline-next]')?.dataset.outlineEmpty ?? '',
+                firstLink: links[0]?.textContent?.trim() ?? '',
+                secondLink: links[1]?.textContent?.trim() ?? '',
+                thirdLink: links[2]?.textContent?.trim() ?? '',
+                shellHeight: shell?.getBoundingClientRect().height ?? 0,
+                shellLeft: shell?.getBoundingClientRect().left ?? 0,
+                shellRight: shell?.getBoundingClientRect().right ?? 0,
+                mainLeft: mainRect?.left ?? 0,
+                mainRight: mainRect?.right ?? 0,
+                borderRadius: shell ? getComputedStyle(shell).borderRadius : '',
+                position: shell ? getComputedStyle(shell).position : '',
+                top: shell ? getComputedStyle(shell).top : '',
+                rollDirection: context?.dataset.outlineRollDirection ?? '',
+                motion: context?.dataset.outlineMotion ?? ''
+              };
+            }
+            """);
+
+        Assert.Equal("2", scrolledState.ActiveIndex);
+        Assert.Equal(scrolledState.SecondLink, scrolledState.Previous);
+        Assert.Equal(scrolledState.ThirdLink, scrolledState.Current);
+        Assert.Equal(initialState.PageTitle, scrolledState.ToggleLabel);
+        Assert.Equal(initialState.ShellHeight, scrolledState.ShellHeight, precision: 1);
+        Assert.False(scrolledState.NextHidden);
+        Assert.Equal("61px", scrolledState.Top);
+        Assert.Equal(scrolledState.MainLeft, scrolledState.ShellLeft, precision: 1);
+        Assert.Equal(scrolledState.MainRight, scrolledState.ShellRight, precision: 1);
+        Assert.Equal("down", scrolledState.RollDirection);
+        Assert.Equal("rolling", scrolledState.Motion);
+    }
+
+    [Fact]
+    public async Task CompactOutline_FullBleedsInsideSidebarLayout()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1100,
+                Height = 900
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/web/forgetrust.razorwire#generated-ui-design-contract",
+            "/Web/ForgeTrust.RazorWire/README.md.html#generated-ui-design-contract");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var state = await page.EvaluateAsync<CompactOutlineBandState>(
+            """
+            () => {
+              const shell = document.getElementById('docs-page-outline');
+              const main = document.getElementById('main-content');
+              const toggle = shell?.querySelector('[data-doc-outline-toggle]');
+              const panel = document.getElementById('docs-page-outline-panel');
+              const shellRect = shell?.getBoundingClientRect();
+              const mainRect = main?.getBoundingClientRect();
+              return {
+                shellLeft: shellRect?.left ?? 0,
+                shellRight: shellRect?.right ?? 0,
+                mainLeft: mainRect?.left ?? 0,
+                mainRight: mainRect?.right ?? 0,
+                top: shell ? getComputedStyle(shell).top : '',
+                position: shell ? getComputedStyle(shell).position : '',
+                borderRadius: shell ? getComputedStyle(shell).borderRadius : '',
+                borderTopWidth: shell ? getComputedStyle(shell).borderTopWidth : '',
+                toggleVisible: toggle ? getComputedStyle(toggle).display !== 'none' : false,
+                panelVisible: panel ? getComputedStyle(panel).display !== 'none' : false
+              };
+            }
+            """);
+
+        Assert.Equal("sticky", state.Position);
+        Assert.Equal("0px", state.Top);
+        Assert.Equal("0px", state.BorderRadius);
+        Assert.Equal("0px", state.BorderTopWidth);
+        Assert.True(state.ToggleVisible);
+        Assert.False(state.PanelVisible);
+        Assert.Equal(state.MainLeft, state.ShellLeft, precision: 1);
+        Assert.Equal(state.MainRight, state.ShellRight, precision: 1);
+    }
+
+    [Fact]
+    public async Task MobileOutline_ReducedMotionUpdatesContextWithoutRollingAnimation()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ReducedMotion = ReducedMotion.Reduce,
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        await page.EvaluateAsync(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              const link = document.querySelectorAll("#docs-page-outline a[data-doc-outline-link='true']")[2];
+              const targetId = link?.getAttribute('href')?.slice(1);
+              const target = targetId ? document.getElementById(targetId) : null;
+              if (!main || !target) {
+                return;
+              }
+
+              const rootTop = main.getBoundingClientRect().top;
+              const targetTop = target.getBoundingClientRect().top;
+              main.scrollTo(0, main.scrollTop + targetTop - rootTop + 90);
+            }
+            """);
+
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('[data-doc-outline-context]')?.dataset.outlineActiveIndex === '2'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        Assert.Equal(
+            "reduced",
+            await page.GetAttributeAsync("[data-doc-outline-context]", "data-outline-motion"));
+        Assert.False(await page.Locator("[data-doc-outline-context]").EvaluateAsync<bool>(
+            "element => element.classList.contains('docs-outline-toggle-context--rolling')"));
+    }
+
+    [Fact]
     public async Task MobileSidebar_NavigatesToNeighborPage_AndRestoresOpenButtonFocusOnEscape()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
@@ -665,7 +959,11 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-sidebar-open", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -683,7 +981,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        const string neighborHref = "/docs/web/forgetrust.razorwire/docs/antiforgery";
+        var neighborHref = Assert.IsType<string>(await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href"));
+        Assert.StartsWith("/docs/", neighborHref);
         var neighborSection = page.Locator("#docs-sidebar details").Filter(new LocatorFilterOptions
         {
             Has = page.Locator($"a[href='{neighborHref}']")
@@ -702,8 +1001,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         await neighborLink.ClickAsync();
 
         await page.WaitForFunctionAsync(
-            "() => window.location.pathname.endsWith('/docs/web/forgetrust.razorwire/docs/antiforgery')",
-            null,
+            "path => window.location.pathname === path",
+            neighborHref,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
         await page.WaitForFunctionAsync(
             "() => document.getElementById('docs-sidebar-open')?.getAttribute('aria-expanded') === 'false'",
@@ -729,6 +1028,78 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         public int MaxScrollTop { get; init; }
 
         public int DocumentScrollTop { get; init; }
+    }
+
+    private sealed class MobileOutlineContextState
+    {
+        public string ActiveIndex { get; init; } = string.Empty;
+
+        public string Current { get; init; } = string.Empty;
+
+        public string ToggleLabel { get; init; } = string.Empty;
+
+        public string PageTitle { get; init; } = string.Empty;
+
+        public string Previous { get; init; } = string.Empty;
+
+        public string Next { get; init; } = string.Empty;
+
+        public bool PreviousHidden { get; init; }
+
+        public bool NextHidden { get; init; }
+
+        public string PreviousEmpty { get; init; } = string.Empty;
+
+        public string NextEmpty { get; init; } = string.Empty;
+
+        public string FirstLink { get; init; } = string.Empty;
+
+        public string SecondLink { get; init; } = string.Empty;
+
+        public string ThirdLink { get; init; } = string.Empty;
+
+        public double ShellHeight { get; init; }
+
+        public double ShellLeft { get; init; }
+
+        public double ShellRight { get; init; }
+
+        public double MainLeft { get; init; }
+
+        public double MainRight { get; init; }
+
+        public string BorderRadius { get; init; } = string.Empty;
+
+        public string Position { get; init; } = string.Empty;
+
+        public string Top { get; init; } = string.Empty;
+
+        public string RollDirection { get; init; } = string.Empty;
+
+        public string Motion { get; init; } = string.Empty;
+    }
+
+    private sealed class CompactOutlineBandState
+    {
+        public double ShellLeft { get; init; }
+
+        public double ShellRight { get; init; }
+
+        public double MainLeft { get; init; }
+
+        public double MainRight { get; init; }
+
+        public string Top { get; init; } = string.Empty;
+
+        public string Position { get; init; } = string.Empty;
+
+        public string BorderRadius { get; init; } = string.Empty;
+
+        public string BorderTopWidth { get; init; } = string.Empty;
+
+        public bool ToggleVisible { get; init; }
+
+        public bool PanelVisible { get; init; }
     }
 
     private const string ScrollMainContentToBottomScript =

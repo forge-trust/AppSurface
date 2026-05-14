@@ -23,7 +23,11 @@ public sealed class RazorDocsWayfindingRegression1Tests
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/examples/razorwire-mvc");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/examples/razorwire-mvc",
+            "/examples/razorwire-mvc/README.md.html");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
