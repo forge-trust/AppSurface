@@ -171,7 +171,7 @@ public class RazorDocsWebModuleTests
     }
 
     [Fact]
-    public void ConfigureEndpoints_ShouldMapDefaultRoute()
+    public void ConfigureEndpoints_ShouldMapDefaultDocsRoutesWithoutAppWideFallback()
     {
         var context = CreateStartupContext();
         var builder = WebApplication.CreateBuilder();
@@ -195,7 +195,7 @@ public class RazorDocsWebModuleTests
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
         Assert.Contains("docs/{*path}", routePatterns);
-        Assert.Contains("{controller=Docs}/{action=Index}/{path?}", routePatterns);
+        Assert.DoesNotContain("{controller=Docs}/{action=Index}/{path?}", routePatterns);
 
         var prioritizedPatterns = routeBuilder.DataSources
             .SelectMany(ds => ds.Endpoints)
@@ -422,12 +422,14 @@ public class RazorDocsWebModuleTests
             .Where(pattern => pattern is not null)
             .ToList();
 
+        Assert.Contains(string.Empty, routePatterns);
         Assert.Contains("search", routePatterns);
         Assert.Contains("search-index.json", routePatterns);
         Assert.Contains("_health", routePatterns);
         Assert.Contains("_health.json", routePatterns);
         Assert.Contains("sections/{sectionSlug}", routePatterns);
         Assert.Contains("{*path}", routePatterns);
+        Assert.DoesNotContain("{controller=Docs}/{action=Index}/{path?}", routePatterns);
         Assert.DoesNotContain("/sections/{sectionSlug}", routePatterns);
         Assert.DoesNotContain("/{*path}", routePatterns);
     }
