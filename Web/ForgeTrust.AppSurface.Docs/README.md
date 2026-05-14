@@ -369,6 +369,8 @@ Default routing:
 
 `DocsRootPath` can be configured explicitly, but RazorDocs does not infer `RouteRootPath` by stripping `/next` or any other suffix. If you want versioned docs under `/foo/bar`, configure `RouteRootPath=/foo/bar`; setting only `DocsRootPath=/foo/bar/next` keeps the route family at the default `/docs`.
 
+RazorDocs registers only the configured docs routes. It does not add a generic `{controller}/{action}` fallback to the host application, so custom docs roots stay isolated from other modules and application routes.
+
 ### Route references
 
 Consumers should resolve `DocsUrlBuilder` and use `DocsUrlBuilder.Routes` instead of hardcoding route strings:
