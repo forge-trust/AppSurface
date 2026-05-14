@@ -243,6 +243,98 @@ public class RazorDocsWebModuleTests
     }
 
     [Fact]
+    public async Task ConfigureEndpoints_ShouldRedirectBareRootToDocsHome_WhenRazorDocsIsTheRootModule()
+    {
+        var envFake = A.Fake<IEnvironmentProvider>();
+        var context = new StartupContext(Array.Empty<string>(), _module, "RazorDocsStandalone", envFake);
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var rootRedirect = Assert.Single(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText is "/" or "");
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = app.Services
+        };
+        httpContext.Response.Body = new MemoryStream();
+
+        await rootRedirect.RequestDelegate!(httpContext);
+
+        Assert.Equal(StatusCodes.Status302Found, httpContext.Response.StatusCode);
+        Assert.Equal("/docs", httpContext.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task ConfigureEndpoints_ShouldPreservePathBase_WhenBareRootRedirectRuns()
+    {
+        var envFake = A.Fake<IEnvironmentProvider>();
+        var context = new StartupContext(Array.Empty<string>(), _module, "RazorDocsStandalone", envFake);
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var rootRedirect = Assert.Single(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText is "/" or "");
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = app.Services
+        };
+        httpContext.Request.PathBase = "/portal/";
+        httpContext.Response.Body = new MemoryStream();
+
+        await rootRedirect.RequestDelegate!(httpContext);
+
+        Assert.Equal(StatusCodes.Status302Found, httpContext.Response.StatusCode);
+        Assert.Equal("/portal/docs", httpContext.Response.Headers.Location);
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotMapBareRootRedirect_WhenRootModuleDocsAreRootMounted()
+    {
+        var envFake = A.Fake<IEnvironmentProvider>();
+        var context = new StartupContext(Array.Empty<string>(), _module, "RazorDocsStandalone", envFake);
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new RazorDocsOptions
+        {
+            Routing = new RazorDocsRoutingOptions
+            {
+                DocsRootPath = "/"
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<RazorDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        Assert.DoesNotContain(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText is "/" or ""
+                        && endpoint.Metadata.GetMetadata<HttpMethodMetadata>() is not null);
+    }
+
+    [Fact]
     public void ConfigureEndpoints_ShouldNotMapBareRootRedirect_WhenRazorDocsIsEmbedded()
     {
         var context = CreateStartupContext();

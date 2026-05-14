@@ -511,9 +511,7 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
         }
 
         var normalizedPathBase = pathBase.TrimEnd('/');
-        return string.Equals(appRelativeUrl, "/", StringComparison.Ordinal)
-            ? normalizedPathBase + "/"
-            : normalizedPathBase + appRelativeUrl;
+        return normalizedPathBase + appRelativeUrl;
     }
 
     private static string ResolveContentType(string relativePath)
