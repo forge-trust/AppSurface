@@ -1,9 +1,13 @@
 (() => {
     const clientKey = "__razorDocsOutlineClient";
-    if (window[clientKey]?.init) {
-        window[clientKey].init();
+    const clientVersion = "rolling-context";
+    const existingClient = window[clientKey];
+    if (existingClient?.version === clientVersion && existingClient.init) {
+        existingClient.init();
         return;
     }
+
+    existingClient?.destroy?.();
 
     const outlineSelector = "#docs-page-outline";
     const outlineLinkSelector = "a[data-doc-outline-link='true']";
@@ -72,7 +76,8 @@
             row.textContent = text;
         }
 
-        row.hidden = !text;
+        row.hidden = false;
+        row.dataset.outlineEmpty = text ? "false" : "true";
     }
 
     function setOutlineContext(context, links, activeIndex) {
@@ -521,7 +526,11 @@
         }
     }
 
-    window[clientKey] = { init: initOutline };
+    window[clientKey] = {
+        destroy: teardown,
+        init: initOutline,
+        version: clientVersion
+    };
 
     document.addEventListener("turbo:load", initOutline);
     document.addEventListener("turbo:frame-load", event => {

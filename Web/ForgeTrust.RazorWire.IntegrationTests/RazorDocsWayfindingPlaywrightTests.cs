@@ -685,25 +685,41 @@ public sealed class RazorDocsWayfindingPlaywrightTests
               return {
                 activeIndex: context?.dataset.outlineActiveIndex ?? '',
                 current: shell?.querySelector('[data-doc-outline-current]')?.textContent?.trim() ?? '',
+                toggleLabel: shell?.querySelector('.docs-outline-toggle-label')?.textContent?.trim() ?? '',
+                pageTitle: document.querySelector('h1')?.textContent?.trim() ?? '',
                 previous: shell?.querySelector('[data-doc-outline-previous] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
                 next: shell?.querySelector('[data-doc-outline-next] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
                 previousHidden: Boolean(shell?.querySelector('[data-doc-outline-previous]')?.hidden),
                 nextHidden: Boolean(shell?.querySelector('[data-doc-outline-next]')?.hidden),
+                previousEmpty: shell?.querySelector('[data-doc-outline-previous]')?.dataset.outlineEmpty ?? '',
+                nextEmpty: shell?.querySelector('[data-doc-outline-next]')?.dataset.outlineEmpty ?? '',
                 firstLink: links[0]?.textContent?.trim() ?? '',
                 secondLink: links[1]?.textContent?.trim() ?? '',
                 thirdLink: links[2]?.textContent?.trim() ?? '',
                 shellHeight: shell?.getBoundingClientRect().height ?? 0,
-                position: shell ? getComputedStyle(shell).position : ''
+                shellLeft: shell?.getBoundingClientRect().left ?? 0,
+                shellRight: shell?.getBoundingClientRect().right ?? 0,
+                viewportWidth: window.innerWidth,
+                borderRadius: shell ? getComputedStyle(shell).borderRadius : '',
+                position: shell ? getComputedStyle(shell).position : '',
+                top: shell ? getComputedStyle(shell).top : ''
               };
             }
             """);
 
         Assert.Equal("sticky", initialState.Position);
+        Assert.Equal("61px", initialState.Top);
+        Assert.Equal(0, initialState.ShellLeft, precision: 1);
+        Assert.Equal(initialState.ViewportWidth, initialState.ShellRight, precision: 1);
+        Assert.Equal("0px", initialState.BorderRadius);
         Assert.True(initialState.ShellHeight is >= 44 and <= 76);
         Assert.Equal("0", initialState.ActiveIndex);
         Assert.Equal(initialState.FirstLink, initialState.Current);
-        Assert.True(initialState.PreviousHidden);
+        Assert.Equal(initialState.PageTitle, initialState.ToggleLabel);
+        Assert.False(initialState.PreviousHidden);
         Assert.False(initialState.NextHidden);
+        Assert.Equal("true", initialState.PreviousEmpty);
+        Assert.Equal("false", initialState.NextEmpty);
         Assert.Equal(initialState.SecondLink, initialState.Next);
 
         await page.EvaluateAsync(
@@ -737,15 +753,24 @@ public sealed class RazorDocsWayfindingPlaywrightTests
               return {
                 activeIndex: context?.dataset.outlineActiveIndex ?? '',
                 current: shell?.querySelector('[data-doc-outline-current]')?.textContent?.trim() ?? '',
+                toggleLabel: shell?.querySelector('.docs-outline-toggle-label')?.textContent?.trim() ?? '',
+                pageTitle: document.querySelector('h1')?.textContent?.trim() ?? '',
                 previous: shell?.querySelector('[data-doc-outline-previous] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
                 next: shell?.querySelector('[data-doc-outline-next] [data-doc-outline-context-title]')?.textContent?.trim() ?? '',
                 previousHidden: Boolean(shell?.querySelector('[data-doc-outline-previous]')?.hidden),
                 nextHidden: Boolean(shell?.querySelector('[data-doc-outline-next]')?.hidden),
+                previousEmpty: shell?.querySelector('[data-doc-outline-previous]')?.dataset.outlineEmpty ?? '',
+                nextEmpty: shell?.querySelector('[data-doc-outline-next]')?.dataset.outlineEmpty ?? '',
                 firstLink: links[0]?.textContent?.trim() ?? '',
                 secondLink: links[1]?.textContent?.trim() ?? '',
                 thirdLink: links[2]?.textContent?.trim() ?? '',
                 shellHeight: shell?.getBoundingClientRect().height ?? 0,
+                shellLeft: shell?.getBoundingClientRect().left ?? 0,
+                shellRight: shell?.getBoundingClientRect().right ?? 0,
+                viewportWidth: window.innerWidth,
+                borderRadius: shell ? getComputedStyle(shell).borderRadius : '',
                 position: shell ? getComputedStyle(shell).position : '',
+                top: shell ? getComputedStyle(shell).top : '',
                 rollDirection: context?.dataset.outlineRollDirection ?? '',
                 motion: context?.dataset.outlineMotion ?? ''
               };
@@ -755,9 +780,72 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Equal("2", scrolledState.ActiveIndex);
         Assert.Equal(scrolledState.SecondLink, scrolledState.Previous);
         Assert.Equal(scrolledState.ThirdLink, scrolledState.Current);
+        Assert.Equal(initialState.PageTitle, scrolledState.ToggleLabel);
+        Assert.Equal(initialState.ShellHeight, scrolledState.ShellHeight, precision: 1);
         Assert.False(scrolledState.NextHidden);
+        Assert.Equal("61px", scrolledState.Top);
+        Assert.Equal(0, scrolledState.ShellLeft, precision: 1);
+        Assert.Equal(scrolledState.ViewportWidth, scrolledState.ShellRight, precision: 1);
         Assert.Equal("down", scrolledState.RollDirection);
         Assert.Equal("rolling", scrolledState.Motion);
+    }
+
+    [Fact]
+    public async Task CompactOutline_FullBleedsInsideSidebarLayout()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1100,
+                Height = 900
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/Web/ForgeTrust.RazorWire/README.md.html#generated-ui-design-contract");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var state = await page.EvaluateAsync<CompactOutlineBandState>(
+            """
+            () => {
+              const shell = document.getElementById('docs-page-outline');
+              const main = document.getElementById('main-content');
+              const toggle = shell?.querySelector('[data-doc-outline-toggle]');
+              const panel = document.getElementById('docs-page-outline-panel');
+              const shellRect = shell?.getBoundingClientRect();
+              const mainRect = main?.getBoundingClientRect();
+              return {
+                shellLeft: shellRect?.left ?? 0,
+                shellRight: shellRect?.right ?? 0,
+                mainLeft: mainRect?.left ?? 0,
+                mainRight: mainRect?.right ?? 0,
+                top: shell ? getComputedStyle(shell).top : '',
+                position: shell ? getComputedStyle(shell).position : '',
+                borderRadius: shell ? getComputedStyle(shell).borderRadius : '',
+                borderTopWidth: shell ? getComputedStyle(shell).borderTopWidth : '',
+                toggleVisible: toggle ? getComputedStyle(toggle).display !== 'none' : false,
+                panelVisible: panel ? getComputedStyle(panel).display !== 'none' : false
+              };
+            }
+            """);
+
+        Assert.Equal("sticky", state.Position);
+        Assert.Equal("0px", state.Top);
+        Assert.Equal("0px", state.BorderRadius);
+        Assert.Equal("0px", state.BorderTopWidth);
+        Assert.True(state.ToggleVisible);
+        Assert.False(state.PanelVisible);
+        Assert.Equal(state.MainLeft, state.ShellLeft, precision: 1);
+        Assert.Equal(state.MainRight, state.ShellRight, precision: 1);
     }
 
     [Fact]
@@ -894,6 +982,10 @@ public sealed class RazorDocsWayfindingPlaywrightTests
 
         public string Current { get; init; } = string.Empty;
 
+        public string ToggleLabel { get; init; } = string.Empty;
+
+        public string PageTitle { get; init; } = string.Empty;
+
         public string Previous { get; init; } = string.Empty;
 
         public string Next { get; init; } = string.Empty;
@@ -901,6 +993,10 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         public bool PreviousHidden { get; init; }
 
         public bool NextHidden { get; init; }
+
+        public string PreviousEmpty { get; init; } = string.Empty;
+
+        public string NextEmpty { get; init; } = string.Empty;
 
         public string FirstLink { get; init; } = string.Empty;
 
@@ -910,11 +1006,44 @@ public sealed class RazorDocsWayfindingPlaywrightTests
 
         public double ShellHeight { get; init; }
 
+        public double ShellLeft { get; init; }
+
+        public double ShellRight { get; init; }
+
+        public double ViewportWidth { get; init; }
+
+        public string BorderRadius { get; init; } = string.Empty;
+
         public string Position { get; init; } = string.Empty;
+
+        public string Top { get; init; } = string.Empty;
 
         public string RollDirection { get; init; } = string.Empty;
 
         public string Motion { get; init; } = string.Empty;
+    }
+
+    private sealed class CompactOutlineBandState
+    {
+        public double ShellLeft { get; init; }
+
+        public double ShellRight { get; init; }
+
+        public double MainLeft { get; init; }
+
+        public double MainRight { get; init; }
+
+        public string Top { get; init; } = string.Empty;
+
+        public string Position { get; init; } = string.Empty;
+
+        public string BorderRadius { get; init; } = string.Empty;
+
+        public string BorderTopWidth { get; init; } = string.Empty;
+
+        public bool ToggleVisible { get; init; }
+
+        public bool PanelVisible { get; init; }
     }
 
     private const string ScrollMainContentToBottomScript =
