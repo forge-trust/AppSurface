@@ -439,13 +439,6 @@ body {
     transform: translateY(0.12rem) rotate(225deg);
 }
 
-.docs-outline-toggle-current {
-    color: var(--docs-color-accent);
-    font-size: 0.8rem;
-    font-weight: 700;
-    line-height: 1.1;
-}
-
 .docs-outline-toggle-context {
     min-width: 0;
     flex: 1 1 auto;
@@ -616,6 +609,7 @@ body {
 @media (max-width: 79.999rem) {
     .docs-outline-shell[data-outline-enhanced="true"] {
         --docs-outline-compact-bleed: 1rem;
+
         position: sticky;
         z-index: 20;
         top: 0;

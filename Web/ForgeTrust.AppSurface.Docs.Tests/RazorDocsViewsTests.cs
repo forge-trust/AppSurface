@@ -250,7 +250,9 @@ public class RazorDocsViewsTests
         Assert.Contains("const clientVersion = \"rolling-context\";", outlineClient);
         Assert.Contains("existingClient?.version === clientVersion", outlineClient);
         Assert.Contains("existingClient?.destroy?.();", outlineClient);
-        Assert.Contains("destroy: teardown", outlineClient);
+        Assert.Contains("destroy: destroyClient", outlineClient);
+        Assert.Contains("document.removeEventListener(\"turbo:load\"", outlineClient);
+        Assert.Contains("document.removeEventListener(\"turbo:frame-load\"", outlineClient);
         Assert.Contains("version: clientVersion", outlineClient);
         Assert.Contains("function setOutlineContext", outlineClient);
         Assert.Contains("data-doc-outline-previous", outlineClient);

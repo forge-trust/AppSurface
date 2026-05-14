@@ -22,6 +22,9 @@
     let contextRollTimeout = 0;
     let lastActiveIndex = -1;
     let fallbackDisposers = [];
+    let turboLoadHandler = null;
+    let turboFrameLoadHandler = null;
+    let domContentLoadedHandler = null;
 
     function decodeHash(hash) {
         if (!hash) {
@@ -416,6 +419,28 @@
         lastActiveIndex = -1;
     }
 
+    function removeDocumentLifecycleEventListeners() {
+        if (turboLoadHandler) {
+            document.removeEventListener("turbo:load", turboLoadHandler);
+            turboLoadHandler = null;
+        }
+
+        if (turboFrameLoadHandler) {
+            document.removeEventListener("turbo:frame-load", turboFrameLoadHandler);
+            turboFrameLoadHandler = null;
+        }
+
+        if (domContentLoadedHandler) {
+            document.removeEventListener("DOMContentLoaded", domContentLoadedHandler);
+            domContentLoadedHandler = null;
+        }
+    }
+
+    function destroyClient() {
+        removeDocumentLifecycleEventListeners();
+        teardown();
+    }
+
     function initOutline() {
         teardown();
 
@@ -527,20 +552,27 @@
     }
 
     window[clientKey] = {
-        destroy: teardown,
+        destroy: destroyClient,
         init: initOutline,
         version: clientVersion
     };
 
-    document.addEventListener("turbo:load", initOutline);
-    document.addEventListener("turbo:frame-load", event => {
+    turboLoadHandler = initOutline;
+    turboFrameLoadHandler = event => {
         if (event.target?.id === "doc-content") {
             initOutline();
         }
-    });
+    };
+
+    document.addEventListener("turbo:load", turboLoadHandler);
+    document.addEventListener("turbo:frame-load", turboFrameLoadHandler);
 
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", initOutline);
+        domContentLoadedHandler = () => {
+            domContentLoadedHandler = null;
+            initOutline();
+        };
+        document.addEventListener("DOMContentLoaded", domContentLoadedHandler, { once: true });
     } else {
         initOutline();
     }

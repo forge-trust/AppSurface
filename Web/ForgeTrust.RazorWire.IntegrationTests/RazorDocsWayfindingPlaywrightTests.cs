@@ -46,14 +46,14 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             await page.GetAttributeAsync("#docs-page-outline a[href='#files-behind-the-hero-flow']", "href"));
 
         const string nextDocHeading = "Failed Form UX";
-        var previousDocPath = await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href");
+        var previousDocPath = Assert.IsType<string>(await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href"));
         Assert.Contains(previousDocPath, new[]
         {
             "/docs/web/forgetrust.razorwire",
             "/docs/Web/ForgeTrust.RazorWire/README.md.html"
         });
 
-        var nextDocPath = await page.GetAttributeAsync("[data-doc-wayfinding='next']", "href");
+        var nextDocPath = Assert.IsType<string>(await page.GetAttributeAsync("[data-doc-wayfinding='next']", "href"));
         Assert.Contains(nextDocPath, new[]
         {
             "/docs/web/forgetrust.razorwire/docs/form-failures",
@@ -123,7 +123,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
-        var outlinePagePath = await outlineLink.GetAttributeAsync("href");
+        var outlinePagePath = Assert.IsType<string>(await outlineLink.GetAttributeAsync("href"));
         await page.EvaluateAsync("() => { window.__rwFrameNavigationSentinel = 'alive'; }");
         await outlineLink.ClickAsync();
 
@@ -981,7 +981,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
 
-        var neighborHref = await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href");
+        var neighborHref = Assert.IsType<string>(await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href"));
         Assert.StartsWith("/docs/", neighborHref);
         var neighborSection = page.Locator("#docs-sidebar details").Filter(new LocatorFilterOptions
         {
