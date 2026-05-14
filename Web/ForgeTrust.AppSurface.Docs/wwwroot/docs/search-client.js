@@ -429,13 +429,17 @@
     return normalized || 'neutral';
   }
 
+  function getPageTypeBadgeVariant(value) {
+    return normalizeBadgeVariant(normalizePageTypeAlias(value));
+  }
+
   function renderPageTypeBadge(item) {
     const label = String(item?.pageTypeLabel ?? '').trim();
     if (!label) {
       return '';
     }
 
-    const variant = normalizeBadgeVariant(item?.pageTypeVariant);
+    const variant = getPageTypeBadgeVariant(item?.pageTypeVariant);
     return `<span class="docs-page-badge docs-page-badge--${escapeHtml(variant)}">${escapeHtml(label)}</span>`;
   }
 
@@ -448,7 +452,11 @@
   }
 
   function normalizePageTypeAlias(value) {
-    const normalized = normalizeFacetValue(value).toLowerCase();
+    const normalized = normalizeFacetValue(value)
+      .toLowerCase()
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .join('-');
     return normalized === 'release-note' || normalized === 'release-notes'
       ? 'release'
       : normalized;
@@ -555,12 +563,12 @@
       return '';
     }
 
-    const lower = normalized.toLowerCase();
-    if (lower === 'api' || lower === 'api-reference') {
+    const pageTypeAlias = normalizePageTypeAlias(normalized);
+    if (pageTypeAlias === 'api' || pageTypeAlias === 'api-reference') {
       return 'API Reference';
     }
 
-    if (lower === 'release' || lower === 'release-note' || lower === 'release-notes') {
+    if (pageTypeAlias === 'release') {
       return 'Release';
     }
 
@@ -586,7 +594,7 @@
   }
 
   function getPageTypeVariant(doc) {
-    const variant = normalizeBadgeVariant(doc?.pageTypeVariant);
+    const variant = getPageTypeBadgeVariant(doc?.pageTypeVariant);
     return variant === 'neutral' && normalizePageTypeAlias(doc?.pageType) === 'release'
       ? 'release'
       : variant;

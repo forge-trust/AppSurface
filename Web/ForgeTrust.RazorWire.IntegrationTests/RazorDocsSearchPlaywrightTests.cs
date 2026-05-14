@@ -297,7 +297,7 @@ public sealed class RazorDocsSearchPlaywrightTests
                 SearchDoc("api/packages", "Package API", "api-reference", "API Reference", "api-reference", "Reference for package APIs.", breadcrumbs: ["API", "Packages"]),
                 SearchDoc("examples/dependency", "Dependency Example", "example", "Example", "example", "A working dependency example.", breadcrumbs: ["Samples", "Dependency"]),
                 SearchDoc("support/dependencies", "Dependency Troubleshooting", "troubleshooting", "Troubleshooting", "troubleshooting", "Resolve dependency build issues.", breadcrumbs: ["Support", "Build"]),
-                SearchDoc("releases/2-1-0", "Release Notes 2.1.0", "release-note", "Release", "release", "Dependency fixes in the latest release.", breadcrumbs: ["Release Notes", "2.1.0"])));
+                SearchDoc("releases/2-1-0", "Release Notes 2.1.0", "release notes", "Release", "release_notes", "Dependency fixes in the latest release.", breadcrumbs: ["Release Notes", "2.1.0"])));
 
         await page.GotoAsync($"{_fixture.DocsUrl}/search");
         await WaitForSearchPageSettledAsync(page);
@@ -359,7 +359,15 @@ public sealed class RazorDocsSearchPlaywrightTests
                     "guide",
                     string.Empty,
                     bodyText: "blank dependency body",
-                    breadcrumbs: ["Guides", "Blank"])));
+                    breadcrumbs: ["Guides", "Blank"]),
+                SearchDoc(
+                    "releases/dependency",
+                    "Dependency Release Notes",
+                    "release_notes",
+                    "Release",
+                    "release note",
+                    "Dependency fixes in release notes.",
+                    breadcrumbs: ["Releases", "Dependency"])));
 
         await page.GotoAsync($"{_fixture.DocsUrl}/search?q=dependency");
         await WaitForSearchPageSettledAsync(page);
@@ -371,6 +379,15 @@ public sealed class RazorDocsSearchPlaywrightTests
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Razordocs");
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Maintainer");
         await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Stable");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Dependency Release Notes");
+
+        var releaseBadgeClass = await page
+            .Locator(".docs-search-result")
+            .Filter(new LocatorFilterOptions { HasTextString = "Dependency Release Notes" })
+            .Locator(".docs-search-result-page-type-badge")
+            .GetAttributeAsync("class");
+        Assert.Contains("docs-page-badge--release", releaseBadgeClass);
+        Assert.DoesNotContain("release-note", releaseBadgeClass);
 
         var blankSnippet = page
             .Locator(".docs-search-result")
