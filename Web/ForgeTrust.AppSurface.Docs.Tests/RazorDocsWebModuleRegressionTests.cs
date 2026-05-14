@@ -580,6 +580,7 @@ public class RazorDocsWebModuleRegressionTests
     [InlineData("//evil.example")]
     [InlineData("/\\evil.example")]
     [InlineData("/safe\\base")]
+    [InlineData("/safe\u001fbase")]
     public void BuildLegacyAssetRedirectPath_Issue007_RejectsUnsafePathBase(string pathBase)
     {
         var exception = Assert.Throws<InvalidOperationException>(
@@ -589,6 +590,17 @@ public class RazorDocsWebModuleRegressionTests
                 QueryString.Empty));
 
         Assert.Contains("path base", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildLegacyAssetRedirectPath_Issue007_TreatsDefaultPathBaseAsEmpty()
+    {
+        var redirectPath = RazorDocsWebModule.BuildLegacyAssetRedirectPath(
+            default,
+            $"{PackagedAssetBasePath}/search.css",
+            QueryString.Empty);
+
+        Assert.Equal($"{PackagedAssetBasePath}/search.css", redirectPath);
     }
 
     [Theory]
