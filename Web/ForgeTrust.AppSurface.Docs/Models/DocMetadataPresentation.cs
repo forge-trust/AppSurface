@@ -35,10 +35,11 @@ public static class DocMetadataPresentation
     /// <summary>
     /// Resolves the built-in RazorDocs page-type badge presentation for a raw metadata value.
     /// </summary>
-    /// <param name="pageType">The raw page-type metadata value, such as <c>guide</c> or <c>api-reference</c>.</param>
+    /// <param name="pageType">The raw page-type metadata value, such as <c>guide</c>, <c>api-reference</c>, or <c>release-note</c>.</param>
     /// <returns>
     /// A normalized badge presentation when <paramref name="pageType"/> is non-empty; otherwise, <see langword="null"/>.
-    /// Unknown page types fall back to a neutral badge with a title-cased label.
+    /// Release aliases such as <c>release-note</c> and <c>release-notes</c> resolve to the canonical
+    /// <c>release</c> badge value. Unknown page types fall back to a neutral badge with a title-cased label.
     /// </returns>
     public static DocPageTypeBadgePresentation? ResolvePageTypeBadge(string? pageType)
     {
@@ -48,23 +49,24 @@ public static class DocMetadataPresentation
             return null;
         }
 
-        var (label, variant) = normalizedValue switch
+        var (label, variant, value) = normalizedValue switch
         {
-            "guide" => ("Guide", "guide"),
-            "example" => ("Example", "example"),
-            "api-reference" => ("API Reference", "api-reference"),
-            "internals" => ("Internals", "internals"),
-            "how-to" => ("How-To", "how-to"),
-            "start-here" => ("Start Here", "start-here"),
-            "troubleshooting" => ("Troubleshooting", "troubleshooting"),
-            "glossary" => ("Glossary", "glossary"),
-            "faq" => ("FAQ", "faq"),
-            _ => (BuildFallbackLabel(normalizedValue), "neutral")
+            "guide" => ("Guide", "guide", normalizedValue),
+            "example" => ("Example", "example", normalizedValue),
+            "api-reference" => ("API Reference", "api-reference", normalizedValue),
+            "internals" => ("Internals", "internals", normalizedValue),
+            "how-to" => ("How-To", "how-to", normalizedValue),
+            "start-here" => ("Start Here", "start-here", normalizedValue),
+            "troubleshooting" => ("Troubleshooting", "troubleshooting", normalizedValue),
+            "glossary" => ("Glossary", "glossary", normalizedValue),
+            "faq" => ("FAQ", "faq", normalizedValue),
+            "release" or "release-note" or "release-notes" => ("Release", "release", "release"),
+            _ => (BuildFallbackLabel(normalizedValue), "neutral", normalizedValue)
         };
 
         return new DocPageTypeBadgePresentation
         {
-            Value = normalizedValue,
+            Value = value,
             Label = label,
             Variant = variant
         };

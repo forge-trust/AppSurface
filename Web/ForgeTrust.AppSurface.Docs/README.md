@@ -919,7 +919,8 @@ RazorDocs treats `page_type` metadata as structured UI input, not just as opaque
 
 ### Built-in normalization
 
-- Known values such as `guide`, `example`, `api-reference`, `internals`, `how-to`, `start-here`, `troubleshooting`, `glossary`, and `faq` render with stable labels and intentional badge variants.
+- Known values such as `guide`, `example`, `api-reference`, `internals`, `how-to`, `start-here`, `troubleshooting`, `glossary`, `faq`, and `release` render with stable labels and intentional badge variants.
+- Release aliases `release-note` and `release-notes` render as the canonical `Release` badge with the normalized `release` value and variant.
 - Unknown values still render safely: RazorDocs normalizes whitespace, underscores, and dashes, then falls back to a neutral title-cased badge.
 - Missing or blank `page_type` values render no badge at all instead of leaving empty chrome behind.
 
@@ -933,6 +934,8 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `publicSectionLabel` for the reader-facing section label
 - `isSectionLanding` for authored section landing entry points
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
+
+When authored metadata uses `release-note` or `release-notes`, RazorDocs keeps the raw `pageType` metadata value in the payload but emits `pageTypeLabel = "Release"` and `pageTypeVariant = "release"` so built-in and custom clients can present release pages consistently.
 
 ## Custom Harvester Outline Contract
 

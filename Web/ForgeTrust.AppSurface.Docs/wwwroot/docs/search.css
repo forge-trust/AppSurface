@@ -20,6 +20,7 @@
 .docs-search-page-chip:focus,
 .docs-search-page-starter-chip:focus,
 .docs-search-page-filters-toggle:focus,
+.docs-search-page-clear-filters:focus,
 .docs-search-page-retry:focus {
     border-color: #22d3ee;
     box-shadow: 0 0 0 1px #22d3ee inset;
@@ -234,6 +235,26 @@
     font-size: 0.84rem;
 }
 
+.docs-search-page-starter-docs {
+    display: grid;
+    gap: 0.7rem;
+    margin-top: 0.35rem;
+    border-top: 1px solid rgba(51, 65, 85, 0.72);
+    padding-top: 0.95rem;
+}
+
+.docs-search-page-starter-heading {
+    margin: 0;
+    color: #f8fafc;
+    font-size: 1rem;
+    line-height: 1.3;
+}
+
+.docs-search-page-starter-list {
+    display: grid;
+    gap: 0;
+}
+
 .docs-search-page-section-title {
     margin: 0 0 0.55rem;
     font-size: 1rem;
@@ -259,8 +280,8 @@
 
 .docs-search-result {
     display: grid;
-    gap: 0.55rem;
-    padding: 0.05rem 0 1rem;
+    gap: 0.45rem;
+    padding: 0.15rem 0 1rem;
     border-bottom: 1px solid #1e293b;
 }
 
@@ -303,6 +324,13 @@
     gap: 0.45rem;
 }
 
+.docs-search-result-meta-line {
+    margin: -0.1rem 0 0;
+    color: #94a3b8;
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+
 .docs-search-result-badge {
     display: inline-flex;
     align-items: center;
@@ -321,10 +349,22 @@
     color: #cbd5e1;
 }
 
+.docs-search-result-page-type-badge {
+    width: fit-content;
+}
+
 .docs-search-result-snippet {
     margin: 0;
     color: #cbd5e1;
     line-height: 1.6;
+}
+
+.docs-search-result-starter {
+    padding-block: 0.85rem;
+}
+
+.docs-search-result-starter:first-child {
+    padding-top: 0.15rem;
 }
 
 .docs-search-result mark {
@@ -341,6 +381,33 @@
     border-radius: 1rem;
     padding: 1rem;
     background: rgba(2, 6, 23, 0.65);
+}
+
+.docs-search-page-no-results-summary {
+    margin: 0;
+    color: #cbd5e1;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.docs-search-page-clear-filters {
+    appearance: none;
+    justify-self: start;
+    border: 1px solid rgba(34, 211, 238, 0.34);
+    border-radius: 0.75rem;
+    background: rgba(8, 47, 73, 0.28);
+    color: #cffafe;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.84rem;
+    font-weight: 600;
+    min-height: 2.75rem;
+    padding: 0.55rem 0.9rem;
+}
+
+.docs-search-page-clear-filters:hover {
+    border-color: rgba(34, 211, 238, 0.58);
+    background: rgba(8, 47, 73, 0.42);
 }
 
 .docs-search-page-no-results-links {
@@ -428,6 +495,14 @@
 
     .docs-search-result {
         padding-bottom: 0.85rem;
+    }
+
+    .docs-search-result-title,
+    .docs-search-result-meta-line,
+    .docs-search-result-snippet,
+    .docs-search-result-badge,
+    .docs-search-result-page-type-badge {
+        overflow-wrap: anywhere;
     }
 }
 

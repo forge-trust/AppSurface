@@ -57,7 +57,8 @@ body {
 
 .docs-page-badge--guide,
 .docs-page-badge--how-to,
-.docs-page-badge--start-here {
+.docs-page-badge--start-here,
+.docs-page-badge--release {
     border-color: rgba(34, 211, 238, 0.35);
     background: rgba(34, 211, 238, 0.12);
     color: #a5f3fc;

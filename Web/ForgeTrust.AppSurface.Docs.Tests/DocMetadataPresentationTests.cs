@@ -14,6 +14,9 @@ public sealed class DocMetadataPresentationTests
     [InlineData("troubleshooting", "troubleshooting", "Troubleshooting", "troubleshooting")]
     [InlineData("glossary", "glossary", "Glossary", "glossary")]
     [InlineData("faq", "faq", "FAQ", "faq")]
+    [InlineData("release", "release", "Release", "release")]
+    [InlineData("release-note", "release", "Release", "release")]
+    [InlineData("release_notes", "release", "Release", "release")]
     public void ResolvePageTypeBadge_ShouldNormalizeKnownValues(
         string rawValue,
         string expectedValue,
