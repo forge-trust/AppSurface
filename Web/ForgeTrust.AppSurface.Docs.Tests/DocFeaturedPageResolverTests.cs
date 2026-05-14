@@ -608,7 +608,7 @@ public sealed class DocFeaturedPageResolverTests
     }
 
     [Fact]
-    public void ResolveGroups_ShouldThrow_WhenDestinationIsMissingCanonicalPath()
+    public void ResolveGroups_ShouldSkipDestination_WhenDestinationIsMissingCanonicalPath()
     {
         var resolver = new DocFeaturedPageResolver(A.Fake<ILogger<DocFeaturedPageResolver>>());
         var landing = new DocNode(
@@ -639,9 +639,9 @@ public sealed class DocFeaturedPageResolverTests
             new DocNode("Intro", "guides/intro.md", "<p>Intro</p>")
         };
 
-        var error = Assert.Throws<InvalidOperationException>(() => resolver.ResolveGroups(landing, docs));
+        var groups = resolver.ResolveGroups(landing, docs);
 
-        Assert.Contains("missing CanonicalPath", error.Message, StringComparison.Ordinal);
+        Assert.Empty(groups);
     }
 
     [Fact]

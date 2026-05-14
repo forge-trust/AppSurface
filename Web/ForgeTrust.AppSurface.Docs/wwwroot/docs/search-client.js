@@ -37,8 +37,16 @@
     ['example', 3],
     ['api-reference', 4],
     ['api', 4],
-    ['troubleshooting', 5]
+    ['troubleshooting', 5],
+    ['release', 6]
   ]);
+  const starterPageTypeGroups = [
+    { key: 'guide', label: 'Guide', pageTypes: ['guide', 'concept', 'tutorial', 'start-here', 'how-to'] },
+    { key: 'api-reference', label: 'API Reference', pageTypes: ['api-reference', 'api'] },
+    { key: 'example', label: 'Example', pageTypes: ['example'] },
+    { key: 'troubleshooting', label: 'Troubleshooting', pageTypes: ['troubleshooting'] },
+    { key: 'release', label: 'Release', pageTypes: ['release'] }
+  ];
   const statusSort = new Map([
     ['stable', 0],
     ['beta', 1],
@@ -49,6 +57,8 @@
   const searchData = {
     index: null,
     docs: [],
+    sortedDocs: [],
+    starterDocs: [],
     docsById: new Map(),
     docsByPath: collectInitialDocsPaths(),
     facetValues: createEmptyFacetValues(),
@@ -108,6 +118,7 @@
       filters: document.getElementById('docs-search-page-filters'),
       activeFilters: document.getElementById('docs-search-page-active-filters'),
       starter: document.getElementById('docs-search-page-starter'),
+      starterDocs: document.getElementById('docs-search-page-starter-docs'),
       failure: document.getElementById('docs-search-page-failure'),
       failureTemplate: document.getElementById('docs-search-page-failure-template'),
       resultsMeta: document.getElementById('docs-search-page-results-meta'),
@@ -418,13 +429,17 @@
     return normalized || 'neutral';
   }
 
+  function getPageTypeBadgeVariant(value) {
+    return normalizeBadgeVariant(normalizePageTypeAlias(value));
+  }
+
   function renderPageTypeBadge(item) {
     const label = String(item?.pageTypeLabel ?? '').trim();
     if (!label) {
       return '';
     }
 
-    const variant = normalizeBadgeVariant(item?.pageTypeVariant);
+    const variant = getPageTypeBadgeVariant(item?.pageTypeVariant);
     return `<span class="docs-page-badge docs-page-badge--${escapeHtml(variant)}">${escapeHtml(label)}</span>`;
   }
 
@@ -434,6 +449,17 @@
 
   function normalizeFacetValue(value) {
     return String(value ?? '').trim();
+  }
+
+  function normalizePageTypeAlias(value) {
+    const normalized = normalizeFacetValue(value)
+      .toLowerCase()
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .join('-');
+    return normalized === 'release-note' || normalized === 'release-notes'
+      ? 'release'
+      : normalized;
   }
 
   function formatQueryForStatus(value) {
@@ -537,9 +563,13 @@
       return '';
     }
 
-    const lower = normalized.toLowerCase();
-    if (lower === 'api' || lower === 'api-reference') {
+    const pageTypeAlias = normalizePageTypeAlias(normalized);
+    if (pageTypeAlias === 'api' || pageTypeAlias === 'api-reference') {
       return 'API Reference';
+    }
+
+    if (pageTypeAlias === 'release') {
+      return 'Release';
     }
 
     return normalized
@@ -547,6 +577,27 @@
       .filter(Boolean)
       .map((part) => part === part.toUpperCase() ? part : `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
       .join(' ');
+  }
+
+  function isPageTypeInGroup(doc, group) {
+    const pageType = normalizePageTypeAlias(doc?.pageType);
+    return Boolean(pageType) && group.pageTypes.includes(pageType);
+  }
+
+  function getPageTypeDisplayLabel(doc) {
+    const label = String(doc?.pageTypeLabel ?? '').trim();
+    if (label) {
+      return label;
+    }
+
+    return formatFacetValue(normalizePageTypeAlias(doc?.pageType));
+  }
+
+  function getPageTypeVariant(doc) {
+    const variant = getPageTypeBadgeVariant(doc?.pageTypeVariant);
+    return variant === 'neutral' && normalizePageTypeAlias(doc?.pageType) === 'release'
+      ? 'release'
+      : variant;
   }
 
   function getLocationLabel(item) {
@@ -574,7 +625,7 @@
       headings: toStringArray(doc?.headings),
       bodyText: String(doc?.bodyText ?? ''),
       snippet: String(doc?.snippet ?? '').trim(),
-      pageType: normalizeFacetValue(doc?.pageType),
+      pageType: normalizePageTypeAlias(doc?.pageType),
       pageTypeLabel: String(doc?.pageTypeLabel ?? '').trim(),
       pageTypeVariant: normalizeFacetValue(doc?.pageTypeVariant),
       audience: normalizeFacetValue(doc?.audience),
@@ -592,7 +643,7 @@
   function sortFacetValues(key, values) {
     const list = [...values];
     if (key === 'pageType') {
-      return list.sort((a, b) => (pageTypeSort.get(a.toLowerCase()) ?? 100) - (pageTypeSort.get(b.toLowerCase()) ?? 100) || a.localeCompare(b));
+      return list.sort((a, b) => (pageTypeSort.get(normalizePageTypeAlias(a)) ?? 100) - (pageTypeSort.get(normalizePageTypeAlias(b)) ?? 100) || a.localeCompare(b));
     }
 
     if (key === 'status') {
@@ -622,7 +673,7 @@
 
   function getSearchFilters(state) {
     return {
-      pageType: normalizeFacetValue(state.pageType),
+      pageType: normalizePageTypeAlias(state.pageType),
       component: normalizeFacetValue(state.component),
       audience: normalizeFacetValue(state.audience),
       status: normalizeFacetValue(state.status)
@@ -644,7 +695,10 @@
         return true;
       }
 
-      return normalizeFacetValue(doc[key]) === expected;
+      const actual = key === 'pageType'
+        ? normalizePageTypeAlias(doc[key])
+        : normalizeFacetValue(doc[key]);
+      return actual === expected;
     });
   }
 
@@ -655,13 +709,16 @@
         return true;
       }
 
-      return normalizeFacetValue(result?.[key]) === expected;
+      const actual = key === 'pageType'
+        ? normalizePageTypeAlias(result?.[key])
+        : normalizeFacetValue(result?.[key]);
+      return actual === expected;
     });
   }
 
   function compareBrowseDocs(left, right) {
-    const leftTypeRank = pageTypeSort.get((left.pageType || '').toLowerCase()) ?? 100;
-    const rightTypeRank = pageTypeSort.get((right.pageType || '').toLowerCase()) ?? 100;
+    const leftTypeRank = pageTypeSort.get(normalizePageTypeAlias(left.pageType)) ?? 100;
+    const rightTypeRank = pageTypeSort.get(normalizePageTypeAlias(right.pageType)) ?? 100;
     if (leftTypeRank !== rightTypeRank) {
       return leftTypeRank - rightTypeRank;
     }
@@ -678,6 +735,18 @@
 
   function sortDocsForBrowse(docs) {
     return [...docs].sort(compareBrowseDocs);
+  }
+
+  function deriveStarterDocs(docs) {
+    const starters = [];
+    for (const group of starterPageTypeGroups) {
+      const doc = docs.find((candidate) => isPageTypeInGroup(candidate, group));
+      if (doc) {
+        starters.push({ group, doc });
+      }
+    }
+
+    return starters;
   }
 
   function readSearchPageStateFromUrl() {
@@ -912,8 +981,26 @@
     return badge;
   }
 
-  function createSearchResultArticle(doc, queryTokens) {
-    const article = createElement('article', 'docs-search-result');
+  function createSearchResultPageTypeBadge(doc) {
+    const label = getPageTypeDisplayLabel(doc);
+    if (!label) {
+      return null;
+    }
+
+    return createElement(
+      'span',
+      `docs-page-badge docs-page-badge--${getPageTypeVariant(doc)} docs-search-result-page-type-badge`,
+      label
+    );
+  }
+
+  function createSearchResultArticle(doc, queryTokens, options = {}) {
+    const article = createElement(
+      'article',
+      options.starter
+        ? 'docs-search-result docs-search-result-starter'
+        : 'docs-search-result'
+    );
 
     const breadcrumbs = buildBreadcrumbLabels(doc);
     if (breadcrumbs.length > 0) {
@@ -936,9 +1023,19 @@
     title.append(link);
     article.append(title);
 
+    const metaParts = [
+      doc.navGroup,
+      getPageTypeDisplayLabel(doc),
+      doc.path
+    ].map((part) => String(part ?? '').trim()).filter(Boolean);
+    if (metaParts.length > 0) {
+      article.append(createElement('p', 'docs-search-result-meta-line', [...new Set(metaParts)].join(' • ')));
+    }
+
     const badgeRow = createElement('div', 'docs-search-result-badges');
-    if (doc.pageType) {
-      badgeRow.append(createSearchResultBadge(formatFacetValue(doc.pageType)));
+    const pageTypeBadge = createSearchResultPageTypeBadge(doc);
+    if (pageTypeBadge) {
+      badgeRow.append(pageTypeBadge);
     }
 
     if (doc.component) {
@@ -957,9 +1054,12 @@
       article.append(badgeRow);
     }
 
-    const snippet = createElement('p', 'docs-search-result-snippet');
-    snippet.append(createHighlightedFragment(doc.summary || doc.snippet || '', queryTokens));
-    article.append(snippet);
+    const snippetText = doc.summary || doc.snippet || '';
+    if (snippetText) {
+      const snippet = createElement('p', 'docs-search-result-snippet');
+      snippet.append(createHighlightedFragment(snippetText, queryTokens));
+      article.append(snippet);
+    }
 
     return article;
   }
@@ -967,7 +1067,27 @@
   function createNoResultsRecovery(view) {
     const container = createElement('section', 'docs-search-page-no-results');
     container.append(createElement('h2', 'docs-search-page-section-title', 'No pages matched this exact combination.'));
-    container.append(createElement('p', 'docs-search-page-starter-copy', 'Try a broader query, clear one filter, or follow one of these recovery paths.'));
+    const activeSummary = [];
+    if (view.normalizedQuery) {
+      activeSummary.push(`query "${formatQueryForStatus(view.normalizedQuery)}"`);
+    }
+
+    for (const filter of view.activeFilters) {
+      activeSummary.push(`${filter.label}: ${filter.displayValue}`);
+    }
+
+    if (activeSummary.length > 0) {
+      container.append(createElement('p', 'docs-search-page-no-results-summary', `Current search: ${activeSummary.join(', ')}.`));
+    }
+
+    container.append(createElement('p', 'docs-search-page-starter-copy', 'Search worked, but this combination is too narrow. Try a broader query or follow one of these recovery paths.'));
+
+    if (view.activeFilters.length > 0) {
+      const clearButton = createElement('button', 'docs-search-page-clear-filters', 'Clear filters');
+      clearButton.type = 'button';
+      clearButton.dataset.rwClearAllFilters = 'true';
+      container.append(clearButton);
+    }
 
     const links = createElement('div', 'docs-search-page-no-results-links');
     view.recoveryLinks.forEach((link) => {
@@ -1063,19 +1183,19 @@
       pushLink(
         selectRecoveryDoc(
           preferredDocs,
-          (doc) => ['guide', 'concept', 'tutorial', 'troubleshooting'].includes((doc.pageType || '').toLowerCase())
+          (doc) => ['guide', 'concept', 'tutorial', 'troubleshooting'].includes(normalizePageTypeAlias(doc.pageType))
             || doc.path.includes('/guides/')),
         'Browse guides');
       pushLink(
         selectRecoveryDoc(
           preferredDocs,
-          (doc) => (doc.pageType || '').toLowerCase() === 'example'
+          (doc) => normalizePageTypeAlias(doc.pageType) === 'example'
             || doc.path.includes('/examples/')),
         'Open an example');
       pushLink(
         selectRecoveryDoc(
           preferredDocs,
-          (doc) => ['api', 'api-reference'].includes((doc.pageType || '').toLowerCase())
+          (doc) => ['api', 'api-reference'].includes(normalizePageTypeAlias(doc.pageType))
             || doc.path.includes('/Namespaces/')),
         'Explore API reference');
     }
@@ -1107,7 +1227,12 @@
         }
 
         const options = facetValues.map((value) => {
-          const count = siblingDocs.filter((doc) => normalizeFacetValue(doc[facet.key]) === value).length;
+          const count = siblingDocs.filter((doc) => {
+            const actual = facet.key === 'pageType'
+              ? normalizePageTypeAlias(doc[facet.key])
+              : normalizeFacetValue(doc[facet.key]);
+            return actual === value;
+          }).length;
           return {
             value,
             count,
@@ -1146,7 +1271,7 @@
         filter: filterFn
       });
     } else if (hasActiveFilters(filters)) {
-      results = sortDocsForBrowse(searchData.docs.filter((doc) => matchesFilters(doc, filters)))
+      results = searchData.sortedDocs.filter((doc) => matchesFilters(doc, filters))
         .map((doc) => ({ id: doc.id }));
     } else {
       results = [];
@@ -1183,15 +1308,15 @@
       : [];
     const baseDocs = normalizedQuery
       ? baseResults.map((result) => searchData.docsById.get(result.id)).filter(Boolean)
-      : sortDocsForBrowse(searchData.docs);
+      : searchData.sortedDocs;
     const resultDocs = normalizedQuery
       ? (activeFilters.length > 0
           ? baseDocs.filter((doc) => matchesFilters(doc, filters))
           : baseDocs)
       : (activeFilters.length > 0
-          ? sortDocsForBrowse(searchData.docs.filter((doc) => matchesFilters(doc, filters)))
+          ? searchData.sortedDocs.filter((doc) => matchesFilters(doc, filters))
           : []);
-    const orderedResultDocs = normalizedQuery ? resultDocs : sortDocsForBrowse(resultDocs);
+    const orderedResultDocs = normalizedQuery ? resultDocs : resultDocs;
 
     return {
       normalizedQuery,
@@ -1199,6 +1324,7 @@
       facets: deriveFacetState(baseDocs, filters),
       resultDocs: orderedResultDocs,
       isStarter,
+      starterDocs: searchData.starterDocs,
       recoveryLinks: buildRecoveryLinks(baseDocs)
     };
   }
@@ -1382,6 +1508,8 @@
 
     searchData.index = index;
     searchData.docs = docs;
+    searchData.sortedDocs = sortDocsForBrowse(docs);
+    searchData.starterDocs = deriveStarterDocs(searchData.sortedDocs);
     searchData.docsById = new Map(docs.map((doc) => [doc.id, doc]));
     searchData.docsByPath = new Set([
       ...searchData.docsByPath,
@@ -1690,6 +1818,32 @@
     page.activeFilters.replaceChildren(fragment);
   }
 
+  function renderSearchPageStarterDocs(page, view) {
+    if (!page.starterDocs) {
+      return;
+    }
+
+    if (!view.isStarter || view.starterDocs.length === 0) {
+      page.starterDocs.hidden = true;
+      page.starterDocs.replaceChildren();
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    fragment.append(createElement('h2', 'docs-search-page-starter-heading', 'Browse the index'));
+
+    const list = createElement('div', 'docs-search-page-starter-list');
+    for (const starter of view.starterDocs) {
+      const article = createSearchResultArticle(starter.doc, [], { starter: true });
+      article.dataset.rwStarterPageType = starter.group.key;
+      list.append(article);
+    }
+
+    fragment.append(list);
+    page.starterDocs.replaceChildren(fragment);
+    page.starterDocs.hidden = false;
+  }
+
   function renderSearchPageResults(page, view) {
     if (!page.results || !page.resultsMeta) {
       return;
@@ -1738,6 +1892,10 @@
       clearSearchPageFailureContent(page);
       page.failure.hidden = true;
       page.starter.hidden = true;
+      page.starterDocs?.replaceChildren();
+      if (page.starterDocs) {
+        page.starterDocs.hidden = true;
+      }
       page.resultsMeta.hidden = true;
       page.results.replaceChildren(createLoadingSkeletons());
       setSearchPageBusy(page, true);
@@ -1749,6 +1907,10 @@
       ensureSearchPageFailureContent(page);
       page.failure.hidden = false;
       page.starter.hidden = true;
+      page.starterDocs?.replaceChildren();
+      if (page.starterDocs) {
+        page.starterDocs.hidden = true;
+      }
       page.resultsMeta.hidden = true;
       page.results.replaceChildren();
       setSearchPageBusy(page, false);
@@ -1762,6 +1924,7 @@
     const view = buildSearchView();
     renderSearchPageFilters(page, view);
     renderSearchPageActiveFilters(page, view);
+    renderSearchPageStarterDocs(page, view);
     clearSearchPageFailureContent(page);
     page.failure.hidden = true;
     page.starter.hidden = !view.isStarter;
@@ -1818,7 +1981,7 @@
 
   function bindSearchPage() {
     const page = getSearchPageElements();
-    const { root, input, filters, activeFilters, failure, filtersToggle, suggestionButtons } = page;
+    const { root, input, filters, activeFilters, failure, filtersToggle, results, suggestionButtons } = page;
     if (!root || !input || !filters || !activeFilters || !failure || !filtersToggle) {
       return;
     }
@@ -1881,6 +2044,15 @@
       }
 
       setSearchPageState({ [key]: '' }, 'push');
+    });
+
+    results?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-rw-clear-all-filters]');
+      if (!(button instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      setSearchPageState({ pageType: '', component: '', audience: '', status: '' }, 'push');
     });
 
     failure.addEventListener('click', (event) => {

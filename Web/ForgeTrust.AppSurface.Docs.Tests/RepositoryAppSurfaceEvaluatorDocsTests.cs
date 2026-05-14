@@ -213,21 +213,21 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
         var evaluator = await aggregator.GetDocDetailsAsync("start-here/appsurface-evaluator.md");
         Assert.NotNull(evaluator);
         Assert.Null(evaluator!.PreviousPage);
-        Assert.Equal("/docs/start-here/should-i-use-appsurface.md.html", evaluator.NextPage?.Href);
+        Assert.Equal("/docs/start-here/should-i-use-appsurface", evaluator.NextPage?.Href);
 
         var decision = await aggregator.GetDocDetailsAsync("start-here/should-i-use-appsurface.md");
         Assert.NotNull(decision);
-        Assert.Equal("/docs/start-here/appsurface-evaluator.md.html", decision!.PreviousPage?.Href);
-        Assert.Equal("/docs/start-here/first-success-path.md.html", decision.NextPage?.Href);
+        Assert.Equal("/docs/start-here/appsurface-evaluator", decision!.PreviousPage?.Href);
+        Assert.Equal("/docs/start-here/first-success-path", decision.NextPage?.Href);
 
         var firstSuccess = await aggregator.GetDocDetailsAsync("start-here/first-success-path.md");
         Assert.NotNull(firstSuccess);
-        Assert.Equal("/docs/start-here/should-i-use-appsurface.md.html", firstSuccess!.PreviousPage?.Href);
-        Assert.Equal("/docs/guides/from-program-cs-to-module.md.html", firstSuccess.NextPage?.Href);
+        Assert.Equal("/docs/start-here/should-i-use-appsurface", firstSuccess!.PreviousPage?.Href);
+        Assert.Equal("/docs/guides/from-program-cs-to-module", firstSuccess.NextPage?.Href);
 
         var proof = await aggregator.GetDocDetailsAsync("guides/from-program-cs-to-module.md");
         Assert.NotNull(proof);
-        Assert.Equal("/docs/start-here/first-success-path.md.html", proof!.PreviousPage?.Href);
+        Assert.Equal("/docs/start-here/first-success-path", proof!.PreviousPage?.Href);
         Assert.Null(proof.NextPage);
     }
 
@@ -235,19 +235,19 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
     {
         var proof = await aggregator.GetDocDetailsAsync("guides/from-program-cs-to-module.md");
         Assert.NotNull(proof);
-        AssertRelatedHref(proof!, "/docs/Web/ForgeTrust.AppSurface.Web/README.md.html");
-        AssertRelatedHref(proof!, "/docs/ForgeTrust.AppSurface.Core/README.md.html");
+        AssertRelatedHref(proof!, "/docs/web/forgetrust.appsurface.web");
+        AssertRelatedHref(proof!, "/docs/forgetrust.appsurface.core");
 
         var troubleshooting = await aggregator.GetDocDetailsAsync("troubleshooting/startup-and-modules.md");
         Assert.NotNull(troubleshooting);
-        AssertRelatedHref(troubleshooting!, "/docs/examples/config-validation/README.md.html");
-        AssertRelatedHref(troubleshooting!, "/docs/ForgeTrust.AppSurface.Core/README.md.html");
-        AssertRelatedHref(troubleshooting!, "/docs/packages/README.md.html");
+        AssertRelatedHref(troubleshooting!, "/docs/examples/config-validation");
+        AssertRelatedHref(troubleshooting!, "/docs/forgetrust.appsurface.core");
+        AssertRelatedHref(troubleshooting!, "/docs/packages");
 
         var glossary = await aggregator.GetDocDetailsAsync("concepts/glossary.md");
         Assert.NotNull(glossary);
-        AssertRelatedHref(glossary!, "/docs/ForgeTrust.AppSurface.Core/README.md.html");
-        AssertRelatedHref(glossary!, "/docs/Web/ForgeTrust.AppSurface.Web/README.md.html");
+        AssertRelatedHref(glossary!, "/docs/forgetrust.appsurface.core");
+        AssertRelatedHref(glossary!, "/docs/web/forgetrust.appsurface.web");
     }
 
     private static void AssertRelatedHref(DocDetailsViewModel details, string expectedHref)
@@ -265,7 +265,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
     {
         var document = Assert.Single(
             payload.Documents,
-            doc => doc.Path.EndsWith(sourcePath, StringComparison.OrdinalIgnoreCase));
+            doc => string.Equals(doc.SourcePath, sourcePath, StringComparison.OrdinalIgnoreCase));
 
         foreach (var alias in aliases)
         {

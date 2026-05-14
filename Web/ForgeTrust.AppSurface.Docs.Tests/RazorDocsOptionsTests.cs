@@ -50,6 +50,12 @@ public sealed class RazorDocsOptionsTests
         Assert.Equal("razordocs.harvest.harvester_failed", DocHarvestDiagnosticCodes.HarvesterFailed);
         Assert.Equal("razordocs.harvest.no_harvesters", DocHarvestDiagnosticCodes.NoHarvesters);
         Assert.Equal("razordocs.harvest.all_failed", DocHarvestDiagnosticCodes.AllFailed);
+        Assert.Equal("razordocs.routes.reserved_collision", DocHarvestDiagnosticCodes.DocReservedRouteCollision);
+        Assert.Equal("razordocs.routes.doc_collision", DocHarvestDiagnosticCodes.DocRouteCollision);
+        Assert.Equal("razordocs.routes.redirect_alias_collision", DocHarvestDiagnosticCodes.DocRedirectAliasCollision);
+        Assert.Equal("razordocs.routes.invalid_canonical_slug", DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug);
+        Assert.Equal("razordocs.routes.invalid_redirect_alias", DocHarvestDiagnosticCodes.DocInvalidRedirectAlias);
+        Assert.Equal("razordocs.routes.lossy_slug_normalization", DocHarvestDiagnosticCodes.DocLossySlugNormalization);
     }
 
     [Fact]

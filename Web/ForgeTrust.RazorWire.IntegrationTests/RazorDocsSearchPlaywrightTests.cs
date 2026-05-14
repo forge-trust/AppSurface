@@ -286,6 +286,194 @@ public sealed class RazorDocsSearchPlaywrightTests
     }
 
     [Fact]
+    public async Task SearchPage_StarterState_ShowsRepresentativeRows_ForAvailablePageTypes()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(
+            page,
+            BuildControlledSearchPayload(
+                SearchDoc("guide/start", "Getting Started Dependencies", "guide", "Guide", "guide", "Learn how to manage dependencies.", breadcrumbs: ["Guides", "Getting Started"]),
+                SearchDoc("api/packages", "Package API", "api-reference", "API Reference", "api-reference", "Reference for package APIs.", breadcrumbs: ["API", "Packages"]),
+                SearchDoc("examples/dependency", "Dependency Example", "example", "Example", "example", "A working dependency example.", breadcrumbs: ["Samples", "Dependency"]),
+                SearchDoc("support/dependencies", "Dependency Troubleshooting", "troubleshooting", "Troubleshooting", "troubleshooting", "Resolve dependency build issues.", breadcrumbs: ["Support", "Build"]),
+                SearchDoc("releases/2-1-0", "Release Notes 2.1.0", "release notes", "Release", "release_notes", "Dependency fixes in the latest release.", breadcrumbs: ["Release Notes", "2.1.0"])));
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+
+        Assert.Equal(string.Empty, await page.InputValueAsync("#docs-search-page-input"));
+        await ExpectVisibleTextAsync(page, "#docs-search-page-starter-docs", "Browse the index");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-starter-docs", "Getting Started Dependencies");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-starter-docs", "Package API");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-starter-docs", "Dependency Example");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-starter-docs", "Dependency Troubleshooting");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-starter-docs", "Release Notes 2.1.0");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-starter-docs", "Release");
+        Assert.Equal(5, await page.Locator("#docs-search-page-starter-docs .docs-search-result-starter").CountAsync());
+    }
+
+    [Fact]
+    public async Task SearchPage_StarterState_OmitsMissingRepresentativeTypes()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(
+            page,
+            BuildControlledSearchPayload(
+                SearchDoc("guide/start", "Getting Started", "guide", "Guide", "guide", "Start here."),
+                SearchDoc("api/packages", "Package API", "api-reference", "API Reference", "api-reference", "Reference docs.")));
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+
+        Assert.Equal(2, await page.Locator("#docs-search-page-starter-docs .docs-search-result-starter").CountAsync());
+        Assert.Equal(0, await page.Locator("[data-rw-starter-page-type='troubleshooting']").CountAsync());
+        Assert.Equal(0, await page.Locator("[data-rw-starter-page-type='release']").CountAsync());
+    }
+
+    [Fact]
+    public async Task SearchPage_QueryResults_RenderRichCards_AndOmitBlankSnippets()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(
+            page,
+            BuildControlledSearchPayload(
+                SearchDoc(
+                    "guides/dependencies",
+                    "Dependency Guide",
+                    "guide",
+                    "Guide",
+                    "guide",
+                    "Manage dependencies across RazorDocs projects.",
+                    component: "razordocs",
+                    audience: "maintainer",
+                    status: "stable",
+                    breadcrumbs: ["Guides", "Dependencies"]),
+                SearchDoc(
+                    "guides/blank",
+                    "Blank Snippet Dependency",
+                    "guide",
+                    "Guide",
+                    "guide",
+                    string.Empty,
+                    bodyText: "blank dependency body",
+                    breadcrumbs: ["Guides", "Blank"]),
+                SearchDoc(
+                    "releases/dependency",
+                    "Dependency Release Notes",
+                    "release_notes",
+                    "Release",
+                    "release note",
+                    "Dependency fixes in release notes.",
+                    breadcrumbs: ["Releases", "Dependency"])));
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search?q=dependency");
+        await WaitForSearchPageSettledAsync(page);
+
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Guides");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Dependency Guide");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Manage dependencies across RazorDocs projects.");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Guide");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Razordocs");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Maintainer");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Stable");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Dependency Release Notes");
+
+        var releaseBadgeClass = await page
+            .Locator(".docs-search-result")
+            .Filter(new LocatorFilterOptions { HasTextString = "Dependency Release Notes" })
+            .Locator(".docs-search-result-page-type-badge")
+            .GetAttributeAsync("class");
+        Assert.Contains("docs-page-badge--release", releaseBadgeClass);
+        Assert.DoesNotContain("release-note", releaseBadgeClass);
+
+        var blankSnippet = page
+            .Locator(".docs-search-result")
+            .Filter(new LocatorFilterOptions { HasTextString = "Blank Snippet Dependency" })
+            .Locator(".docs-search-result-snippet");
+        Assert.Equal(0, await blankSnippet.CountAsync());
+    }
+
+    [Fact]
+    public async Task SearchPage_NoResultsRecovery_ShowsSummaryAndClearsFilters()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(
+            page,
+            BuildControlledSearchPayload(
+                SearchDoc(
+                    "guide/start",
+                    "Getting Started",
+                    "guide",
+                    "Guide",
+                    "guide",
+                    "Start here.",
+                    component: "razordocs",
+                    audience: "developer",
+                    status: "stable")));
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search?q=no-such-query&pageType=guide&component=razordocs&audience=developer&status=stable");
+        await WaitForSearchPageSettledAsync(page);
+
+        await ExpectVisibleTextAsync(
+            page,
+            "#docs-search-page-results",
+            "Current search: query \"no-such-query\", Page Type: Guide, Component: Razordocs, Audience: Developer, Status: Stable.");
+        await ExpectVisibleTextAsync(page, "#docs-search-page-results", "Clear filters");
+        Assert.False(await page.GetByText("Search is temporarily unavailable").IsVisibleAsync());
+
+        await page.GetByRole(AriaRole.Button, new PageGetByRoleOptions { Name = "Clear filters", Exact = true }).ClickAsync();
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const params = new URLSearchParams(window.location.search);
+              return !params.get('pageType')
+                && !params.get('component')
+                && !params.get('audience')
+                && !params.get('status');
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        Assert.Contains("q=no-such-query", page.Url, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchPage_MobileFilters_CollapseButExposeSelectedState()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(
+            page,
+            BuildControlledSearchPayload(
+                SearchDoc("guide/start", "Getting Started", "guide", "Guide", "guide", "Start here."),
+                SearchDoc("api/packages", "Package API", "api-reference", "API Reference", "api-reference", "Reference docs.")));
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search?pageType=guide");
+        await WaitForSearchPageSettledAsync(page);
+
+        Assert.True(await page.Locator("#docs-search-page-filters-toggle").IsVisibleAsync());
+        Assert.Equal("false", await page.GetAttributeAsync("#docs-search-page-filters-toggle", "aria-expanded"));
+        Assert.False(await page.Locator("#docs-search-page-filters-panel").IsVisibleAsync());
+        await ExpectVisibleTextAsync(page, "#docs-search-page-active-filters", "Page Type: Guide");
+
+        await page.ClickAsync("#docs-search-page-filters-toggle");
+        Assert.Equal("true", await page.GetAttributeAsync("#docs-search-page-filters-toggle", "aria-expanded"));
+        Assert.True(await page.Locator("#docs-search-page-filters-panel").IsVisibleAsync());
+    }
+
+    [Fact]
     public async Task SearchPage_UsesTopLevelNavigation_ForDocumentationIndexRecoveryLink()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
@@ -507,6 +695,84 @@ public sealed class RazorDocsSearchPlaywrightTests
             "() => document.querySelectorAll('#docs-search-page-results .docs-search-result').length > 0",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
+    }
+
+    private static async Task RouteSearchPayloadAsync(IPage page, string payload)
+    {
+        await page.RouteAsync(
+            $"**{SearchIndexPath}",
+            async route =>
+            {
+                await route.FulfillAsync(new RouteFulfillOptions
+                {
+                    Status = 200,
+                    ContentType = "application/json",
+                    Body = payload
+                });
+            });
+    }
+
+    private static string BuildControlledSearchPayload(params object[] documents)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            metadata = new
+            {
+                generatedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+                version = "1",
+                engine = "minisearch"
+            },
+            documents
+        });
+    }
+
+    private static object SearchDoc(
+        string id,
+        string title,
+        string pageType,
+        string pageTypeLabel,
+        string pageTypeVariant,
+        string summary,
+        string component = "",
+        string audience = "",
+        string status = "",
+        string bodyText = "",
+        string[]? breadcrumbs = null)
+    {
+        var path = id.StartsWith("/docs/", StringComparison.Ordinal)
+            ? id
+            : $"/docs/{id}";
+
+        return new
+        {
+            id,
+            path,
+            title,
+            summary,
+            headings = Array.Empty<string>(),
+            bodyText = string.IsNullOrWhiteSpace(bodyText) ? $"{title} {summary}" : bodyText,
+            snippet = summary,
+            pageType,
+            pageTypeLabel,
+            pageTypeVariant,
+            audience,
+            component,
+            aliases = Array.Empty<string>(),
+            keywords = Array.Empty<string>(),
+            status,
+            navGroup = breadcrumbs?.FirstOrDefault() ?? string.Empty,
+            order = 1,
+            relatedPages = Array.Empty<string>(),
+            breadcrumbs = breadcrumbs ?? []
+        };
+    }
+
+    private static async Task ExpectVisibleTextAsync(IPage page, string selector, string text)
+    {
+        await Assertions.Expect(page.Locator(selector)).ToContainTextAsync(text, new LocatorAssertionsToContainTextOptions
+        {
+            Timeout = 30_000
+        });
     }
 
     private static async Task WaitForSearchPageSettledAsync(IPage page)

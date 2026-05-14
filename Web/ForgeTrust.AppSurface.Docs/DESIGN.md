@@ -127,6 +127,9 @@ The empty state should guide without feeling promotional.
 - Include a one-sentence orientation
 - Show clickable suggestion chips
 - Explain that filters can also be used for browse mode before typing
+- Show representative starter rows after the index loads so the page proves the corpus shape before the user knows the exact query
+- Treat starter rows as discovery aids in the same single editorial stream, not as grouped dashboard columns
+- Omit missing representative page types cleanly; do not render empty placeholders for Guide, API Reference, Example, Troubleshooting, or Release when the corpus lacks one
 
 ### Results
 
@@ -137,6 +140,8 @@ Results should be a high-information list.
 - Badges are compact metadata, not visual decoration
 - Snippets should stay short and readable
 - Highlight matches with restrained `<mark>` styling
+- Blank snippets should be omitted instead of replaced with filler text
+- Page-type badges should use the shared badge vocabulary, including `Release` for release-note metadata aliases
 
 ### Filters
 

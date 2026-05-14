@@ -109,7 +109,11 @@ public sealed class RazorDocsStyleTokenPlaywrightTests
         AssertCssColor(detailStyles[2], "51, 65, 85");
         AssertCssColor(detailStyles[3], "15, 23, 42");
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/releases/unreleased.md.html");
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/releases/unreleased",
+            "/releases/unreleased.md.html");
         await page.WaitForSelectorAsync(".docs-provenance-strip", new PageWaitForSelectorOptions
         {
             State = WaitForSelectorState.Visible,

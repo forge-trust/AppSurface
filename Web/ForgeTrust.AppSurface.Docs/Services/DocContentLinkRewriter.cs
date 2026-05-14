@@ -46,6 +46,32 @@ internal static class DocContentLinkRewriter
         return document.Body?.InnerHtml ?? html;
     }
 
+    internal static string RewriteInternalDocLinks(
+        string sourcePath,
+        string html,
+        string docsRootPath,
+        DocRouteIdentityCatalog routeIdentityCatalog)
+    {
+        ArgumentNullException.ThrowIfNull(sourcePath);
+        ArgumentNullException.ThrowIfNull(html);
+        ArgumentException.ThrowIfNullOrWhiteSpace(docsRootPath);
+        ArgumentNullException.ThrowIfNull(routeIdentityCatalog);
+
+        if (html.IndexOf("<a", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            return html;
+        }
+
+        var parser = new HtmlParser();
+        var document = parser.ParseDocument(html);
+        foreach (var anchor in document.QuerySelectorAll("a[href]"))
+        {
+            RewriteAnchorElement(sourcePath, docsRootPath, anchor, routeIdentityCatalog);
+        }
+
+        return document.Body?.InnerHtml ?? html;
+    }
+
     /// <summary>
     /// Prefixes request <c>PathBase</c> for rooted docs-local anchor hrefs in rendered HTML content.
     /// </summary>
@@ -112,6 +138,33 @@ internal static class DocContentLinkRewriter
         // These markers are intentionally shared with IsRootMountedDecoratedDocsLink and
         // PrefixPathBaseForDocsUrls so root-mounted docs links rewritten here can be detected later without reparsing
         // authored source context. DocsFrameId remains the canonical in-frame target.
+        anchor.SetAttribute("data-turbo-frame", DocsFrameId);
+        anchor.SetAttribute("data-turbo-action", "advance");
+
+        if (docsHref.Contains('#'))
+        {
+            anchor.SetAttribute("data-doc-anchor-link", "true");
+        }
+    }
+
+    private static void RewriteAnchorElement(
+        string sourcePath,
+        string docsRootPath,
+        IElement anchor,
+        DocRouteIdentityCatalog routeIdentityCatalog)
+    {
+        if (HasNonSelfTarget(anchor))
+        {
+            return;
+        }
+
+        var href = anchor.GetAttribute("href");
+        if (!TryBuildDocsHref(sourcePath, href, docsRootPath, routeIdentityCatalog, out var docsHref))
+        {
+            return;
+        }
+
+        anchor.SetAttribute("href", docsHref);
         anchor.SetAttribute("data-turbo-frame", DocsFrameId);
         anchor.SetAttribute("data-turbo-action", "advance");
 
@@ -234,6 +287,92 @@ internal static class DocContentLinkRewriter
         }
 
         docsHref = BuildDocsHref(docsRootPath, resolvedTarget, query, fragment);
+        return true;
+    }
+
+    private static bool TryBuildDocsHref(
+        string sourcePath,
+        string? href,
+        string docsRootPath,
+        DocRouteIdentityCatalog routeIdentityCatalog,
+        out string docsHref)
+    {
+        docsHref = string.Empty;
+        if (string.IsNullOrWhiteSpace(href))
+        {
+            return false;
+        }
+
+        var trimmedHref = href.Trim();
+        var (path, query, fragment) = SplitHref(trimmedHref);
+
+        if (string.Equals(path, docsRootPath, StringComparison.OrdinalIgnoreCase))
+        {
+            docsHref = docsRootPath + query + fragment;
+            return true;
+        }
+
+        if (DocsUrlBuilder.IsUnderRoot(path, docsRootPath)
+            && !string.Equals(path, docsRootPath, StringComparison.OrdinalIgnoreCase))
+        {
+            var docsRelativePath = string.Equals(docsRootPath, "/", StringComparison.Ordinal)
+                ? path.TrimStart('/')
+                : path[(docsRootPath.Length + 1)..];
+            return TryBuildCatalogDocsHref(routeIdentityCatalog, docsRootPath, docsRelativePath, query, fragment, out docsHref);
+        }
+
+        if (trimmedHref.StartsWith('#'))
+        {
+            return TryBuildCatalogDocsHref(
+                routeIdentityCatalog,
+                docsRootPath,
+                GetSourceDocumentPath(sourcePath),
+                query,
+                fragment,
+                out docsHref);
+        }
+
+        if (trimmedHref.StartsWith("//", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        if (path.StartsWith("/", StringComparison.Ordinal))
+        {
+            return TryBuildCatalogDocsHref(
+                routeIdentityCatalog,
+                docsRootPath,
+                path.TrimStart('/'),
+                query,
+                fragment,
+                out docsHref);
+        }
+
+        if (Uri.TryCreate(trimmedHref, UriKind.Absolute, out _))
+        {
+            return false;
+        }
+
+        var resolvedTarget = ResolveRelativePath(sourcePath, path);
+        return TryBuildCatalogDocsHref(routeIdentityCatalog, docsRootPath, resolvedTarget, query, fragment, out docsHref);
+    }
+
+    private static bool TryBuildCatalogDocsHref(
+        DocRouteIdentityCatalog routeIdentityCatalog,
+        string docsRootPath,
+        string docPath,
+        string query,
+        string fragment,
+        out string docsHref)
+    {
+        docsHref = string.Empty;
+        if (!routeIdentityCatalog.TryGetPublicRoutePath(docPath, out var publicRoutePath))
+        {
+            return false;
+        }
+
+        docsHref = DocsUrlBuilder.BuildDocUrl(docsRootPath, publicRoutePath) + query + fragment;
         return true;
     }
 

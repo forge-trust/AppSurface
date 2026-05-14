@@ -212,7 +212,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         });
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/Web/ForgeTrust.AppSurface.Web/README.md.html");
+        await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.appsurface.web");
         await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
