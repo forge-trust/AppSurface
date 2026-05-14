@@ -104,7 +104,7 @@
     <h1>@descriptor.Heading</h1>
     <p>We couldn't open <code>@requestPath</code>. @descriptor.Description</p>
     <nav class="actions" aria-label="Recovery actions">
-        <a class="recovery-link" href="@Url.Content("~/")">@descriptor.PrimaryActionText</a>
+        <a class="recovery-link" href="@Url.Content("~/")" data-rw-export-ignore="true">@descriptor.PrimaryActionText</a>
         @if (isDocsPath)
         {
             <a class="recovery-link secondary" href="@Url.Content("~/docs/search")">Search documentation</a>
