@@ -769,20 +769,14 @@ public class ExportEngine
 
         var relativePath = normalized.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
 
-        // Detect extension on the last segment
         var fileName = Path.GetFileName(relativePath);
-        var hasExtension = Path.HasExtension(fileName);
-
-        // Only append .html if:
-        // 1. It is explicitly an HTML content type
-        // 2. AND it doesn't already have an extension (or ends in slash which is handled by fileName check)
-        // 3. OR it's a directory-style index request (empty filename)
+        var isExplicitHtmlFile = relativePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase);
 
         if (string.IsNullOrEmpty(fileName)) // Ends in slash -> index.html
         {
             relativePath = Path.Combine(relativePath, "index.html");
         }
-        else if (!hasExtension && isHtml)
+        else if (isHtml && !isExplicitHtmlFile)
         {
             relativePath += ".html";
         }

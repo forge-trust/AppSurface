@@ -232,8 +232,8 @@ public class DocsController : Controller
     /// Displays the full or partial details view for a documentation item identified by the given path.
     /// </summary>
     /// <param name="path">
-    /// The source path, canonical docs path, or <c>.partial.html</c> resource identifier of the documentation item to
-    /// retrieve.
+    /// The public docs route, redirect alias, or <c>.partial.html</c> resource identifier of the documentation item to
+    /// retrieve. Source-shaped Markdown routes are not rendered unless they are declared as aliases.
     /// </param>
     /// <returns>
     /// An <see cref="IActionResult"/> rendering the details view or the <c>doc-content</c> RazorWire frame; returns
@@ -266,18 +266,35 @@ public class DocsController : Controller
             return NotFound();
         }
 
-        var docDetails = await _aggregator.GetDocDetailsAsync(resolvedPath, HttpContext.RequestAborted);
-        if (docDetails == null
+        var routeResolution = await _aggregator.ResolvePublicRouteAsync(resolvedPath, HttpContext.RequestAborted);
+        if (servesPartial)
+        {
+            routeResolution = await ResolvePartialRouteAsync(resolvedPath, routeResolution, HttpContext.RequestAborted);
+        }
+        else if (routeResolution.Kind == DocRouteResolutionKind.AliasRedirect)
+        {
+            var redirectPath = _docsUrlBuilder.BuildDocUrl(routeResolution.PublicRoutePath ?? string.Empty);
+            return LocalRedirectPermanent(PathBaseAware(redirectPath) + HttpContext.Request.QueryString);
+        }
+
+        if ((routeResolution.Kind != DocRouteResolutionKind.Canonical || string.IsNullOrWhiteSpace(routeResolution.SourcePath))
             && servesPartial
             && resolvedPath.EndsWith("/index", StringComparison.OrdinalIgnoreCase))
         {
             var fallbackPath = resolvedPath[..^"/index".Length];
             if (!string.IsNullOrWhiteSpace(fallbackPath))
             {
-                docDetails = await _aggregator.GetDocDetailsAsync(fallbackPath, HttpContext.RequestAborted);
+                var fallbackResolution = await _aggregator.ResolvePublicRouteAsync(fallbackPath, HttpContext.RequestAborted);
+                routeResolution = await ResolvePartialRouteAsync(fallbackPath, fallbackResolution, HttpContext.RequestAborted);
             }
         }
 
+        if (routeResolution.Kind != DocRouteResolutionKind.Canonical || string.IsNullOrWhiteSpace(routeResolution.SourcePath))
+        {
+            return NotFound();
+        }
+
+        var docDetails = await _aggregator.GetDocDetailsAsync(routeResolution.SourcePath, HttpContext.RequestAborted);
         if (docDetails == null)
         {
             return NotFound();
@@ -293,6 +310,35 @@ public class DocsController : Controller
         }
 
         return View(viewModel);
+    }
+
+    private async Task<DocRouteResolution> ResolvePartialRouteAsync(
+        string resolvedPath,
+        DocRouteResolution routeResolution,
+        CancellationToken cancellationToken)
+    {
+        if (routeResolution.Kind == DocRouteResolutionKind.AliasRedirect
+            && !string.IsNullOrWhiteSpace(routeResolution.PublicRoutePath))
+        {
+            return await _aggregator.ResolvePublicRouteAsync(routeResolution.PublicRoutePath, cancellationToken);
+        }
+
+        if (routeResolution.Kind == DocRouteResolutionKind.Canonical
+            || resolvedPath.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            return routeResolution;
+        }
+
+        var htmlRouteResolution = await _aggregator.ResolvePublicRouteAsync(resolvedPath + ".html", cancellationToken);
+        if (htmlRouteResolution.Kind == DocRouteResolutionKind.AliasRedirect
+            && !string.IsNullOrWhiteSpace(htmlRouteResolution.PublicRoutePath))
+        {
+            return await _aggregator.ResolvePublicRouteAsync(htmlRouteResolution.PublicRoutePath, cancellationToken);
+        }
+
+        return htmlRouteResolution.Kind == DocRouteResolutionKind.Canonical
+            ? htmlRouteResolution
+            : routeResolution;
     }
 
     /// <summary>
@@ -534,6 +580,7 @@ public class DocsController : Controller
         IReadOnlyList<DocSectionSnapshot> sections)
     {
         var visibleDocs = docs
+            .Where(d => d.CanonicalPath is not null)
             .Where(d => d.Metadata?.HideFromPublicNav != true)
             .ToList();
         var landingDoc = docs.FirstOrDefault(
@@ -1167,12 +1214,12 @@ public class DocsController : Controller
         string title,
         string description)
     {
-        if (doc is null)
+        if (doc is null || string.IsNullOrWhiteSpace(doc.CanonicalPath))
         {
             return;
         }
 
-        var href = DocAggregator.BuildSearchDocUrl(_docsUrlBuilder.CurrentDocsRootPath, doc.Path);
+        var href = DocAggregator.BuildSearchDocUrl(_docsUrlBuilder.CurrentDocsRootPath, GetSnapshotCanonicalPath(doc));
         if (links.Any(link => string.Equals(link.Href, href, StringComparison.OrdinalIgnoreCase)))
         {
             return;

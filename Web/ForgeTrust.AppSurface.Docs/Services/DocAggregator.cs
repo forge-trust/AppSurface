@@ -62,6 +62,7 @@ internal sealed record DocsSearchIndexMetadata(
 /// <param name="CanonicalSlug">Optional canonical slug used for route continuity.</param>
 /// <param name="RelatedPages">Authored related-page references used for recovery links.</param>
 /// <param name="Breadcrumbs">Authored breadcrumb labels displayed in result chrome.</param>
+/// <param name="SourcePath">Repository-relative source path retained for provenance and custom integrations.</param>
 internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("path")] string Path,
@@ -86,7 +87,8 @@ internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("sequenceKey")] string? SequenceKey,
     [property: JsonPropertyName("canonicalSlug")] string? CanonicalSlug,
     [property: JsonPropertyName("relatedPages")] IReadOnlyList<string> RelatedPages,
-    [property: JsonPropertyName("breadcrumbs")] IReadOnlyList<string> Breadcrumbs);
+    [property: JsonPropertyName("breadcrumbs")] IReadOnlyList<string> Breadcrumbs,
+    [property: JsonPropertyName("sourcePath")] string SourcePath = "");
 
 /// <summary>
 /// Service responsible for aggregating documentation from multiple harvesters and caching the results.
@@ -142,6 +144,7 @@ public class DocAggregator
     private sealed record CachedDocsSnapshot(
         Dictionary<string, DocNode> DocsByPath,
         DocPathResolver PathResolver,
+        DocRouteIdentityCatalog RouteIdentityCatalog,
         IReadOnlyList<DocSectionSnapshot> PublicSections,
         DocsSearchIndexPayload SearchIndexPayload,
         Dictionary<string, DocContributorProvenanceViewModel> ContributorProvenanceByPath,
@@ -451,6 +454,33 @@ public class DocAggregator
     }
 
     /// <summary>
+    /// Resolves a requested browser-facing docs route against the current snapshot route catalog.
+    /// </summary>
+    /// <param name="path">
+    /// The non-null request path to resolve. Callers may pass a docs-relative route such as
+    /// <c>packages</c>, a rooted docs path such as <c>/docs/packages</c>, or a source-shaped path that should remain
+    /// internal-only.
+    /// </param>
+    /// <param name="cancellationToken">An optional token observed while waiting for the cached docs snapshot.</param>
+    /// <returns>
+    /// A <see cref="DocRouteResolution"/> whose kind tells callers whether the request is the canonical public route,
+    /// a declared alias that should redirect to <see cref="DocRouteResolution.PublicRoutePath"/>, an internal source
+    /// match, a collision or reserved-route loser, or an unresolved path.
+    /// </returns>
+    /// <remarks>
+    /// This method does not redirect or mutate the snapshot. It awaits <c>GetCachedDocsSnapshotAsync</c>, then delegates
+    /// to <see cref="DocRouteIdentityCatalog.ResolvePublicRoute(string)"/> so controllers and link builders branch on
+    /// the same route identity semantics.
+    /// </remarks>
+    internal async Task<DocRouteResolution> ResolvePublicRouteAsync(string path, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
+        return snapshot.RouteIdentityCatalog.ResolvePublicRoute(path);
+    }
+
+    /// <summary>
     /// Builds the typed details view model for the specified documentation page.
     /// </summary>
     /// <param name="path">The documentation path to resolve.</param>
@@ -597,7 +627,7 @@ public class DocAggregator
                                        sanitizedContent,
                                        n.ParentPath,
                                        n.IsDirectory,
-                                       DocRoutePath.BuildCanonicalPath(n.Path),
+                                       null,
                                        n.Metadata,
                                        n.Outline,
                                        n.SymbolSourceProvenance);
@@ -606,7 +636,7 @@ public class DocAggregator
 
                        var targetNodes = sanitizedNodes.ToList();
                        MergeNamespaceReadmes(targetNodes);
-                       var linkTargetManifest = DocLinkTargetManifest.FromNodes(targetNodes);
+                       var routeIdentityCatalog = DocRouteIdentityCatalog.Create(targetNodes, _docsUrlBuilder);
                        // Rewrite before the real namespace merge so README-relative links keep their source path
                        // context, while the manifest still reflects only final published docs targets.
                        var rewrittenNodes = sanitizedNodes
@@ -614,14 +644,16 @@ public class DocAggregator
                                n => new DocNode(
                                    n.Title,
                                    n.Path,
-                                   DocContentLinkRewriter.RewriteInternalDocLinks(
-                                       n.Path,
-                                       n.Content,
-                                       _docsUrlBuilder.CurrentDocsRootPath,
-                                       linkTargetManifest),
+                                       DocContentLinkRewriter.RewriteInternalDocLinks(
+                                           n.Path,
+                                           n.Content,
+                                           _docsUrlBuilder.CurrentDocsRootPath,
+                                           routeIdentityCatalog),
                                    n.ParentPath,
                                    n.IsDirectory,
-                                   n.CanonicalPath,
+                                   routeIdentityCatalog.TryGetPublicRoutePath(n.Path, out var publicRoutePath)
+                                       ? publicRoutePath
+                                       : null,
                                    n.Metadata,
                                    n.Outline,
                                    n.SymbolSourceProvenance))
@@ -644,15 +676,20 @@ public class DocAggregator
                                return first;
                            })
                            .ToDictionary(n => n.Path, n => n);
+                       var finalRouteIdentityCatalog = DocRouteIdentityCatalog.Create(docsByPath.Values, _docsUrlBuilder);
                        var pathResolver = DocPathResolver.Create(docsByPath.Values);
 
                        var publicSections = BuildPublicSections(docsByPath.Values, logger);
                        var contributorProvenanceByPath = await BuildContributorProvenanceByPathAsync(
                            docsByPath.Values,
                            CancellationToken.None);
-                       var (searchIndexPayload, searchRecordCount) = BuildSearchIndexPayload(docsByPath.Values, publicSections);
+                       var (searchIndexPayload, searchRecordCount) = BuildSearchIndexPayload(
+                           docsByPath.Values,
+                           publicSections,
+                           finalRouteIdentityCatalog);
                        var harvestHealth = BuildHarvestHealthSnapshot(
                            harvesterResults,
+                           finalRouteIdentityCatalog.Diagnostics,
                            docsByPath.Count,
                            repositoryRoot,
                            utcNow(),
@@ -669,6 +706,7 @@ public class DocAggregator
                        return new CachedDocsSnapshot(
                            docsByPath,
                            pathResolver,
+                           finalRouteIdentityCatalog,
                            publicSections,
                            searchIndexPayload,
                            contributorProvenanceByPath,
@@ -794,6 +832,7 @@ public class DocAggregator
 
     private static DocHarvestHealthSnapshot BuildHarvestHealthSnapshot(
         IReadOnlyList<HarvesterRunResult> harvesterResults,
+        IReadOnlyList<DocHarvestDiagnostic> routeDiagnostics,
         int totalDocs,
         string repositoryRoot,
         DateTimeOffset generatedUtc,
@@ -811,6 +850,7 @@ public class DocAggregator
             .Select(result => result.Diagnostic)
             .OfType<DocHarvestDiagnostic>()
             .ToList();
+        diagnostics.AddRange(routeDiagnostics);
 
         if (harvesters.Length == 0)
         {
@@ -1401,6 +1441,7 @@ public class DocAggregator
         ILogger logger)
     {
         var visibleDocs = docs
+            .Where(doc => doc.CanonicalPath is not null)
             .Where(doc => doc.Metadata?.HideFromPublicNav != true)
             .Where(doc => DocPublicSectionCatalog.TryResolve(doc.Metadata?.NavGroup, out _))
             .GroupBy(
@@ -1487,10 +1528,12 @@ public class DocAggregator
     /// </summary>
     /// <param name="docs">The documentation nodes to index.</param>
     /// <param name="publicSections">The resolved public sections used to derive landing winners.</param>
+    /// <param name="routeIdentityCatalog">The snapshot route catalog used to emit public canonical paths.</param>
     /// <returns>A tuple containing the serializable payload and the number of records indexed.</returns>
     private (DocsSearchIndexPayload Payload, int RecordCount) BuildSearchIndexPayload(
         IEnumerable<DocNode> docs,
-        IReadOnlyList<DocSectionSnapshot> publicSections)
+        IReadOnlyList<DocSectionSnapshot> publicSections,
+        DocRouteIdentityCatalog routeIdentityCatalog)
     {
         var resolvedLandingPaths = publicSections
             .Where(section => section.LandingDoc is not null)
@@ -1499,9 +1542,14 @@ public class DocAggregator
 
         var records = docs
             .Where(d => d.Metadata?.HideFromSearch != true && d.Metadata?.HideFromPublicNav != true)
-            .Select(
+            .Select<DocNode, DocsSearchIndexDocument?>(
                 d =>
                 {
+                    if (!routeIdentityCatalog.TryGetPublicRoutePath(d.Path, out var publicRoutePath))
+                    {
+                        return null;
+                    }
+
                     var content = d.Content ?? string.Empty;
                     var searchableContent = SymbolSourceLinkRegex.Replace(content, " ");
                     var bodyText = NormalizeSearchText(TagRegex.Replace(ScriptOrStyleRegex.Replace(searchableContent, string.Empty), " "));
@@ -1519,8 +1567,8 @@ public class DocAggregator
                     var hasPublicSection = DocPublicSectionCatalog.TryResolve(d.Metadata?.NavGroup, out var publicSection);
 
                     return new DocsSearchIndexDocument(
-                        d.Path,
-                        BuildSearchDocUrl(_docsUrlBuilder.CurrentDocsRootPath, d.Path),
+                        publicRoutePath,
+                        BuildSearchDocUrl(_docsUrlBuilder.CurrentDocsRootPath, publicRoutePath),
                         title,
                         summary,
                         headings,
@@ -1542,8 +1590,11 @@ public class DocAggregator
                         d.Metadata?.SequenceKey,
                         d.Metadata?.CanonicalSlug,
                         d.Metadata?.RelatedPages ?? [],
-                        d.Metadata?.Breadcrumbs ?? []);
+                        d.Metadata?.Breadcrumbs ?? [],
+                        d.Path);
                 })
+            .Where(r => r is not null)
+            .Select(r => r!)
             .Where(r => !string.IsNullOrWhiteSpace(r.Title) || !string.IsNullOrWhiteSpace(r.BodyText))
             .GroupBy(r => r.Path, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.First())

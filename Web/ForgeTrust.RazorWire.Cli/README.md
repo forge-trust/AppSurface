@@ -84,6 +84,7 @@ Exactly one source option is required: `--url`, `--project`, or `--dll`.
 - `/` is emitted as `index.html` and may still be referenced as `/`.
 - `/about` is emitted as `about.html` and internal references rewrite to `/about.html`.
 - `/docs/start` is emitted as `docs/start.html` and internal references rewrite to `/docs/start.html`.
+- Dotted page slugs still follow page-route rules: `/docs/web/forgetrust.razorwire` is emitted as `docs/web/forgetrust.razorwire.html`, while assets that return non-HTML content keep their real extension.
 - RazorDocs content frames also emit `.partial.html` artifacts when a `doc-content` frame exists, so static frame navigation can fetch the content island.
 - Assets that already have extensions, such as `/css/site.css`, `/img/logo.png`, or `/_content/.../razorwire.js`, keep their path. Cache-busting query strings on assets are allowed only when the query-free path maps to an exported file.
 - The conventional `/_appsurface/errors/404` page, when available, is emitted as `404.html` and participates in the same CDN validation and URL rewriting.

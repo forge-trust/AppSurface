@@ -13,7 +13,7 @@ trust:
   change_scope: Repository-wide. The chooser covers AppSurface's coordinated v0.1 package family, support packages, and proof-host surfaces.
   migration:
     label: Read the pre-1.0 upgrade policy
-    href: /docs/releases/upgrade-policy.md.html
+    href: /docs/releases/upgrade-policy
   archive: Package READMEs remain the deep reference. This chooser is the public install map for the current repo state.
   sources:
     - packages/package-index.yml

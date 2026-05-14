@@ -703,6 +703,36 @@ public static class DocHarvestDiagnosticCodes
     /// Every configured harvester failed, timed out, or canceled for the snapshot.
     /// </summary>
     public const string AllFailed = "razordocs.harvest.all_failed";
+
+    /// <summary>
+    /// A documentation page resolved to a route owned by RazorDocs chrome, search, health, versions, sections, or assets.
+    /// </summary>
+    public const string DocReservedRouteCollision = "razordocs.routes.reserved_collision";
+
+    /// <summary>
+    /// Multiple documentation pages resolved to the same public route path.
+    /// </summary>
+    public const string DocRouteCollision = "razordocs.routes.doc_collision";
+
+    /// <summary>
+    /// A declared redirect alias collided with another public doc route or alias.
+    /// </summary>
+    public const string DocRedirectAliasCollision = "razordocs.routes.redirect_alias_collision";
+
+    /// <summary>
+    /// A declared canonical slug was invalid for public route identity.
+    /// </summary>
+    public const string DocInvalidCanonicalSlug = "razordocs.routes.invalid_canonical_slug";
+
+    /// <summary>
+    /// A declared redirect alias was invalid for public route identity.
+    /// </summary>
+    public const string DocInvalidRedirectAlias = "razordocs.routes.invalid_redirect_alias";
+
+    /// <summary>
+    /// RazorDocs had to drop or fold characters while normalizing a public route slug.
+    /// </summary>
+    public const string DocLossySlugNormalization = "razordocs.routes.lossy_slug_normalization";
 }
 
 /// <summary>

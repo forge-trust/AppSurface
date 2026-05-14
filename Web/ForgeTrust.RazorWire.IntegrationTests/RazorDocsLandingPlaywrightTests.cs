@@ -35,54 +35,54 @@ public sealed class RazorDocsLandingPlaywrightTests
         Assert.DoesNotContain(
             "Welcome to the technical documentation.",
             await page.InnerTextAsync("body"));
-        Assert.Equal("/docs/start-here/should-i-use-appsurface.md.html", await page.GetAttributeAsync("main a.group", "href"));
+        Assert.Equal("/docs/start-here/should-i-use-appsurface", await page.GetAttributeAsync("main a.group", "href"));
 
         await AssertFeaturedCardAsync(
             page,
-            "/docs/start-here/should-i-use-appsurface.md.html",
+            "/docs/start-here/should-i-use-appsurface",
             "Should my team use AppSurface?",
             "Should I Use AppSurface?",
             "GUIDE");
 
         await AssertFeaturedCardAsync(
             page,
-            "/docs/start-here/appsurface-evaluator.md.html",
+            "/docs/start-here/appsurface-evaluator",
             "What is the evaluator path?",
             "Start Here for AppSurface Evaluators",
             "GUIDE");
         await AssertFeaturedCardAsync(
             page,
-            "/docs/start-here/first-success-path.md.html",
+            "/docs/start-here/first-success-path",
             "Can I run it in minutes?",
             "First Success Path",
             "TUTORIAL");
         await AssertFeaturedCardAsync(
             page,
-            "/docs/packages/README.md.html",
+            "/docs/packages",
             "Which AppSurface package should I install first?",
             "AppSurface v0.1 package chooser",
             "GUIDE");
         await AssertFeaturedCardAsync(
             page,
-            "/docs/releases/README.md.html",
+            "/docs/releases",
             "What is shipping next, and how risky is the upgrade?",
             "Releases",
             "GUIDE");
         await AssertFeaturedCardAsync(
             page,
-            "/docs/examples/web-app/README.md.html",
+            "/docs/examples/web-app",
             "Show me a working app, not just abstractions",
             "Web app example",
             "EXAMPLE");
         await AssertFeaturedCardAsync(
             page,
-            "/docs/Aspire/README.md.html",
+            "/docs/aspire",
             "How does this fit distributed systems?",
             "Aspire",
             "GUIDE");
         await AssertFeaturedCardAsync(
             page,
-            "/docs/Console/README.md.html",
+            "/docs/console",
             "What about CLI and worker flows?",
             "Console",
             "GUIDE");
@@ -95,8 +95,8 @@ public sealed class RazorDocsLandingPlaywrightTests
         var page = await context.NewPageAsync();
 
         await page.GotoAsync(_fixture.DocsUrl);
-        await page.Locator("main a[href='/docs/releases/README.md.html']").First.ClickAsync();
-        await WaitForPathAsync(page, "/docs/releases/README.md.html");
+        await page.Locator("main a[href='/docs/releases']").First.ClickAsync();
+        await WaitForPathAsync(page, "/docs/releases");
         await page.WaitForSelectorAsync(".docs-trust-bar", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -106,8 +106,8 @@ public sealed class RazorDocsLandingPlaywrightTests
         Assert.Equal("Releases", (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("Release contract", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
 
-        await page.Locator(".docs-content a[href='/docs/releases/unreleased.md.html']").First.ClickAsync();
-        await WaitForPathAsync(page, "/docs/releases/unreleased.md.html");
+        await page.Locator(".docs-content a[href='/docs/releases/unreleased']").First.ClickAsync();
+        await WaitForPathAsync(page, "/docs/releases/unreleased");
         await page.WaitForFunctionAsync(
             "() => document.querySelector('h1')?.textContent?.trim() === 'Unreleased'",
             null,
@@ -130,7 +130,7 @@ public sealed class RazorDocsLandingPlaywrightTests
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/releases/unreleased.md.html");
+        await page.GotoAsync($"{_fixture.DocsUrl}/releases/unreleased");
         await page.WaitForSelectorAsync(".docs-provenance-strip", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
