@@ -967,7 +967,14 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.Combine(_repositoryRoot, "packages", "package-index.yml"), defaults.Request.ManifestPath);
         Assert.Equal(Path.Combine(_repositoryRoot, "packages", "README.md"), defaults.Request.OutputPath);
         Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "packages"), defaults.ArtifactsOutputPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "packages"), defaults.ArtifactsInputPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-artifact-manifest.json"), defaults.ArtifactManifestPath);
         Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-validation-report.md"), defaults.ReportPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-publish-log.md"), defaults.PublishLogPath);
+        Assert.Equal("https://api.nuget.org/v3/index.json", defaults.Source);
+        Assert.Equal("NUGET_API_KEY", defaults.ApiKeyEnvironmentVariable);
+        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-smoke"), defaults.SmokeWorkDirectory);
+        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-smoke-report.md"), defaults.SmokeReportPath);
         Assert.Null(defaults.PackageVersion);
 
         var parsed = CommandLineOptions.Parse(
@@ -976,8 +983,15 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "--manifest", "manifest.yml",
                 "--output", "chooser.md",
                 "--artifacts-output", "packages-out",
+                "--artifacts-input", "packages-in",
+                "--artifact-manifest", "artifact-manifest.json",
                 "--package-version", "0.0.0-ci.99",
-                "--report", "package-report.md"
+                "--report", "package-report.md",
+                "--publish-log", "publish-log.md",
+                "--source", "https://example.test/v3/index.json",
+                "--api-key-env", "CUSTOM_NUGET_KEY",
+                "--smoke-work-dir", "smoke",
+                "--smoke-report", "smoke-report.md"
             ],
             _repositoryRoot);
 
@@ -985,21 +999,48 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "manifest.yml")), parsed.Request.ManifestPath);
         Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "chooser.md")), parsed.Request.OutputPath);
         Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "packages-out")), parsed.ArtifactsOutputPath);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "packages-in")), parsed.ArtifactsInputPath);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "artifact-manifest.json")), parsed.ArtifactManifestPath);
         Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "package-report.md")), parsed.ReportPath);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "publish-log.md")), parsed.PublishLogPath);
+        Assert.Equal("https://example.test/v3/index.json", parsed.Source);
+        Assert.Equal("CUSTOM_NUGET_KEY", parsed.ApiKeyEnvironmentVariable);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "smoke")), parsed.SmokeWorkDirectory);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "smoke-report.md")), parsed.SmokeReportPath);
         Assert.Equal("0.0.0-ci.99", parsed.PackageVersion);
 
         var absoluteManifest = Path.Combine(_repositoryRoot, "abs", "manifest.yml");
         var absoluteOutput = Path.Combine(_repositoryRoot, "abs", "chooser.md");
         var absoluteArtifacts = Path.Combine(_repositoryRoot, "abs", "artifacts");
+        var absoluteArtifactsInput = Path.Combine(_repositoryRoot, "abs", "artifacts-in");
+        var absoluteArtifactManifest = Path.Combine(_repositoryRoot, "abs", "manifest.json");
         var absoluteReport = Path.Combine(_repositoryRoot, "abs", "report.md");
+        var absolutePublishLog = Path.Combine(_repositoryRoot, "abs", "publish.md");
+        var absoluteSmokeWorkDirectory = Path.Combine(_repositoryRoot, "abs", "smoke");
+        var absoluteSmokeReport = Path.Combine(_repositoryRoot, "abs", "smoke.md");
         var absolute = CommandLineOptions.Parse(
-            ["--manifest", absoluteManifest, "--output", absoluteOutput, "--artifacts-output", absoluteArtifacts, "--report", absoluteReport],
+            [
+                "--manifest", absoluteManifest,
+                "--output", absoluteOutput,
+                "--artifacts-output", absoluteArtifacts,
+                "--artifacts-input", absoluteArtifactsInput,
+                "--artifact-manifest", absoluteArtifactManifest,
+                "--report", absoluteReport,
+                "--publish-log", absolutePublishLog,
+                "--smoke-work-dir", absoluteSmokeWorkDirectory,
+                "--smoke-report", absoluteSmokeReport
+            ],
             _repositoryRoot);
 
         Assert.Equal(absoluteManifest, absolute.Request.ManifestPath);
         Assert.Equal(absoluteOutput, absolute.Request.OutputPath);
         Assert.Equal(absoluteArtifacts, absolute.ArtifactsOutputPath);
+        Assert.Equal(absoluteArtifactsInput, absolute.ArtifactsInputPath);
+        Assert.Equal(absoluteArtifactManifest, absolute.ArtifactManifestPath);
         Assert.Equal(absoluteReport, absolute.ReportPath);
+        Assert.Equal(absolutePublishLog, absolute.PublishLogPath);
+        Assert.Equal(absoluteSmokeWorkDirectory, absolute.SmokeWorkDirectory);
+        Assert.Equal(absoluteSmokeReport, absolute.SmokeReportPath);
     }
 
     [Fact]
@@ -1050,6 +1091,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     [InlineData("generate", "-h")]
     [InlineData("verify", "--help")]
     [InlineData("verify-packages", "--help")]
+    [InlineData("publish-prerelease", "--help")]
+    [InlineData("smoke-install", "--help")]
     [InlineData("gate", "--help")]
     public async Task RunAsync_WritesCommandHelpToStandardOut(string command, string helpOption)
     {
@@ -1233,6 +1276,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 "verify-packages",
                 "--package-version", "0.0.0-ci.99",
                 "--artifacts-output", "packages-out",
+                "--artifact-manifest", "reports/artifacts.json",
                 "--report", "reports/packages.md"
             ],
             stdout,
@@ -1257,6 +1301,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.NotNull(capturedRequest);
         Assert.Equal(Path.Combine(_repositoryRoot, "packages-out"), capturedRequest.ArtifactsOutputPath);
         Assert.Equal(Path.Combine(_repositoryRoot, "reports", "packages.md"), capturedRequest.ReportPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "artifacts.json"), capturedRequest.ArtifactManifestPath);
         Assert.Equal("0.0.0-ci.99", capturedRequest.PackageVersion);
         Assert.Contains("Validated 1 package artifacts for 0.0.0-ci.99. Report: reports/packages.md.", stdout.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr.ToString());
@@ -1291,6 +1336,99 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(1, exitCode);
         Assert.Contains("--package-version", stderr.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, stdout.ToString());
+    }
+
+    [Fact]
+    public async Task RunAsync_PublishPrerelease_UsesWorkflowAndReturnsFailureWhenLedgerFails()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        PackagePrereleasePublishRequest? capturedRequest = null;
+
+        var exitCode = await Program.RunAsync(
+            [
+                "publish-prerelease",
+                "--artifacts-input", "packages-in",
+                "--artifact-manifest", "packages-in/artifacts.json",
+                "--publish-log", "reports/publish.md",
+                "--source", "https://example.test/v3/index.json",
+                "--api-key-env", "TEST_KEY"
+            ],
+            stdout,
+            stderr,
+            _repositoryRoot,
+            publishPrereleaseAsync: (request, _) =>
+            {
+                capturedRequest = request;
+                return Task.FromResult(new PackagePublishLedger(
+                    "0.0.0-ci.99",
+                    request.Source,
+                    [
+                        new PackagePublishLedgerEntry(
+                            "ForgeTrust.AppSurface.Web",
+                            "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                            "ForgeTrust.AppSurface.Web.0.0.0-ci.99.nupkg",
+                            PackagePublishStatus.Failed,
+                            1,
+                            "failed")
+                    ]));
+            });
+
+        Assert.Equal(1, exitCode);
+        Assert.NotNull(capturedRequest);
+        Assert.Equal(Path.Combine(_repositoryRoot, "packages-in"), capturedRequest.ArtifactsInputPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "packages-in", "artifacts.json"), capturedRequest.ArtifactManifestPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "publish.md"), capturedRequest.PublishLogPath);
+        Assert.Equal("https://example.test/v3/index.json", capturedRequest.Source);
+        Assert.Equal("TEST_KEY", capturedRequest.ApiKeyEnvironmentVariable);
+        Assert.Contains("Published 0 package artifacts for 0.0.0-ci.99. Log: reports/publish.md.", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    [Fact]
+    public async Task RunAsync_SmokeInstall_UsesWorkflowAndReturnsSuccess()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        PackageSmokeInstallRequest? capturedRequest = null;
+
+        var exitCode = await Program.RunAsync(
+            [
+                "smoke-install",
+                "--artifact-manifest", "packages-in/artifacts.json",
+                "--smoke-work-dir", "smoke",
+                "--smoke-report", "reports/smoke.md",
+                "--source", "https://example.test/v3/index.json"
+            ],
+            stdout,
+            stderr,
+            _repositoryRoot,
+            smokeInstallAsync: (request, _) =>
+            {
+                capturedRequest = request;
+                return Task.FromResult(new PackageSmokeInstallReport(
+                    "0.0.0-ci.99",
+                    request.Source,
+                    [
+                        new PackageSmokeInstallReportEntry(
+                            "ForgeTrust.AppSurface.Web",
+                            "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                            IsTool: false,
+                            PackageSmokeInstallStatus.Restored,
+                            0,
+                            "restored")
+                    ]));
+            });
+
+        Assert.Equal(0, exitCode);
+        Assert.NotNull(capturedRequest);
+        Assert.Equal(Path.Combine(_repositoryRoot, "packages", "package-index.yml"), capturedRequest.ManifestPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "packages-in", "artifacts.json"), capturedRequest.ArtifactManifestPath);
+        Assert.Equal(Path.Combine(_repositoryRoot, "smoke"), capturedRequest.WorkDirectory);
+        Assert.Equal(Path.Combine(_repositoryRoot, "reports", "smoke.md"), capturedRequest.ReportPath);
+        Assert.Equal("https://example.test/v3/index.json", capturedRequest.Source);
+        Assert.Contains("Smoke installed 1 published prerelease packages for 0.0.0-ci.99. Report: reports/smoke.md.", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, stderr.ToString());
     }
 
     [Fact]

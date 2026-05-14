@@ -123,8 +123,15 @@
       "forgetrust.appsurface.packageindex": {
         "type": "Project",
         "dependencies": {
+          "CliWrap": "[3.10.1, )",
           "YamlDotNet": "[17.0.1, )"
         }
+      },
+      "CliWrap": {
+        "type": "CentralTransitive",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
       "YamlDotNet": {
         "type": "CentralTransitive",

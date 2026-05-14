@@ -1,0 +1,252 @@
+name: NuGet Prerelease Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: nuget-prerelease-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-tag:
+    if: ${{ github.repository == 'forge-trust/AppSurface' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      package-version: ${{ steps.tag.outputs.package-version }}
+      tag-commit: ${{ steps.tag.outputs.tag-commit }}
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Validate prerelease tag
+        id: tag
+        run: |
+          set -euo pipefail
+
+          tag_name="${GITHUB_REF_NAME}"
+          tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(preview|alpha|beta|rc)\.[1-9][0-9]*$'
+          if [[ ! "${tag_name}" =~ ${tag_pattern} ]]; then
+            echo "Tag '${tag_name}' must match v<major>.<minor>.<patch>-<preview|alpha|beta|rc>.<positive-number>." >&2
+            exit 1
+          fi
+
+          tag_type="$(git cat-file -t "refs/tags/${tag_name}")"
+          if [[ "${tag_type}" != "tag" ]]; then
+            echo "Prerelease publish requires an annotated tag. '${tag_name}' is ${tag_type}." >&2
+            exit 1
+          fi
+
+          tag_commit="$(git rev-parse "refs/tags/${tag_name}^{commit}")"
+          git fetch origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${tag_commit}" origin/main; then
+            echo "Tag '${tag_name}' resolves to ${tag_commit}, which is not reachable from origin/main." >&2
+            exit 1
+          fi
+
+          {
+            echo "package-version=${tag_name#v}"
+            echo "tag-commit=${tag_commit}"
+          } >> "${GITHUB_OUTPUT}"
+
+  validate-release-environment:
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      deployments: read
+
+    steps:
+      - name: Validate protected NuGet environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if ! environment_json="$(gh api "repos/${GITHUB_REPOSITORY}/environments/nuget-prerelease")"; then
+            echo "Environment 'nuget-prerelease' must exist before prerelease publishing can run." >&2
+            exit 1
+          fi
+
+          required_reviewer_rules="$(jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' <<< "${environment_json}")"
+          prevent_self_review_rules="$(jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == true)] | length' <<< "${environment_json}")"
+
+          if [[ "${required_reviewer_rules}" -lt 1 ]]; then
+            echo "Environment 'nuget-prerelease' must exist with required reviewers before prerelease publishing can run." >&2
+            exit 1
+          fi
+
+          if [[ "${prevent_self_review_rules}" -lt 1 ]]; then
+            echo "Environment 'nuget-prerelease' must prevent self-review before prerelease publishing can run." >&2
+            exit 1
+          fi
+
+  validate-source-ci:
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Validate source workflows succeeded
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_COMMIT: ${{ needs.validate-tag.outputs.tag-commit }}
+        run: |
+          set -euo pipefail
+
+          for workflow in build.yml package-gate.yml; do
+            run_url="$(gh run list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --workflow "${workflow}" \
+              --branch main \
+              --commit "${TAG_COMMIT}" \
+              --json conclusion,status,url \
+              --jq '[.[] | select(.status == "completed" and .conclusion == "success")][0].url // ""')"
+
+            if [[ -z "${run_url}" ]]; then
+              echo "Required workflow '${workflow}' has no successful completed run for ${TAG_COMMIT} on main." >&2
+              exit 1
+            fi
+
+            echo "Validated ${workflow}: ${run_url}"
+          done
+
+  pack-and-verify:
+    needs:
+      - validate-tag
+      - validate-source-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout tag commit
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag-commit }}
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Verify package artifacts
+        env:
+          PACKAGE_VERSION: ${{ needs.validate-tag.outputs.package-version }}
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+            verify-packages \
+            --package-version "${PACKAGE_VERSION}" \
+            --artifacts-output "${PACKAGE_ARTIFACTS}" \
+            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
+            --report "${PACKAGE_ARTIFACTS}/package-validation-report.md"
+
+      - name: Upload validated package artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: appsurface-prerelease-packages-${{ needs.validate-tag.outputs.package-version }}
+          path: ${{ runner.temp }}/package-artifacts
+          if-no-files-found: error
+
+  publish-nuget:
+    needs:
+      - validate-tag
+      - validate-release-environment
+      - pack-and-verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: nuget-prerelease
+
+    steps:
+      - name: Checkout tag commit
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag-commit }}
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Download validated package artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: appsurface-prerelease-packages-${{ needs.validate-tag.outputs.package-version }}
+          path: ${{ runner.temp }}/package-artifacts
+
+      - name: Publish packages to NuGet
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+            publish-prerelease \
+            --artifacts-input "${PACKAGE_ARTIFACTS}" \
+            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
+            --publish-log "${PACKAGE_ARTIFACTS}/package-publish-log.md"
+
+      - name: Upload publish ledger
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: appsurface-prerelease-publish-log-${{ needs.validate-tag.outputs.package-version }}
+          path: ${{ runner.temp }}/package-artifacts/package-publish-log.md
+          if-no-files-found: warn
+
+  smoke-install:
+    needs:
+      - validate-tag
+      - publish-nuget
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout tag commit
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag-commit }}
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Download validated package artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: appsurface-prerelease-packages-${{ needs.validate-tag.outputs.package-version }}
+          path: ${{ runner.temp }}/package-artifacts
+
+      - name: Smoke install published packages
+        env:
+          PACKAGE_ARTIFACTS: ${{ runner.temp }}/package-artifacts
+          SMOKE_WORK_DIR: ${{ runner.temp }}/package-smoke
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+            smoke-install \
+            --artifact-manifest "${PACKAGE_ARTIFACTS}/package-artifact-manifest.json" \
+            --smoke-work-dir "${SMOKE_WORK_DIR}" \
+            --smoke-report "${SMOKE_WORK_DIR}/package-smoke-report.md"
+
+      - name: Upload smoke install report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: appsurface-prerelease-smoke-${{ needs.validate-tag.outputs.package-version }}
+          path: ${{ runner.temp }}/package-smoke/package-smoke-report.md
+          if-no-files-found: warn

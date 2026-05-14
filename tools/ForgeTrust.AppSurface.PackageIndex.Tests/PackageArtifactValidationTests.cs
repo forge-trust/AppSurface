@@ -1215,6 +1215,37 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task PackageArtifactManifestReader_RejectsArtifactFileNamesWithDirectorySegments()
+    {
+        var manifestPath = Path.Combine(_repositoryRoot, "manifest.json");
+        await File.WriteAllTextAsync(
+            manifestPath,
+            $$"""
+            {
+              "schema_version": 1,
+              "package_version": "{{PackageVersion}}",
+              "generated_at_utc": "2026-05-12T00:00:00Z",
+              "entries": [
+                {
+                  "package_id": "ForgeTrust.AppSurface.Web",
+                  "project_path": "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                  "decision": "publish",
+                  "artifact_file_name": "../ForgeTrust.AppSurface.Web.{{PackageVersion}}.nupkg",
+                  "sha512": "abc",
+                  "is_tool": false
+                }
+              ]
+            }
+            """,
+            Encoding.UTF8);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => new PackageArtifactManifestReader().ReadAsync(manifestPath, CancellationToken.None));
+
+        Assert.Contains("without directory segments", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PackageArtifactWorkflow_RunsRestoreBuildPackAndWritesReport()
     {
         await WriteFileAsync("packages/package-index.yml",
@@ -1233,6 +1264,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
         var reportPath = Path.Combine(artifactDirectory, "package-validation-report.md");
+        var artifactManifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
         Directory.CreateDirectory(artifactDirectory);
         var stalePackage = Path.Combine(artifactDirectory, "stale.nupkg");
         var staleSymbolPackage = Path.Combine(artifactDirectory, "stale.snupkg");
@@ -1255,7 +1287,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 ManifestPath,
                 artifactDirectory,
                 reportPath,
-                PackageVersion));
+                PackageVersion,
+                artifactManifestPath));
 
         Assert.Single(report.Entries);
         Assert.Equal(["dotnet restore", "dotnet build", "dotnet pack"], commandRunner.OperationNames);
@@ -1274,6 +1307,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.False(File.Exists(stalePackage));
         Assert.False(File.Exists(staleSymbolPackage));
         Assert.True(File.Exists(reportPath), $"Expected report at {reportPath}.");
+        Assert.True(File.Exists(artifactManifestPath), $"Expected artifact manifest at {artifactManifestPath}.");
     }
 
     [Fact]
@@ -1290,7 +1324,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 Path.Combine(missingRepository, "packages", "package-index.yml"),
                 Path.Combine(missingRepository, "artifacts"),
                 Path.Combine(missingRepository, "report.md"),
-                PackageVersion)));
+                PackageVersion,
+                Path.Combine(missingRepository, "manifest.json"))));
 
         var missingManifestError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
@@ -1298,7 +1333,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 ManifestPath,
                 Path.Combine(_repositoryRoot, "artifacts"),
                 Path.Combine(_repositoryRoot, "report.md"),
-                PackageVersion)));
+                PackageVersion,
+                Path.Combine(_repositoryRoot, "manifest.json"))));
 
         await WriteFileAsync("packages/package-index.yml", "packages: []");
         var missingArtifactPathError = await Assert.ThrowsAsync<PackageIndexException>(
@@ -1307,19 +1343,30 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 ManifestPath,
                 " ",
                 Path.Combine(_repositoryRoot, "report.md"),
-                PackageVersion)));
+                PackageVersion,
+                Path.Combine(_repositoryRoot, "manifest.json"))));
         var missingReportPathError = await Assert.ThrowsAsync<PackageIndexException>(
             () => workflow.RunAsync(new PackageArtifactRequest(
                 _repositoryRoot,
                 ManifestPath,
                 Path.Combine(_repositoryRoot, "artifacts"),
                 "",
-                PackageVersion)));
+                PackageVersion,
+                Path.Combine(_repositoryRoot, "manifest.json"))));
+        var missingArtifactManifestPathError = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(new PackageArtifactRequest(
+                _repositoryRoot,
+                ManifestPath,
+                Path.Combine(_repositoryRoot, "artifacts"),
+                Path.Combine(_repositoryRoot, "report.md"),
+                PackageVersion,
+                "")));
 
         Assert.Contains("Repository root", missingRepositoryError.Message, StringComparison.Ordinal);
         Assert.Contains("Manifest", missingManifestError.Message, StringComparison.Ordinal);
         Assert.Contains("output path", missingArtifactPathError.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("report path", missingReportPathError.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("manifest path", missingArtifactManifestPathError.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1414,6 +1461,429 @@ public sealed class PackageArtifactValidationTests : IDisposable
                     "probing",
                     30_000),
                 cts.Token));
+    }
+
+    [Fact]
+    public async Task CliWrapCommandRunner_ReturnsResultWhenProcessCannotStart()
+    {
+        var result = await new CliWrapCommandRunner().RunAsync(
+            new ExternalCommandRequest(
+                "definitely-not-a-real-package-index-command",
+                [],
+                _repositoryRoot,
+                "missing command",
+                "starting missing command",
+                30_000),
+            CancellationToken.None);
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Contains("missing command failed", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("definitely-not-a-real-package-index-command", result.StandardError, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PackagePrereleasePublishWorkflow_PushesArtifactsInManifestOrderAndWritesLedger()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                classification: support
+                publish_decision: support_publish
+                order: 10
+                note: Core dependency.
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                order: 20
+                use_when: Install this first.
+                includes: Web.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+                expected_dependency_package_ids:
+                  - ForgeTrust.AppSurface.Core
+            """);
+        await WriteFileAsync("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var corePackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
+        var webPackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        await File.WriteAllTextAsync(corePackagePath, "core", Encoding.UTF8);
+        await File.WriteAllTextAsync(webPackagePath, "web", Encoding.UTF8);
+        var manifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        await new PackageArtifactManifestWriter().WriteAsync(
+            new PackageArtifactValidationReport(
+                PackageVersion,
+                [
+                    new PackageArtifactValidationReportEntry(
+                        "ForgeTrust.AppSurface.Core",
+                        "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+                        PackagePublishDecision.SupportPublish,
+                        [],
+                        corePackagePath),
+                    new PackageArtifactValidationReportEntry(
+                        "ForgeTrust.AppSurface.Web",
+                        "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                        PackagePublishDecision.Publish,
+                        ["ForgeTrust.AppSurface.Core"],
+                        webPackagePath)
+                ]),
+            artifactDirectory,
+            manifestPath,
+            CancellationToken.None);
+        var commandRunner = new RecordingExternalCommandRunner([
+            new ExternalCommandResult(0, "pushed", string.Empty),
+            new ExternalCommandResult(0, "Package already exists.", string.Empty)
+        ]);
+        var workflow = new PackagePrereleasePublishWorkflow(
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"] = CreateMetadata(
+                    "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+                    "ForgeTrust.AppSurface.Core"),
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                    "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                    "ForgeTrust.AppSurface.Web",
+                    projectReferences: [Path.Combine(_repositoryRoot, "ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core.csproj")])
+            }),
+            new PackageArtifactManifestReader(),
+            commandRunner,
+            new PackagePublishLedgerRenderer());
+        var publishLogPath = Path.Combine(artifactDirectory, "publish.md");
+        Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", "secret");
+
+        try
+        {
+            var ledger = await workflow.RunAsync(
+                new PackagePrereleasePublishRequest(
+                    _repositoryRoot,
+                    ManifestPath,
+                    artifactDirectory,
+                    manifestPath,
+                    publishLogPath,
+                    "https://api.nuget.org/v3/index.json",
+                    "PACKAGE_INDEX_TEST_NUGET_API_KEY"),
+                CancellationToken.None);
+
+            Assert.Equal([PackagePublishStatus.Pushed, PackagePublishStatus.DuplicateReported], ledger.Entries.Select(entry => entry.Status).ToArray());
+            Assert.EndsWith($"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg", commandRunner.Requests[0].Arguments[2], StringComparison.Ordinal);
+            Assert.EndsWith($"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg", commandRunner.Requests[1].Arguments[2], StringComparison.Ordinal);
+            Assert.All(commandRunner.Requests, request => Assert.Contains("--skip-duplicate", request.Arguments));
+            Assert.Contains("duplicate-reported", await File.ReadAllTextAsync(publishLogPath), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", null);
+        }
+    }
+
+    [Fact]
+    public async Task PackagePrereleasePublishWorkflow_StopsAfterFirstPublishFailure()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Core.
+                includes: Core.
+                does_not_include: Web.
+                start_here_path: ForgeTrust.AppSurface.Core/README.md
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                order: 20
+                use_when: Web.
+                includes: Web.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+            """);
+        await WriteFileAsync("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "<Project />");
+        await WriteFileAsync("ForgeTrust.AppSurface.Core/README.md", "# Core");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var corePackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
+        var webPackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        await File.WriteAllTextAsync(corePackagePath, "core", Encoding.UTF8);
+        await File.WriteAllTextAsync(webPackagePath, "web", Encoding.UTF8);
+        var manifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        await new PackageArtifactManifestWriter().WriteAsync(
+            new PackageArtifactValidationReport(
+                PackageVersion,
+                [
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", PackagePublishDecision.Publish, [], corePackagePath),
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Web", "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", PackagePublishDecision.Publish, [], webPackagePath)
+                ]),
+            artifactDirectory,
+            manifestPath,
+            CancellationToken.None);
+        var commandRunner = new RecordingExternalCommandRunner([
+            new ExternalCommandResult(1, string.Empty, "nuget outage")
+        ]);
+        var workflow = new PackagePrereleasePublishWorkflow(
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"] = CreateMetadata("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "ForgeTrust.AppSurface.Core"),
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "ForgeTrust.AppSurface.Web")
+            }),
+            new PackageArtifactManifestReader(),
+            commandRunner,
+            new PackagePublishLedgerRenderer());
+        Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", "secret");
+
+        try
+        {
+            var ledger = await workflow.RunAsync(
+                new PackagePrereleasePublishRequest(
+                    _repositoryRoot,
+                    ManifestPath,
+                    artifactDirectory,
+                    manifestPath,
+                    Path.Combine(artifactDirectory, "publish.md"),
+                    "https://api.nuget.org/v3/index.json",
+                    "PACKAGE_INDEX_TEST_NUGET_API_KEY"),
+                CancellationToken.None);
+
+            Assert.Equal([PackagePublishStatus.Failed, PackagePublishStatus.SkippedAfterFailure], ledger.Entries.Select(entry => entry.Status).ToArray());
+            Assert.Single(commandRunner.Requests);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", null);
+        }
+    }
+
+    [Fact]
+    public async Task PackagePrereleasePublishWorkflow_RedactsSecretsAndPersistsLedgerAfterEachAttempt()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Core.
+                includes: Core.
+                does_not_include: Web.
+                start_here_path: ForgeTrust.AppSurface.Core/README.md
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                order: 20
+                use_when: Web.
+                includes: Web.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+            """);
+        await WriteFileAsync("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "<Project />");
+        await WriteFileAsync("ForgeTrust.AppSurface.Core/README.md", "# Core");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var corePackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
+        var webPackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        await File.WriteAllTextAsync(corePackagePath, "core", Encoding.UTF8);
+        await File.WriteAllTextAsync(webPackagePath, "web", Encoding.UTF8);
+        var manifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        await new PackageArtifactManifestWriter().WriteAsync(
+            new PackageArtifactValidationReport(
+                PackageVersion,
+                [
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", PackagePublishDecision.Publish, [], corePackagePath),
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Web", "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", PackagePublishDecision.Publish, [], webPackagePath)
+                ]),
+            artifactDirectory,
+            manifestPath,
+            CancellationToken.None);
+        var publishLogPath = Path.Combine(artifactDirectory, "publish.md");
+        var commandRunner = new RecordingExternalCommandRunner([
+            new ExternalCommandResult(0, "api-key: super-secret-token", "pushed super-secret-token"),
+            new InvalidOperationException("runner crashed")
+        ]);
+        var workflow = new PackagePrereleasePublishWorkflow(
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"] = CreateMetadata("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "ForgeTrust.AppSurface.Core"),
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "ForgeTrust.AppSurface.Web")
+            }),
+            new PackageArtifactManifestReader(),
+            commandRunner,
+            new PackagePublishLedgerRenderer());
+        Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", "super-secret-token");
+
+        try
+        {
+            var ledger = await workflow.RunAsync(
+                new PackagePrereleasePublishRequest(
+                    _repositoryRoot,
+                    ManifestPath,
+                    artifactDirectory,
+                    manifestPath,
+                    publishLogPath,
+                    "https://api.nuget.org/v3/index.json",
+                    "PACKAGE_INDEX_TEST_NUGET_API_KEY"),
+                CancellationToken.None);
+
+            Assert.Equal([PackagePublishStatus.Pushed, PackagePublishStatus.Failed], ledger.Entries.Select(entry => entry.Status).ToArray());
+            var ledgerMarkdown = await File.ReadAllTextAsync(publishLogPath);
+            Assert.Contains("ForgeTrust.AppSurface.Core", ledgerMarkdown, StringComparison.Ordinal);
+            Assert.Contains("runner crashed", ledgerMarkdown, StringComparison.Ordinal);
+            Assert.DoesNotContain("super-secret-token", ledgerMarkdown, StringComparison.Ordinal);
+            Assert.Contains("[redacted]", ledgerMarkdown, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PACKAGE_INDEX_TEST_NUGET_API_KEY", null);
+        }
+    }
+
+    [Fact]
+    public async Task PackageSmokeInstallWorkflow_RestoresPublicPackagesWithRetryAndIsolatedConfig()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                classification: support
+                publish_decision: support_publish
+                order: 10
+                note: Core dependency.
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                order: 20
+                use_when: Web.
+                includes: Web.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+            """);
+        await WriteFileAsync("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var packagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        await File.WriteAllTextAsync(packagePath, "web", Encoding.UTF8);
+        var supportPackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
+        await File.WriteAllTextAsync(supportPackagePath, "core", Encoding.UTF8);
+        var manifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        await new PackageArtifactManifestWriter().WriteAsync(
+            new PackageArtifactValidationReport(
+                PackageVersion,
+                [
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", PackagePublishDecision.SupportPublish, [], supportPackagePath),
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Web", "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", PackagePublishDecision.Publish, [], packagePath)
+                ]),
+            artifactDirectory,
+            manifestPath,
+            CancellationToken.None);
+        var commandRunner = new RecordingExternalCommandRunner([
+            new ExternalCommandResult(1, string.Empty, "not indexed yet"),
+            new ExternalCommandResult(0, "restored", string.Empty)
+        ]);
+        var delays = new List<TimeSpan>();
+        var workflow = new PackageSmokeInstallWorkflow(
+            new PackageArtifactManifestReader(),
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"] = CreateMetadata("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "ForgeTrust.AppSurface.Core"),
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "ForgeTrust.AppSurface.Web")
+            }),
+            commandRunner,
+            new PackageSmokeInstallReportRenderer(),
+            (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            });
+        var workDirectory = Path.Combine(_repositoryRoot, "smoke");
+
+        var report = await workflow.RunAsync(
+            new PackageSmokeInstallRequest(
+                _repositoryRoot,
+                ManifestPath,
+                manifestPath,
+                workDirectory,
+                Path.Combine(workDirectory, "smoke.md"),
+                "https://api.nuget.org/v3/index.json"),
+            CancellationToken.None);
+
+        var entry = Assert.Single(report.Entries);
+        Assert.Equal("ForgeTrust.AppSurface.Web", entry.PackageId);
+        Assert.Equal(PackageSmokeInstallStatus.Restored, entry.Status);
+        Assert.Equal(2, commandRunner.Requests.Count);
+        Assert.Single(delays);
+        Assert.True(File.Exists(Path.Combine(workDirectory, "NuGet.config")));
+        Assert.Contains("<clear />", await File.ReadAllTextAsync(Path.Combine(workDirectory, "NuGet.config")), StringComparison.Ordinal);
+        Assert.Contains("NUGET_PACKAGES", commandRunner.Requests[0].Environment!.Keys);
+    }
+
+    [Fact]
+    public async Task PackageSmokeInstallWorkflow_RejectsManifestThatDoesNotMatchPackagePlan()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Web.
+                includes: Web.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var packagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        await File.WriteAllTextAsync(packagePath, "web", Encoding.UTF8);
+        var manifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        await new PackageArtifactManifestWriter().WriteAsync(
+            new PackageArtifactValidationReport(
+                PackageVersion,
+                [
+                    new PackageArtifactValidationReportEntry(
+                        "ForgeTrust.AppSurface.Web\"><PackageReference Include=\"Bad",
+                        "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                        PackagePublishDecision.Publish,
+                        [],
+                        packagePath)
+                ]),
+            artifactDirectory,
+            manifestPath,
+            CancellationToken.None);
+        var workflow = new PackageSmokeInstallWorkflow(
+            new PackageArtifactManifestReader(),
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "ForgeTrust.AppSurface.Web")
+            }),
+            new RecordingExternalCommandRunner([]),
+            new PackageSmokeInstallReportRenderer(),
+            (_, _) => Task.CompletedTask);
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(
+            () => workflow.RunAsync(
+                new PackageSmokeInstallRequest(
+                    _repositoryRoot,
+                    ManifestPath,
+                    manifestPath,
+                    Path.Combine(_repositoryRoot, "smoke"),
+                    Path.Combine(_repositoryRoot, "smoke", "report.md"),
+                    "https://api.nuget.org/v3/index.json"),
+                CancellationToken.None));
+
+        Assert.Contains("does not match package plan", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private string ManifestPath => Path.Combine(_repositoryRoot, "packages", "package-index.yml");
@@ -1642,6 +2112,37 @@ public sealed class PackageArtifactValidationTests : IDisposable
             }
 
             return Task.FromResult(new CommandRunResult(string.Empty, string.Empty));
+        }
+    }
+
+    private sealed class RecordingExternalCommandRunner : IExternalCommandRunner
+    {
+        private readonly Queue<object> _results;
+
+        public RecordingExternalCommandRunner(IEnumerable<object> results)
+        {
+            _results = new Queue<object>(results);
+        }
+
+        public List<ExternalCommandRequest> Requests { get; } = [];
+
+        public Task<ExternalCommandResult> RunAsync(
+            ExternalCommandRequest request,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            if (_results.Count == 0)
+            {
+                return Task.FromResult(new ExternalCommandResult(0, string.Empty, string.Empty));
+            }
+
+            var result = _results.Dequeue();
+            if (result is Exception exception)
+            {
+                throw exception;
+            }
+
+            return Task.FromResult((ExternalCommandResult)result);
         }
     }
 }
