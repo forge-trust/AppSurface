@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
@@ -83,7 +84,167 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
     /// <returns>A task that completes when the web host run exits.</returns>
     internal virtual Task RunResolvedAsync(string[] args)
     {
-        return base.RunAsync(args);
+        return RunResolvedWithStartupTimeoutAsync(args);
+    }
+
+    private async Task RunResolvedWithStartupTimeoutAsync(string[] args)
+    {
+        var context = new StartupContext(args, CreateRootModule());
+        IHost? host = null;
+        CancellationTokenSource? startupCts = null;
+        var timedOut = false;
+
+        try
+        {
+            RegisterDependencies(context);
+            BuildModules(context);
+            BuildWebOptions(context);
+
+            var startupTimeout = _options.StartupTimeout;
+
+            if (startupTimeout <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(WebOptions.StartupTimeout),
+                    startupTimeout,
+                    "AppSurface Web startup timeout must be positive when it is configured. Set it to null to disable the watchdog.");
+            }
+
+            var logger = GetStartupLogger();
+            startupCts = new CancellationTokenSource();
+            var startTask = Task.Run(
+                () => BuildAndStartHostAsync(
+                    context,
+                    startupCts.Token,
+                    (startedHost, startupLogger) =>
+                    {
+                        host = startedHost;
+                        logger = startupLogger;
+                    }));
+            if (startupTimeout is not null)
+            {
+                var completedTask = await Task.WhenAny(startTask, Task.Delay(startupTimeout.Value));
+                if (completedTask != startTask)
+                {
+                    timedOut = true;
+                    var cancellationTask = startupCts.CancelAsync();
+                    ObserveTimedOutStartupTask(startTask, startupCts, () => host?.Dispose(), cancellationTask);
+                    logger.LogCritical(
+                        "AppSurface Web host startup did not complete within {StartupTimeoutSeconds} seconds. The host may be blocked before Kestrel has bound its URLs. Check sandbox restrictions, static web asset discovery, package layout, and hosted-service startup work. Set WebOptions.StartupTimeout to null only when this pre-bind delay is intentional.",
+                        startupTimeout.Value.TotalSeconds);
+                    Environment.ExitCode = -100;
+                    return;
+                }
+            }
+
+            host = await startTask;
+            await WaitForShutdownAndLogAsync(host, context, logger);
+        }
+        catch (OperationCanceledException ex)
+        {
+            GetStartupLogger().LogWarning(ex, "Service(s) did not exit in a timely fashion.");
+        }
+        catch (Exception e)
+        {
+            GetStartupLogger().LogCritical(e, "Fatal Processing Error");
+            Environment.ExitCode = -100;
+        }
+        finally
+        {
+            if (!timedOut)
+            {
+                host?.Dispose();
+                startupCts?.Dispose();
+            }
+        }
+    }
+
+    [ExcludeFromCodeCoverage(
+        Justification = "Private framework-host adapter; RunResolvedAsync tests verify success, fault, cancellation, and timeout outcomes through the public startup path.")]
+    private async Task<IHost> BuildAndStartHostAsync(
+        StartupContext context,
+        CancellationToken startupCancellationToken,
+        Action<IHost, ILogger> hostStarted)
+    {
+        var host = ((IAppSurfaceStartup)this).CreateHostBuilder(context).Build();
+        var loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
+        var logger = loggerFactory.CreateLogger(GetType().Name);
+        hostStarted(host, logger);
+
+        try
+        {
+            await host.StartAsync(startupCancellationToken);
+        }
+        catch (OperationCanceledException) when (startupCancellationToken.IsCancellationRequested)
+        {
+        }
+
+        return host;
+    }
+
+    [ExcludeFromCodeCoverage(
+        Justification = "Private framework-host adapter; RunResolvedAsync tests verify that normal shutdown completes without surfacing host lifecycle noise.")]
+    private static async Task WaitForShutdownAndLogAsync(
+        IHost host,
+        StartupContext context,
+        ILogger logger)
+    {
+        await host.WaitForShutdownAsync();
+
+        if (context.ConsoleOutputMode != ConsoleOutputMode.CommandFirst)
+        {
+            logger.LogInformation("Run Exited - Shutting down");
+        }
+    }
+
+    [ExcludeFromCodeCoverage(
+        Justification = "Private fire-and-forget continuation that prevents unobserved timeout faults; public tests verify timeout exit behavior.")]
+    private static void ObserveTimedOutStartupTask(
+        Task<IHost> startTask,
+        CancellationTokenSource startupCts,
+        Action disposeStartedHost,
+        Task cancellationTask)
+    {
+        _ = ObserveTimedOutStartupTaskAsync(startTask, startupCts, disposeStartedHost, cancellationTask);
+    }
+
+    [ExcludeFromCodeCoverage(
+        Justification = "Private fire-and-forget cleanup continuation; public tests verify the timeout exits immediately even when cancellation callbacks block.")]
+    private static async Task ObserveTimedOutStartupTaskAsync(
+        Task<IHost> startTask,
+        CancellationTokenSource startupCts,
+        Action disposeStartedHost,
+        Task cancellationTask)
+    {
+        try
+        {
+            try
+            {
+                var startedHost = await startTask.ConfigureAwait(false);
+                startedHost.Dispose();
+            }
+            catch
+            {
+                disposeStartedHost();
+
+                if (startTask.IsFaulted)
+                {
+                    _ = startTask.Exception;
+                }
+            }
+
+            try
+            {
+                await cancellationTask.ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+        }
+        finally
+        {
+            startupCts.Dispose();
+        }
     }
 
     /// <summary>

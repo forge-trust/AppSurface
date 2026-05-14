@@ -913,7 +913,13 @@ Preview locally from the repository root with the standalone docs host:
 dotnet run --project Web/ForgeTrust.AppSurface.Docs.Standalone -- --urls http://localhost:5189
 ```
 
-Then open the configured docs home, `http://localhost:5189/docs` by default. This is only the docs site running locally; the separate `razordocs preview --repo .` CLI idea is intentionally deferred.
+Or use the AppSurface CLI shape, which keeps RazorDocs workflows under the `appsurface` command family:
+
+```bash
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo . --urls http://localhost:5189
+```
+
+Then open the configured docs home, `http://localhost:5189/docs` by default. The standalone host remains the reusable runtime seam; `appsurface docs` is the public CLI entry point for the same preview workflow rather than a separate `razordocs` tool.
 
 ### Fallback and visibility rules
 
@@ -1086,6 +1092,6 @@ trust:
 ## Notes
 
 - This package is the reusable documentation surface; `ForgeTrust.AppSurface.Docs.Standalone` is the thin executable wrapper used for local hosting and export scenarios.
-- The bundled RazorDocs UI already includes its generated stylesheet as a static web asset. The layout resolves the correct stylesheet path automatically from the host's root module shape for standalone/root-module hosts versus embedded application-part consumers.
+- The bundled RazorDocs UI includes its generated stylesheet and docs runtime files as static web assets and assembly-embedded fallback resources. The layout resolves the correct stylesheet path automatically from the host's root module shape for standalone/root-module hosts versus embedded application-part consumers, while endpoint fallbacks keep packaged hosts working when static web asset manifests are unavailable.
 - Consumers do not need to call `services.AddTailwind()` unless they also want Tailwind build/watch integration for their own host application's CSS.
 - It depends on the Tailwind package family for RazorDocs package build-time styling generation and on the caching package for docs aggregation performance.

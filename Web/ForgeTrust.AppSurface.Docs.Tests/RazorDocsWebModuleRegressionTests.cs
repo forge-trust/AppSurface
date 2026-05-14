@@ -769,7 +769,7 @@ public class RazorDocsWebModuleRegressionTests
     }
 
     [Fact]
-    public async Task ConfigureEndpoints_Versioning_ReturnsNotFoundForPreviewAssets_WhenWebRootAssetFileIsMissing()
+    public async Task ConfigureEndpoints_Versioning_ServesEmbeddedPreviewAssets_WhenWebRootAssetFileIsMissing()
     {
         var tempDirectory = Path.Combine(
             Path.GetTempPath(),
@@ -820,10 +820,17 @@ public class RazorDocsWebModuleRegressionTests
                     };
 
                     using var getResponse = await client.GetAsync("/docs/next/search.css");
-                    Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
+                    Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+                    Assert.Equal("text/css", getResponse.Content.Headers.ContentType?.MediaType);
+                    Assert.Contains(
+                        "docs-search",
+                        await getResponse.Content.ReadAsStringAsync(),
+                        StringComparison.Ordinal);
 
                     using var headResponse = await client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/docs/next/search-client.js"));
-                    Assert.Equal(HttpStatusCode.NotFound, headResponse.StatusCode);
+                    Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
+                    Assert.Equal("text/javascript", headResponse.Content.Headers.ContentType?.MediaType);
+                    Assert.True(headResponse.Content.Headers.ContentLength > 0);
                 }
                 finally
                 {
@@ -1023,6 +1030,75 @@ public class RazorDocsWebModuleRegressionTests
             await AssertRedirectAsync(client, RootStylesheetPath, PackagedStylesheetPath);
             await AssertRedirectAsync(client, $"{RootStylesheetPath}?v=42", $"{PackagedStylesheetPath}?v=42");
             await AssertRedirectAsync(client, HttpMethod.Head, RootStylesheetPath, PackagedStylesheetPath);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureEndpoints_ShouldServePackagedAssetsFromEmbeddedResources_WhenStaticWebAssetsAreUnavailable()
+    {
+        var module = new RazorDocsWebModule();
+        var context = new StartupContext([], module);
+        var builder = WebApplication.CreateBuilder();
+
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+
+        using var app = builder.Build();
+        module.ConfigureEndpoints(context, app);
+
+        await app.StartAsync();
+
+        try
+        {
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            using var stylesheetResponse = await client.GetAsync(PackagedStylesheetPath);
+            Assert.Equal(HttpStatusCode.OK, stylesheetResponse.StatusCode);
+            Assert.Equal("text/css", stylesheetResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains(
+                "--docs",
+                await stylesheetResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
+            using var searchClientResponse = await client.GetAsync($"{PackagedAssetBasePath}/search-client.js");
+            Assert.Equal(HttpStatusCode.OK, searchClientResponse.StatusCode);
+            Assert.Contains(
+                "razorDocsConfig",
+                await searchClientResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
+            using var packagedSearchCssResponse = await client.GetAsync($"{PackagedAssetBasePath}/search.css");
+            Assert.Equal(HttpStatusCode.OK, packagedSearchCssResponse.StatusCode);
+            Assert.Equal("text/css", packagedSearchCssResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains(
+                "--docs-search",
+                await packagedSearchCssResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
+            using var miniSearchResponse = await client.GetAsync($"{PackagedAssetBasePath}/minisearch.min.js");
+            Assert.Equal(HttpStatusCode.OK, miniSearchResponse.StatusCode);
+            Assert.Equal("text/javascript", miniSearchResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains(
+                "MiniSearch",
+                await miniSearchResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
+            using var outlineHeadRequest = new HttpRequestMessage(HttpMethod.Head, $"{PackagedAssetBasePath}/outline-client.js");
+            using var outlineHeadResponse = await client.SendAsync(outlineHeadRequest);
+            Assert.Equal(HttpStatusCode.OK, outlineHeadResponse.StatusCode);
+            Assert.Equal("text/javascript", outlineHeadResponse.Content.Headers.ContentType?.MediaType);
+            Assert.True(outlineHeadResponse.Content.Headers.ContentLength > 0);
         }
         finally
         {

@@ -116,8 +116,8 @@ jobs:
           dotnet run --project Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj -c Release -- \
             export \
             --mode cdn \
-            --output "$RUNNER_TEMP/razordocs-pages" \
             --seeds "$RUNNER_TEMP/razordocs-seeds.txt" \
+            --output "$RUNNER_TEMP/razordocs-pages" \
             --project Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj
 
       - name: Upload Pages artifact

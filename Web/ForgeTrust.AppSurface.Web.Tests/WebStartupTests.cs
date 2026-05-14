@@ -84,6 +84,136 @@ public class WebStartupTests
     }
 
     [Fact]
+    public async Task RunResolvedAsync_FailsFast_WhenHostStartupDoesNotCompleteBeforeTimeout()
+    {
+        var startup = new HangingWebStartup(new HangingWebModule());
+        startup.WithOptions(options => options.StartupTimeout = TimeSpan.FromMilliseconds(250));
+        var originalExitCode = Environment.ExitCode;
+
+        try
+        {
+            Environment.ExitCode = 0;
+
+            await startup.RunResolvedAsync(["--urls", "http://127.0.0.1:0"]);
+
+            Assert.Equal(-100, Environment.ExitCode);
+        }
+        finally
+        {
+            Environment.ExitCode = originalExitCode;
+        }
+    }
+
+    [Fact]
+    public async Task RunResolvedAsync_FailsFast_WhenStartupCancellationCallbackDoesNotComplete()
+    {
+        var module = new HangingCancellationWebModule();
+        var startup = new HangingCancellationWebStartup(module);
+        startup.WithOptions(options => options.StartupTimeout = TimeSpan.FromMilliseconds(100));
+        var originalExitCode = Environment.ExitCode;
+
+        try
+        {
+            Environment.ExitCode = 0;
+
+            var runTask = startup.RunResolvedAsync(["--urls", "http://127.0.0.1:0"]);
+            var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(1)));
+
+            Assert.Same(runTask, completedTask);
+            await runTask;
+            await module.Probe.CancellationStarted.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.Equal(-100, Environment.ExitCode);
+        }
+        finally
+        {
+            module.Probe.ReleaseCancellation();
+            Environment.ExitCode = originalExitCode;
+        }
+    }
+
+    [Fact]
+    public async Task RunResolvedAsync_Rejects_NonPositive_Configured_StartupTimeout()
+    {
+        var startup = new StoppingWebStartup(new StoppingWebModule());
+        startup.WithOptions(options => options.StartupTimeout = TimeSpan.Zero);
+        var originalExitCode = Environment.ExitCode;
+
+        try
+        {
+            Environment.ExitCode = 0;
+
+            await startup.RunResolvedAsync(["--urls", "http://127.0.0.1:0"]);
+
+            Assert.Equal(-100, Environment.ExitCode);
+        }
+        finally
+        {
+            Environment.ExitCode = originalExitCode;
+        }
+    }
+
+    [Fact]
+    public async Task RunResolvedAsync_Handles_OperationCanceledException_WithoutChangingExitCode()
+    {
+        var startup = new CancelingWebStartup(new CancelingWebModule());
+        var originalExitCode = Environment.ExitCode;
+
+        try
+        {
+            Environment.ExitCode = 17;
+
+            await startup.RunResolvedAsync(["--urls", "http://127.0.0.1:0"]);
+
+            Assert.Equal(17, Environment.ExitCode);
+        }
+        finally
+        {
+            Environment.ExitCode = originalExitCode;
+        }
+    }
+
+    [Fact]
+    public async Task RunResolvedAsync_Handles_GeneralException_BySettingExitCode()
+    {
+        var startup = new FaultingWebStartup(new FaultingWebModule());
+        var originalExitCode = Environment.ExitCode;
+
+        try
+        {
+            Environment.ExitCode = 0;
+
+            await startup.RunResolvedAsync(["--urls", "http://127.0.0.1:0"]);
+
+            Assert.Equal(-100, Environment.ExitCode);
+        }
+        finally
+        {
+            Environment.ExitCode = originalExitCode;
+        }
+    }
+
+    [Fact]
+    public async Task RunResolvedAsync_UsesDependencyConfiguredStartupTimeout_BeforeHostBuild()
+    {
+        var startup = new DependencyTimeoutWebStartup(new DependencyTimeoutRootModule());
+        var originalExitCode = Environment.ExitCode;
+
+        try
+        {
+            Environment.ExitCode = 0;
+
+            await startup.RunResolvedAsync(["--urls", "http://127.0.0.1:0"]);
+
+            Assert.Equal(-100, Environment.ExitCode);
+        }
+        finally
+        {
+            Environment.ExitCode = originalExitCode;
+        }
+    }
+
+
+    [Fact]
     public void BuildModules_CorrectlyCollectsWebModules()
     {
         var root = new TestWebModule();
@@ -714,6 +844,323 @@ public class WebStartupTests
         protected override StoppingWebModule CreateRootModule() => _module;
     }
 
+    private sealed class HangingWebStartup : WebStartup<HangingWebModule>
+    {
+        private readonly HangingWebModule _module;
+
+        public HangingWebStartup(HangingWebModule module)
+        {
+            _module = module;
+        }
+
+        protected override HangingWebModule CreateRootModule() => _module;
+    }
+
+    private sealed class HangingCancellationWebStartup : WebStartup<HangingCancellationWebModule>
+    {
+        private readonly HangingCancellationWebModule _module;
+
+        public HangingCancellationWebStartup(HangingCancellationWebModule module)
+        {
+            _module = module;
+        }
+
+        protected override HangingCancellationWebModule CreateRootModule() => _module;
+    }
+
+    private sealed class DependencyTimeoutWebStartup : WebStartup<DependencyTimeoutRootModule>
+    {
+        private readonly DependencyTimeoutRootModule _module;
+
+        public DependencyTimeoutWebStartup(DependencyTimeoutRootModule module)
+        {
+            _module = module;
+        }
+
+        protected override DependencyTimeoutRootModule CreateRootModule() => _module;
+    }
+
+    private sealed class CancelingWebStartup : WebStartup<CancelingWebModule>
+    {
+        private readonly CancelingWebModule _module;
+
+        public CancelingWebStartup(CancelingWebModule module)
+        {
+            _module = module;
+        }
+
+        protected override CancelingWebModule CreateRootModule() => _module;
+    }
+
+    private sealed class FaultingWebStartup : WebStartup<FaultingWebModule>
+    {
+        private readonly FaultingWebModule _module;
+
+        public FaultingWebStartup(FaultingWebModule module)
+        {
+            _module = module;
+        }
+
+        protected override FaultingWebModule CreateRootModule() => _module;
+    }
+
+    private sealed class CancelingWebModule : IAppSurfaceWebModule
+    {
+        public bool IncludeAsApplicationPart => false;
+
+        public void ConfigureWebOptions(StartupContext context, WebOptions options)
+        {
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+            throw new OperationCanceledException();
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void ConfigureWebApplication(StartupContext context, IApplicationBuilder app)
+        {
+        }
+
+        public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+    }
+
+    private sealed class FaultingWebModule : IAppSurfaceWebModule
+    {
+        public bool IncludeAsApplicationPart => false;
+
+        public void ConfigureWebOptions(StartupContext context, WebOptions options)
+        {
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+            throw new InvalidOperationException("startup failed");
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void ConfigureWebApplication(StartupContext context, IApplicationBuilder app)
+        {
+        }
+
+        public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+    }
+
+    private sealed class DependencyTimeoutRootModule : IAppSurfaceWebModule
+    {
+        public bool IncludeAsApplicationPart => false;
+
+        public void ConfigureWebOptions(StartupContext context, WebOptions options)
+        {
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void ConfigureWebApplication(StartupContext context, IApplicationBuilder app)
+        {
+        }
+
+        public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+            builder.AddModule<DependencyTimeoutHangingModule>();
+        }
+    }
+
+    private sealed class DependencyTimeoutHangingModule : IAppSurfaceWebModule
+    {
+        public bool IncludeAsApplicationPart => false;
+
+        public void ConfigureWebOptions(StartupContext context, WebOptions options)
+        {
+            options.StartupTimeout = TimeSpan.FromMilliseconds(250);
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+            services.AddHostedService<NeverStartingHostedService>();
+        }
+
+        public void ConfigureWebApplication(StartupContext context, IApplicationBuilder app)
+        {
+        }
+
+        public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+    }
+
+    private sealed class HangingWebModule : IAppSurfaceWebModule
+    {
+        public bool IncludeAsApplicationPart => false;
+
+        public void ConfigureWebOptions(StartupContext context, WebOptions options)
+        {
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+            services.AddHostedService<NeverStartingHostedService>();
+        }
+
+        public void ConfigureWebApplication(StartupContext context, IApplicationBuilder app)
+        {
+        }
+
+        public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+    }
+
+    private sealed class HangingCancellationWebModule : IAppSurfaceWebModule
+    {
+        public HangingCancellationProbe Probe { get; } = new();
+
+        public bool IncludeAsApplicationPart => false;
+
+        public void ConfigureWebOptions(StartupContext context, WebOptions options)
+        {
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+            services.AddSingleton(Probe);
+            services.AddHostedService<HangingCancellationHostedService>();
+        }
+
+        public void ConfigureWebApplication(StartupContext context, IApplicationBuilder app)
+        {
+        }
+
+        public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+    }
+
+    private sealed class NeverStartingHostedService : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class HangingCancellationHostedService(HangingCancellationProbe probe) : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.Register(probe.BlockCancellationUntilReleased);
+            return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class HangingCancellationProbe
+    {
+        private readonly TaskCompletionSource<object?> _cancellationStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private readonly TaskCompletionSource<object?> _releaseCancellation =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task CancellationStarted => _cancellationStarted.Task;
+
+        public void BlockCancellationUntilReleased()
+        {
+            _cancellationStarted.TrySetResult(null);
+            _releaseCancellation.Task.GetAwaiter().GetResult();
+        }
+
+        public void ReleaseCancellation()
+        {
+            _releaseCancellation.TrySetResult(null);
+        }
+    }
+
     private sealed class StoppingWebModule : IAppSurfaceWebModule
     {
         public bool IncludeAsApplicationPart => false;
@@ -778,6 +1225,17 @@ public class WebStartupTests
         public void RegisterDependentModules(ModuleDependencyBuilder builder)
         {
         }
+    }
+}
+
+public class WebOptionsTests
+{
+    [Fact]
+    public void WebOptions_DefaultStartupTimeout_IsThirtySeconds()
+    {
+        var opts = new WebOptions();
+
+        Assert.Equal(TimeSpan.FromSeconds(30), opts.StartupTimeout);
     }
 }
 

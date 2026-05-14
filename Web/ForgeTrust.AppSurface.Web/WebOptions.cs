@@ -43,6 +43,19 @@ public record WebOptions
     public ErrorPagesOptions Errors { get; set; } = ErrorPagesOptions.Default;
 
     /// <summary>
+    /// Gets or sets the amount of time AppSurface waits for the web host to complete startup before failing fast.
+    /// </summary>
+    /// <remarks>
+    /// The default is 30 seconds. Set this to <see langword="null"/> only for hosts that intentionally perform
+    /// long-running startup work before Kestrel binds. The watchdog covers pre-bind stalls caused by package layout,
+    /// sandboxing, static asset discovery, hosted-service startup, and similar issues; it does not limit normal request
+    /// processing after the host has started.
+    /// <see cref="StartupTimeout"/> must be <see langword="null"/> or greater than <see cref="TimeSpan.Zero"/>.
+    /// Use <see langword="null"/> to disable the watchdog instead of <see cref="TimeSpan.Zero"/>.
+    /// </remarks>
+    public TimeSpan? StartupTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Gets or sets an optional delegate to configure endpoint routing for the application.
     /// </summary>
     public Action<IEndpointRouteBuilder>? MapEndpoints { get; set; }
