@@ -41,8 +41,6 @@ internal static class RazorDocsRouteHelper
             throw new ArgumentException("At least one RazorDocs route candidate is required.", nameof(relativePaths));
         }
 
-        var attempts = new List<string>(relativePaths.Length);
-
         for (var index = 0; index < relativePaths.Length; index++)
         {
             var relativePath = relativePaths[index];
@@ -52,7 +50,12 @@ internal static class RazorDocsRouteHelper
                     $"Route candidate at index {index} must be non-empty.",
                     nameof(relativePaths));
             }
+        }
 
+        var attempts = new List<string>(relativePaths.Length);
+
+        foreach (var relativePath in relativePaths)
+        {
             try
             {
                 var response = await page.GotoAsync($"{docsUrl}{relativePath}");
