@@ -206,10 +206,16 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             () => {
               history.replaceState(null, "", window.location.pathname);
               window.__sectionCopyPushStateCalls = 0;
+              window.__sectionCopyReplaceStateCalls = 0;
               const originalPushState = history.pushState.bind(history);
+              const originalReplaceState = history.replaceState.bind(history);
               history.pushState = (...args) => {
                 window.__sectionCopyPushStateCalls += 1;
                 return originalPushState(...args);
+              };
+              history.replaceState = (...args) => {
+                window.__sectionCopyReplaceStateCalls += 1;
+                return originalReplaceState(...args);
               };
             }
             """);
@@ -222,6 +228,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Equal(expectedUrl, await ReadClipboardTextAsync(page));
         Assert.Equal(string.Empty, await page.EvaluateAsync<string>("() => window.location.hash"));
         Assert.Equal(0, await page.EvaluateAsync<int>("() => window.__sectionCopyPushStateCalls"));
+        Assert.Equal(0, await page.EvaluateAsync<int>("() => window.__sectionCopyReplaceStateCalls"));
 
         await page.ClickAsync($".docs-content button[data-doc-section-copy='{targetId}']");
         await page.WaitForSelectorAsync(
@@ -231,6 +238,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Equal(expectedUrl, await ReadClipboardTextAsync(page));
         Assert.Equal(string.Empty, await page.EvaluateAsync<string>("() => window.location.hash"));
         Assert.Equal(0, await page.EvaluateAsync<int>("() => window.__sectionCopyPushStateCalls"));
+        Assert.Equal(0, await page.EvaluateAsync<int>("() => window.__sectionCopyReplaceStateCalls"));
     }
 
     [Fact]
@@ -300,6 +308,14 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Null(await page.GetAttributeAsync(
             $"#docs-page-outline button[data-doc-section-copy='{targetId}']",
             "data-copy-state"));
+
+        await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
+        await page.WaitForSelectorAsync(
+            "[data-doc-section-copy-fallback='true'] input",
+            new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Visible });
+
+        await page.ClickAsync("[data-doc-section-copy-fallback='true'] input");
+        Assert.Equal(1, await page.Locator("[data-doc-section-copy-fallback='true']").CountAsync());
     }
 
     [Fact]
@@ -344,6 +360,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             """));
         Assert.Equal(0, await page.Locator("summary button[data-doc-section-copy]").CountAsync());
         Assert.Equal(0, await page.Locator(".doc-signature button[data-doc-section-copy]").CountAsync());
+        Assert.Equal(0, await page.Locator(".doc-symbol-source-link button[data-doc-section-copy]").CountAsync());
         Assert.Equal(0, await page.Locator("pre button[data-doc-section-copy], code button[data-doc-section-copy]").CountAsync());
     }
 

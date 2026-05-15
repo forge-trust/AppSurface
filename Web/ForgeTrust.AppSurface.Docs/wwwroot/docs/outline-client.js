@@ -34,6 +34,7 @@
     let activeCopyFallback = null;
     let activeCopyFallbackButton = null;
     let activeCopyFallbackShell = null;
+    let activeCopyFallbackPointerDown = null;
 
     function decodeHash(hash) {
         if (!hash) {
@@ -409,6 +410,11 @@
     }
 
     function hideCopyFallback() {
+        if (activeCopyFallbackPointerDown) {
+            document.removeEventListener("pointerdown", activeCopyFallbackPointerDown);
+            activeCopyFallbackPointerDown = null;
+        }
+
         const button = activeCopyFallbackButton;
         const shell = activeCopyFallbackShell;
         activeCopyFallback?.remove();
@@ -480,14 +486,15 @@
                 }
             }, 0);
         });
-        addLifecycleEventListener(document, "pointerdown", event => {
+        activeCopyFallbackPointerDown = event => {
             const target = event.target;
             if (target instanceof Node
                 && !fallback.contains(target)
                 && target !== button) {
                 hideCopyFallback();
             }
-        });
+        };
+        document.addEventListener("pointerdown", activeCopyFallbackPointerDown);
 
         input.focus();
         input.select();
