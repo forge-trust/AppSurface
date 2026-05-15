@@ -787,6 +787,33 @@ body {
     }
 }
 
+@media (min-width: 48rem) and (max-width: 79.999rem) {
+    .docs-outline-toggle {
+        min-height: 3.25rem;
+        padding-right: 1.15rem;
+        padding-left: 1.15rem;
+    }
+
+    .docs-outline-toggle-label {
+        order: 2;
+        flex: 0 1 min(22rem, 42%);
+        max-width: min(22rem, 42%);
+        color: var(--docs-color-text-subtle);
+        font-size: 0.78rem;
+        font-weight: 700;
+        text-align: right;
+    }
+
+    .docs-outline-toggle-context {
+        order: 1;
+        text-align: left;
+    }
+
+    .docs-outline-toggle::after {
+        order: 3;
+    }
+}
+
 @media (max-width: 47.999rem) {
     .docs-outline-shell[data-outline-enhanced="true"] {
         top: 3.8125rem;
