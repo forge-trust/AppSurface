@@ -267,7 +267,18 @@
         }
     }
 
+    function clearCopyFeedbackTimer(button) {
+        const timer = Number.parseInt(button.dataset.docSectionCopyTimer ?? "", 10);
+        if (Number.isFinite(timer) && timer > 0) {
+            window.clearTimeout(timer);
+            copyFeedbackTimers = copyFeedbackTimers.filter(candidate => candidate !== timer);
+        }
+
+        button.removeAttribute("data-doc-section-copy-timer");
+    }
+
     function clearCopyFeedback(button) {
+        clearCopyFeedbackTimer(button);
         button.removeAttribute("data-copy-state");
         button.removeAttribute("data-doc-section-copy-message");
 
@@ -300,6 +311,7 @@
 
     function showCopiedFeedback(button, shell) {
         hideCopyFallback();
+        clearCopyFeedbackTimer(button);
 
         const title = getSectionTitle(button);
         button.dataset.copyState = "copied";
@@ -309,9 +321,12 @@
 
         const timer = window.setTimeout(() => {
             copyFeedbackTimers = copyFeedbackTimers.filter(candidate => candidate !== timer);
+            button.removeAttribute("data-doc-section-copy-timer");
             clearCopyFeedback(button);
+            setCopyStatus(shell, "");
         }, copyFeedbackDurationMs);
 
+        button.dataset.docSectionCopyTimer = String(timer);
         copyFeedbackTimers.push(timer);
     }
 
