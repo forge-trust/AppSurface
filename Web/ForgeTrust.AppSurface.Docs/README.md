@@ -393,6 +393,7 @@ Default route behavior:
 
 - Markdown files publish without `.md.html`. For example, `start-here/appsurface-evaluator.md` publishes at `{DocsRootPath}/start-here/appsurface-evaluator`.
 - `README.md`, `README.markdown`, `index.md`, and `index.markdown` collapse to their containing directory. For example, `packages/README.md` publishes at `{DocsRootPath}/packages`.
+- Source-shaped Markdown requests for public pages, including copy-pasted paths such as `{DocsRootPath}/packages/README.md` or `{DocsRootPath}/guides/start.md`, permanently redirect to the clean public route. Collision losers and reserved-route conflicts still stay non-public.
 - The repository-root README represents the docs home and appears in search as `{DocsRootPath}`. It is not rendered through `/README.md`.
 - Generated API docs and other non-Markdown docs keep the existing `.html` route shape, such as `{DocsRootPath}/Namespaces/ForgeTrust.AppSurface.Web.html`.
 - Fragments stay fragments. A harvested source path like `guides/intro.md#setup` publishes as `{DocsRootPath}/guides/intro#setup`.
@@ -418,7 +419,7 @@ redirect_aliases:
   - start-here/appsurface-evaluator.md.html
 ```
 
-`canonical_slug` and `redirect_aliases` are docs-root-relative route paths. Do not include a query string, fragment, leading docs root, or host name. Canonical slugs use the same deterministic segment normalization as source-derived Markdown routes. Redirect aliases preserve their literal authored route text after separator cleanup, so legacy URLs such as `Old_Path/Guide.md.html` keep their existing shape instead of being slugified. Aliases redirect permanently to the public canonical route and preserve the request query string. Source-shaped routes such as `/docs/foo.md` and `/docs/foo.md.html` are not served unless explicitly declared as redirect aliases.
+`canonical_slug` and `redirect_aliases` are docs-root-relative route paths. Do not include a query string, fragment, leading docs root, or host name. Canonical slugs use the same deterministic segment normalization as source-derived Markdown routes. Redirect aliases preserve their literal authored route text after separator cleanup, so legacy URLs such as `Old_Path/Guide.md.html` keep their existing shape instead of being slugified. Aliases redirect permanently to the public canonical route and preserve the request query string. Public Markdown source paths such as `/docs/foo.md` and `/docs/foo.md.html` also redirect to the clean route so GitHub-style copy-pasted links recover automatically. Use `redirect_aliases` for non-source legacy URLs, renamed pages, and old route shapes that are not already implied by the source path. Declared aliases that try to shadow another public Markdown source path are ignored with a `DocRedirectAliasCollision` diagnostic so copy-pasted source URLs keep pointing at their owning page.
 
 ### Option reference
 

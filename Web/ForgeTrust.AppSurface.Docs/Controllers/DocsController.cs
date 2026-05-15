@@ -233,7 +233,7 @@ public class DocsController : Controller
     /// </summary>
     /// <param name="path">
     /// The public docs route, redirect alias, or <c>.partial.html</c> resource identifier of the documentation item to
-    /// retrieve. Source-shaped Markdown routes are not rendered unless they are declared as aliases.
+    /// retrieve. Full-page source-shaped Markdown routes for public pages redirect to the clean canonical route.
     /// </param>
     /// <returns>
     /// An <see cref="IActionResult"/> rendering the details view or the <c>doc-content</c> RazorWire frame; returns
@@ -274,7 +274,9 @@ public class DocsController : Controller
         else if (routeResolution.Kind == DocRouteResolutionKind.AliasRedirect)
         {
             var redirectPath = _docsUrlBuilder.BuildDocUrl(routeResolution.PublicRoutePath ?? string.Empty);
-            return LocalRedirectPermanent(PathBaseAware(redirectPath) + HttpContext.Request.QueryString);
+            return LocalRedirectPermanent(AppendQueryStringBeforeFragment(
+                PathBaseAware(redirectPath),
+                HttpContext.Request.QueryString));
         }
 
         if ((routeResolution.Kind != DocRouteResolutionKind.Canonical || string.IsNullOrWhiteSpace(routeResolution.SourcePath))
@@ -877,6 +879,20 @@ public class DocsController : Controller
         return string.Equals(appRelativeUrl, "/", StringComparison.Ordinal)
             ? normalizedPathBase + "/"
             : normalizedPathBase + appRelativeUrl;
+    }
+
+    private static string AppendQueryStringBeforeFragment(string url, QueryString queryString)
+    {
+        var query = queryString.ToString();
+        if (string.IsNullOrEmpty(query))
+        {
+            return url;
+        }
+
+        var fragmentIndex = url.IndexOf('#', StringComparison.Ordinal);
+        return fragmentIndex < 0
+            ? url + query
+            : url[..fragmentIndex] + query + url[fragmentIndex..];
     }
 
     private IReadOnlyList<DocBreadcrumbViewModel> BuildBreadcrumbs(

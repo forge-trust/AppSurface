@@ -458,19 +458,21 @@ public class DocAggregator
     /// </summary>
     /// <param name="path">
     /// The non-null request path to resolve. Callers may pass a docs-relative route such as
-    /// <c>packages</c>, a rooted docs path such as <c>/docs/packages</c>, or a source-shaped path that should remain
-    /// internal-only.
+    /// <c>packages</c>, a rooted docs path such as <c>/docs/packages</c>, or a source-shaped path. Markdown source-shaped
+    /// paths for public winners resolve as redirects to their clean public routes; non-Markdown source paths, collision
+    /// losers, and reserved routes remain non-public.
     /// </param>
     /// <param name="cancellationToken">An optional token observed while waiting for the cached docs snapshot.</param>
     /// <returns>
     /// A <see cref="DocRouteResolution"/> whose kind tells callers whether the request is the canonical public route,
-    /// a declared alias that should redirect to <see cref="DocRouteResolution.PublicRoutePath"/>, an internal source
-    /// match, a collision or reserved-route loser, or an unresolved path.
+    /// a declared or Markdown source-shaped alias that should redirect to <see cref="DocRouteResolution.PublicRoutePath"/>,
+    /// an internal non-Markdown source match, a collision or reserved-route loser, or an unresolved path.
     /// </returns>
     /// <remarks>
     /// This method does not redirect or mutate the snapshot. It awaits <c>GetCachedDocsSnapshotAsync</c>, then delegates
     /// to <see cref="DocRouteIdentityCatalog.ResolvePublicRoute(string)"/> so controllers and link builders branch on
-    /// the same route identity semantics.
+    /// the same route identity semantics. Markdown source-shaped redirects let links copied from GitHub or editor paths
+    /// recover to their published canonical routes instead of falling into the generic 404 page.
     /// </remarks>
     internal async Task<DocRouteResolution> ResolvePublicRouteAsync(string path, CancellationToken cancellationToken = default)
     {

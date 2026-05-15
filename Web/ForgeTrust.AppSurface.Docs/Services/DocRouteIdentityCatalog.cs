@@ -23,6 +23,7 @@ internal sealed record DocRouteIdentity(
     string SourcePath,
     string PublicRoutePath,
     bool IsPublicCanonicalWinner,
+    bool SourcePathIsMarkdown,
     IReadOnlyList<string> RedirectAliasPaths);
 
 /// <summary>
@@ -33,11 +34,12 @@ internal sealed record DocRouteIdentity(
 ///
 ///   source path        -> internal lookup and authoring provenance
 ///   public route path  -> browser-facing canonical URL
-///   redirect alias     -> declared migration URL that redirects to public route
+///   redirect alias     -> declared or Markdown source-shaped URL that redirects to public route
 ///
-/// Controllers render only public canonical winners and aliases. Link builders can still
-/// resolve source paths so authored Markdown stays source-friendly without leaking source-shaped
-/// URLs into the reader-facing surface.
+/// Controllers render only public canonical winners. Declared aliases and Markdown source-shaped paths
+/// for public winners redirect to the canonical route, while non-Markdown source paths, collision losers,
+/// and reserved routes stay non-public. Link builders can still resolve source paths so authored Markdown
+/// stays source-friendly without rendering source-shaped URLs into the reader-facing surface.
 /// </remarks>
 internal sealed class DocRouteIdentityCatalog
 {
@@ -104,7 +106,12 @@ internal sealed class DocRouteIdentityCatalog
         {
             var isWinner = publicWinners.TryGetValue(candidate.PublicRouteLookupPath, out var winner)
                            && ReferenceEquals(candidate, winner);
-            var identity = new DocRouteIdentity(candidate.SourcePath, candidate.PublicRoutePath, isWinner, []);
+            var identity = new DocRouteIdentity(
+                candidate.SourcePath,
+                candidate.PublicRoutePath,
+                isWinner,
+                candidate.SourcePathIsMarkdown,
+                []);
             AddIdentity(identityBySourcePath, candidate.SourceLookupPath, identity);
             AddInternalIdentity(identityByInternalPath, candidate.SourceLookupPath, identity);
             AddInternalIdentity(identityByInternalPath, candidate.PublicRouteLookupPath, identity);
@@ -132,6 +139,7 @@ internal sealed class DocRouteIdentityCatalog
                 identity,
                 reservedRoutePaths,
                 publicIdentityByRoutePath,
+                identityByInternalPath,
                 aliasIdentityByRoutePath,
                 diagnostics);
             if (aliases.Count > 0)
@@ -192,7 +200,7 @@ internal sealed class DocRouteIdentityCatalog
         {
             return new DocRouteResolution(
                 internalIdentity.IsPublicCanonicalWinner
-                    ? DocRouteResolutionKind.InternalSourceMatch
+                    ? ResolveInternalPublicWinnerKind(internalIdentity)
                     : DocRouteResolutionKind.CollisionLoser,
                 internalIdentity.SourcePath,
                 internalIdentity.PublicRoutePath);
@@ -228,6 +236,13 @@ internal sealed class DocRouteIdentityCatalog
 
         publicRoutePath = string.Empty;
         return false;
+    }
+
+    private static DocRouteResolutionKind ResolveInternalPublicWinnerKind(DocRouteIdentity identity)
+    {
+        return identity.SourcePathIsMarkdown
+            ? DocRouteResolutionKind.AliasRedirect
+            : DocRouteResolutionKind.InternalSourceMatch;
     }
 
     private static bool TryReturnPublicLinkableRoute(DocRouteIdentity identity, out string publicRoutePath)
@@ -346,6 +361,7 @@ internal sealed class DocRouteIdentityCatalog
         DocRouteIdentity identity,
         HashSet<string> reservedRoutePaths,
         Dictionary<string, DocRouteIdentity> publicIdentityByRoutePath,
+        Dictionary<string, DocRouteIdentity> identityByInternalPath,
         Dictionary<string, DocRouteIdentity> aliasIdentityByRoutePath,
         List<DocHarvestDiagnostic> diagnostics)
     {
@@ -376,6 +392,22 @@ internal sealed class DocRouteIdentityCatalog
                     DocHarvestDiagnosticCodes.DocRedirectAliasCollision,
                     $"Redirect alias '{DisplayRoute(aliasLookup)}' collides with another canonical doc route.",
                     "Canonical doc routes win over redirect aliases so public pages stay stable.",
+                    $"Choose a different redirect_aliases entry for '{candidate.SourcePath}'."));
+                continue;
+            }
+
+            if (identityByInternalPath.TryGetValue(aliasLookup, out var internalIdentity)
+                && internalIdentity.SourcePathIsMarkdown)
+            {
+                if (string.Equals(internalIdentity.SourcePath, identity.SourcePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                diagnostics.Add(CreateDiagnostic(
+                    DocHarvestDiagnosticCodes.DocRedirectAliasCollision,
+                    $"Redirect alias '{DisplayRoute(aliasLookup)}' collides with another Markdown source path.",
+                    "Markdown source paths and their legacy .html forms are implicit redirects, so declared aliases cannot safely shadow them.",
                     $"Choose a different redirect_aliases entry for '{candidate.SourcePath}'."));
                 continue;
             }
@@ -425,6 +457,7 @@ internal sealed class DocRouteIdentityCatalog
             NormalizeExactRouteLookupPath(routePath),
             NormalizeRouteLookupPath(BuildLegacyHtmlPath(sourcePath)),
             NormalizeExactRouteLookupPath(BuildLegacyHtmlPath(sourcePath)),
+            IsMarkdownPath(sourcePath),
             routePath.Contains('#', StringComparison.Ordinal));
     }
 
@@ -826,5 +859,6 @@ internal sealed class DocRouteIdentityCatalog
         string PublicRouteExactLookupPath,
         string LegacyHtmlLookupPath,
         string LegacyHtmlExactLookupPath,
+        bool SourcePathIsMarkdown,
         bool HasFragment);
 }

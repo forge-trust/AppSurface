@@ -40,6 +40,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - RazorDocs source-path, canonical-path, fragment, and docs-root-prefixed lookups now share one resolver across page details, landing curation, related-page links, and search fallback links.
 - RazorDocs landing curation now renders reader-intent `featured_page_groups` instead of one flat featured list.
 - RazorDocs authored Markdown pages now use a tighter prose layout while generated API pages keep the wider reference treatment.
+- RazorDocs now redirects public Markdown source-shaped requests such as `/docs/packages/README.md` to the clean canonical route instead of returning a 404.
 - The PackageIndex generator now has a successful `--help`/`-h` path with command and option guidance instead of a bare usage failure.
 - The conventional browser 404 page now favors user recovery, including documentation search for missing docs routes and a home link for other missing pages.
 - AppSurface Web now generalizes conventional browser status pages to empty HTML `401`, `403`, and `404` responses with `BrowserStatusPageMode`, `BrowserStatusPageModel`, preview routes, and status-specific Razor override paths. Static export still writes only `404.html`; conventional production `500` exception pages are tracked separately in issue #224.
