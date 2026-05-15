@@ -921,16 +921,19 @@ public class ExportEngineTests
     }
 
     [Fact]
-    public async Task RunAsync_CdnMode_Should_Allow_404HomeRecoveryLink_To_Be_ExportIgnored()
+    public async Task RunAsync_CdnMode_Should_Export_RootSeed_And_Allow_404HomeRecoveryLink_To_Be_ExportIgnored()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
         var seedFile = Path.Combine(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
-        await File.WriteAllLinesAsync(seedFile, ["/docs"]);
+        await File.WriteAllLinesAsync(seedFile, ["/", "/docs"]);
 
         try
         {
-            var client = new HttpClient(new IgnoredRootRecoveryNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            var client = new HttpClient(new RedirectFollowingHandler(new IgnoredRootRecoveryNotFoundPageHandler()))
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
@@ -938,9 +941,10 @@ public class ExportEngineTests
 
             var notFoundHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "404.html"));
             Assert.Contains("href=\"/\" data-rw-export-ignore=\"true\"", notFoundHtml, StringComparison.Ordinal);
-            Assert.False(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
             Assert.True(File.Exists(Path.Combine(tempDir, "docs.html")));
-            Assert.DoesNotContain(context.RouteOutcomes.Keys, route => route == "/");
+            Assert.True(context.RouteOutcomes.TryGetValue("/", out var rootOutcome));
+            Assert.True(rootOutcome.Succeeded);
         }
         finally
         {
@@ -1986,6 +1990,17 @@ public class ExportEngineTests
                       </body>
                     </html>
                     """);
+            }
+
+            if (path == "/")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+                {
+                    Headers =
+                    {
+                        Location = new Uri("/docs", UriKind.Relative)
+                    }
+                });
             }
 
             if (path == "/docs")

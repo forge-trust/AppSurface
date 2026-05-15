@@ -108,7 +108,7 @@ jobs:
           RazorDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
           RazorDocs__Contributor__LastUpdatedMode: Git
         run: |
-          printf '%s\n' '/docs' > "$RUNNER_TEMP/razordocs-seeds.txt"
+          printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/razordocs-seeds.txt"
           dotnet run --project Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj -c Release -- \
             export \
             --mode cdn \
