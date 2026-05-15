@@ -16,6 +16,7 @@ internal sealed class RazorDocsAssetPathResolver
 {
     internal const string RootStylesheetPath = "~/css/site.gen.css";
     internal const string PackagedStylesheetPath = "~/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css";
+    internal const string PackagedBrandIconPath = "~/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg";
 
     private static readonly Assembly RazorDocsAssembly = typeof(RazorDocsWebModule).Assembly;
 
@@ -28,6 +29,11 @@ internal sealed class RazorDocsAssetPathResolver
     /// Gets the application-relative stylesheet path to use from RazorDocs layouts.
     /// </summary>
     public string StylesheetPath { get; }
+
+    /// <summary>
+    /// Gets the application-relative path for the AppSurface Docs brand mark static asset.
+    /// </summary>
+    public string BrandIconPath => PackagedBrandIconPath;
 
     /// <summary>
     /// Creates the default asset-path resolver used when only the RazorDocs services are registered.

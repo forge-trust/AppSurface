@@ -10,7 +10,7 @@
     var docsSearchStylesheetUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("search.css"));
     var docsMiniSearchUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("minisearch.min.js"));
     var docsSearchClientUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("search-client.js"));
-    var docsBrandIconUrl = Url.Content("~/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg");
+    var docsBrandIconUrl = Url.Content(AssetPathResolver.BrandIconPath);
     var docsClientConfigJson = JsonSerializer.Serialize(
         new
         {
@@ -58,7 +58,7 @@
            class="fixed inset-y-0 left-0 z-40 w-72 max-w-[90vw] flex-shrink-0 border-r border-[#1b2a43] bg-[#050b17]/95 flex flex-col transform transition-transform duration-200 ease-out md:relative md:z-auto md:w-64 md:max-w-none md:translate-x-0"
            tabindex="-1"
            aria-hidden="false">
-        <div class="flex items-center justify-between p-4 border-b border-[#1b2a43] md:hidden">
+        <div class="docs-sidebar-header flex items-center justify-between p-4 border-b border-[#1b2a43] md:hidden">
             <a href="@docsHomeUrl" class="docs-brand">
                 <img class="docs-brand-mark docs-brand-mark--sm" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
                 <span class="docs-brand-wordmark text-xl">App<span class="docs-brand-wordmark-highlight">Surface</span></span>

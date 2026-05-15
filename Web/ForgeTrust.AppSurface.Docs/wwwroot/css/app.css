@@ -103,6 +103,7 @@
     --docs-color-panel-depth-shadow: rgba(0, 0, 0, 0.22);
     --docs-focus-ring-inset: 0 0 0 1px var(--docs-color-accent-strong) inset;
     --docs-focus-outline: 2px solid var(--docs-color-accent-strong);
+
     color-scheme: dark;
 }
 
@@ -199,23 +200,23 @@ body {
 }
 
 @media (max-width: 47.999rem) {
-    #docs-sidebar > div:first-child {
+    .docs-sidebar-header {
         gap: 0.75rem;
     }
 
-    #docs-sidebar > div:first-child .docs-brand {
+    .docs-sidebar-header .docs-brand {
         flex: 1 1 auto;
         gap: 0.55rem;
         min-height: 2.75rem;
         overflow: hidden;
     }
 
-    #docs-sidebar > div:first-child .docs-brand-mark--sm {
+    .docs-sidebar-header .docs-brand-mark--sm {
         width: 2.25rem;
         height: 2.25rem;
     }
 
-    #docs-sidebar > div:first-child .docs-brand-wordmark {
+    .docs-sidebar-header .docs-brand-wordmark {
         overflow: hidden;
         font-size: 1.05rem;
         text-overflow: ellipsis;
@@ -270,6 +271,33 @@ body {
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+}
+
+.docs-section-eyebrow {
+    color: var(--docs-color-accent);
+}
+
+.docs-action-link {
+    border: 1px solid var(--docs-color-border-accent);
+    background: var(--docs-color-accent-fill-soft);
+    color: var(--docs-color-link);
+}
+
+.docs-action-link:hover {
+    border-color: var(--docs-color-border-accent-strong);
+    background: var(--docs-color-brand-teal-wash);
+    color: var(--docs-color-accent-soft);
+}
+
+.docs-version-card {
+    border: 1px solid var(--docs-color-border-muted);
+    background: var(--docs-color-surface-overlay-soft);
+}
+
+.docs-status-badge--recommended {
+    border-color: var(--docs-color-border-accent-strong);
+    background: var(--docs-color-brand-teal-wash);
+    color: var(--docs-color-accent-muted);
 }
 
 .docs-page-badge,

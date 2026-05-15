@@ -5,7 +5,7 @@
 
 <div class="grid gap-8">
     <header class="grid gap-3">
-        <p class="m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[#14b8a6]">Docs Archive</p>
+        <p class="docs-section-eyebrow m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em]">Docs Archive</p>
         <h1 class="docs-gradient-title m-0 text-[clamp(2rem,4vw,3rem)] font-bold leading-[1.02]">@Model.Heading</h1>
         <p class="m-0 max-w-[52rem] text-base leading-[1.6] text-slate-400">@Model.Description</p>
         @if (!string.IsNullOrWhiteSpace(Model.AvailabilityMessage))
@@ -17,7 +17,7 @@
         <div class="flex flex-wrap gap-3">
             <a href="@Url.PathBaseAware(Model.PreviewHref)"
                data-turbo-frame="_top"
-               class="inline-flex items-center gap-2 rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-4 py-2 text-sm font-semibold text-[#bfdbfe] no-underline transition-colors hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
+               class="docs-action-link inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold no-underline transition-colors">
                 Open preview docs
             </a>
             <a href="@Url.PathBaseAware(Model.VersionsHref)"
@@ -30,7 +30,7 @@
 
     @if (Model.Versions.Count == 0)
     {
-        <section class="rounded-lg border border-[#1b2a43] bg-[#050b17]/55 p-6 text-sm leading-[1.65] text-slate-300">
+        <section class="docs-version-card rounded-lg p-6 text-sm leading-[1.65] text-slate-300">
             No published versions are currently listed in the configured archive catalog.
         </section>
     }
@@ -39,13 +39,13 @@
         <section class="grid gap-4">
             @foreach (var version in Model.Versions)
             {
-                <article class="grid gap-3 rounded-lg border border-[#1b2a43] bg-[#050b17]/55 p-5">
+                <article class="docs-version-card grid gap-3 rounded-lg p-5">
                     <div class="flex flex-wrap items-center gap-2">
                         <h2 class="m-0 text-xl font-semibold text-slate-50">@version.Label</h2>
                         <span class="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-slate-300">@version.SupportStateLabel</span>
                         @if (version.IsRecommended)
                         {
-                            <span class="rounded-full border border-[#14b8a6]/45 bg-[#14b8a6]/10 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#99f6e4]">Recommended</span>
+                            <span class="docs-status-badge--recommended rounded-full border px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em]">Recommended</span>
                         }
                         @if (!string.IsNullOrWhiteSpace(version.AdvisoryLabel))
                         {
@@ -69,7 +69,7 @@
                         <div>
                             <a href="@Url.PathBaseAware(version.Href)"
                                data-turbo-frame="_top"
-                               class="inline-flex items-center gap-2 rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-4 py-2 text-sm font-semibold text-[#bfdbfe] no-underline transition-colors hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
+                               class="docs-action-link inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold no-underline transition-colors">
                                 Open @version.Version
                             </a>
                         </div>
