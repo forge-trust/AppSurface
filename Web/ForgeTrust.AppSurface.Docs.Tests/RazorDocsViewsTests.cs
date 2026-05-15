@@ -313,7 +313,7 @@ public class RazorDocsViewsTests
         var layout = ReadLayoutMarkup();
 
         Assert.Contains("<div class=\"flex h-full min-h-0 overflow-hidden\">", layout);
-        Assert.Contains("id=\"main-content\" role=\"main\" class=\"h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-transparent\"", layout);
+        Assert.Contains("id=\"main-content\" role=\"main\" tabindex=\"-1\" class=\"h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-transparent\"", layout);
     }
 
     [Fact]
