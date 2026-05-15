@@ -69,7 +69,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("/reference/next", runner.Args);
         Assert.Contains("--environment", runner.Args);
         Assert.Contains("Development", runner.Args);
-        Assert.Equal(TimeSpan.FromSeconds(30), runner.StartupTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), runner.StartupTimeout);
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains(repository.Path, runner.Args);
         Assert.Contains("--port", runner.Args);
         Assert.Contains("5189", runner.Args);
-        Assert.Equal(TimeSpan.FromSeconds(30), runner.StartupTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), runner.StartupTimeout);
     }
 
     [Fact]

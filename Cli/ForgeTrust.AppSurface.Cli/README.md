@@ -29,7 +29,7 @@ Options:
 - `--route-root`: Route-family root for version and archive routes.
 - `--docs-root`: Live docs preview root.
 - `--environment`, `-e`: Host environment forwarded to the RazorDocs host.
-- `--startup-timeout-seconds`: Seconds to wait for the web host to start before failing fast. Defaults to `30`; use `0` to disable while investigating intentional pre-bind delays.
+- `--startup-timeout-seconds`: Seconds to wait for the web host to start before failing fast. Defaults to `10`; use `0` to disable while investigating intentional pre-bind delays.
 
 `appsurface docs preview` is an alias for the same behavior, kept so the old deferred shape maps cleanly to the new AppSurface command family.
 

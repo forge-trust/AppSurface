@@ -156,11 +156,11 @@ internal abstract class RazorDocsPreviewCommand : ICommand
     /// Gets the number of seconds to wait for the web host to start before failing fast.
     /// </summary>
     /// <remarks>
-    /// Defaults to 30 seconds. Set to <c>0</c> to disable the startup watchdog. Negative, infinite, and NaN values are
+    /// Defaults to 10 seconds. Set to <c>0</c> to disable the startup watchdog. Negative, infinite, and NaN values are
     /// rejected before the host starts.
     /// </remarks>
     [CommandOption("startup-timeout-seconds", Description = "Seconds to wait for the RazorDocs web host to start before failing fast. Use 0 to disable.")]
-    public double StartupTimeoutSeconds { get; init; } = 30;
+    public double StartupTimeoutSeconds { get; init; } = 10;
 
     /// <summary>
     /// Executes the command through the CliFx console integration.

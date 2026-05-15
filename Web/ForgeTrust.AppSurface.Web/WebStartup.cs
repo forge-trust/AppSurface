@@ -93,11 +93,15 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
         IHost? host = null;
         CancellationTokenSource? startupCts = null;
         var timedOut = false;
+        var startupPhase = new StartupPhaseTracker();
 
         try
         {
+            startupPhase.Enter("RegisterDependencies");
             RegisterDependencies(context);
+            startupPhase.Enter("BuildModules");
             BuildModules(context);
+            startupPhase.Enter("BuildWebOptions");
             BuildWebOptions(context);
 
             var startupTimeout = _options.StartupTimeout;
@@ -112,10 +116,12 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
 
             var logger = GetStartupLogger();
             startupCts = new CancellationTokenSource();
+            startupPhase.Enter("BuildAndStartHost");
             var startTask = Task.Run(
                 () => BuildAndStartHostAsync(
                     context,
                     startupCts.Token,
+                    startupPhase.Enter,
                     (startedHost, startupLogger) =>
                     {
                         host = startedHost;
@@ -129,9 +135,24 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
                     timedOut = true;
                     var cancellationTask = startupCts.CancelAsync();
                     ObserveTimedOutStartupTask(startTask, startupCts, () => host?.Dispose(), cancellationTask);
+                    var diagnostic = AppSurfaceWebStartupTimeoutDiagnostic.Create(
+                        startupTimeout.Value,
+                        startupPhase.Current,
+                        Directory.GetCurrentDirectory(),
+                        AppContext.BaseDirectory,
+                        _options.StaticFiles.EnableStaticWebAssets,
+                        args,
+                        Environment.GetEnvironmentVariable);
                     logger.LogCritical(
-                        "AppSurface Web host startup did not complete within {StartupTimeoutSeconds} seconds. The host may be blocked before Kestrel has bound its URLs. Check sandbox restrictions, static web asset discovery, package layout, and hosted-service startup work. Set WebOptions.StartupTimeout to null only when this pre-bind delay is intentional.",
-                        startupTimeout.Value.TotalSeconds);
+                        "AppSurface Web host startup did not complete within {StartupTimeoutSeconds} seconds before Kestrel finished binding. Startup phase: {StartupPhase}. Sandbox markers: {SandboxSummary}. Recommendation: {RecommendedAction} Current directory: {CurrentDirectory}. App base directory: {BaseDirectory}. Static web assets enabled: {StaticWebAssetsEnabled}. Endpoint startup args: {StartupArgs}. Set WebOptions.StartupTimeout to null only when this pre-bind delay is intentional.",
+                        diagnostic.StartupTimeout.TotalSeconds,
+                        diagnostic.StartupPhase,
+                        diagnostic.SandboxSummary,
+                        diagnostic.RecommendedAction,
+                        diagnostic.CurrentDirectory,
+                        diagnostic.BaseDirectory,
+                        diagnostic.StaticWebAssetsEnabled,
+                        diagnostic.StartupArgsSummary);
                     Environment.ExitCode = -100;
                     return;
                 }
@@ -159,13 +180,27 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
         }
     }
 
+    private sealed class StartupPhaseTracker
+    {
+        private string _current = "created";
+
+        internal string Current => Volatile.Read(ref _current);
+
+        internal void Enter(string phase)
+        {
+            Volatile.Write(ref _current, phase);
+        }
+    }
+
     [ExcludeFromCodeCoverage(
         Justification = "Private framework-host adapter; RunResolvedAsync tests verify success, fault, cancellation, and timeout outcomes through the public startup path.")]
     private async Task<IHost> BuildAndStartHostAsync(
         StartupContext context,
         CancellationToken startupCancellationToken,
+        Action<string> setStartupPhase,
         Action<IHost, ILogger> hostStarted)
     {
+        setStartupPhase("BuildHost");
         var host = ((IAppSurfaceStartup)this).CreateHostBuilder(context).Build();
         var loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
         var logger = loggerFactory.CreateLogger(GetType().Name);
@@ -173,7 +208,9 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
 
         try
         {
+            setStartupPhase("StartHost");
             await host.StartAsync(startupCancellationToken);
+            setStartupPhase("HostStarted");
         }
         catch (OperationCanceledException) when (startupCancellationToken.IsCancellationRequested)
         {
