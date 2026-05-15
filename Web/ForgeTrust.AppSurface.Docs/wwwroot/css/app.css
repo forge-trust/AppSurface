@@ -1,91 +1,116 @@
 @import "tailwindcss";
 
 @theme {
-    --font-outfit: "Outfit", ui-sans-serif, system-ui;
+    --font-inter: "Inter", ui-sans-serif, system-ui;
 }
 
 :root {
-    --docs-color-surface-canvas: #020617;
-    --docs-color-surface-raised: #0f172a;
-    --docs-color-surface-muted: rgba(30, 41, 59, 0.8);
-    --docs-color-surface-panel: rgba(15, 23, 42, 0.72);
-    --docs-color-surface-panel-elevated: rgba(15, 23, 42, 0.86);
-    --docs-color-surface-panel-heavy: rgba(15, 23, 42, 0.88);
-    --docs-color-surface-panel-hover: rgba(15, 23, 42, 0.52);
-    --docs-color-surface-panel-hover-strong: rgba(15, 23, 42, 0.54);
-    --docs-color-surface-panel-raised: rgba(15, 23, 42, 0.55);
-    --docs-color-surface-panel-active: rgba(15, 23, 42, 0.65);
-    --docs-color-surface-panel-soft: rgba(15, 23, 42, 0.42);
-    --docs-color-surface-panel-faint: rgba(15, 23, 42, 0.32);
-    --docs-color-surface-panel-table: rgba(15, 23, 42, 0.45);
-    --docs-color-surface-panel-table-head: rgba(15, 23, 42, 0.82);
-    --docs-color-surface-overlay: rgba(2, 6, 23, 0.78);
-    --docs-color-surface-overlay-strong: rgba(2, 6, 23, 0.9);
-    --docs-color-surface-overlay-soft: rgba(2, 6, 23, 0.65);
-    --docs-color-surface-overlay-faint: rgba(2, 6, 23, 0.26);
-    --docs-color-surface-code: #111827;
-    --docs-color-surface-code-plain: #172033;
-    --docs-color-border-muted: #1e293b;
-    --docs-color-border-muted-heavy: rgba(30, 41, 59, 0.95);
-    --docs-color-border-code-plain: #29384f;
-    --docs-color-border-default: #334155;
-    --docs-color-border-default-strong: rgba(51, 65, 85, 0.88);
-    --docs-color-border-default-heavy: rgba(51, 65, 85, 0.9);
-    --docs-color-border-default-heavier: rgba(51, 65, 85, 0.92);
-    --docs-color-border-strong: #475569;
-    --docs-color-border-accent: rgba(34, 211, 238, 0.35);
-    --docs-color-border-accent-hover: rgba(34, 211, 238, 0.45);
-    --docs-color-border-accent-muted: rgba(34, 211, 238, 0.3);
-    --docs-color-border-accent-active: rgba(34, 211, 238, 0.42);
-    --docs-color-border-accent-subtle: rgba(34, 211, 238, 0.18);
-    --docs-color-border-accent-faint: rgba(34, 211, 238, 0.08);
-    --docs-color-border-accent-strong: rgba(103, 232, 249, 0.65);
-    --docs-color-border-accent-readable: rgba(103, 232, 249, 0.55);
+    --docs-brand-navy: #0d182a;
+    --docs-brand-blue: #2563eb;
+    --docs-brand-teal: #14b8a6;
+    --docs-brand-violet: #8b5cf6;
+    --docs-brand-ice: #e5e7eb;
+    --docs-brand-violet-hot: #a855f7;
+    --docs-color-surface-canvas: #050b17;
+    --docs-color-surface-canvas-mid: #08101e;
+    --docs-color-surface-canvas-deep: #040812;
+    --docs-color-surface-raised: #0d182a;
+    --docs-color-surface-muted: rgba(24, 38, 64, 0.8);
+    --docs-color-surface-panel: rgba(13, 24, 42, 0.72);
+    --docs-color-surface-panel-elevated: rgba(13, 24, 42, 0.88);
+    --docs-color-surface-panel-heavy: rgba(13, 24, 42, 0.92);
+    --docs-color-surface-panel-hover: rgba(20, 35, 61, 0.56);
+    --docs-color-surface-panel-hover-strong: rgba(20, 35, 61, 0.68);
+    --docs-color-surface-panel-raised: rgba(13, 24, 42, 0.64);
+    --docs-color-surface-panel-active: rgba(20, 35, 61, 0.78);
+    --docs-color-surface-panel-soft: rgba(13, 24, 42, 0.48);
+    --docs-color-surface-panel-faint: rgba(13, 24, 42, 0.34);
+    --docs-color-surface-panel-table: rgba(13, 24, 42, 0.52);
+    --docs-color-surface-panel-table-head: rgba(13, 24, 42, 0.86);
+    --docs-color-surface-overlay: rgba(5, 11, 23, 0.78);
+    --docs-color-surface-overlay-strong: rgba(5, 11, 23, 0.92);
+    --docs-color-surface-overlay-soft: rgba(5, 11, 23, 0.68);
+    --docs-color-surface-overlay-faint: rgba(5, 11, 23, 0.32);
+    --docs-color-surface-code: #0a1322;
+    --docs-color-surface-code-plain: #111d31;
+    --docs-color-border-muted: #1b2a43;
+    --docs-color-border-muted-heavy: rgba(31, 45, 70, 0.96);
+    --docs-color-border-code-plain: #263857;
+    --docs-color-border-default: #314461;
+    --docs-color-border-default-strong: rgba(65, 87, 121, 0.88);
+    --docs-color-border-default-heavy: rgba(65, 87, 121, 0.9);
+    --docs-color-border-default-heavier: rgba(65, 87, 121, 0.92);
+    --docs-color-border-strong: #526987;
+    --docs-color-border-accent: rgba(37, 99, 235, 0.42);
+    --docs-color-border-accent-hover: rgba(20, 184, 166, 0.56);
+    --docs-color-border-accent-muted: rgba(37, 99, 235, 0.34);
+    --docs-color-border-accent-active: rgba(20, 184, 166, 0.48);
+    --docs-color-border-accent-subtle: rgba(37, 99, 235, 0.22);
+    --docs-color-border-accent-faint: rgba(139, 92, 246, 0.12);
+    --docs-color-border-accent-strong: rgba(20, 184, 166, 0.7);
+    --docs-color-border-accent-readable: rgba(20, 184, 166, 0.62);
     --docs-color-text-strong: #f8fafc;
-    --docs-color-text-default: #e2e8f0;
-    --docs-color-text-default-underline: rgba(226, 232, 240, 0.8);
-    --docs-color-text-muted: #cbd5e1;
-    --docs-color-text-subtle: #94a3b8;
-    --docs-color-text-subtle-underline: rgba(148, 163, 184, 0.6);
-    --docs-color-text-faint: #64748b;
-    --docs-color-text-prose: #d8e1ee;
-    --docs-color-text-table: #dbe4f0;
+    --docs-color-text-default: #e5e7eb;
+    --docs-color-text-default-underline: rgba(229, 231, 235, 0.78);
+    --docs-color-text-muted: #c8d0dc;
+    --docs-color-text-subtle: #9aa8bc;
+    --docs-color-text-subtle-underline: rgba(154, 168, 188, 0.6);
+    --docs-color-text-faint: #728098;
+    --docs-color-text-prose: #dbe2ec;
+    --docs-color-text-table: #dfe6f0;
     --docs-color-text-info: #dbeafe;
-    --docs-color-text-info-muted: #bfdbfe;
-    --docs-color-text-mark: #ecfeff;
-    --docs-color-accent: #67e8f9;
-    --docs-color-accent-strong: #22d3ee;
-    --docs-color-accent-blue: #38bdf8;
-    --docs-color-accent-soft: #cffafe;
-    --docs-color-accent-muted: #a5f3fc;
-    --docs-color-link: #7dd3fc;
-    --docs-color-link-visited: #93c5fd;
-    --docs-color-link-underline: rgba(125, 211, 252, 0.48);
-    --docs-color-accent-fill-soft: rgba(34, 211, 238, 0.12);
-    --docs-color-accent-mark-fill: rgba(34, 211, 238, 0.25);
-    --docs-color-accent-underline: rgba(103, 232, 249, 0.45);
-    --docs-color-accent-soft-underline: rgba(207, 250, 254, 0.78);
-    --docs-color-accent-soft-underline-muted: rgba(207, 250, 254, 0.7);
-    --docs-color-state-active-fill: rgba(8, 47, 73, 0.35);
-    --docs-color-state-active-fill-strong: rgba(8, 47, 73, 0.45);
-    --docs-color-state-link-fill: rgba(8, 47, 73, 0.38);
-    --docs-color-state-trust-fill-start: rgba(8, 47, 73, 0.22);
-    --docs-color-state-outline-fill: rgba(8, 47, 73, 0.62);
-    --docs-color-state-outline-fill-end: rgba(15, 23, 42, 0.28);
-    --docs-color-state-outline-rail-start: rgba(8, 47, 73, 0.58);
-    --docs-color-state-outline-rail-mid: rgba(8, 47, 73, 0.34);
-    --docs-color-state-outline-rail-end: rgba(15, 23, 42, 0.16);
-    --docs-color-state-outline-rail-hover-start: rgba(8, 47, 73, 0.68);
-    --docs-color-state-outline-rail-hover-mid: rgba(8, 47, 73, 0.42);
-    --docs-color-state-outline-rail-hover-end: rgba(15, 23, 42, 0.22);
-    --docs-color-skeleton-edge: rgba(30, 41, 59, 0.9);
-    --docs-color-skeleton-mid: rgba(51, 65, 85, 0.55);
+    --docs-color-text-info-muted: #c7d2fe;
+    --docs-color-text-mark: #f5f7fb;
+    --docs-color-accent: #14b8a6;
+    --docs-color-accent-strong: #2563eb;
+    --docs-color-accent-blue: #2563eb;
+    --docs-color-accent-violet: #8b5cf6;
+    --docs-color-accent-soft: #ccfbf1;
+    --docs-color-accent-muted: #99f6e4;
+    --docs-color-link: #93c5fd;
+    --docs-color-link-visited: #c4b5fd;
+    --docs-color-link-underline: rgba(147, 197, 253, 0.5);
+    --docs-color-accent-fill-soft: rgba(37, 99, 235, 0.14);
+    --docs-color-accent-mark-fill: rgba(20, 184, 166, 0.28);
+    --docs-color-accent-underline: rgba(20, 184, 166, 0.5);
+    --docs-color-accent-soft-underline: rgba(204, 251, 241, 0.78);
+    --docs-color-accent-soft-underline-muted: rgba(204, 251, 241, 0.7);
+    --docs-color-state-active-fill: rgba(37, 99, 235, 0.24);
+    --docs-color-state-active-fill-strong: rgba(37, 99, 235, 0.34);
+    --docs-color-state-link-fill: rgba(37, 99, 235, 0.28);
+    --docs-color-state-trust-fill-start: rgba(37, 99, 235, 0.18);
+    --docs-color-state-outline-fill: rgba(37, 99, 235, 0.46);
+    --docs-color-state-outline-fill-end: rgba(13, 24, 42, 0.3);
+    --docs-color-state-outline-rail-start: rgba(37, 99, 235, 0.5);
+    --docs-color-state-outline-rail-mid: rgba(20, 184, 166, 0.22);
+    --docs-color-state-outline-rail-end: rgba(13, 24, 42, 0.18);
+    --docs-color-state-outline-rail-hover-start: rgba(37, 99, 235, 0.6);
+    --docs-color-state-outline-rail-hover-mid: rgba(20, 184, 166, 0.3);
+    --docs-color-state-outline-rail-hover-end: rgba(13, 24, 42, 0.24);
+    --docs-color-skeleton-edge: rgba(27, 42, 67, 0.92);
+    --docs-color-skeleton-mid: rgba(65, 87, 121, 0.55);
+    --docs-color-page-wash: rgba(37, 99, 235, 0.08);
+    --docs-color-brand-blue-shadow: rgba(37, 99, 235, 0.2);
+    --docs-color-brand-blue-shadow-strong: rgba(37, 99, 235, 0.22);
+    --docs-color-brand-blue-wash: rgba(37, 99, 235, 0.42);
+    --docs-color-brand-teal-shadow: rgba(20, 184, 166, 0.3);
+    --docs-color-brand-teal-wash: rgba(20, 184, 166, 0.08);
+    --docs-color-brand-violet-shadow: rgba(139, 92, 246, 0.34);
+    --docs-color-brand-violet-wash: rgba(139, 92, 246, 0.1);
+    --docs-color-brand-ice-border: rgba(229, 231, 235, 0.2);
+    --docs-color-brand-ice-highlight: rgba(229, 231, 235, 0.05);
+    --docs-color-brand-panel-border: rgba(65, 87, 121, 0.62);
+    --docs-color-panel-depth-shadow: rgba(0, 0, 0, 0.22);
     --docs-focus-ring-inset: 0 0 0 1px var(--docs-color-accent-strong) inset;
     --docs-focus-outline: 2px solid var(--docs-color-accent-strong);
+    color-scheme: dark;
 }
 
 body {
-    font-family: var(--font-outfit);
+    background:
+        linear-gradient(180deg, var(--docs-color-page-wash), transparent 22rem),
+        linear-gradient(135deg, var(--docs-color-surface-canvas), var(--docs-color-surface-canvas-mid) 52%, var(--docs-color-surface-canvas-deep));
+    font-family: var(--font-inter);
     scrollbar-width: thin;
     scrollbar-color: var(--docs-color-border-default) var(--docs-color-surface-raised);
 }
@@ -114,6 +139,96 @@ body {
 * {
     scrollbar-width: thin;
     scrollbar-color: var(--docs-color-border-default) var(--docs-color-surface-raised);
+}
+
+.docs-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+    color: var(--docs-color-text-strong);
+    text-decoration: none;
+}
+
+.docs-brand:hover .docs-brand-wordmark {
+    filter: brightness(1.1);
+}
+
+.docs-brand-mark {
+    width: 3.25rem;
+    height: 3.25rem;
+    flex: 0 0 auto;
+    object-fit: contain;
+    filter:
+        drop-shadow(0 0.7rem 1rem var(--docs-color-brand-blue-shadow))
+        drop-shadow(0 0 0.75rem var(--docs-color-brand-teal-shadow));
+}
+
+.docs-brand-wordmark {
+    min-width: 0;
+    font-weight: 800;
+    letter-spacing: 0;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.docs-brand-wordmark-highlight {
+    background: linear-gradient(90deg, var(--docs-brand-blue), var(--docs-brand-teal) 52%, var(--docs-brand-violet));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.docs-brand-kicker {
+    color: var(--docs-color-text-faint);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.docs-brand-mark--sm {
+    width: 2.55rem;
+    height: 2.55rem;
+}
+
+.docs-brand-mark--lg {
+    width: 7.25rem;
+    height: 7.25rem;
+}
+
+.docs-hero-panel,
+.docs-surface-panel {
+    border: 1px solid var(--docs-color-brand-panel-border);
+    background:
+        linear-gradient(180deg, var(--docs-color-surface-panel-elevated), var(--docs-color-surface-panel)),
+        var(--docs-color-surface-panel);
+    box-shadow:
+        inset 0 1px 0 var(--docs-color-brand-ice-highlight),
+        0 1.5rem 4rem var(--docs-color-panel-depth-shadow);
+}
+
+.docs-hero-panel {
+    position: relative;
+    overflow: hidden;
+}
+
+.docs-hero-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        linear-gradient(90deg, var(--docs-color-brand-teal-wash), transparent 42%),
+        linear-gradient(135deg, transparent 62%, var(--docs-color-brand-violet-wash));
+}
+
+.docs-gradient-title {
+    background: linear-gradient(90deg, var(--docs-color-text-strong), var(--docs-brand-blue) 43%, var(--docs-brand-violet));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
 }
 
 .docs-page-badge,
@@ -1268,7 +1383,7 @@ body {
     top: 0.78rem;
     right: 0.9rem;
     color: var(--docs-color-link-visited);
-    font-family: Outfit, ui-sans-serif, system-ui, sans-serif;
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
     font-size: 0.68rem;
     font-weight: 700;
     letter-spacing: 0.08em;

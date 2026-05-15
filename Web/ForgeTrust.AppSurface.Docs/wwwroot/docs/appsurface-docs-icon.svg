@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">AppSurface Docs layered document mark</title>
+  <desc id="desc">Four rounded isometric document layers in navy, blue, teal, and violet with document lines and a folded corner.</desc>
+  <defs>
+    <linearGradient id="base" x1="116" y1="386" x2="397" y2="247" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#05112A"/>
+      <stop offset="1" stop-color="#0D182A"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="117" y1="329" x2="394" y2="187" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0074FF"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="teal" x1="113" y1="259" x2="390" y2="117" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0FB5A6"/>
+      <stop offset="1" stop-color="#14D3C0"/>
+    </linearGradient>
+    <linearGradient id="violet" x1="133" y1="188" x2="410" y2="46" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#9B5CFF"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="365" y1="69" x2="452" y2="129" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4ECFF" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#D7B7FF" stop-opacity=".82"/>
+    </linearGradient>
+    <filter id="shadow" x="31" y="32" width="450" height="450" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#020617" flood-opacity=".32"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="9" flood-color="#2563EB" flood-opacity=".18"/>
+    </filter>
+    <filter id="glow" x="46" y="26" width="420" height="332" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feColorMatrix in="blur" values="0 0 0 0 0.145 0 0 0 0 0.388 0 0 0 0 0.922 0 0 0 .24 0"/>
+      <feBlend in="SourceGraphic"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <path d="M62.04 349.27c-13.66 7.25-13.53 26.86.22 33.93l183.9 94.56a52 52 0 0 0 47.75-.12L449.15 396.4c13.4-7.02 13.58-26.15.32-33.42L264.18 261.45a52 52 0 0 0-49.46-.24L62.04 349.27Z" fill="url(#base)"/>
+    <path d="M62.04 319.27c-13.66 7.25-13.53 26.86.22 33.93l183.9 94.56a52 52 0 0 0 47.75-.12l155.24-81.24c13.4-7.02 13.58-26.15.32-33.42L264.18 231.45a52 52 0 0 0-49.46-.24L62.04 319.27Z" fill="#08173A" opacity=".78"/>
+    <path d="M65.75 289.16c-13.85 7.11-13.9 26.91-.09 34.1l181.95 94.74a52 52 0 0 0 47.94.05l150.52-77.86c13.48-6.98 13.72-26.16.42-33.47L265.36 207.21a52 52 0 0 0-48.84-.54L65.75 289.16Z" fill="url(#blue)"/>
+    <path d="M65.75 258.16c-13.85 7.11-13.9 26.91-.09 34.1L247.61 387a52 52 0 0 0 47.94.05l150.52-77.86c13.48-6.98 13.72-26.16.42-33.47L265.36 176.21a52 52 0 0 0-48.84-.54L65.75 258.16Z" fill="#0057D9" opacity=".8"/>
+    <path d="M83.21 219.38c-14.55 7.04-14.7 27.69-.25 34.94l164.36 82.5a52 52 0 0 0 47.37-.44l132.56-70.95c13.08-7 13.21-25.7.23-32.89L263.73 141.9a52 52 0 0 0-48.05-.37L83.21 219.38Z" fill="url(#teal)"/>
+    <path d="M83.21 187.38c-14.55 7.04-14.7 27.69-.25 34.94l164.36 82.5a52 52 0 0 0 47.37-.44l132.56-70.95c13.08-7 13.21-25.7.23-32.89L263.73 109.9a52 52 0 0 0-48.05-.37L83.21 187.38Z" fill="#08998D" opacity=".82"/>
+    <path d="M120.64 149.04c-15.67 7.22-15.73 29.48-.1 36.78L265.76 253.6a52 52 0 0 0 47.61-.94l113.44-60.57c14.04-7.5 13.72-27.76-.55-34.81L276.77 83.47a52 52 0 0 0-47.38.61L120.64 149.04Z" fill="url(#violet)" filter="url(#glow)"/>
+    <path d="M120.64 116.04c-15.67 7.22-15.73 29.48-.1 36.78L265.76 220.6a52 52 0 0 0 47.61-.94l113.44-60.57c14.04-7.5 13.72-27.76-.55-34.81L276.77 50.47a52 52 0 0 0-47.38.61L120.64 116.04Z" fill="url(#violet)"/>
+  </g>
+
+  <path d="M368.62 78.96 425.4 107a28.9 28.9 0 0 1 11.86 10.44l17.66 26.47-66.98-8.56c-14.86-1.9-25.11-15.88-21.92-30.52l2.6-25.87Z" fill="url(#fold)" opacity=".9"/>
+  <g opacity=".34" fill="#3B17A9">
+    <ellipse cx="270" cy="94" rx="13.5" ry="9.2" transform="rotate(7 270 94)"/>
+    <ellipse cx="304" cy="106" rx="13.5" ry="9.2" transform="rotate(7 304 106)"/>
+    <ellipse cx="338" cy="119" rx="13.5" ry="9.2" transform="rotate(7 338 119)"/>
+  </g>
+  <g opacity=".32" stroke="#3B17A9" stroke-linecap="round" stroke-width="12">
+    <path d="M214 119 345 183"/>
+    <path d="M183 143 314 207"/>
+  </g>
+  <g opacity=".28" stroke="#04766E" stroke-linecap="round" stroke-width="12">
+    <path d="M149 214 281 281"/>
+    <path d="M118 239 249 306"/>
+  </g>
+  <path d="M61 350 245.88 445.67a52 52 0 0 0 48.14-.06l155.1-80.2" fill="none" opacity=".55" stroke="#18366F" stroke-linecap="round" stroke-width="3"/>
+</svg>

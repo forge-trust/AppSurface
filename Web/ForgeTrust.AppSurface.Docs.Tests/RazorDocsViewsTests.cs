@@ -203,17 +203,21 @@ public class RazorDocsViewsTests
         var searchStylesheet = ReadSearchStylesheetMarkup();
 
         Assert.Contains(":root {", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-surface-canvas: #020617;", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-border-default: #334155;", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-text-default: #e2e8f0;", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-accent-strong: #22d3ee;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-navy: #0d182a;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-blue: #2563eb;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-teal: #14b8a6;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-violet: #8b5cf6;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-surface-canvas: #050b17;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-border-default: #314461;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-text-default: #e5e7eb;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-accent-strong: #2563eb;", tailwindEntryStylesheet);
         Assert.Contains("--docs-focus-ring-inset:", tailwindEntryStylesheet);
 
         Assert.Contains("border: 1px solid var(--docs-color-border-default);", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-accent);", tailwindEntryStylesheet);
         Assert.Contains("outline: var(--docs-focus-outline);", tailwindEntryStylesheet);
 
-        Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #020617);", searchStylesheet);
+        Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #050b17);", searchStylesheet);
         Assert.Contains("--docs-search-focus-ring-inset: var(--docs-focus-ring-inset,", searchStylesheet);
         Assert.Contains("background: var(--docs-search-color-surface-canvas);", searchStylesheet);
         Assert.Contains("border: 1px solid var(--docs-search-color-border-default);", searchStylesheet);
@@ -309,7 +313,7 @@ public class RazorDocsViewsTests
         var layout = ReadLayoutMarkup();
 
         Assert.Contains("<div class=\"flex h-full min-h-0 overflow-hidden\">", layout);
-        Assert.Contains("id=\"main-content\" role=\"main\" class=\"h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-slate-900\"", layout);
+        Assert.Contains("id=\"main-content\" role=\"main\" class=\"h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-transparent\"", layout);
     }
 
     [Fact]

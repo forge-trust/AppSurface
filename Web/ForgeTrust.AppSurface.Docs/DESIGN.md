@@ -1,8 +1,8 @@
-# RazorDocs Design Language
+# AppSurface Docs Design Language
 
 ## Purpose
 
-RazorDocs should feel like a focused documentation workspace, not a marketing site and not a generic SaaS dashboard. The UI should help people orient quickly, scan densely, and move deeper into docs with very little friction.
+AppSurface Docs should feel like a focused documentation workspace, not a marketing site and not a generic SaaS dashboard. The UI should help people orient quickly, scan densely, and move deeper into docs with very little friction.
 
 ## Core Tone
 
@@ -17,7 +17,7 @@ If a new surface starts to feel like a feature grid, a landing page, or an AI-ge
 
 ### Typography
 
-- Primary typeface: `Outfit`
+- Primary typeface: `Inter`, with the platform sans-serif stack as fallback
 - Body copy should stay clean and readable with generous line-height
 - Authored Markdown prose should use a shorter measure and stronger paragraph/list rhythm than generated API reference pages. Release notes and long guides must scan as editorial documents, not as one uninterrupted text column.
 - Headings should feel compact and intentional, not oversized hero copy
@@ -25,16 +25,16 @@ If a new surface starts to feel like a feature grid, a landing page, or an AI-ge
 
 ### Color
 
-- Base surfaces: dark slate family
-- Accent: cyan for focus, active state, and high-value calls to action
+- Base surfaces: deep navy, anchored by `#0D182A`
+- Accent system: cobalt blue for primary controls, teal for active/focus states, and violet for occasional brand depth
 - Borders and separators should do most of the structure work
 - Avoid adding extra accent colors unless the feature truly needs semantic differentiation
 
 ### Style Tokens
 
-RazorDocs expresses the flagship dark-slate system through internal `--docs-*` CSS custom properties in `wwwroot/css/app.css`.
+AppSurface Docs expresses the ForgeTrust AppSurface brand system through internal `--docs-*` CSS custom properties in `wwwroot/css/app.css`.
 
-The token layer exists so contributors can preserve the same visual language without rediscovering which hardcoded slate, cyan, or translucent fill belongs to each shared primitive. Token names should describe the design job: surface, border, text, accent, focus, active state, code chrome, table chrome, or skeleton. Do not name tokens after Tailwind hues unless the hue itself is the contract, which it usually is not.
+The token layer exists so contributors can preserve the same visual language without rediscovering which hardcoded navy, cobalt, teal, violet, or translucent fill belongs to each shared primitive. Token names should describe the design job: surface, border, text, accent, focus, active state, code chrome, table chrome, or skeleton. Do not name tokens after Tailwind hues unless the hue itself is the contract, which it usually is not.
 
 Default rule:
 
@@ -42,7 +42,7 @@ Default rule:
 2. If a color represents a repeated state such as focus, active, muted, raised, loading, or default border, use or add a token.
 3. If a color is local to syntax highlighting, generated API signature colorization, or a one-off semantic badge family, keep it local and document the category.
 
-These tokens are not a public theming API yet. Hosts should not rely on overriding `--docs-*` names until a future theming feature explicitly documents that contract. Inside RazorDocs, though, shared package chrome and search-specific UI should consume the same root token layer so future theming can change the system deliberately. Search CSS may route through `--docs-search-*` aliases with fallbacks because exact published release trees can serve `search.css` without the generated package stylesheet.
+These tokens are not a public theming API yet. Hosts should not rely on overriding `--docs-*` names until a future theming feature explicitly documents that contract. Inside AppSurface Docs, though, shared package chrome and search-specific UI should consume the same root token layer so future theming can change the system deliberately. Search CSS may route through `--docs-search-*` aliases with fallbacks because exact published release trees can serve `search.css` without the generated package stylesheet.
 
 ### Surfaces
 
@@ -175,8 +175,8 @@ The persistent rail appears only on wide desktop (`>=1280px`) so the article col
 Visual rules:
 
 - Keep the rail editorial and quiet: border/separator structure beats boxed cards.
-- Use cyan for active and focus states only.
-- Borrow the active-row treatment from the approved mockup direction: subtle row fill plus a cyan marker.
+- Use teal for active and focus states only.
+- Borrow the active-row treatment from the approved mockup direction: subtle row fill plus a teal marker.
 - Keep H2 links stronger and H3 links quieter/indented.
 - Use small row radii only. Do not wrap the whole rail in a large rounded card.
 - Preserve the existing RazorDocs global sidebar; do not replace it with icon-only chrome for this pattern.
@@ -214,4 +214,4 @@ Avoid these by default:
 - decorative gradients inside core reading surfaces
 - multiple competing result columns
 - hiding the corpus shape behind over-minimal filter UI
-- introducing visual styles that do not already fit the dark-slate plus cyan system
+- introducing visual styles that do not already fit the navy, cobalt, teal, and violet AppSurface system

@@ -89,7 +89,7 @@
             <a href="@Url.PathBaseAware(Model.PublicSectionHref)"
                data-turbo-frame="doc-content"
                data-turbo-action="advance"
-               class="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-slate-200 transition-colors hover:border-cyan-500/40 hover:text-cyan-200">
+               class="inline-flex items-center gap-2 rounded-full border border-[#314461] bg-[#0d182a]/80 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-slate-200 transition-colors hover:border-[#14b8a6]/45 hover:text-[#99f6e4]">
                 <span class="text-slate-500">Section</span>
                 <span>@Model.PublicSectionLabel</span>
             </a>
@@ -113,7 +113,7 @@
                     <a href="@Url.PathBaseAware(crumb.Href)"
                        data-turbo-frame="doc-content"
                        data-turbo-action="advance"
-                       class="px-1 text-slate-400 transition-colors hover:text-cyan-400">
+                       class="px-1 text-slate-400 transition-colors hover:text-[#14b8a6]">
                         @crumb.Label
                     </a>
                 }
@@ -265,10 +265,10 @@
     <div class="docs-detail-primary">
         @if (Model.IsSectionLanding)
         {
-            <section class="mb-10 rounded-2xl border border-slate-800 bg-slate-950/35 p-5 sm:p-6">
-                <div class="flex flex-col gap-3 border-b border-slate-800 pb-4 sm:flex-row sm:items-end sm:justify-between">
+            <section class="mb-10 rounded-lg border border-[#1b2a43] bg-[#050b17]/35 p-5 sm:p-6">
+                <div class="flex flex-col gap-3 border-b border-[#1b2a43] pb-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>
-                        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Section landing</p>
+                        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-[#14b8a6]">Section landing</p>
                         <h2 class="mt-2 text-xl font-semibold text-white">Use this section as the entry point.</h2>
                         @if (!string.IsNullOrWhiteSpace(Model.PublicSectionPurpose))
                         {
@@ -280,7 +280,7 @@
                         <a href="@Url.PathBaseAware(Model.PublicSectionHref)"
                            data-turbo-frame="doc-content"
                            data-turbo-action="advance"
-                           class="inline-flex items-center gap-2 self-start rounded-full border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition-colors hover:border-cyan-500/40 hover:text-cyan-200">
+                           class="inline-flex items-center gap-2 self-start rounded-full border border-[#314461] bg-[#0d182a]/70 px-4 py-2 text-sm font-semibold text-slate-200 transition-colors hover:border-[#14b8a6]/45 hover:text-[#99f6e4]">
                             Section route
                         </a>
                     }
@@ -305,18 +305,18 @@
                                             <a href="@Url.PathBaseAware(featuredPage.Href)"
                                                data-turbo-frame="doc-content"
                                                data-turbo-action="advance"
-                                               class="group block rounded-xl border border-slate-900 bg-slate-950/60 px-4 py-3 transition-colors hover:border-cyan-500/30 hover:bg-slate-950">
+                                               class="group block rounded-lg border border-[#1b2a43] bg-[#050b17]/60 px-4 py-3 transition-colors hover:border-[#14b8a6]/35 hover:bg-[#08101e]">
                                                 <div class="flex flex-wrap items-center gap-2">
                                                     @if (!string.IsNullOrWhiteSpace(featuredPage.Question))
                                                     {
-                                                        <span class="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">@featuredPage.Question</span>
+                                                        <span class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#14b8a6]">@featuredPage.Question</span>
                                                     }
                                                     @if (featuredPage.PageTypeBadge is not null)
                                                     {
                                                         <span class="docs-page-badge docs-page-badge--@featuredPage.PageTypeBadge.Variant">@featuredPage.PageTypeBadge.Label</span>
                                                     }
                                                 </div>
-                                                <h4 class="mt-2 text-base font-semibold text-white transition-colors group-hover:text-cyan-100">@featuredPage.Title</h4>
+                                                <h4 class="mt-2 text-base font-semibold text-white transition-colors group-hover:text-[#ccfbf1]">@featuredPage.Title</h4>
                                                 @if (!string.IsNullOrWhiteSpace(featuredPage.SupportingText))
                                                 {
                                                     <p class="mt-2 text-sm leading-6 text-slate-400">@featuredPage.SupportingText</p>
@@ -349,9 +349,9 @@
                                                 <a href="@Url.PathBaseAware(link.Href)"
                                                    data-turbo-frame="doc-content"
                                                    data-turbo-action="advance"
-                                                   class="group block rounded-xl border border-slate-900 bg-slate-950/50 px-4 py-3 transition-colors hover:border-cyan-500/30 hover:bg-slate-950">
+                                                   class="group block rounded-lg border border-[#1b2a43] bg-[#050b17]/50 px-4 py-3 transition-colors hover:border-[#14b8a6]/35 hover:bg-[#08101e]">
                                                     <div class="flex flex-wrap items-center gap-2">
-                                                        <span class="text-sm font-semibold text-white transition-colors group-hover:text-cyan-100">@link.Title</span>
+                                                        <span class="text-sm font-semibold text-white transition-colors group-hover:text-[#ccfbf1]">@link.Title</span>
                                                         @if (link.PageTypeBadge is not null)
                                                         {
                                                             <span class="docs-page-badge docs-page-badge--@link.PageTypeBadge.Variant">@link.PageTypeBadge.Label</span>
@@ -382,7 +382,7 @@
 
         @if (Model.HasWayfinding)
         {
-            <section id="docs-page-wayfinding" class="mt-10 space-y-6 border-t border-slate-800 pt-8">
+            <section id="docs-page-wayfinding" class="mt-10 space-y-6 border-t border-[#1b2a43] pt-8">
                 @if (Model.PreviousPage is not null || Model.NextPage is not null)
                 {
                     <div class="space-y-3">
@@ -394,7 +394,7 @@
                                    data-doc-wayfinding="previous"
                                    data-turbo-frame="doc-content"
                                    data-turbo-action="advance"
-                                   class="block rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-4 transition-colors hover:border-cyan-500/40 hover:bg-slate-900">
+                                   class="block rounded-lg border border-[#1b2a43] bg-[#0d182a]/60 px-4 py-4 transition-colors hover:border-[#14b8a6]/45 hover:bg-[#0d182a]">
                                     <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Previous</div>
                                     <div class="mt-2 text-base font-semibold text-white">@Model.PreviousPage.Title</div>
                                     @if (Model.PreviousPage.PageTypeBadge is not null)
@@ -413,7 +413,7 @@
                                    data-doc-wayfinding="next"
                                    data-turbo-frame="doc-content"
                                    data-turbo-action="advance"
-                                   class="block rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-4 transition-colors hover:border-cyan-500/40 hover:bg-slate-900">
+                                   class="block rounded-lg border border-[#1b2a43] bg-[#0d182a]/60 px-4 py-4 transition-colors hover:border-[#14b8a6]/45 hover:bg-[#0d182a]">
                                     <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Next</div>
                                     <div class="mt-2 text-base font-semibold text-white">@Model.NextPage.Title</div>
                                     @if (Model.NextPage.PageTypeBadge is not null)
@@ -441,7 +441,7 @@
                                    data-doc-related-link="true"
                                    data-turbo-frame="doc-content"
                                    data-turbo-action="advance"
-                                   class="block rounded-2xl border border-slate-800 bg-slate-900/40 px-4 py-4 transition-colors hover:border-cyan-500/40 hover:bg-slate-900">
+                                   class="block rounded-lg border border-[#1b2a43] bg-[#0d182a]/40 px-4 py-4 transition-colors hover:border-[#14b8a6]/45 hover:bg-[#0d182a]">
                                     <div class="text-base font-semibold text-white">@relatedPage.Title</div>
                                     @if (relatedPage.PageTypeBadge is not null)
                                     {
