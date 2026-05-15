@@ -6,7 +6,7 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 public sealed class DocRouteIdentityCatalogTests
 {
     [Fact]
-    public void Create_ShouldPublishMarkdownDocsAtCleanCanonicalRoutes()
+    public void Create_ShouldRedirectMarkdownSourceRoutesToCleanCanonicalRoutes()
     {
         var catalog = CreateCatalog(new DocNode("Evaluator", "start-here/appsurface-evaluator.md", "<p>Body</p>"));
 
@@ -17,8 +17,28 @@ public sealed class DocRouteIdentityCatalogTests
         Assert.Equal(DocRouteResolutionKind.Canonical, canonical.Kind);
         Assert.Equal("start-here/appsurface-evaluator.md", canonical.SourcePath);
         Assert.Equal("start-here/appsurface-evaluator", canonical.PublicRoutePath);
-        Assert.Equal(DocRouteResolutionKind.InternalSourceMatch, source.Kind);
-        Assert.Equal(DocRouteResolutionKind.InternalSourceMatch, legacyHtml.Kind);
+        Assert.Equal(DocRouteResolutionKind.AliasRedirect, source.Kind);
+        Assert.Equal("start-here/appsurface-evaluator", source.PublicRoutePath);
+        Assert.Equal(DocRouteResolutionKind.AliasRedirect, legacyHtml.Kind);
+        Assert.Equal("start-here/appsurface-evaluator", legacyHtml.PublicRoutePath);
+    }
+
+    [Fact]
+    public void Create_ShouldRedirectDotMarkdownSourceRoutesToCleanCanonicalRoutes()
+    {
+        var catalog = CreateCatalog(new DocNode("Evaluator", "start-here/appsurface-evaluator.markdown", "<p>Body</p>"));
+
+        var canonical = catalog.ResolvePublicRoute("start-here/appsurface-evaluator");
+        var source = catalog.ResolvePublicRoute("start-here/appsurface-evaluator.markdown");
+        var legacyHtml = catalog.ResolvePublicRoute("start-here/appsurface-evaluator.markdown.html");
+
+        Assert.Equal(DocRouteResolutionKind.Canonical, canonical.Kind);
+        Assert.Equal("start-here/appsurface-evaluator.markdown", canonical.SourcePath);
+        Assert.Equal("start-here/appsurface-evaluator", canonical.PublicRoutePath);
+        Assert.Equal(DocRouteResolutionKind.AliasRedirect, source.Kind);
+        Assert.Equal("start-here/appsurface-evaluator", source.PublicRoutePath);
+        Assert.Equal(DocRouteResolutionKind.AliasRedirect, legacyHtml.Kind);
+        Assert.Equal("start-here/appsurface-evaluator", legacyHtml.PublicRoutePath);
     }
 
     [Fact]
@@ -30,8 +50,53 @@ public sealed class DocRouteIdentityCatalogTests
 
         Assert.Equal(DocRouteResolutionKind.Canonical, catalog.ResolvePublicRoute("packages").Kind);
         Assert.Equal("packages/README.md", catalog.ResolvePublicRoute("packages").SourcePath);
+        Assert.Equal(DocRouteResolutionKind.AliasRedirect, catalog.ResolvePublicRoute("packages/README.md").Kind);
+        Assert.Equal("packages", catalog.ResolvePublicRoute("packages/README.md").PublicRoutePath);
         Assert.Equal(DocRouteResolutionKind.Canonical, catalog.ResolvePublicRoute("guides").Kind);
         Assert.Equal("guides/index.md", catalog.ResolvePublicRoute("guides").SourcePath);
+        Assert.Equal(DocRouteResolutionKind.AliasRedirect, catalog.ResolvePublicRoute("guides/index.md").Kind);
+        Assert.Equal("guides", catalog.ResolvePublicRoute("guides/index.md").PublicRoutePath);
+    }
+
+    [Fact]
+    public void Create_ShouldKeepNonMarkdownSourceRoutesInternal()
+    {
+        var catalog = CreateCatalog(new DocNode("Namespace", "Namespaces/Foo", "<p>API</p>"));
+
+        var canonical = catalog.ResolvePublicRoute("Namespaces/Foo.html");
+        var source = catalog.ResolvePublicRoute("Namespaces/Foo");
+
+        Assert.Equal(DocRouteResolutionKind.Canonical, canonical.Kind);
+        Assert.Equal("Namespaces/Foo", canonical.SourcePath);
+        Assert.Equal("Namespaces/Foo.html", canonical.PublicRoutePath);
+        Assert.Equal(DocRouteResolutionKind.InternalSourceMatch, source.Kind);
+        Assert.Equal("Namespaces/Foo.html", source.PublicRoutePath);
+    }
+
+    [Fact]
+    public void Create_ShouldRejectRedirectAliasesThatShadowMarkdownSourceRoutes()
+    {
+        var catalog = CreateCatalog(
+            new DocNode("Package", "packages/README.md", "<p>Package</p>"),
+            new DocNode(
+                "Other",
+                "other.md",
+                "<p>Other</p>",
+                Metadata: new DocMetadata
+                {
+                    RedirectAliases = ["packages/README.md", "packages/README.md.html"]
+                }));
+
+        var source = catalog.ResolvePublicRoute("packages/README.md");
+        var legacyHtml = catalog.ResolvePublicRoute("packages/README.md.html");
+
+        Assert.Equal(DocRouteResolutionKind.AliasRedirect, source.Kind);
+        Assert.Equal("packages", source.PublicRoutePath);
+        Assert.Equal(DocRouteResolutionKind.AliasRedirect, legacyHtml.Kind);
+        Assert.Equal("packages", legacyHtml.PublicRoutePath);
+        Assert.Equal(
+            2,
+            catalog.Diagnostics.Count(diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.DocRedirectAliasCollision));
     }
 
     [Fact]

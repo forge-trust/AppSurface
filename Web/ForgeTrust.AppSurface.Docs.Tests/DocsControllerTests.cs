@@ -1577,7 +1577,7 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task Details_ShouldReturnNotFound_WhenUndeclaredLegacySourcePathRequested()
+    public async Task Details_ShouldRedirectSourceShapedMarkdownPath_ToCanonicalPath()
     {
         // Arrange
         var docs = new List<DocNode> { new("Legacy", "legacy-path.md", "content") };
@@ -1587,7 +1587,57 @@ public class DocsControllerTests : IDisposable
         var result = await _controller.Details("legacy-path.md");
 
         // Assert
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
+        Assert.True(redirect.Permanent);
+        Assert.Equal("/docs/legacy-path", redirect.Url);
+    }
+
+    [Fact]
+    public async Task Details_ShouldRedirectSourceShapedReadmePath_ToCollapsedCanonicalPath()
+    {
+        var docs = new List<DocNode> { new("Package Chooser", "packages/README.md", "content") };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.PathBase = new PathString("/some-base");
+        httpContext.Request.QueryString = new QueryString("?from=github");
+        _controller.ControllerContext = CreateControllerContext(httpContext);
+        _controller.Url = new UrlHelper(_controller.ControllerContext);
+
+        var result = await _controller.Details("packages/README.md");
+
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
+        Assert.True(redirect.Permanent);
+        Assert.Equal("/some-base/docs/packages?from=github", redirect.Url);
+    }
+
+    [Fact]
+    public async Task Details_ShouldReturnNotFound_WhenNonMarkdownSourcePathRequested()
+    {
+        var docs = new List<DocNode> { new("Namespace", "Namespaces/Foo", "content") };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        var result = await _controller.Details("Namespaces/Foo");
+
         Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task Details_ShouldRedirectSourceShapedFragmentPath_WithQueryBeforeFragment()
+    {
+        var docs = new List<DocNode> { new("Setup", "guides/intro.md#setup", "content") };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.QueryString = new QueryString("?from=github");
+        _controller.ControllerContext = CreateControllerContext(httpContext);
+        _controller.Url = new UrlHelper(_controller.ControllerContext);
+
+        var result = await _controller.Details("guides/intro.md");
+
+        var redirect = Assert.IsType<LocalRedirectResult>(result);
+        Assert.True(redirect.Permanent);
+        Assert.Equal("/docs/guides/intro?from=github#setup", redirect.Url);
     }
 
     [Fact]
