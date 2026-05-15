@@ -792,18 +792,39 @@ body {
         top: 3.8125rem;
     }
 
-    .docs-outline-toggle {
+    .docs-outline-shell[data-outline-enhanced="true"] .docs-outline-toggle {
+        display: grid;
+        grid-template-areas:
+            "title icon"
+            "context icon";
+        grid-template-columns: minmax(0, 1fr) auto;
+        row-gap: 0.18rem;
+        min-height: 4.15rem;
         padding-right: 1rem;
         padding-left: 1rem;
     }
 
     .docs-outline-toggle-label {
-        display: none;
+        display: block;
+        grid-area: title;
+        max-width: 100%;
+        flex: none;
+        color: var(--docs-color-text-subtle);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
     }
 
     .docs-outline-toggle-context {
-        flex-basis: 100%;
+        grid-area: context;
+        flex-basis: auto;
+        padding-right: 0.75rem;
         text-align: left;
+    }
+
+    .docs-outline-toggle::after {
+        grid-area: icon;
+        align-self: center;
     }
 }
 
