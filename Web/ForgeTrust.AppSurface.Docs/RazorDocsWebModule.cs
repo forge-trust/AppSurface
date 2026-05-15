@@ -434,7 +434,8 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
     /// <remarks>
     /// This helper intentionally treats query text as data appended after the validated path. It validates the unescaped
     /// path base so unsafe separators are not hidden by URI formatting, then emits the escaped path base used for
-    /// redirect headers. It does not allow the path base or target path to be absolute, protocol-relative,
+    /// redirect headers. A root path base (<c>/</c>) is normalized to empty so the redirect stays single-slash local.
+    /// It does not allow the path base or target path to be absolute, protocol-relative,
     /// backslash-prefixed, or control-character-bearing because those shapes can be interpreted by clients as redirects
     /// away from the current host.
     /// </remarks>
@@ -444,16 +445,20 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
         if (!IsSafeLocalPathComponent(pathBaseValue, allowEmpty: true))
         {
             throw new InvalidOperationException(
-                $"The RazorDocs legacy asset redirect path base '{pathBaseValue}' is not app-relative.");
+                "The RazorDocs legacy asset redirect path base is not app-relative.");
         }
 
         if (!IsSafeLocalPathComponent(targetPath, allowEmpty: false))
         {
             throw new InvalidOperationException(
-                $"The RazorDocs legacy asset redirect target '{targetPath}' is not app-relative.");
+                "The RazorDocs legacy asset redirect target is not app-relative.");
         }
 
-        return string.Concat(pathBase.ToUriComponent(), targetPath, queryString.ToUriComponent());
+        var pathBasePrefix = string.Equals(pathBaseValue, "/", StringComparison.Ordinal)
+            ? string.Empty
+            : pathBase.ToUriComponent();
+
+        return string.Concat(pathBasePrefix, targetPath, queryString.ToUriComponent());
     }
 
     private static bool IsSafeLocalPathComponent(string? path, bool allowEmpty)

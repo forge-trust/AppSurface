@@ -574,6 +574,7 @@ public class RazorDocsWebModuleRegressionTests
                 QueryString.Empty));
 
         Assert.Contains("redirect target", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(targetPath, exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -590,13 +591,16 @@ public class RazorDocsWebModuleRegressionTests
                 QueryString.Empty));
 
         Assert.Contains("path base", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(pathBase, exception.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void BuildLegacyAssetRedirectPath_Issue007_TreatsDefaultPathBaseAsEmpty()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("/")]
+    public void BuildLegacyAssetRedirectPath_Issue007_TreatsEmptyOrRootPathBaseAsEmpty(string? pathBase)
     {
         var redirectPath = RazorDocsWebModule.BuildLegacyAssetRedirectPath(
-            default,
+            pathBase is null ? default : new PathString(pathBase),
             $"{PackagedAssetBasePath}/search.css",
             QueryString.Empty);
 
