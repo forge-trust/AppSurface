@@ -750,7 +750,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Equal(initialState.MainLeft, initialState.ShellLeft, precision: 1);
         Assert.Equal(initialState.MainRight, initialState.ShellRight, precision: 1);
         Assert.Equal("0px", initialState.BorderRadius);
-        Assert.True(initialState.ShellHeight is >= 44 and <= 76);
+        Assert.True(initialState.ShellHeight is >= 64 and <= 96);
         Assert.Equal("0", initialState.ActiveIndex);
         Assert.Equal(initialState.FirstLink, initialState.Current);
         Assert.Equal(initialState.PageTitle, initialState.ToggleLabel);
