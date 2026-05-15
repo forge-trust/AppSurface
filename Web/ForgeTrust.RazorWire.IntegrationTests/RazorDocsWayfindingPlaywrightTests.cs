@@ -337,6 +337,8 @@ public sealed class RazorDocsWayfindingPlaywrightTests
               const style = getComputedStyle(button);
               return style.visibility === 'visible'
                 && style.display !== 'none'
+                && style.borderTopWidth === '0px'
+                && style.backgroundColor === 'rgba(0, 0, 0, 0)'
                 && Number.parseFloat(style.opacity) > 0.7;
             }
             """));

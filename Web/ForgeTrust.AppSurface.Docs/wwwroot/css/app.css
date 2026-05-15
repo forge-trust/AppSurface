@@ -621,15 +621,15 @@ body {
     flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--docs-color-border-default-heavier);
+    border: 0;
     border-radius: 0.45rem;
-    background: var(--docs-color-surface-panel-raised);
+    background: transparent;
     color: var(--docs-color-text-subtle);
     cursor: pointer;
     font: inherit;
     line-height: 1;
     opacity: 0.78;
-    transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+    transition: color 140ms ease, opacity 140ms ease;
 }
 
 .docs-section-copy-icon {
@@ -646,9 +646,6 @@ body {
 .docs-section-copy:focus-visible,
 .docs-section-copy[data-copy-state="copied"],
 .docs-section-copy[data-copy-state="fallback"] {
-    border-color: var(--docs-color-border-accent-strong);
-    background: var(--docs-color-state-outline-fill);
-    box-shadow: 0 0 0 1px var(--docs-color-border-accent-subtle);
     color: var(--docs-color-accent-soft);
     opacity: 1;
 }
