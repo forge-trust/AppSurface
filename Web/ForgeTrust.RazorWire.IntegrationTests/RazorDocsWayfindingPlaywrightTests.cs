@@ -684,6 +684,109 @@ public sealed class RazorDocsWayfindingPlaywrightTests
     }
 
     [Fact]
+    public async Task MobileOutline_ExpandedPanelContainsScroll()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await RazorDocsRouteHelper.GotoFirstAvailableAsync(
+            page,
+            _fixture.DocsUrl,
+            "/web/forgetrust.appsurface.docs",
+            "/Web/ForgeTrust.AppSurface.Docs/README.md.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        await page.ClickAsync("#docs-page-outline [data-doc-outline-toggle]");
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const shell = document.getElementById('docs-page-outline');
+              const toggle = shell?.querySelector('[data-doc-outline-toggle]');
+              return toggle?.getAttribute('aria-expanded') === 'true'
+                && shell.scrollHeight > shell.clientHeight;
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var initialState = await page.EvaluateAsync<ExpandedOutlineScrollState>(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              const shell = document.getElementById('docs-page-outline');
+              if (main) {
+                main.scrollTop = 180;
+              }
+
+              return {
+                mainScrollTop: main?.scrollTop ?? 0,
+                shellScrollTop: shell?.scrollTop ?? 0,
+                shellScrollHeight: shell?.scrollHeight ?? 0,
+                shellClientHeight: shell?.clientHeight ?? 0,
+                shellOverflowY: shell ? getComputedStyle(shell).overflowY : '',
+                shellOverscrollBehaviorY: shell ? getComputedStyle(shell).overscrollBehaviorY : ''
+              };
+            }
+            """);
+
+        Assert.Equal("auto", initialState.ShellOverflowY);
+        Assert.Equal("contain", initialState.ShellOverscrollBehaviorY);
+        Assert.True(initialState.ShellScrollHeight > initialState.ShellClientHeight);
+
+        var panelBox = await page.Locator("#docs-page-outline-panel").BoundingBoxAsync();
+        Assert.NotNull(panelBox);
+
+        await page.Mouse.MoveAsync(panelBox.X + panelBox.Width / 2, panelBox.Y + Math.Min(160, panelBox.Height / 2));
+        await page.Mouse.WheelAsync(0, 360);
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const shell = document.getElementById('docs-page-outline');
+              return (shell?.scrollTop ?? 0) > 0;
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+
+        var scrolledState = await page.EvaluateAsync<ExpandedOutlineScrollState>(
+            """
+            () => {
+              const main = document.getElementById('main-content');
+              const shell = document.getElementById('docs-page-outline');
+              return {
+                mainScrollTop: main?.scrollTop ?? 0,
+                shellScrollTop: shell?.scrollTop ?? 0,
+                shellScrollHeight: shell?.scrollHeight ?? 0,
+                shellClientHeight: shell?.clientHeight ?? 0,
+                shellOverflowY: shell ? getComputedStyle(shell).overflowY : '',
+                shellOverscrollBehaviorY: shell ? getComputedStyle(shell).overscrollBehaviorY : ''
+              };
+            }
+            """);
+
+        Assert.True(scrolledState.ShellScrollTop > initialState.ShellScrollTop);
+        Assert.InRange(
+            scrolledState.MainScrollTop - initialState.MainScrollTop,
+            -1,
+            1);
+    }
+
+    [Fact]
     public async Task MobileOutline_StickyContextTracksNeighborSections()
     {
         await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
@@ -1077,6 +1180,21 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         public string RollDirection { get; init; } = string.Empty;
 
         public string Motion { get; init; } = string.Empty;
+    }
+
+    private sealed class ExpandedOutlineScrollState
+    {
+        public double MainScrollTop { get; init; }
+
+        public double ShellScrollTop { get; init; }
+
+        public double ShellScrollHeight { get; init; }
+
+        public double ShellClientHeight { get; init; }
+
+        public string ShellOverflowY { get; init; } = string.Empty;
+
+        public string ShellOverscrollBehaviorY { get; init; } = string.Empty;
     }
 
     private sealed class CompactOutlineBandState

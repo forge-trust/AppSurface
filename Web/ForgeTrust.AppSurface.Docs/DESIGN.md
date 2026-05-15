@@ -181,6 +181,7 @@ Visual rules:
 - Use small row radii only. Do not wrap the whole rail in a large rounded card.
 - Preserve the existing RazorDocs global sidebar; do not replace it with icon-only chrome for this pattern.
 - On compact viewports, the collapsed outline may show previous, current, and next section context. The current section is dominant; previous and next stay smaller and quieter so the control remains a reader aid instead of a second header.
+- When the compact outline is expanded, it is a bounded scroll surface with contained overscroll. Readers should be able to inspect a long `On this page` list without accidentally moving the article behind it.
 
 Interaction rules:
 
