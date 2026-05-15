@@ -962,6 +962,7 @@ The outline client enhances the server-rendered links by:
 - easing outline-link clicks to the target section over 620 ms, while preserving instant jumps for readers who prefer reduced motion and canceling the animation when the reader manually wheels or touches the scroll root
 - initializing from the current URL hash
 - rebinding after RazorWire/Turbo frame navigation replaces `rw:island id="doc-content"`
+- containing scroll inside the expanded compact outline so touch or wheel input over `On this page` does not move the article behind it
 - collapsing the mobile outline after an outline link is chosen
 - skipping missing heading targets for active-state tracking while leaving their normal hash links intact instead of marking stale entries current or closing the drawer
 
