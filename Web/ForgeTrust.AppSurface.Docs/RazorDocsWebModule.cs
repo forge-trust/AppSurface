@@ -251,6 +251,11 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
     /// root-mounted or overlaps published exact-version aliases.
     /// </para>
     /// <para>
+    /// When RazorDocs is the root module, the bare application root redirects to the configured docs home. This keeps
+    /// standalone docs hosts and static exports useful after route isolation removed the old app-wide controller
+    /// fallback. Embedded hosts do not get this redirect; their owning app should decide what <c>/</c> means.
+    /// </para>
+    /// <para>
     /// The operator-facing harvest health route patterns are always registered before the catch-all docs route so
     /// <c>{DocsRootPath}/_health</c> and <c>{DocsRootPath}/_health.json</c> remain reserved operator paths rather than
     /// falling through to document lookup. The route named <c>razordocs_harvest_health</c> maps the current docs root
@@ -325,6 +330,11 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
         var currentHealthJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthJsonUrl());
         var currentSectionPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "sections/{sectionSlug}"));
         var currentDetailsPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "{*path}"));
+
+        if (ShouldMapRootDocsRedirect(context, docsUrlBuilder))
+        {
+            MapRootDocsRedirect(endpoints, docsUrlBuilder.BuildHomeUrl());
+        }
 
         // Index route MUST come before catch-all to be matched first
         endpoints.MapControllerRoute(
@@ -405,6 +415,20 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
             });
     }
 
+    private static void MapRootDocsRedirect(IEndpointRouteBuilder endpoints, string docsHomeUrl)
+    {
+        endpoints.MapMethods(
+            "/",
+            [HttpMethods.Get, HttpMethods.Head],
+            context =>
+            {
+                context.Response.Redirect(
+                    BuildPathBaseAwareRedirectUrl(context, docsHomeUrl),
+                    permanent: false);
+                return Task.CompletedTask;
+            });
+    }
+
     private static RazorDocsOptions ResolveOptions(IServiceProvider? services)
     {
         return services?.GetService(typeof(RazorDocsOptions)) as RazorDocsOptions
@@ -454,6 +478,12 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
         return RazorDocsAssetPathResolver.IsRootModuleAssembly(context.RootModuleAssembly);
     }
 
+    private static bool ShouldMapRootDocsRedirect(StartupContext context, DocsUrlBuilder docsUrlBuilder)
+    {
+        return ShouldPreserveRootStylesheetPath(context)
+               && !string.Equals(docsUrlBuilder.CurrentDocsRootPath, "/", StringComparison.Ordinal);
+    }
+
     private static bool ShouldServePreviewAssetsDirectlyFromWebRoot(
         StartupContext context,
         RazorDocsOptions options,
@@ -470,6 +500,18 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
     private static string ResolveLegacySearchAssetBasePath(StartupContext context)
     {
         return RazorDocsStaticAssetBasePath;
+    }
+
+    private static string BuildPathBaseAwareRedirectUrl(HttpContext context, string appRelativeUrl)
+    {
+        var pathBase = context.Request.PathBase.Value;
+        if (string.IsNullOrWhiteSpace(pathBase) || string.Equals(pathBase, "/", StringComparison.Ordinal))
+        {
+            return appRelativeUrl;
+        }
+
+        var normalizedPathBase = pathBase.TrimEnd('/');
+        return normalizedPathBase + appRelativeUrl;
     }
 
     private static string ResolveContentType(string relativePath)

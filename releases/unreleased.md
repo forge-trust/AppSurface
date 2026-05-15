@@ -136,6 +136,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorWire-enhanced forms now get a convention-based failed-submission stack: durable request markers, default form-local fallback UI, handled server validation helpers, and runtime events for custom consumers.
 - Development anti-forgery failures from RazorWire forms now return useful diagnostics with safe production copy, so stale or missing token problems are easier to fix without exposing implementation detail to users.
 - The MVC sample now includes `/Reactivity/FormFailures`, covering validation, anti-forgery, authorization, malformed request, server failure, default styling, CSS variable customization, and manual event-driven rendering.
+- The MVC sample now persists its demo username cookie with `Secure`, `HttpOnly`, and `SameSite=Lax`, and its browser-level regression coverage runs through `localhost` so local development keeps the secure-cookie behavior observable.
 - The MVC sample counter keeps its compact icon-only button while exposing an `Increment counter` accessible name for assistive technology and role-based tests.
 
 ## Migration watch

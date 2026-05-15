@@ -65,7 +65,7 @@ public class ReactivityController : Controller
     }
 
     /// <summary>
-    /// Registers the provided username, persists it in an HttpOnly cookie, and broadcasts the user's presence to other clients.
+    /// Registers the provided username, persists it in a secure HttpOnly cookie, and broadcasts the user's presence to other clients.
     /// </summary>
     /// <param name="username">The username submitted from the registration form. If empty or whitespace, no username is persisted or broadcast.</param>
     /// <returns>A Turbo Stream that replaces the message form and updates the register form when the request is a Turbo request; otherwise a redirect to the Index action.</returns>
@@ -86,6 +86,7 @@ public class ReactivityController : Controller
                 new CookieOptions
                 {
                     HttpOnly = true,
+                    Secure = true,
                     SameSite = SameSiteMode.Lax,
                     Expires = DateTimeOffset.UtcNow.AddDays(30)
                 });
