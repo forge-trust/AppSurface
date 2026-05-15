@@ -45,6 +45,19 @@ During development, the watch service is non-blocking. If the Tailwind CLI is no
 
 `ForgeTrust.AppSurface.Web.Tailwind` hooks into the normal `dotnet build` and `dotnet publish` pipeline through MSBuild targets, so the default integration does not require a separate `npm install` or `npm run build` step in CI.
 
+Runtime packages download the official Tailwind checksum file and standalone binary during build or publish, then verify the binary with SHA-256 before packaging it. These downloads retry transient network failures by default, which keeps CI resilient to brief GitHub release CDN 5xx responses and timeouts without weakening checksum validation.
+
+The retry behavior is configurable with MSBuild properties:
+
+```xml
+<PropertyGroup>
+  <TailwindDownloadRetries>4</TailwindDownloadRetries>
+  <TailwindDownloadRetryDelayMilliseconds>5000</TailwindDownloadRetryDelayMilliseconds>
+</PropertyGroup>
+```
+
+Raise these values for slower CI networks. Lower them only when you prefer fail-fast behavior and have another way to provide the Tailwind CLI, such as `TailwindCliPath`.
+
 If you need to suppress the package-driven build temporarily, set `TailwindEnabled=false` in MSBuild, for example with `dotnet build -p:TailwindEnabled=false` or a project-level `<TailwindEnabled>false</TailwindEnabled>` property.
 
 If you want to keep the package-driven build but point it at a different standalone Tailwind executable, set `TailwindCliPath` to an absolute path or a project-relative file path:

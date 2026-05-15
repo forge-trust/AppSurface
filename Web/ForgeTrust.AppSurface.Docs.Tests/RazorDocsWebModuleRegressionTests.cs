@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -515,6 +516,110 @@ public class RazorDocsWebModuleRegressionTests
         {
             await app.StopAsync();
         }
+    }
+
+    [Fact]
+    public async Task ConfigureEndpoints_Issue007_PreservesHostileLookingQueryAsQueryDataInLocalAssetRedirect()
+    {
+        var module = new RazorDocsWebModule();
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+
+        using var app = builder.Build();
+        module.ConfigureEndpoints(context, app);
+
+        await app.StartAsync();
+
+        try
+        {
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            await AssertRedirectAsync(
+                client,
+                "/docs/search.css?next=https://evil.example/login",
+                $"{PackagedAssetBasePath}/search.css?next=https://evil.example/login");
+            await AssertRedirectAsync(
+                client,
+                HttpMethod.Head,
+                "/docs/search-client.js?next=//evil.example/login",
+                $"{PackagedAssetBasePath}/search-client.js?next=//evil.example/login");
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("https://evil.example/asset.css")]
+    [InlineData("//evil.example/asset.css")]
+    [InlineData("/\\evil.example/asset.css")]
+    [InlineData("/safe\\asset.css")]
+    public void BuildLegacyAssetRedirectPath_Issue007_RejectsUnsafeTargetPath(string targetPath)
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => RazorDocsWebModule.BuildLegacyAssetRedirectPath(
+                PathString.Empty,
+                targetPath,
+                QueryString.Empty));
+
+        Assert.Contains("redirect target", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(targetPath, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("//evil.example")]
+    [InlineData("/\\evil.example")]
+    [InlineData("/safe\\base")]
+    [InlineData("/safe\u001fbase")]
+    public void BuildLegacyAssetRedirectPath_Issue007_RejectsUnsafePathBase(string pathBase)
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => RazorDocsWebModule.BuildLegacyAssetRedirectPath(
+                new PathString(pathBase),
+                $"{PackagedAssetBasePath}/search.css",
+                QueryString.Empty));
+
+        Assert.Contains("path base", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(pathBase, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("/")]
+    public void BuildLegacyAssetRedirectPath_Issue007_TreatsEmptyOrRootPathBaseAsEmpty(string? pathBase)
+    {
+        var redirectPath = RazorDocsWebModule.BuildLegacyAssetRedirectPath(
+            pathBase is null ? default : new PathString(pathBase),
+            $"{PackagedAssetBasePath}/search.css",
+            QueryString.Empty);
+
+        Assert.Equal($"{PackagedAssetBasePath}/search.css", redirectPath);
+    }
+
+    [Theory]
+    [InlineData("/docs preview", "/docs%20preview/_content/ForgeTrust.AppSurface.Docs/docs/search.css?v=42")]
+    [InlineData("/docs/éclair", "/docs/%C3%A9clair/_content/ForgeTrust.AppSurface.Docs/docs/search.css?v=42")]
+    public void BuildLegacyAssetRedirectPath_Issue007_EscapesSafePathBaseForRedirectHeader(
+        string pathBase,
+        string expectedRedirectPath)
+    {
+        var redirectPath = RazorDocsWebModule.BuildLegacyAssetRedirectPath(
+            new PathString(pathBase),
+            $"{PackagedAssetBasePath}/search.css",
+            new QueryString("?v=42"));
+
+        Assert.Equal(expectedRedirectPath, redirectPath);
     }
 
     [Fact]

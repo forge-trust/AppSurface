@@ -15,6 +15,8 @@
     <TailwindBinaryName Condition="'$(TailwindRid)' == 'linux-arm64'">tailwindcss-linux-arm64</TailwindBinaryName>
 
     <TailwindDownloadUrl>$(TailwindBaseUrl)/$(TailwindBinaryName)</TailwindDownloadUrl>
+    <TailwindDownloadRetries Condition="'$(TailwindDownloadRetries)' == ''">4</TailwindDownloadRetries>
+    <TailwindDownloadRetryDelayMilliseconds Condition="'$(TailwindDownloadRetryDelayMilliseconds)' == ''">5000</TailwindDownloadRetryDelayMilliseconds>
     <_TailwindCacheDir>$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/tailwind-$(TailwindVersion)/</_TailwindCacheDir>
     <_TailwindBinaryPath>$(_TailwindCacheDir)$(TailwindBinaryName)</_TailwindBinaryPath>
     <ChecksumFile>$(_TailwindCacheDir)sha256sums.txt</ChecksumFile>
@@ -38,7 +40,13 @@
 
     <MakeDir Directories="$(_TailwindCacheDir)" Condition="!Exists('$(_TailwindCacheDir)')" />
 
-    <DownloadFile SourceUrl="$(TailwindSumsUrl)" DestinationFolder="$(_TailwindCacheDir)" DestinationFileName="sha256sums.txt" Condition="!Exists('$(ChecksumFile)')" />
+    <DownloadFile
+      SourceUrl="$(TailwindSumsUrl)"
+      DestinationFolder="$(_TailwindCacheDir)"
+      DestinationFileName="sha256sums.txt"
+      Retries="$(TailwindDownloadRetries)"
+      RetryDelayMilliseconds="$(TailwindDownloadRetryDelayMilliseconds)"
+      Condition="!Exists('$(ChecksumFile)')" />
 
     <FindChecksum ChecksumFile="$(ChecksumFile)" BinaryName="$(TailwindBinaryName)">
       <Output TaskParameter="Hash" PropertyName="ExpectedHash" />
@@ -46,7 +54,13 @@
 
     <Error Text="Could not find expected SHA-256 hash for '$(TailwindBinaryName)' in '$(ChecksumFile)'." Condition="'$(ExpectedHash)' == ''" />
 
-    <DownloadFile SourceUrl="$(TailwindDownloadUrl)" DestinationFolder="$(_TailwindCacheDir)" DestinationFileName="$(TailwindBinaryName)" Condition="!Exists('$(_TailwindBinaryPath)')" />
+    <DownloadFile
+      SourceUrl="$(TailwindDownloadUrl)"
+      DestinationFolder="$(_TailwindCacheDir)"
+      DestinationFileName="$(TailwindBinaryName)"
+      Retries="$(TailwindDownloadRetries)"
+      RetryDelayMilliseconds="$(TailwindDownloadRetryDelayMilliseconds)"
+      Condition="!Exists('$(_TailwindBinaryPath)')" />
 
     <GetFileHash Files="$(_TailwindBinaryPath)" Algorithm="SHA256">
       <Output TaskParameter="Items" ItemName="ComputedHashes" />
