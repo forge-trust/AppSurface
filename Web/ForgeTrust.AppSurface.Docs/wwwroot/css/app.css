@@ -787,7 +787,7 @@ body {
     }
 }
 
-@media (min-width: 48rem) and (max-width: 79.999rem) {
+@media (min-width: 40rem) and (max-width: 79.999rem) {
     .docs-outline-toggle {
         min-height: 3.25rem;
         padding-right: 1.15rem;
@@ -818,7 +818,9 @@ body {
     .docs-outline-shell[data-outline-enhanced="true"] {
         top: 3.8125rem;
     }
+}
 
+@media (max-width: 39.999rem) {
     .docs-outline-shell[data-outline-enhanced="true"] .docs-outline-toggle {
         display: grid;
         grid-template-areas:
