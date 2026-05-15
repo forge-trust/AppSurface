@@ -91,7 +91,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 
 - AppSurface's own release pages now double as a working RazorDocs example for consumers who want better release notes.
 - RazorDocs now supports a static-first versioned docs surface: `/docs` can point at the recommended released tree, `/docs/next` can stay on the live preview, `/docs/v/{version}` can serve exact historical releases, and `/docs/versions` can act as the public archive.
-- RazorDocs route families can now be mounted away from `/docs` with `RazorDocs:Routing:RouteRootPath`, so consumers can host docs under paths such as `/foo/bar` while archive, exact-version, search, metadata, and static export URLs stay aligned.
+- RazorDocs route families can now be mounted away from `/docs` with `RazorDocs:Routing:RouteRootPath`, so consumers can host docs under paths such as `/foo/bar` while archive, exact-version, search, metadata, and static export URLs stay aligned. RazorDocs now registers only its configured docs routes instead of an app-wide controller/action fallback, keeping docs routing isolated from other modules.
 - Published RazorDocs release trees are now catalog-driven and validated before they are mounted, so broken historical exports stay unavailable instead of half-rendering with cross-version search or asset leakage.
 - RazorDocs pages can now expose typed `On this page` outlines, explicit proof-path previous/next links, related-page cards, and sidebar anchor navigation from harvested metadata instead of scraping rendered HTML.
 - RazorDocs details pages now render those `On this page` outlines as a page-local navigation surface, using a sticky desktop rail, a compact narrow-viewport drawer, and active-section state that keeps the reader oriented without competing with the global sidebar.
@@ -137,6 +137,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorWire-enhanced forms now get a convention-based failed-submission stack: durable request markers, default form-local fallback UI, handled server validation helpers, and runtime events for custom consumers.
 - Development anti-forgery failures from RazorWire forms now return useful diagnostics with safe production copy, so stale or missing token problems are easier to fix without exposing implementation detail to users.
 - The MVC sample now includes `/Reactivity/FormFailures`, covering validation, anti-forgery, authorization, malformed request, server failure, default styling, CSS variable customization, and manual event-driven rendering.
+- The MVC sample now persists its demo username cookie with `Secure`, `HttpOnly`, and `SameSite=Lax`, and its browser-level regression coverage runs through `localhost` so local development keeps the secure-cookie behavior observable.
 - The MVC sample counter keeps its compact icon-only button while exposing an `Increment counter` accessible name for assistive technology and role-based tests.
 
 ## Migration watch

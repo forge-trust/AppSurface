@@ -171,7 +171,7 @@ public class RazorDocsWebModuleTests
     }
 
     [Fact]
-    public void ConfigureEndpoints_ShouldMapDefaultRoute()
+    public void ConfigureEndpoints_ShouldMapDefaultDocsRoutesWithoutAppWideFallback()
     {
         var context = CreateStartupContext();
         var builder = WebApplication.CreateBuilder();
@@ -195,7 +195,7 @@ public class RazorDocsWebModuleTests
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
         Assert.Contains("docs/{*path}", routePatterns);
-        Assert.Contains("{controller=Docs}/{action=Index}/{path?}", routePatterns);
+        Assert.DoesNotContain("{controller=Docs}/{action=Index}/{path?}", routePatterns);
 
         var prioritizedPatterns = routeBuilder.DataSources
             .SelectMany(ds => ds.Endpoints)
@@ -217,6 +217,140 @@ public class RazorDocsWebModuleTests
         Assert.True(searchIndex < catchAllIndex, "docs/search must be prioritized before docs/{*path}.");
         Assert.True(healthIndex < catchAllIndex, "docs/_health must be prioritized before docs/{*path}.");
         Assert.True(healthJsonIndex < catchAllIndex, "docs/_health.json must be prioritized before docs/{*path}.");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldMapBareRootRedirect_WhenRazorDocsIsTheRootModule()
+    {
+        var envFake = A.Fake<IEnvironmentProvider>();
+        var context = new StartupContext(Array.Empty<string>(), _module, "RazorDocsStandalone", envFake);
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var rootRedirect = Assert.Single(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText is "/" or "");
+        var methods = Assert.Single(rootRedirect.Metadata.OfType<HttpMethodMetadata>());
+        Assert.Contains(HttpMethods.Get, methods.HttpMethods);
+        Assert.Contains(HttpMethods.Head, methods.HttpMethods);
+    }
+
+    [Fact]
+    public async Task ConfigureEndpoints_ShouldRedirectBareRootToDocsHome_WhenRazorDocsIsTheRootModule()
+    {
+        var envFake = A.Fake<IEnvironmentProvider>();
+        var context = new StartupContext(Array.Empty<string>(), _module, "RazorDocsStandalone", envFake);
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var rootRedirect = Assert.Single(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText is "/" or "");
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = app.Services
+        };
+        httpContext.Response.Body = new MemoryStream();
+
+        await rootRedirect.RequestDelegate!(httpContext);
+
+        Assert.Equal(StatusCodes.Status302Found, httpContext.Response.StatusCode);
+        Assert.Equal("/docs", httpContext.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task ConfigureEndpoints_ShouldPreservePathBase_WhenBareRootRedirectRuns()
+    {
+        var envFake = A.Fake<IEnvironmentProvider>();
+        var context = new StartupContext(Array.Empty<string>(), _module, "RazorDocsStandalone", envFake);
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var rootRedirect = Assert.Single(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText is "/" or "");
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = app.Services
+        };
+        httpContext.Request.PathBase = "/portal/";
+        httpContext.Response.Body = new MemoryStream();
+
+        await rootRedirect.RequestDelegate!(httpContext);
+
+        Assert.Equal(StatusCodes.Status302Found, httpContext.Response.StatusCode);
+        Assert.Equal("/portal/docs", httpContext.Response.Headers.Location);
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotMapBareRootRedirect_WhenRootModuleDocsAreRootMounted()
+    {
+        var envFake = A.Fake<IEnvironmentProvider>();
+        var context = new StartupContext(Array.Empty<string>(), _module, "RazorDocsStandalone", envFake);
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        var options = new RazorDocsOptions
+        {
+            Routing = new RazorDocsRoutingOptions
+            {
+                DocsRootPath = "/"
+            }
+        };
+        var optionsMonitor = A.Fake<IOptionsMonitor<RazorDocsOptions>>();
+        A.CallTo(() => optionsMonitor.CurrentValue).Returns(options);
+        builder.Services.AddSingleton(optionsMonitor);
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        Assert.DoesNotContain(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText is "/" or ""
+                        && endpoint.Metadata.GetMetadata<HttpMethodMetadata>() is not null);
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldNotMapBareRootRedirect_WhenRazorDocsIsEmbedded()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        Assert.DoesNotContain(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText is "/" or "");
     }
 
     [Fact]
@@ -422,12 +556,14 @@ public class RazorDocsWebModuleTests
             .Where(pattern => pattern is not null)
             .ToList();
 
+        Assert.Contains(string.Empty, routePatterns);
         Assert.Contains("search", routePatterns);
         Assert.Contains("search-index.json", routePatterns);
         Assert.Contains("_health", routePatterns);
         Assert.Contains("_health.json", routePatterns);
         Assert.Contains("sections/{sectionSlug}", routePatterns);
         Assert.Contains("{*path}", routePatterns);
+        Assert.DoesNotContain("{controller=Docs}/{action=Index}/{path?}", routePatterns);
         Assert.DoesNotContain("/sections/{sectionSlug}", routePatterns);
         Assert.DoesNotContain("/{*path}", routePatterns);
     }

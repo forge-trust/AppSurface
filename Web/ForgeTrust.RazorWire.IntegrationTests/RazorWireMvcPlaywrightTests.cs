@@ -156,6 +156,28 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task RegisterUser_SetsSecureUsernameCookie()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync(_fixture.ReactivityUrl);
+        await WaitForStreamConnectedAsync(page);
+
+        var registerResponse = await RegisterUserAndWaitForPostAsync(page, "secure-cookie-user");
+        Assert.True(registerResponse.Ok, $"RegisterUser POST failed with status {(int)registerResponse.Status}.");
+
+        var usernameCookie = Assert.Single(
+            await context.CookiesAsync(_fixture.BaseUrl),
+            cookie => cookie.Name == "razorwire-username");
+
+        Assert.Equal("secure-cookie-user", usernameCookie.Value);
+        Assert.True(usernameCookie.Secure);
+        Assert.True(usernameCookie.HttpOnly);
+        Assert.Equal(SameSiteAttribute.Lax, usernameCookie.SameSite);
+    }
+
+    [Fact]
     public async Task IncrementCounter_ButtonHasAccessibleName()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
@@ -682,6 +704,30 @@ public sealed class RazorWireMvcPlaywrightTests
             Timeout = 30_000,
             State = WaitForSelectorState.Attached
         });
+        await page.WaitForFunctionAsync(
+            @"() => {
+                const form = document.querySelector('[data-counter-form]');
+                if (!(form instanceof HTMLFormElement)) {
+                    return false;
+                }
+
+                const token = form.querySelector(""input[name='__RequestVerificationToken']"");
+                const marker = form.querySelector(""input[name='__RazorWireForm']"");
+                const clientCount = form.querySelector('#client-count-input');
+                const submit = form.querySelector(""button[type='submit']"");
+
+                return form.getAttribute('data-rw-form') === 'true'
+                    && token instanceof HTMLInputElement
+                    && token.value.trim().length > 0
+                    && marker instanceof HTMLInputElement
+                    && marker.value === '1'
+                    && clientCount instanceof HTMLInputElement
+                    && clientCount.value.trim().length > 0
+                    && submit instanceof HTMLButtonElement
+                    && !submit.disabled;
+            }",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
     }
 
     private static async Task<IResponse> SubmitAndWaitForPostAsync(IPage page, string formSelector, string path)
@@ -812,13 +858,15 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
         });
 
         _appProcess = StartExampleApp("http://127.0.0.1:0");
-        var baseUrl = await WaitForBoundBaseUrlAsync(TimeSpan.FromSeconds(60));
-        BaseUrl = baseUrl;
-        ReactivityUrl = $"{baseUrl}/Reactivity";
-        FormFailuresUrl = $"{baseUrl}/Reactivity/FormFailures";
+        var boundBaseUrl = await WaitForBoundBaseUrlAsync(TimeSpan.FromSeconds(60));
+        var browserBaseUrl = ReplaceLoopbackIpHostWithLocalhost(boundBaseUrl);
 
-        await WaitForAppReadyAsync(baseUrl, TimeSpan.FromSeconds(60));
-        await WarmReactivitySurfaceAsync(baseUrl, TimeSpan.FromSeconds(60));
+        BaseUrl = browserBaseUrl;
+        ReactivityUrl = $"{browserBaseUrl}/Reactivity";
+        FormFailuresUrl = $"{browserBaseUrl}/Reactivity/FormFailures";
+
+        await WaitForAppReadyAsync(boundBaseUrl, TimeSpan.FromSeconds(60));
+        await WarmReactivitySurfaceAsync(boundBaseUrl, TimeSpan.FromSeconds(60));
     }
 
     public async Task DisposeAsync()
@@ -923,6 +971,23 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
                 new TimeoutException($"RazorWire MVC example did not publish a listening URL within {timeout.TotalSeconds} seconds.{Environment.NewLine}{GetRecentLogs()}")));
 
         return await _boundBaseUrlSource.Task;
+    }
+
+    private static string ReplaceLoopbackIpHostWithLocalhost(string baseUrl)
+    {
+        var uri = new Uri(baseUrl, UriKind.Absolute);
+
+        if (!IPAddress.TryParse(uri.Host, out var address) || !IPAddress.IsLoopback(address))
+        {
+            return baseUrl;
+        }
+
+        var builder = new UriBuilder(uri)
+        {
+            Host = "localhost"
+        };
+
+        return builder.Uri.ToString().TrimEnd('/');
     }
 
     private async Task WaitForAppReadyAsync(string baseUrl, TimeSpan timeout)
