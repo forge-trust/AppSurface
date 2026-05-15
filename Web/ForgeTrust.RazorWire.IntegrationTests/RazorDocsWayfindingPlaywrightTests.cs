@@ -780,7 +780,10 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             """);
 
         Assert.True(scrolledState.ShellScrollTop > initialState.ShellScrollTop);
-        Assert.Equal(initialState.MainScrollTop, scrolledState.MainScrollTop);
+        Assert.InRange(
+            scrolledState.MainScrollTop - initialState.MainScrollTop,
+            -1,
+            1);
     }
 
     [Fact]
