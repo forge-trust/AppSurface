@@ -168,7 +168,7 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-outline-context-row[data-outline-empty=\"true\"]", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-toggle-context--rolling", tailwindEntryStylesheet);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", tailwindEntryStylesheet);
-        Assert.Contains(".docs-outline-copy", tailwindEntryStylesheet);
+        Assert.Contains("#docs-page-outline .docs-section-copy", tailwindEntryStylesheet);
         Assert.Contains(".docs-section-copy", tailwindEntryStylesheet);
         Assert.Contains(".docs-section-copy-fallback", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-toggle", tailwindEntryStylesheet);
