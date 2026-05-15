@@ -2418,6 +2418,10 @@ public class RazorDocsViewsTests
         Assert.NotNull(document.QuerySelector(".docs-section-copy-status[data-doc-section-copy-status][aria-live='polite']"));
         Assert.NotNull(document.QuerySelector(".docs-outline-item > button.docs-outline-copy[data-doc-section-copy='install'][data-doc-section-copy-title='Install'][aria-label='Copy link to Install']"));
         Assert.NotNull(document.QuerySelector(".docs-outline-item > button.docs-outline-copy[data-doc-section-copy='verify'][data-doc-section-copy-title='Verify'][aria-label='Copy link to Verify']"));
+        Assert.Equal(2, document.QuerySelectorAll("#docs-page-outline .docs-section-copy-icon[aria-hidden='true'][viewBox='0 0 24 24']").Length);
+        Assert.DoesNotContain(
+            "#",
+            document.QuerySelector(".docs-outline-item > button.docs-outline-copy[data-doc-section-copy='install']")!.TextContent);
         Assert.Equal(2, document.QuerySelectorAll("#docs-page-outline button[data-doc-section-copy]").Length);
         Assert.Null(document.QuerySelector("a.docs-outline-link[href='#missing-title']"));
         Assert.Null(document.QuerySelector("button[data-doc-section-copy='missing-title']"));

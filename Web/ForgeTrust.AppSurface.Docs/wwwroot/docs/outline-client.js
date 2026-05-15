@@ -274,6 +274,29 @@
         button.setAttribute("aria-label", `Copy link to ${title}`);
     }
 
+    function createCopyIcon() {
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.classList.add("docs-section-copy-icon");
+        svg.setAttribute("aria-hidden", "true");
+        svg.setAttribute("focusable", "false");
+        svg.setAttribute("viewBox", "0 0 24 24");
+
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", "9");
+        rect.setAttribute("y", "9");
+        rect.setAttribute("width", "11");
+        rect.setAttribute("height", "11");
+        rect.setAttribute("rx", "2");
+        rect.setAttribute("ry", "2");
+        svg.append(rect);
+
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "M5 15V6a2 2 0 0 1 2-2h9");
+        svg.append(path);
+
+        return svg;
+    }
+
     function showCopiedFeedback(button, shell) {
         hideCopyFallback();
 
@@ -300,10 +323,7 @@
         button.dataset.docSectionCopyInserted = "true";
         button.setAttribute("aria-label", `Copy link to ${title}`);
 
-        const icon = document.createElement("span");
-        icon.setAttribute("aria-hidden", "true");
-        icon.textContent = "#";
-        button.append(icon);
+        button.append(createCopyIcon());
 
         return button;
     }

@@ -627,10 +627,19 @@ body {
     color: var(--docs-color-text-subtle);
     cursor: pointer;
     font: inherit;
-    font-size: 0.86rem;
-    font-weight: 800;
     line-height: 1;
-    transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease, opacity 140ms ease;
+    opacity: 0.78;
+    transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+}
+
+.docs-section-copy-icon {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.9;
 }
 
 .docs-section-copy:hover,
@@ -639,7 +648,9 @@ body {
 .docs-section-copy[data-copy-state="fallback"] {
     border-color: var(--docs-color-border-accent-strong);
     background: var(--docs-color-state-outline-fill);
+    box-shadow: 0 0 0 1px var(--docs-color-border-accent-subtle);
     color: var(--docs-color-accent-soft);
+    opacity: 1;
 }
 
 .docs-section-copy:focus-visible {
@@ -666,32 +677,15 @@ body {
     pointer-events: none;
 }
 
-.docs-outline-copy {
-    opacity: 0.62;
-}
-
-.docs-outline-item:hover .docs-outline-copy,
-.docs-outline-copy:focus-visible,
-.docs-outline-copy[data-copy-state] {
-    opacity: 1;
-}
-
 .docs-content-copy {
     width: 1.95rem;
     height: 1.95rem;
     margin-left: 0.25rem;
     vertical-align: 0.08em;
-    opacity: 0;
 }
 
 .docs-section-copy-target {
     position: relative;
-}
-
-.docs-section-copy-target:hover > .docs-content-copy,
-.docs-content-copy:focus-visible,
-.docs-content-copy[data-copy-state] {
-    opacity: 1;
 }
 
 .docs-section-copy-fallback {

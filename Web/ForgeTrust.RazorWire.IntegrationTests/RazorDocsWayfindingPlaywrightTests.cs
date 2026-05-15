@@ -327,6 +327,19 @@ public sealed class RazorDocsWayfindingPlaywrightTests
 
         Assert.True(await page.Locator(".doc-type > .doc-type-header > button[data-doc-section-copy]").CountAsync() > 0);
         Assert.True(await page.Locator(".doc-method-group > .doc-method-group-header > button[data-doc-section-copy]").CountAsync() > 0);
+        Assert.True(await page.Locator(".docs-content button[data-doc-section-copy] .docs-section-copy-icon").CountAsync() > 0);
+        Assert.Equal(
+            string.Empty,
+            await page.Locator(".docs-content button[data-doc-section-copy]").First.TextContentAsync());
+        Assert.True(await page.Locator(".docs-content button[data-doc-section-copy]").First.EvaluateAsync<bool>(
+            """
+            button => {
+              const style = getComputedStyle(button);
+              return style.visibility === 'visible'
+                && style.display !== 'none'
+                && Number.parseFloat(style.opacity) > 0.7;
+            }
+            """));
         Assert.Equal(0, await page.Locator("summary button[data-doc-section-copy]").CountAsync());
         Assert.Equal(0, await page.Locator(".doc-signature button[data-doc-section-copy]").CountAsync());
         Assert.Equal(0, await page.Locator("pre button[data-doc-section-copy], code button[data-doc-section-copy]").CountAsync());

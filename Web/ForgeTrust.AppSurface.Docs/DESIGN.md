@@ -187,6 +187,7 @@ Interaction rules:
 
 - The active outline link uses `aria-current="location"`.
 - Each outline row includes a small copy-link action that writes the absolute section URL to the clipboard without changing scroll position, browser history, or the current hash.
+- Copy-link actions use conventional copy iconography, remain visible without hover, and may highlight on hover or focus. Do not use `#` as the action glyph.
 - Matching copy-link actions are added beside rendered Markdown headings and generated API type/member headers. Do not insert copy controls inside `summary`, signature blocks, `code`, `pre`, or source-link placeholders.
 - Clipboard writes must run directly from the user's click or tap. If the browser denies clipboard access, show a focused manual-copy field and keep it open while focus remains inside the fallback.
 - Turbo frame reloads must remove generated section-copy buttons, fallback popovers, status text, and timers before re-enhancing the new document.
