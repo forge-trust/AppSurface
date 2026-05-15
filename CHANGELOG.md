@@ -17,6 +17,9 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 
 ### Added
 
+- AppSurface now has a planned `appsurface` .NET tool surface. Its first verb is `appsurface docs`, which runs RazorDocs preview workflows through the existing standalone docs host instead of minting a separate `razordocs` CLI.
+- AppSurface Web now has a startup watchdog that fails fast when a web host stalls before Kestrel starts listening; `appsurface docs` exposes the same guard through `--startup-timeout-seconds`.
+- RazorDocs and RazorWire runtime assets are now embedded into their assemblies and served through endpoint fallbacks, so packaged CLI hosts can serve docs UI assets without relying on static web asset manifests.
 - AppSurface now has a repo-level release contract: a public release hub, an unreleased proof artifact, a pre-1.0 upgrade policy, and a tagged-release template for future versioned notes.
 - RazorWire now has a package-level generated UI design contract that defines ownership scope, data-attribute and CSS custom-property styling surfaces, accessibility expectations, override levels, and anti-patterns for package-owned UI.
 - RazorDocs pages can now render a top-of-page trust bar from structured metadata so release notes and upgrade guidance can show status, safety context, and provenance without custom page code.

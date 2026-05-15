@@ -1,4 +1,7 @@
 using System.Net;
+using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Docs.Standalone;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.RazorWire.IntegrationTests;
@@ -51,6 +54,22 @@ public sealed class RazorDocsInProcessHostTests
 
         Assert.Same(expected, exception);
         Assert.True(host.IsDisposed);
+    }
+
+    [Fact]
+    public void RazorDocsStandaloneHost_PreservesTwoParameterCreateBuilderOverload()
+    {
+        var environmentProvider = new TestEnvironmentProvider(Environments.Development);
+
+        var builder = RazorDocsStandaloneHost.CreateBuilder(
+            ["--urls", "http://127.0.0.1:0"],
+            environmentProvider);
+
+        using var host = builder.Build();
+
+        Assert.Same(
+            environmentProvider,
+            host.Services.GetRequiredService<IEnvironmentProvider>());
     }
 
     [Fact]
@@ -111,6 +130,18 @@ public sealed class RazorDocsInProcessHostTests
         Assert.Equal(
             "RazorDocs standalone host did not publish a valid listening URL. Value: 'not-a-url'.",
             exception.Message);
+    }
+
+    private sealed class TestEnvironmentProvider(string environmentName) : IEnvironmentProvider
+    {
+        public string Environment { get; } = environmentName;
+
+        public bool IsDevelopment { get; } = string.Equals(
+            environmentName,
+            Environments.Development,
+            StringComparison.OrdinalIgnoreCase);
+
+        public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
     }
 
     private sealed class ThrowingHost : IHost

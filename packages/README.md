@@ -70,7 +70,8 @@ Swipe to compare package details on narrow screens.
 
 ### Not in the direct-install matrix
 
-- `ForgeTrust.RazorWire.Cli`: Held out of the direct-install chooser until issue Release: excluded; not applicable; [notes](../releases/unreleased.md).
+- `ForgeTrust.AppSurface.Cli`: Planned public `appsurface` .NET tool. The `docs` verb owns RazorDocs preview workflows that were previously sketched as a separate `razordocs` CLI. Release: excluded; not applicable; [notes](../releases/unreleased.md).
+- `ForgeTrust.RazorWire.Cli`: Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance. Release: excluded; not applicable; [notes](../releases/unreleased.md).
 
 ## Maintainer notes
 
