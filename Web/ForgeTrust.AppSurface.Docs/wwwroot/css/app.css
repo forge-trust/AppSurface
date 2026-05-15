@@ -198,6 +198,47 @@ body {
     height: 7.25rem;
 }
 
+@media (max-width: 47.999rem) {
+    #docs-sidebar > div:first-child {
+        gap: 0.75rem;
+    }
+
+    #docs-sidebar > div:first-child .docs-brand {
+        flex: 1 1 auto;
+        gap: 0.55rem;
+        min-height: 2.75rem;
+        overflow: hidden;
+    }
+
+    #docs-sidebar > div:first-child .docs-brand-mark--sm {
+        width: 2.25rem;
+        height: 2.25rem;
+    }
+
+    #docs-sidebar > div:first-child .docs-brand-wordmark {
+        overflow: hidden;
+        font-size: 1.05rem;
+        text-overflow: ellipsis;
+    }
+
+    #docs-sidebar-close {
+        min-width: 3.25rem;
+        min-height: 2.75rem;
+        padding-right: 0.75rem;
+        padding-left: 0.75rem;
+    }
+
+    #docs-sidebar nav a {
+        display: flex;
+        min-height: 2.75rem;
+        align-items: center;
+    }
+
+    #docs-sidebar summary > div {
+        min-height: 2.75rem;
+    }
+}
+
 .docs-hero-panel,
 .docs-surface-panel {
     border: 1px solid var(--docs-color-brand-panel-border);
@@ -749,6 +790,20 @@ body {
 @media (max-width: 47.999rem) {
     .docs-outline-shell[data-outline-enhanced="true"] {
         top: 3.8125rem;
+    }
+
+    .docs-outline-toggle {
+        padding-right: 1rem;
+        padding-left: 1rem;
+    }
+
+    .docs-outline-toggle-label {
+        display: none;
+    }
+
+    .docs-outline-toggle-context {
+        flex-basis: 100%;
+        text-align: left;
     }
 }
 
@@ -1495,5 +1550,16 @@ body {
     .docs-content td {
         min-width: 10.5rem;
         padding: 0.75rem 0.8rem;
+    }
+
+    .docs-content--markdown pre {
+        padding: 0.85rem;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
+    .docs-content--markdown pre code {
+        min-width: 0;
+        white-space: inherit;
     }
 }
