@@ -1,8 +1,9 @@
 @model ForgeTrust.AppSurface.Docs.Models.DocDetailsViewModel
+@inject ForgeTrust.AppSurface.Docs.RazorDocsAssetVersioner AssetVersioner
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
     ViewData["Title"] = Model.Title;
-    var docsOutlineClientUrl = $"{Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("outline-client.js"))}?v=rolling-context";
+    var docsOutlineClientUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "outline-client.js"));
     var trust = Model.Document.Metadata?.Trust;
     var trustStatus = string.IsNullOrWhiteSpace(trust?.Status) ? null : trust!.Status!.Trim();
     var trustSummary = string.IsNullOrWhiteSpace(trust?.Summary) ? null : trust!.Summary!.Trim();
@@ -532,5 +533,5 @@
 
 @if (hasOutline)
 {
-    <script src="@docsOutlineClientUrl" defer data-doc-outline-client="true"></script>
+    <script src="@docsOutlineClientUrl" defer data-doc-outline-client="true" asp-append-version="false"></script>
 }

@@ -542,10 +542,24 @@ internal static class RazorDocsPublishedTreeContentRewriter
                 configNode["docsRootPath"] = PrefixPathBase(mountRootPath, requestPathBase);
                 configNode["docsSearchUrl"] = PrefixPathBase(mountRootPath + "/search", requestPathBase);
                 configNode["docsSearchIndexUrl"] = PrefixPathBase(mountRootPath + "/search-index.json", requestPathBase);
+                if (configNode.TryGetPropertyValue("miniSearchUrl", out var miniSearchUrlNode)
+                    && miniSearchUrlNode?.GetValue<string>() is { } miniSearchUrl)
+                {
+                    configNode["miniSearchUrl"] = PrefixPathBase(
+                        mountRootPath + "/minisearch.min.js",
+                        requestPathBase) + GetUrlSuffix(miniSearchUrl);
+                }
+
                 configNode.AsObject().Remove("docsVersionsUrl");
 
                 return $"window.__razorDocsConfig = {configNode.ToJsonString()};";
             });
+    }
+
+    private static string GetUrlSuffix(string url)
+    {
+        var suffixIndex = url.IndexOfAny(['?', '#']);
+        return suffixIndex >= 0 ? url[suffixIndex..] : string.Empty;
     }
 
     private static string RewriteSrcSetValue(

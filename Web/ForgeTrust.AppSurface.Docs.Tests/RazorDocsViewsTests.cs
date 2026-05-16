@@ -36,15 +36,15 @@ public class RazorDocsViewsTests
         var layout = ReadLayoutMarkup();
         Assert.Contains("id=\"docs-search-input\"", layout);
         Assert.Contains("id=\"docs-search-results\"", layout);
-        Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"search.css\"))", layout);
+        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search.css\")", layout);
         Assert.Contains("docsSearchIndexUrl", layout);
         Assert.Contains("var isSearchPage = string.Equals(", layout);
         Assert.Contains("crossorigin=\"use-credentials\"", layout);
         Assert.Contains("data-rw-search-runtime=\"minisearch\"", layout);
         Assert.DoesNotContain("src=\"~/docs/outline-client.js\"", layout);
         Assert.Contains("window.__razorDocsConfig", layout);
-        Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"search-client.js\"))", layout);
-        Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"minisearch.min.js\"))", layout);
+        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search-client.js\")", layout);
+        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"minisearch.min.js\")", layout);
     }
 
     [Fact]
@@ -80,12 +80,13 @@ public class RazorDocsViewsTests
             c => c.Search(),
             pathBase: "/some-base");
 
-        Assert.Contains("href=\"/some-base/docs/search.css\"", html);
-        Assert.Contains("src=\"/some-base/docs/minisearch.min.js\"", html);
-        Assert.Contains("src=\"/some-base/docs/search-client.js\"", html);
+        Assert.Matches("href=\"/some-base/docs/search\\.css\\?v=[^\"]+\"", html);
+        Assert.Matches("src=\"/some-base/docs/minisearch\\.min\\.js\\?v=[^\"]+\"", html);
+        Assert.Matches("src=\"/some-base/docs/search-client\\.js\\?v=[^\"]+\"", html);
         Assert.Contains("\"docsRootPath\":\"/some-base/docs\"", html);
         Assert.Contains("\"docsSearchUrl\":\"/some-base/docs/search\"", html);
         Assert.Contains("\"docsSearchIndexUrl\":\"/some-base/docs/search-index.json\"", html);
+        Assert.Matches("\"miniSearchUrl\":\"/some-base/docs/minisearch\\.min\\.js\\?v=[^\"]+\"", html);
     }
 
     [Fact]
@@ -2439,7 +2440,9 @@ public class RazorDocsViewsTests
         Assert.True(
             document.QuerySelector(".docs-detail-primary")!.CompareDocumentPosition(document.QuerySelector("#docs-page-outline")!)
                 .HasFlag(DocumentPositions.Following));
-        Assert.NotNull(document.QuerySelector("script[src='/docs/outline-client.js?v=rolling-context'][data-doc-outline-client='true']"));
+        var outlineScript = document.QuerySelector("script[data-doc-outline-client='true']");
+        Assert.NotNull(outlineScript);
+        Assert.Matches("^/docs/outline-client\\.js\\?v=.+", outlineScript!.GetAttribute("src") ?? string.Empty);
         Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", html);
         Assert.DoesNotContain("rounded-2xl border border-slate-800 bg-slate-900/60", html);
 
@@ -2450,7 +2453,9 @@ public class RazorDocsViewsTests
             pathBase: "/tenant");
         var tenantDocument = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(tenantHtml);
 
-        Assert.NotNull(tenantDocument.QuerySelector("script[src='/tenant/docs/outline-client.js?v=rolling-context'][data-doc-outline-client='true']"));
+        var tenantOutlineScript = tenantDocument.QuerySelector("script[data-doc-outline-client='true']");
+        Assert.NotNull(tenantOutlineScript);
+        Assert.Matches("^/tenant/docs/outline-client\\.js\\?v=.+", tenantOutlineScript!.GetAttribute("src") ?? string.Empty);
         Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", tenantHtml);
     }
 
@@ -3412,7 +3417,7 @@ public class RazorDocsViewsTests
 
         Assert.DoesNotContain("href=\"/docs/search-index.json\"", html);
         Assert.DoesNotContain("data-rw-search-runtime=\"minisearch\"", html);
-        Assert.Contains("src=\"/docs/search-client.js\"", html);
+        Assert.Matches("src=\"/docs/search-client\\.js\\?v=[^\"]+\"", html);
         Assert.DoesNotContain("src=\"/docs/outline-client.js\"", html);
         Assert.Contains("id=\"docs-search-input\"", html);
     }

@@ -114,6 +114,7 @@ public static class RazorDocsServiceCollectionExtensions
             ServiceDescriptor.Singleton<IValidateOptions<RazorDocsOptions>, RazorDocsOptionsValidator>());
         services.TryAddSingleton(sp => sp.GetRequiredService<IOptions<RazorDocsOptions>>().Value);
         services.TryAddSingleton(RazorDocsAssetPathResolver.CreateDefault());
+        services.TryAddSingleton<RazorDocsAssetVersioner>();
         services.TryAddSingleton<DocsUrlBuilder>();
         services.TryAddSingleton<RazorDocsVersionCatalogService>();
         services.AddMemoryCache();
