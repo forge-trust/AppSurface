@@ -45,9 +45,19 @@ internal sealed record AppSurfaceWebStartupTimeoutDiagnostic(
     /// <summary>
     /// Gets endpoint-related command-line arguments rendered for diagnostics.
     /// </summary>
-    internal string StartupArgsSummary => StartupArgs.Count == 0
-        ? "<none>"
-        : string.Join(" ", SelectEndpointArguments(StartupArgs).Select(QuoteArgument));
+    internal string StartupArgsSummary
+    {
+        get
+        {
+            var endpointArguments = SelectEndpointArguments(StartupArgs)
+                .Select(QuoteArgument)
+                .ToArray();
+
+            return endpointArguments.Length == 0
+                ? "<none>"
+                : string.Join(" ", endpointArguments);
+        }
+    }
 
     /// <summary>
     /// Creates a startup-timeout diagnostic from the current process environment.

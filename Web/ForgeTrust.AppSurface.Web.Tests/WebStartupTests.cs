@@ -173,6 +173,21 @@ public class WebStartupTests
     }
 
     [Fact]
+    public void StartupTimeoutDiagnostic_UsesNone_WhenNoEndpointArgumentsSurviveFiltering()
+    {
+        var diagnostic = AppSurfaceWebStartupTimeoutDiagnostic.Create(
+            TimeSpan.FromSeconds(10),
+            "StartHost",
+            "/workspace/app",
+            "/workspace/app/bin",
+            staticWebAssetsEnabled: true,
+            ["--name", "docs preview", "--ConnectionStrings:Default", "Server=secret"],
+            _ => null);
+
+        Assert.Equal("<none>", diagnostic.StartupArgsSummary);
+    }
+
+    [Fact]
     public void StartupTimeoutDiagnostic_Uses_GenericRecommendation_WhenSandboxMarkersAreAbsent()
     {
         var diagnostic = AppSurfaceWebStartupTimeoutDiagnostic.Create(
