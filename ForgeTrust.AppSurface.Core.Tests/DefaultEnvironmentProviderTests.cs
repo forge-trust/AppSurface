@@ -134,6 +134,35 @@ public class DefaultEnvironmentProviderTests
     }
 
     [Fact]
+    public void DefaultEnvironmentProvider_IgnoresBlankSplitCommandLineEnvironment()
+    {
+        var previousDotnetEnvironment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var previousAspNetCoreEnvironment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Production");
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+
+            var provider = new DefaultEnvironmentProvider(["--environment", " "]);
+
+            Assert.Equal("Development", provider.Environment);
+            Assert.True(provider.IsDevelopment);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", previousDotnetEnvironment);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousAspNetCoreEnvironment);
+        }
+    }
+
+    [Fact]
+    public void DefaultEnvironmentProvider_Throws_WhenArgsIsNull()
+    {
+        Assert.Throws<ArgumentNullException>(() => new DefaultEnvironmentProvider(null!));
+    }
+
+    [Fact]
     public void GetEnvironmentVariable_ReturnsEmptyString_WhenVariableIsExplicitlyEmpty()
     {
         var variableName = $"APPSURFACE_TEST_{Guid.NewGuid():N}";
