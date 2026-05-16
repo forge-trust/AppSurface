@@ -1545,12 +1545,18 @@ public sealed class RazorDocsWayfindingPlaywrightTests
 
     private static async Task AssertSectionCopyFallbackAsync(IPage page, string targetId, string expectedUrl)
     {
+        await InstallSectionCopyHistoryCountersAsync(page);
+        await SetMainContentScrollTopAsync(page, 260);
+        var initialScrollTop = await GetMainContentScrollTopAsync(page);
+        Assert.True(initialScrollTop > 0);
+
         await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
         await page.WaitForSelectorAsync(
             "[data-doc-section-copy-fallback='true'] input",
             new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Visible });
 
         Assert.Equal(expectedUrl, await page.InputValueAsync("[data-doc-section-copy-fallback='true'] input"));
+        await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
         Assert.True(await page.Locator("[data-doc-section-copy-fallback='true']").EvaluateAsync<bool>(
             """
             fallback => {
@@ -1571,6 +1577,7 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         Assert.Null(await page.GetAttributeAsync(
             $"#docs-page-outline button[data-doc-section-copy='{targetId}']",
             "data-copy-state"));
+        await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
 
         await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
         await page.WaitForSelectorAsync(
@@ -1578,8 +1585,22 @@ public sealed class RazorDocsWayfindingPlaywrightTests
             new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Visible });
 
         Assert.Equal(expectedUrl, await page.InputValueAsync("[data-doc-section-copy-fallback='true'] input"));
+        await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
         await page.ClickAsync("[data-doc-section-copy-fallback='true'] input");
         Assert.Equal(1, await page.Locator("[data-doc-section-copy-fallback='true']").CountAsync());
+
+        await page.Keyboard.PressAsync("Escape");
+        await page.WaitForSelectorAsync(
+            "[data-doc-section-copy-fallback='true']",
+            new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Detached });
+        await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
+    }
+
+    private static async Task AssertSectionCopyPreservedNavigationAsync(IPage page, int initialScrollTop)
+    {
+        Assert.Equal(string.Empty, await page.EvaluateAsync<string>("() => window.location.hash"));
+        Assert.Equal(initialScrollTop, await GetMainContentScrollTopAsync(page));
+        await AssertSectionCopyDidNotMutateHistoryAsync(page);
     }
 
     private const string ScrollMainContentToBottomScript =
