@@ -114,7 +114,7 @@ Important behavior:
 - Only empty `401`, `403`, and `404` responses from `GET` or `HEAD` requests that accept `text/html` or `application/xhtml+xml` are re-executed.
 - JSON, non-HTML, non-empty, and non-GET/HEAD responses keep their original API-friendly behavior.
 - Missing default documentation `404` routes include a documentation search recovery link because stale docs links are the most common browser miss. The default RazorDocs route family is `/docs`, so the default recovery target is `/docs/search`. Apps that set `RazorDocs:Routing:RouteRootPath` should derive the search target from that root, for example `RazorDocs:Routing:RouteRootPath=/foo/bar` points stale-docs recovery links at `/foo/bar/search`.
-- Static export remains conservative: RazorWire CLI probes `/_appsurface/errors/404` and writes only `404.html`; it does not emit `401.html` or `403.html`. In CDN mode, that `404.html` page is validated and rewritten with the rest of the static output.
+- Static export remains conservative: RazorWire CLI probes `/_appsurface/errors/404` and writes only `404.html`; it does not emit `401.html` or `403.html`. In CDN mode, that `404.html` page is validated and rewritten with the rest of the static output. The fallback `Return home` link is marked `data-rw-export-ignore` so apps that do not export `/` can still publish a valid conventional `404.html`.
 - Production `500` exception pages are intentionally separate from browser status pages and must be enabled with `UseConventionalExceptionPage()`.
 
 ### Conventional Production 500 Pages
@@ -188,6 +188,22 @@ You can override the application's listening port using several methods:
 > The `--port` flag is a convenience shortcut that maps to `http://localhost:{port};http://*:{port}`. This ensures the application is accessible on all interfaces while logging a clickable `localhost` URL in the console. If both `--port` and `--urls` are provided, `--port` takes precedence.
 > [!TIP]
 > If you rely on the deterministic development-port fallback, different worktrees on the same machine will get different stable ports. If you need a predictable shared URL for docs, QA, or CI instructions, pass `--port` or `--urls` explicitly instead of depending on the fallback.
+
+### Startup Watchdog
+
+AppSurface Web fails fast when a host does not complete startup within `WebOptions.StartupTimeout`. The default is 10 seconds. This catches pre-bind stalls where the process is alive but Kestrel has not started listening, including sandbox restrictions, package layout issues, static web asset discovery hangs, and hosted services that block startup.
+
+When the watchdog fires, AppSurface logs the observed startup phase, current directory, application base directory, static web asset mode, endpoint-related startup arguments, and any known Codex sandbox markers such as `CODEX_SANDBOX`. If a Codex sandbox is detected, try the same command outside the sandbox or with the runner's approved unsandboxed/escalated permission before debugging package layout or hosted-service startup.
+
+Configure or disable the watchdog through `WebOptions`:
+
+```csharp
+await WebApp<MyRootModule>.RunAsync(
+    args,
+    options => options.StartupTimeout = TimeSpan.FromSeconds(60));
+```
+
+Set `StartupTimeout` to `null` only when the host intentionally performs long-running pre-bind work. Values at or below zero are invalid; use `null` instead of `TimeSpan.Zero` when disabling the guard. The watchdog stops checking once startup completes, so it does not limit normal request processing or long-running background work after the host is listening.
 
 ---
 [📂 Back to Web List](../README.md) | [🏠 Back to Root](../../README.md)

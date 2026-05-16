@@ -921,6 +921,41 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_CdnMode_Should_Export_RootSeed_And_Allow_404HomeRecoveryLink_To_Be_ExportIgnored()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        Directory.CreateDirectory(tempDir);
+        await File.WriteAllLinesAsync(seedFile, ["/", "/docs"]);
+
+        try
+        {
+            var client = new HttpClient(new RedirectFollowingHandler(new IgnoredRootRecoveryNotFoundPageHandler()))
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var notFoundHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "404.html"));
+            Assert.Contains("href=\"/\" data-rw-export-ignore=\"true\"", notFoundHtml, StringComparison.Ordinal);
+            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Combine(tempDir, "docs.html")));
+            Assert.True(context.RouteOutcomes.TryGetValue("/", out var rootOutcome));
+            Assert.True(rootOutcome.Succeeded);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_HybridMode_Should_Continue_When_Managed_Dependency_Is_Missing()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -1934,6 +1969,43 @@ public class ExportEngineTests
                 {
                     Content = new StringContent("<html><body><h1>Home</h1></body></html>", Encoding.UTF8, "text/html")
                 });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class IgnoredRootRecoveryNotFoundPageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == BrowserStatusPageDefaults.ReservedNotFoundRoute)
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <h1>Exported 404 page</h1>
+                        <a href="/" data-rw-export-ignore="true">Return home</a>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            if (path == "/")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Found)
+                {
+                    Headers =
+                    {
+                        Location = new Uri("/docs", UriKind.Relative)
+                    }
+                });
+            }
+
+            if (path == "/docs")
+            {
+                return Html("<html><body><h1>Docs</h1></body></html>");
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));

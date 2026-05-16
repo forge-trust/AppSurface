@@ -10,6 +10,14 @@ This project is the thin executable wrapper around the reusable [ForgeTrust.AppS
 - the export target in CI
 - a smoke-testable host that proves the package seam stays honest
 
+For public command-line workflows, use the AppSurface CLI as the public command surface:
+
+```bash
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo . --urls http://127.0.0.1:5189
+```
+
+The CLI delegates to this standalone host, so the host remains the source of truth for RazorDocs startup, static web assets, routes, and configuration binding.
+
 ## Entry Point
 
 The app boots through [Program.cs](./Program.cs), which delegates to `RazorDocsStandaloneHost`.
@@ -17,12 +25,15 @@ The app boots through [Program.cs](./Program.cs), which delegates to `RazorDocsS
 
 - `RunAsync(string[] args)` starts the standalone app and is what `Program.cs` uses.
 - `CreateBuilder(string[] args, IEnvironmentProvider? environmentProvider = null)` returns an `IHostBuilder` without starting it.
+- `CreateBuilder(string[] args, IEnvironmentProvider? environmentProvider, Action<WebOptions>? configureOptions)` adds the same builder seam plus web-option customization for package-hosted tools.
 
 Use `CreateBuilder` when a test or tool needs the real standalone host in-process. It keeps the same `RazorDocsWebModule`, MVC routes, static web assets, and `RazorDocs` configuration binding as the executable path while avoiding a shell-out to `dotnet run`.
 
 Do not duplicate standalone setup in test fixtures. If a scenario needs different URLs, repository roots, contributor templates, or environment behavior, pass those through command-line configuration or the optional environment provider so the normal host builder still owns the app shape.
 `CreateBuilder` is lower level than `RunAsync`: callers that build and start the host themselves should pass `--urls`, `--port`, or configure the web host before `Build()` instead of relying on the executable startup path's development-port fallback.
 The builder pins this standalone assembly as the host entry point identity so in-process callers, including xUnit, resolve the same static web asset manifest as the executable.
+
+The optional `configureOptions` callback is for host-shape seams that must stay on the normal AppSurface Web path. `appsurface docs` uses it to disable static web asset manifest loading for packaged tool runs because RazorDocs and RazorWire runtime assets are embedded in their assemblies. The shared AppSurface Web startup watchdog still applies through `WebOptions.StartupTimeout`, which defaults to 10 seconds and fails fast when the process stalls before Kestrel starts listening.
 
 ## Strict Harvest Failure
 

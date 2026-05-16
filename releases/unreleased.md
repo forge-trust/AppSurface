@@ -29,6 +29,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 
 - Pull request titles are now expected to follow Conventional Commits so the merge history is machine-readable for future automation.
 - Pull requests are expected to update this page unless maintainers explicitly mark the change as outside the public release story.
+- The primary build workflow now declares explicit read-only `GITHUB_TOKEN` contents permissions, keeping CI aligned with least-privilege GitHub Actions defaults.
 - Markdown-only changes on `main` now republish the docs surface, so release-note and policy edits are treated as first-class product updates.
 - AppSurface now exposes focused GitHub issue forms for bug reports, feature requests, and docs/developer-experience feedback, with the root README and contribution guide pointing developers to that feedback path.
 - Public contribution surfaces now steer suspected vulnerabilities away from issue forms and into a private security reporting path.
@@ -37,6 +38,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 ### Console and CLI polish
 
 - AppSurface console apps can now opt into a command-first output contract so public CLI help and validation flows stay quiet instead of printing Generic Host lifecycle chatter.
+- AppSurface now plans two public CLI tools: `appsurface` for repository-level AppSurface workflows, starting with `appsurface docs` for RazorDocs preview, and `razorwire` for RazorWire-specific export workflows.
 - RazorWire CLI now uses that contract for `--help`, `export --help`, invalid option output, and missing-source validation while still preserving command-owned export progress logs.
 - RazorWire CLI now names export seed-route files with `-r|--seeds`, matching the seed terminology used throughout the exporter and docs.
 - The shared console startup seam now exposes `ConsoleOptions` and `ConsoleOutputMode`, so future public AppSurface CLIs can adopt the same behavior without forking startup logic.
@@ -71,6 +73,8 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 ### Web host development defaults
 
 - AppSurface web hosts now choose a deterministic localhost-only development URL when no endpoint is configured, while production, staging, container, and appsettings-based endpoint choices remain untouched.
+- AppSurface web hosts now fail fast when startup does not complete before `WebOptions.StartupTimeout`, which defaults to 10 seconds and catches pre-bind stalls from sandbox restrictions, package layout issues, static asset discovery, or hosted services that block startup.
+- Startup watchdog failures now surface Codex sandbox markers, the observed startup phase, safe path context, static web asset mode, endpoint startup arguments, and a sandbox-first rerun recommendation when applicable.
 - OpenAPI's optional web package now has dedicated test coverage for service registration, endpoint mapping, generated document titles, and transformer behavior that removes `ForgeTrust.AppSurface.Web` tags at the document and operation levels while preserving unrelated tags, so the public module contract is guarded independently of Scalar.
 - Scalar's optional web package now has dedicated test coverage for OpenAPI dependency wiring, Scalar endpoint mapping, no-op lifecycle hooks, and minimal AppSurface web host composition.
 - Tailwind development watch mode now treats a missing standalone CLI as a recoverable local-tooling gap: the app keeps serving existing CSS and logs a warning that points to the runtime package or `TailwindCliPath` override.
@@ -96,6 +100,8 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorDocs pages can now expose typed `On this page` outlines, explicit proof-path previous/next links, related-page cards, and sidebar anchor navigation from harvested metadata instead of scraping rendered HTML.
 - RazorDocs details pages now render those `On this page` outlines as a page-local navigation surface, using a sticky desktop rail, a compact narrow-viewport drawer, and active-section state that keeps the reader oriented without competing with the global sidebar.
 - RazorDocs compact `On this page` outlines now stay visible while reading on narrow viewports, showing smaller previous/next context around the current section with reduced-motion-safe rolling label updates.
+- RazorDocs compact `On this page` outlines now contain their own scrolling while expanded, preventing touch or wheel input over the outline from scrolling the article behind it.
+- RazorDocs detail-page outlines and section headers now include copy-link actions for deep section URLs, with a manual-copy fallback when clipboard writes are unavailable or denied.
 - RazorDocs details pages now emit the outline client as a normal deferred script asset, so static exports publish `/docs/outline-client.js` through the existing asset crawler instead of depending on an inline loader.
 - RazorDocs detail-page outlines now keep long-section active states and the desktop right rail aligned, including the full-height rail rule, active-item visibility on long pages, and animated section jumps.
 - Public docs navigation now groups pages by intent-first sections, preserves authored editorial breadcrumbs, and keeps Start Here recovery links hidden when that section is unavailable.
@@ -103,6 +109,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorDocs landing curation now uses `featured_page_groups`, so root and section landing pages can organize next-step links by reader intent instead of rendering one flat list.
 - RazorDocs now exposes structured harvest health through `DocAggregator.GetHarvestHealthAsync(...)`, letting hosts distinguish healthy, valid-empty, degraded, and all-failed source-backed docs snapshots while keeping raw exception details in logs.
 - RazorDocs hosts can now opt into strict startup failure with `RazorDocs:Harvest:FailOnFailure`, so CI, release, and static export runs fail before listening when every configured harvester fails while runtime hosts stay tolerant by default.
+- RazorDocs and RazorWire now compile their package-owned runtime assets into their assemblies and map endpoint fallbacks for those assets. Static web assets remain the normal host path when manifests are available, while packaged CLI hosts can still serve the docs stylesheet, search scripts, outline script, and RazorWire runtime from compiled assemblies.
 - RazorDocs now exposes a local-first harvest health UI at `{DocsRootPath}/_health` plus a machine-readable `{DocsRootPath}/_health.json` endpoint, shown by default in Development and configurable independently from sidebar chrome for operator-owned environments.
 - RazorDocs page lookup now uses one shared path resolver for details pages, landing curation, related-page links, and search recovery links, keeping source paths, canonical `.html` paths, fragments, backslash normalization, and configured docs-root prefixes behaviorally aligned.
 - RazorDocs authored Markdown pages now publish clean canonical routes that follow their public section hierarchy, so teams can link to URLs such as `/docs/packages` instead of repository-shaped `README.md.html` paths while source-path lookups and declared aliases continue to work.
@@ -119,6 +126,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorDocs snapshot caching is now configurable with `RazorDocs:CacheExpirationMinutes`, so development hosts can shorten reuse while production hosts can choose a longer docs and search-index cache lifetime.
 - Shared RazorDocs badges, metadata chips, provenance strips, and trust bars now live in the shared package stylesheet while `search.css` stays focused on search-specific UI.
 - RazorDocs shared package chrome and search UI now consume one internal `--docs-*` design-token layer, with `search.css` fallback aliases so exact published release trees keep styled search controls even when they load the search stylesheet without the generated package stylesheet.
+- RazorDocs legacy asset redirects now validate app-relative redirect targets before preserving cache-busting query strings, closing an open-redirect path while keeping virtual-path deployments and packaged asset fallbacks working.
 - RazorDocs authored Markdown pages now use a dedicated prose treatment with a shorter line length, stronger paragraph rhythm, readable lists, clearer links, blockquotes, and inline code while generated API pages keep the wider reference layout.
 - AppSurface Docs now uses the new AppSurface brand system across the docs shell, landing page, search workspace, iconography, and responsive article outline, while keeping the UI focused on developer wayfinding instead of marketing chrome.
 - RazorDocs fenced Markdown code blocks now render server-side syntax highlighting through TextMateSharp with RazorDocs-owned token classes, language badges, and escaped plaintext fallback when a language is unknown, unsupported, oversized, or cannot be tokenized safely.

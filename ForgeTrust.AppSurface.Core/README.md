@@ -15,6 +15,7 @@ The Core library is designed to be lightweight and implementation-agnostic. It p
 - **`StartupContext`**: Provides metadata about the running application, including the user-facing application label, assembly-backed host identity, application discovery assembly, environment, and startup-level console output mode.
 - **`ConsoleOutputMode`**: Shared core enum that lets console-oriented packages describe whether command output should remain host-centric or command-first.
 - **`AppSurfaceStartup`**: The base class that orchestrates the host building and service registration process.
+- **`AppSurfaceStartup.RegisterDependencies`**: A protected seam for specialized startup types that need the module graph prepared before they build the Generic Host.
 
 ## Application labels and host identity
 
@@ -25,6 +26,14 @@ The Core library is designed to be lightweight and implementation-agnostic. It p
 `StartupContext.EntryPointAssembly` is the assembly AppSurface scans for application-owned commands, MVC application parts, Aspire components, and similar extensibility points. It defaults to the root module assembly so test runners and shared outer hosts do not accidentally scan the xUnit/VSTest process entry assembly. When `StartupContext.OverrideEntryPointAssembly` is set, that override applies to both discovery and host manifest identity.
 
 Keep these values separate. ASP.NET static web assets use the host application name to find runtime manifests. Passing a custom display label such as `CustomDocsHost` into the host environment can make static asset requests resolve against a manifest that does not exist. When a test or custom host needs a different manifest identity, set `StartupContext.OverrideEntryPointAssembly` instead of overloading `ApplicationName`.
+
+## Startup dependency graph
+
+`AppSurfaceStartup` registers framework dependencies and root-module dependencies exactly once per `StartupContext`. Standard hosts do not need to call anything directly: the registration happens during host-builder creation before module hooks and service registration run.
+
+Specialized startup types can call the protected `RegisterDependencies(StartupContext context)` seam earlier when they need module-derived options before `IHostBuilder.Build()`. AppSurface Web uses this to resolve `WebOptions.StartupTimeout` before arming its startup watchdog around host creation and startup.
+
+Call `RegisterDependencies` before reading `StartupContext.GetDependencies()` for startup-shaping decisions. Repeated calls with the same context are no-ops, but module registration is still part of startup composition, so avoid calling it from request-time code or from parallel threads.
 
 ## Logging in Static Utilities
 

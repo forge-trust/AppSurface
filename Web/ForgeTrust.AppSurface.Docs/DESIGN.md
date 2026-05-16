@@ -181,10 +181,16 @@ Visual rules:
 - Use small row radii only. Do not wrap the whole rail in a large rounded card.
 - Preserve the existing RazorDocs global sidebar; do not replace it with icon-only chrome for this pattern.
 - On compact viewports, the collapsed outline may show previous, current, and next section context. The current section is dominant; previous and next stay smaller and quieter so the control remains a reader aid instead of a second header.
+- When the compact outline is expanded, it is a bounded scroll surface with contained overscroll. Readers should be able to inspect a long `On this page` list without accidentally moving the article behind it.
 
 Interaction rules:
 
 - The active outline link uses `aria-current="location"`.
+- Each outline row includes a small copy-link action that writes the absolute section URL to the clipboard without changing scroll position, browser history, or the current hash.
+- Copy-link actions use conventional unframed copy iconography, remain visible without hover, and may highlight on hover or focus. Do not use `#` as the action glyph.
+- Matching copy-link actions are added beside rendered Markdown headings and generated API type/member headers. Do not insert copy controls inside `summary`, signature blocks, `code`, `pre`, or source-link placeholders.
+- Clipboard writes must run directly from the user's click or tap. If the browser denies clipboard access, show a focused manual-copy field and keep it open while focus remains inside the fallback.
+- Turbo frame reloads must remove generated section-copy buttons, fallback popovers, status text, and timers before re-enhancing the new document.
 - Mobile outline links collapse the outline after navigation so the reader returns to content.
 - Compact context rows can use a subtle vertical rolling cue when the active section changes. Animate text rows only, keep the shell fixed-height, and disable the cue under `prefers-reduced-motion: reduce`.
 - JavaScript enhances server-rendered hash links. It must not create a hidden-only outline when scripts fail.

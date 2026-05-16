@@ -1,4 +1,8 @@
 ﻿name: build.yml
+
+permissions:
+  contents: read
+
 on:
   push:
     branches: [ main ]
@@ -108,9 +112,11 @@ jobs:
           RazorDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
           RazorDocs__Contributor__LastUpdatedMode: Git
         run: |
+          printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/razordocs-seeds.txt"
           dotnet run --project Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj -c Release -- \
             export \
             --mode cdn \
+            --seeds "$RUNNER_TEMP/razordocs-seeds.txt" \
             --output "$RUNNER_TEMP/razordocs-pages" \
             --project Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj
 

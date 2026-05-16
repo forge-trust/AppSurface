@@ -227,12 +227,25 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 340
     note: Tailwind standalone runtime for Windows x64 build hosts. Restore it transitively through `ForgeTrust.AppSurface.Web.Tailwind` instead of installing it directly.
+  - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    publish_reason: Planned public AppSurface CLI surface; held out of package publishing until tool packaging and stable install guidance are finalized.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 390
+    note: Planned public `appsurface` .NET tool. The `docs` verb owns RazorDocs preview workflows that were previously sketched as a separate `razordocs` CLI.
+    start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
+    start_here_label: AppSurface CLI README
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish
-    publish_reason: Held out of package publishing until issue #171 lands real .NET tool packaging and stable install guidance.
+    publish_reason: "Held out of package publishing until issue #171 lands real .NET tool packaging and stable install guidance."
     release_status: excluded
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 400
-    note: Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance.
+    note: "Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance."
+    start_here_path: Web/ForgeTrust.RazorWire.Cli/README.md
+    start_here_label: RazorWire CLI README

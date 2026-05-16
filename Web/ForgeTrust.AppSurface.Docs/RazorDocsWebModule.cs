@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Reflection;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Services;
@@ -34,9 +36,11 @@ namespace ForgeTrust.AppSurface.Docs;
 public class RazorDocsWebModule : IAppSurfaceWebModule
 {
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
+    private static readonly Assembly RazorDocsAssembly = typeof(RazorDocsWebModule).Assembly;
     private const string RazorDocsStaticAssetBasePath = "/_content/ForgeTrust.AppSurface.Docs/docs";
     private const string RazorDocsPackagedStylesheetPath = "/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css";
     private const string RazorDocsRootStylesheetPath = "/css/site.gen.css";
+    private const string EmbeddedAssetResourcePrefix = "RazorDocsEmbeddedAssets/";
 
     /// <inheritdoc />
     public bool IncludeAsApplicationPart => true;
@@ -236,7 +240,8 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
     /// <c>/css/site.gen.css</c> URL by redirecting it to the packaged Razor Class Library stylesheet at
     /// <c>/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css</c>. Embedded hosts do not register that
     /// redirect because they already link to the packaged asset directly. Redirects preserve the request
-    /// <see cref="HttpRequest.PathBase"/> and query string so legacy links continue to work behind a virtual path.
+    /// <see cref="HttpRequest.PathBase"/> and query string so legacy links continue to work behind a virtual path, but
+    /// the path base and configured package target must remain single-slash app-relative path components.
     /// </para>
     /// <para>
     /// When versioning is enabled, this hook also reserves the stable version entry route at the configured route-family
@@ -245,7 +250,9 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
     /// Asset routes are built with <see cref="DocsUrlBuilder.BuildAssetUrl(string)"/> for <c>search.css</c>,
     /// <c>minisearch.min.js</c>, <c>search-client.js</c>, and the page-local <c>outline-client.js</c>. Preview hosts can
     /// serve those files directly from the web root; otherwise the current-surface URLs redirect through
-    /// <see cref="ResolveLegacySearchAssetBasePath"/> to the packaged RazorDocs assets.
+    /// <see cref="ResolveLegacySearchAssetBasePath"/> to the packaged RazorDocs assets. Legacy asset redirects preserve
+    /// only the request query string, while the redirect path itself is constrained to an app-relative URL so
+    /// cache-busting parameters cannot turn the redirect into an external hop.
     /// Route ordering matters: index, search, search-index, section, and catch-all routes are registered from most to
     /// least specific so the live preview root continues to behave correctly even when the current docs root is
     /// root-mounted or overlaps published exact-version aliases.
@@ -275,6 +282,12 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
         var docsOptions = ResolveOptions(endpoints.ServiceProvider);
         var docsUrlBuilder = endpoints.ServiceProvider.GetService(typeof(DocsUrlBuilder)) as DocsUrlBuilder
                              ?? new DocsUrlBuilder(docsOptions);
+        MapEmbeddedAssetFallback(endpoints, RazorDocsPackagedStylesheetPath, "css/site.gen.css");
+        MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/search.css", "docs/search.css");
+        MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/minisearch.min.js", "docs/minisearch.min.js");
+        MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/search-client.js", "docs/search-client.js");
+        MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/outline-client.js", "docs/outline-client.js");
+
         if (ShouldPreserveRootStylesheetPath(context))
         {
             // Published/exported standalone hosts can resolve the packaged stylesheet only under /_content.
@@ -408,11 +421,79 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
             [HttpMethods.Get, HttpMethods.Head],
             context =>
             {
-                var redirectPath = $"{context.Request.PathBase}{targetPath}{context.Request.QueryString}";
+                var redirectPath = BuildLegacyAssetRedirectPath(
+                    context.Request.PathBase,
+                    targetPath,
+                    context.Request.QueryString);
 
-                context.Response.Redirect(redirectPath, permanent: false);
-                return Task.CompletedTask;
+                return Results.LocalRedirect(redirectPath, permanent: false).ExecuteAsync(context);
             });
+    }
+
+    /// <summary>
+    /// Builds the local redirect target used when historical docs asset URLs move to packaged Razor Class Library assets.
+    /// </summary>
+    /// <param name="pathBase">The current request path base to preserve for applications mounted below a prefix.</param>
+    /// <param name="targetPath">The package asset path selected by RazorDocs endpoint configuration.</param>
+    /// <param name="queryString">The request query string to preserve for cache-busting or diagnostics parameters.</param>
+    /// <returns>An escaped, single-slash app-relative redirect target with the original query string appended.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <paramref name="pathBase"/> or <paramref name="targetPath"/> is not a safe app-relative path
+    /// component.
+    /// </exception>
+    /// <remarks>
+    /// This helper intentionally treats query text as data appended after the validated path. It validates the unescaped
+    /// path base so unsafe separators are not hidden by URI formatting, then emits the escaped path base used for
+    /// redirect headers. A root path base (<c>/</c>) is normalized to empty so the redirect stays single-slash local.
+    /// It does not allow the path base or target path to be absolute, protocol-relative,
+    /// backslash-prefixed, or control-character-bearing because those shapes can be interpreted by clients as redirects
+    /// away from the current host.
+    /// </remarks>
+    internal static string BuildLegacyAssetRedirectPath(PathString pathBase, string targetPath, QueryString queryString)
+    {
+        var pathBaseValue = pathBase.Value ?? string.Empty;
+        if (!IsSafeLocalPathComponent(pathBaseValue, allowEmpty: true))
+        {
+            throw new InvalidOperationException(
+                "The RazorDocs legacy asset redirect path base is not app-relative.");
+        }
+
+        if (!IsSafeLocalPathComponent(targetPath, allowEmpty: false))
+        {
+            throw new InvalidOperationException(
+                "The RazorDocs legacy asset redirect target is not app-relative.");
+        }
+
+        var pathBasePrefix = string.Equals(pathBaseValue, "/", StringComparison.Ordinal)
+            ? string.Empty
+            : pathBase.ToUriComponent();
+
+        return string.Concat(pathBasePrefix, targetPath, queryString.ToUriComponent());
+    }
+
+    private static bool IsSafeLocalPathComponent(string? path, bool allowEmpty)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return allowEmpty;
+        }
+
+        if (path[0] != '/'
+            || path.Length > 1 && (path[1] == '/' || path[1] == '\\')
+            || path.Contains('\\', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var character in path)
+        {
+            if (char.IsControl(character))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void MapRootDocsRedirect(IEndpointRouteBuilder endpoints, string docsHomeUrl)
@@ -436,6 +517,8 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
                ?? new RazorDocsOptions();
     }
 
+    [ExcludeFromCodeCoverage(
+        Justification = "Private endpoint closure for preview asset serving; integration coverage verifies the mapped public asset routes.")]
     private static void MapWebRootAsset(IEndpointRouteBuilder endpoints, string route, string webRootSubPath)
     {
         endpoints.MapMethods(
@@ -454,7 +537,11 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
                 var fileInfo = fileProvider.GetFileInfo(webRootSubPath);
                 if (!fileInfo.Exists)
                 {
-                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    if (!await TryWriteEmbeddedAssetAsync(context, webRootSubPath))
+                    {
+                        context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    }
+
                     return;
                 }
 
@@ -471,6 +558,45 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
 
                 await context.Response.SendFileAsync(fileInfo, context.RequestAborted);
             });
+    }
+
+    [ExcludeFromCodeCoverage(
+        Justification = "Private endpoint closure for static asset fallback; integration coverage verifies the mapped public asset routes.")]
+    private static void MapEmbeddedAssetFallback(IEndpointRouteBuilder endpoints, string route, string webRootSubPath)
+    {
+        endpoints.MapMethods(
+            route,
+            [HttpMethods.Get, HttpMethods.Head],
+            async context =>
+            {
+                if (!await TryWriteEmbeddedAssetAsync(context, webRootSubPath))
+                {
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                }
+            });
+    }
+
+    [ExcludeFromCodeCoverage(
+        Justification = "Private assembly-resource adapter with a defensive missing-resource branch; public route tests cover packaged asset availability.")]
+    private static async Task<bool> TryWriteEmbeddedAssetAsync(HttpContext context, string webRootSubPath)
+    {
+        var resourceName = EmbeddedAssetResourcePrefix + webRootSubPath.Replace('\\', '/').TrimStart('/');
+        await using var stream = RazorDocsAssembly.GetManifestResourceStream(resourceName);
+        if (stream is null)
+        {
+            return false;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = ResolveContentType(webRootSubPath);
+        context.Response.ContentLength = stream.Length;
+        if (HttpMethods.IsHead(context.Request.Method))
+        {
+            return true;
+        }
+
+        await stream.CopyToAsync(context.Response.Body, context.RequestAborted);
+        return true;
     }
 
     private static bool ShouldPreserveRootStylesheetPath(StartupContext context)

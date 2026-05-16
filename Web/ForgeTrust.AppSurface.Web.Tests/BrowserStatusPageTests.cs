@@ -57,6 +57,7 @@ public sealed class BrowserStatusPageTests
         Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
         Assert.Contains(expectedMarker, html);
         Assert.Contains(BrowserStatusPageDefaults.GetAppViewPath(statusCode), html);
+        Assert.Contains("data-rw-export-ignore=\"true\"", html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -126,6 +127,7 @@ public sealed class BrowserStatusPageTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains(expectedMarker, html);
         Assert.Contains(BrowserStatusPageDefaults.GetAppViewPath(statusCode), html);
+        Assert.Contains("data-rw-export-ignore=\"true\"", html);
     }
 
     [Fact]

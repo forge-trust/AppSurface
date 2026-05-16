@@ -156,9 +156,7 @@ public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSu
             }
         });
 
-        // Ensure internal services (like Default IEnvironmentProvider) are included first so external modules can override them.
-        context.Dependencies.AddModule<Defaults.InternalServicesModule>();
-        context.RootModule.RegisterDependentModules(context.Dependencies);
+        RegisterDependencies(context);
 
         ConfigureHostBeforeServicesCore(context, builder);
 
@@ -177,6 +175,37 @@ public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSu
     /// </summary>
     /// <returns>A new <typeparamref name="TRootModule"/> instance.</returns>
     protected virtual TRootModule CreateRootModule() => new();
+
+    /// <summary>
+    /// Registers framework and root-module dependencies into the startup context once.
+    /// </summary>
+    /// <param name="context">Startup context whose dependency graph should be prepared.</param>
+    /// <remarks>
+    /// <para>
+    /// App-type startups normally let AppSurface call this during host-builder creation. Specialized startup lifecycles
+    /// may call it earlier when they need module-derived options before building the host. For example, CLI hosts that
+    /// need packaged-asset or web-option defaults before the Generic Host exists should call
+    /// <c>RegisterDependencies(context)</c> before reading those settings.
+    /// </para>
+    /// <para>
+    /// The method adds <see cref="Defaults.InternalServicesModule"/> first, invokes
+    /// <see cref="IAppSurfaceModule.RegisterDependentModules(ModuleDependencyBuilder)"/> on the root module, and then
+    /// marks <see cref="StartupContext.DependenciesRegistered"/> so repeated calls are no-ops for the same context.
+    /// This method is not thread-safe; access each <see cref="StartupContext"/> from a single thread during startup.
+    /// </para>
+    /// </remarks>
+    protected void RegisterDependencies(StartupContext context)
+    {
+        if (context.DependenciesRegistered)
+        {
+            return;
+        }
+
+        // Ensure internal services (like Default IEnvironmentProvider) are included first so external modules can override them.
+        context.Dependencies.AddModule<Defaults.InternalServicesModule>();
+        context.RootModule.RegisterDependentModules(context.Dependencies);
+        context.DependenciesRegistered = true;
+    }
 
     private void ConfigureHostBeforeServicesCore(
         StartupContext context,
