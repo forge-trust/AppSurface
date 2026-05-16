@@ -90,7 +90,7 @@ public record StartupContext(
     /// <summary>
     /// Gets the environment provider for the application.
     /// </summary>
-    public IEnvironmentProvider EnvironmentProvider { get; } = EnvironmentProvider ?? new DefaultEnvironmentProvider();
+    public IEnvironmentProvider EnvironmentProvider { get; } = EnvironmentProvider ?? new DefaultEnvironmentProvider(Args);
 
     /// <summary>
     /// Gets a value indicating whether the current environment is development.

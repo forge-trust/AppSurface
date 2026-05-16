@@ -92,6 +92,42 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsCommand_Should_Default_ToDevelopmentEnvironment_ForLocalPreview()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingRazorDocsHostRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(runner.Args);
+        var environmentIndex = Array.IndexOf(runner.Args, "--environment");
+        Assert.InRange(environmentIndex, 0, runner.Args.Length - 2);
+        Assert.Equal("Development", runner.Args[environmentIndex + 1]);
+        Assert.DoesNotContain("--urls", runner.Args);
+        Assert.DoesNotContain("--port", runner.Args);
+    }
+
+    [Fact]
+    public async Task DocsCommand_Should_Preserve_Explicit_Environment()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingRazorDocsHostRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "--repo", repository.Path, "--environment", "Production"],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(runner.Args);
+        var environmentIndex = Array.IndexOf(runner.Args, "--environment");
+        Assert.InRange(environmentIndex, 0, runner.Args.Length - 2);
+        Assert.Equal("Production", runner.Args[environmentIndex + 1]);
+    }
+
+    [Fact]
     public async Task DocsCommand_Should_Allow_Disabling_Startup_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");

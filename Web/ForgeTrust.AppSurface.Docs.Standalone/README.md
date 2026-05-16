@@ -13,7 +13,7 @@ This project is the thin executable wrapper around the reusable [ForgeTrust.AppS
 For public command-line workflows, use the AppSurface CLI as the public command surface:
 
 ```bash
-dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo . --urls http://127.0.0.1:5189
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo .
 ```
 
 The CLI delegates to this standalone host, so the host remains the source of truth for RazorDocs startup, static web assets, routes, and configuration binding.
@@ -51,6 +51,7 @@ Strict mode fails only when every configured harvester fails, times out, or canc
 When you run this host in `Development` without explicit endpoint configuration, AppSurface Web assigns a deterministic localhost-only development URL from the current workspace path. That keeps sibling worktrees from colliding on the same default localhost URL.
 
 - The standalone host redirects `/` to the configured RazorDocs home, `/docs` by default. The reusable RazorDocs package keeps embedded apps isolated to their configured docs routes; this root redirect exists only because this executable is a docs-only host and CI export target.
+- The public `appsurface docs` and `appsurface docs preview` commands default the forwarded host environment to `Development`, so omitting `--urls` and `--port` uses this deterministic local URL behavior.
 - Use the startup log as the source of truth for the selected local URL.
 - Pass `--port 5189`, `--urls http://127.0.0.1:5189`, `ASPNETCORE_HTTP_PORTS=5189`, or a `Kestrel:Endpoints` appsettings/environment entry when you intentionally want a fixed address.
 - The checked-in launch profile no longer pins a single shared localhost port, because that was the source of cross-worktree QA confusion.

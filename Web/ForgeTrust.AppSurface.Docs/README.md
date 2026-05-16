@@ -916,10 +916,10 @@ dotnet run --project Web/ForgeTrust.AppSurface.Docs.Standalone -- --urls http://
 Or use the AppSurface CLI shape, which keeps RazorDocs workflows under the `appsurface` command family:
 
 ```bash
-dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo . --urls http://localhost:5189
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo .
 ```
 
-Then open the configured docs home, `http://localhost:5189/docs` by default. The standalone host remains the reusable runtime seam; `appsurface docs` is the public CLI entry point for the same preview workflow rather than a separate `razordocs` tool.
+Then open the docs home printed in the startup log. The AppSurface CLI defaults the host environment to `Development`, so omitting `--urls` and `--port` uses AppSurface Web's deterministic per-workspace localhost URL. The standalone host remains the reusable runtime seam; `appsurface docs` is the public CLI entry point for the same preview workflow rather than a separate `razordocs` tool.
 
 ### Fallback and visibility rules
 

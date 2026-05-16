@@ -4,8 +4,9 @@ using Microsoft.Extensions.Hosting;
 
 /// <summary>
 ///    Default implementation of <see cref="IEnvironmentProvider"/> that retrieves the environment from
-/// system environment variables. It checks for "ASPNETCORE_ENVIRONMENT" first, then "DOTNET_ENVIRONMENT",
-/// and defaults to "Production" if neither is set.
+/// command-line host arguments or system environment variables. Command-line <c>--environment</c> wins when supplied,
+/// otherwise it checks for "ASPNETCORE_ENVIRONMENT" first, then "DOTNET_ENVIRONMENT", and defaults to "Production" if
+/// neither is set.
 ///
 /// Can be overridden by passing a custom implementation to the <see cref="StartupContext"/>,
 /// when building the host.
@@ -16,9 +17,26 @@ public class DefaultEnvironmentProvider : IEnvironmentProvider
     /// Initializes a new instance of the <see cref="DefaultEnvironmentProvider"/> class.
     /// </summary>
     public DefaultEnvironmentProvider()
+        : this([])
     {
-        // Prefer ASPNETCORE_ENVIRONMENT for Generic Host, fallback to DOTNET_ENVIRONMENT, default to Production
-        var env = System.Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DefaultEnvironmentProvider"/> class using startup arguments.
+    /// </summary>
+    /// <param name="args">Command-line arguments supplied to the host startup pipeline.</param>
+    /// <remarks>
+    /// Pass the same arguments supplied to the Generic Host so AppSurface module configuration sees the same
+    /// environment as host configuration. The provider recognizes <c>--environment Development</c> and
+    /// <c>--environment=Development</c>. Blank command-line values are ignored and fall back to environment variables.
+    /// </remarks>
+    public DefaultEnvironmentProvider(IReadOnlyList<string> args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        // Prefer explicit host command-line configuration, then ASPNETCORE_ENVIRONMENT, then DOTNET_ENVIRONMENT.
+        var env = ResolveEnvironmentArgument(args)
+                  ?? System.Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
                   ?? System.Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
                   ?? Environments.Production;
 
@@ -29,8 +47,8 @@ public class DefaultEnvironmentProvider : IEnvironmentProvider
     /// <summary>
     /// The current environment name.
     ///
-    /// Read from "ASPNETCORE_ENVIRONMENT" or "DOTNET_ENVIRONMENT" environment variables,
-    /// defaults to "Production" if neither is set.
+    /// Read from command-line <c>--environment</c>, "ASPNETCORE_ENVIRONMENT", or "DOTNET_ENVIRONMENT"; defaults to
+    /// "Production" if none is set.
     /// </summary>
     public string Environment { get; }
 
@@ -58,5 +76,33 @@ public class DefaultEnvironmentProvider : IEnvironmentProvider
         var value = System.Environment.GetEnvironmentVariable(name);
 
         return value ?? defaultValue;
+    }
+
+    private static string? ResolveEnvironmentArgument(IReadOnlyList<string> args)
+    {
+        for (var index = 0; index < args.Count; index++)
+        {
+            var arg = args[index];
+            const string environmentPrefix = "--environment=";
+            if (arg.StartsWith(environmentPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var inlineValue = arg[environmentPrefix.Length..];
+                return string.IsNullOrWhiteSpace(inlineValue) ? null : inlineValue;
+            }
+
+            if (!string.Equals(arg, "--environment", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (index + 1 >= args.Count || string.IsNullOrWhiteSpace(args[index + 1]))
+            {
+                return null;
+            }
+
+            return args[index + 1];
+        }
+
+        return null;
     }
 }

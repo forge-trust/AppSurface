@@ -39,7 +39,7 @@ internal static class AppSurfaceWebDevelopmentPortDefaults
         ArgumentNullException.ThrowIfNull(applicationBaseDirectory);
         ArgumentNullException.ThrowIfNull(environmentReader);
 
-        var environmentName = ResolveEnvironmentName(environmentReader);
+        var environmentName = ResolveEnvironmentName(args, environmentReader);
         if (!string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase)
             || HasExplicitEndpointConfiguration(args, currentDirectory, environmentName, environmentReader, environmentVariableNames))
         {
@@ -53,11 +53,42 @@ internal static class AppSurfaceWebDevelopmentPortDefaults
         return new([.. args, "--urls", url], port, seedPath);
     }
 
-    private static string ResolveEnvironmentName(Func<string, string?> environmentReader)
+    private static string ResolveEnvironmentName(
+        IReadOnlyList<string> args,
+        Func<string, string?> environmentReader)
     {
-        return environmentReader("ASPNETCORE_ENVIRONMENT")
+        return ResolveEnvironmentArgument(args)
+               ?? environmentReader("ASPNETCORE_ENVIRONMENT")
                ?? environmentReader("DOTNET_ENVIRONMENT")
                ?? Environments.Production;
+    }
+
+    private static string? ResolveEnvironmentArgument(IReadOnlyList<string> args)
+    {
+        for (var index = 0; index < args.Count; index++)
+        {
+            var arg = args[index];
+            const string environmentPrefix = "--environment=";
+            if (arg.StartsWith(environmentPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var inlineValue = arg[environmentPrefix.Length..];
+                return string.IsNullOrWhiteSpace(inlineValue) ? null : inlineValue;
+            }
+
+            if (!string.Equals(arg, "--environment", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (index + 1 >= args.Count || string.IsNullOrWhiteSpace(args[index + 1]))
+            {
+                return null;
+            }
+
+            return args[index + 1];
+        }
+
+        return null;
     }
 
     private static bool HasExplicitEndpointConfiguration(

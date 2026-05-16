@@ -73,6 +73,66 @@ public class DefaultEnvironmentProviderTests
         Assert.False(provider.IsDevelopment);
     }
 
+    [Theory]
+    [InlineData("--environment", "Development", "Development", true)]
+    [InlineData("--environment", "Production", "Production", false)]
+    [InlineData("--environment=Development", null, "Development", true)]
+    [InlineData("--environment=Production", null, "Production", false)]
+    public void DefaultEnvironmentProvider_PrefersCommandLineEnvironmentOverEnvironmentVariables(
+        string environmentOption,
+        string? environmentValue,
+        string expectedEnvironment,
+        bool expectedIsDevelopment)
+    {
+        var previousDotnetEnvironment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var previousAspNetCoreEnvironment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Development");
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+
+            string[] args = environmentValue is null
+                ? [environmentOption]
+                : [environmentOption, environmentValue];
+
+            var provider = new DefaultEnvironmentProvider(args);
+
+            Assert.Equal(expectedEnvironment, provider.Environment);
+            Assert.Equal(expectedIsDevelopment, provider.IsDevelopment);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", previousDotnetEnvironment);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousAspNetCoreEnvironment);
+        }
+    }
+
+    [Theory]
+    [InlineData("--environment")]
+    [InlineData("--environment=")]
+    public void DefaultEnvironmentProvider_IgnoresBlankCommandLineEnvironment(string environmentOption)
+    {
+        var previousDotnetEnvironment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var previousAspNetCoreEnvironment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", null);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Staging");
+
+            var provider = new DefaultEnvironmentProvider([environmentOption]);
+
+            Assert.Equal("Staging", provider.Environment);
+            Assert.False(provider.IsDevelopment);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", previousDotnetEnvironment);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousAspNetCoreEnvironment);
+        }
+    }
+
     [Fact]
     public void GetEnvironmentVariable_ReturnsEmptyString_WhenVariableIsExplicitlyEmpty()
     {

@@ -61,6 +61,65 @@ public sealed class AppSurfaceWebDevelopmentPortDefaultsTests
     }
 
     [Fact]
+    public void Resolve_AppendsDeterministicPort_WhenCommandLineEnvironmentIsDevelopment()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { "--environment", Environments.Development };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            _ => null);
+
+        Assert.NotNull(resolution.AppliedPort);
+        Assert.Equal(
+            ["--environment", Environments.Development, "--urls", $"http://localhost:{resolution.AppliedPort.Value}"],
+            resolution.Args);
+    }
+
+    [Fact]
+    public void Resolve_AppendsDeterministicPort_WhenCommandLineEnvironmentIsDevelopmentInline()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { $"--environment={Environments.Development}" };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            _ => null);
+
+        Assert.NotNull(resolution.AppliedPort);
+        Assert.Equal(
+            [$"--environment={Environments.Development}", "--urls", $"http://localhost:{resolution.AppliedPort.Value}"],
+            resolution.Args);
+    }
+
+    [Fact]
+    public void Resolve_DoesNotAppendDeterministicPort_WhenCommandLineEnvironmentIsProduction()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { "--environment", Environments.Production };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            ReadDevelopmentEnvironment);
+
+        Assert.Null(resolution.AppliedPort);
+        Assert.Same(args, resolution.Args);
+        Assert.Null(resolution.SeedPath);
+    }
+
+    [Fact]
     public void Resolve_AppendsDeterministicPort_WhenDotnetEnvironmentIsDevelopment()
     {
         using var environment = new TemporaryEnvironment();
