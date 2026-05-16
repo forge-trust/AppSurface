@@ -51,8 +51,10 @@ public static class RazorDocsServiceCollectionExtensions
     /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/> run.
     /// </para>
     /// <para>
-    /// The method also registers <see cref="DocsUrlBuilder"/> and <see cref="RazorDocsVersionCatalogService"/> as
-    /// singleton downstream services alongside the standard harvesters, memo cache, and <see cref="DocAggregator"/>.
+    /// The method also registers <see cref="DocsUrlBuilder"/>, <see cref="RazorDocsAssetVersioner"/>, and
+    /// <see cref="RazorDocsVersionCatalogService"/> as singleton downstream services alongside the standard harvesters,
+    /// memo cache, and <see cref="DocAggregator"/>. <see cref="RazorDocsAssetVersioner"/> supplies content-derived
+    /// cache keys for RazorDocs-owned CSS and JavaScript assets rendered by the package views.
     /// Consumers that resolve <see cref="RazorDocsOptions"/> directly should expect the normalized values rather than
     /// raw configuration text, and applications that need custom routing or catalog paths should provide those values
     /// before this method runs so the normalized singleton graph stays consistent.

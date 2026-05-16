@@ -543,7 +543,9 @@ internal static class RazorDocsPublishedTreeContentRewriter
                 configNode["docsSearchUrl"] = PrefixPathBase(mountRootPath + "/search", requestPathBase);
                 configNode["docsSearchIndexUrl"] = PrefixPathBase(mountRootPath + "/search-index.json", requestPathBase);
                 if (configNode.TryGetPropertyValue("miniSearchUrl", out var miniSearchUrlNode)
-                    && miniSearchUrlNode?.GetValue<string>() is { } miniSearchUrl)
+                    && miniSearchUrlNode is JsonValue miniSearchUrlValue
+                    && miniSearchUrlValue.TryGetValue<string>(out var miniSearchUrl)
+                    && !string.IsNullOrWhiteSpace(miniSearchUrl))
                 {
                     configNode["miniSearchUrl"] = PrefixPathBase(
                         mountRootPath + "/minisearch.min.js",
