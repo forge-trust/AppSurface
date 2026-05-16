@@ -105,6 +105,108 @@ public class WebStartupTests
     }
 
     [Fact]
+    public void StartupTimeoutDiagnostic_Detects_CodexSandboxMarkers()
+    {
+        var diagnostic = AppSurfaceWebStartupTimeoutDiagnostic.Create(
+            TimeSpan.FromSeconds(10),
+            "StartHost",
+            "/workspace/app",
+            "/workspace/app/bin",
+            staticWebAssetsEnabled: false,
+            ["--urls", "http://127.0.0.1:5000", "--name", "docs preview", "--ConnectionStrings:Default", "Server=secret"],
+            key => key switch
+            {
+                "CODEX_SANDBOX" => "seatbelt",
+                "CODEX_SANDBOX_NETWORK_DISABLED" => "1",
+                _ => null
+            });
+
+        Assert.True(diagnostic.SandboxDetected);
+        Assert.Contains("CODEX_SANDBOX=seatbelt", diagnostic.SandboxSummary, StringComparison.Ordinal);
+        Assert.Contains("CODEX_SANDBOX_NETWORK_DISABLED=1", diagnostic.SandboxSummary, StringComparison.Ordinal);
+        Assert.Contains("Rerun the command outside the sandbox", diagnostic.RecommendedAction, StringComparison.Ordinal);
+        Assert.Contains("--urls http://127.0.0.1:5000", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs preview", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("ConnectionStrings", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StartupTimeoutDiagnostic_Renders_Only_EndpointArgumentForms()
+    {
+        var diagnostic = AppSurfaceWebStartupTimeoutDiagnostic.Create(
+            TimeSpan.FromSeconds(10),
+            "StartHost",
+            "/workspace/app",
+            "/workspace/app/bin",
+            staticWebAssetsEnabled: true,
+            [
+                "--urls=http://127.0.0.1:5000",
+                "--password=secret",
+                "--port",
+                "5189",
+                "--port",
+                "--ApiSecret=secret",
+                "--ApiKey",
+                "secret",
+                "--Kestrel:Endpoints:Http:Url",
+                "http://127.0.0.1:5190",
+                "--Kestrel:Endpoints:Admin:Url",
+                "--Password=secret",
+                "--Kestrel__Endpoints__Https__Url=https://127.0.0.1:5191",
+                "--Kestrel:Endpoints:Https:Certificate:Password",
+                "cert-secret",
+                "--Kestrel__Endpoints__Https__Certificate__Password=cert-secret"
+            ],
+            _ => null);
+
+        Assert.Contains("--urls=http://127.0.0.1:5000", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+        Assert.Contains("--port 5189", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+        Assert.Contains("--Kestrel:Endpoints:Http:Url http://127.0.0.1:5190", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+        Assert.Contains("--Kestrel__Endpoints__Https__Url=https://127.0.0.1:5191", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", diagnostic.StartupArgsSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ApiKey", diagnostic.StartupArgsSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ApiSecret", diagnostic.StartupArgsSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secret", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("Certificate", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("cert-secret", diagnostic.StartupArgsSummary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StartupTimeoutDiagnostic_UsesNone_WhenNoEndpointArgumentsSurviveFiltering()
+    {
+        var diagnostic = AppSurfaceWebStartupTimeoutDiagnostic.Create(
+            TimeSpan.FromSeconds(10),
+            "StartHost",
+            "/workspace/app",
+            "/workspace/app/bin",
+            staticWebAssetsEnabled: true,
+            ["--name", "docs preview", "--ConnectionStrings:Default", "Server=secret"],
+            _ => null);
+
+        Assert.Equal("<none>", diagnostic.StartupArgsSummary);
+    }
+
+    [Fact]
+    public void StartupTimeoutDiagnostic_Uses_GenericRecommendation_WhenSandboxMarkersAreAbsent()
+    {
+        var diagnostic = AppSurfaceWebStartupTimeoutDiagnostic.Create(
+            TimeSpan.FromSeconds(10),
+            "",
+            "/workspace/app",
+            "/workspace/app/bin",
+            staticWebAssetsEnabled: true,
+            [],
+            _ => null);
+
+        Assert.False(diagnostic.SandboxDetected);
+        Assert.Equal("none detected", diagnostic.SandboxSummary);
+        Assert.Equal("unknown", diagnostic.StartupPhase);
+        Assert.Equal("<none>", diagnostic.StartupArgsSummary);
+        Assert.Contains("Check static web asset discovery", diagnostic.RecommendedAction, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunResolvedAsync_FailsFast_WhenStartupCancellationCallbackDoesNotComplete()
     {
         var module = new HangingCancellationWebModule();
@@ -1231,11 +1333,11 @@ public class WebStartupTests
 public class WebOptionsTests
 {
     [Fact]
-    public void WebOptions_DefaultStartupTimeout_IsThirtySeconds()
+    public void WebOptions_DefaultStartupTimeout_IsTenSeconds()
     {
         var opts = new WebOptions();
 
-        Assert.Equal(TimeSpan.FromSeconds(30), opts.StartupTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), opts.StartupTimeout);
     }
 }
 
