@@ -259,9 +259,33 @@ public abstract class WebStartup<TModule> : AppSurfaceStartup<TModule>
                             }
                         }
 
-                        //TODO: Make this configurable
-                        builder.AllowAnyHeader()
-                            .AllowAnyMethod();
+                        var isDevelopmentAllowAll = _options.Cors.EnableAllOriginsInDevelopment && context.IsDevelopment;
+
+                        if (_options.Cors.AllowedHeaders.Contains("*"))
+                        {
+                            builder.AllowAnyHeader();
+                        }
+                        else if (_options.Cors.AllowedHeaders.Length > 0)
+                        {
+                            builder.WithHeaders(_options.Cors.AllowedHeaders);
+                        }
+                        else if (isDevelopmentAllowAll)
+                        {
+                            builder.AllowAnyHeader();
+                        }
+
+                        if (_options.Cors.AllowedMethods.Contains("*"))
+                        {
+                            builder.AllowAnyMethod();
+                        }
+                        else if (_options.Cors.AllowedMethods.Length > 0)
+                        {
+                            builder.WithMethods(_options.Cors.AllowedMethods);
+                        }
+                        else if (isDevelopmentAllowAll)
+                        {
+                            builder.AllowAnyMethod();
+                        }
                     }));
         }
     }

@@ -26,6 +26,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - The root README now includes a single hello-world web quickstart with an explicit local port and a concrete expected response.
 - AppSurface now ships GitHub issue templates for bug reports and documentation feedback.
 - AppSurface Config now supports first-class scalar value validation on `Config<T>` and `ConfigStruct<T>` wrappers with `ConfigValueNotEmpty`, `ConfigValueRange`, `ConfigValueMinLength`, and a `ValidateValue` override for custom rules.
+- AppSurface Web CORS options now expose `AllowedHeaders` and `AllowedMethods` so applications can define explicit production preflight contracts without replacing the framework-managed policy.
 
 ### Changed
 

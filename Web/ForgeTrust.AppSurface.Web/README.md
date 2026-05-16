@@ -44,8 +44,26 @@ Support for MVC approaches can be configured via `WebOptions`:
 ### CORS
 Built-in support for CORS configuration:
 *   **Enforced Origin Safety**: When `EnableCors` is true, you MUST specify at least one origin in `AllowedOrigins`, unless running in Development with `EnableAllOriginsInDevelopment` enabled (the default). If `AllowedOrigins` is empty in production or when `EnableAllOriginsInDevelopment` is disabled, the application will throw a startup exception to prevent unintended security openness (verified by tests `EmptyOrigins_WithEnableCors_ThrowsException` and `EnableAllOriginsInDevelopment_AllowsAnyOrigin`).
-*   **Development Convenience**: `EnableAllOriginsInDevelopment` (enabled by default) automatically allows any origin when the environment is `Development`, simplifying local testing without compromising production security.
+*   **Development Convenience**: `EnableAllOriginsInDevelopment` (enabled by default) automatically allows any origin, header, and method when the environment is `Development`, simplifying local testing without compromising production defaults.
+*   **Header and Method Control**: `AllowedHeaders` and `AllowedMethods` default to empty arrays in production, so AppSurface does not silently allow every preflight header and method once CORS is enabled. Set each collection to the browser contract the app actually supports, for example `["Content-Type", "X-Request-Id"]` and `[HttpMethods.Get, HttpMethods.Post]`. Use `["*"]` only when a production app intentionally wants `AllowAnyHeader()` or `AllowAnyMethod()`.
 *   **Default Policy**: Configures a policy named "DefaultCorsPolicy" (configurable) and automatically registers the CORS middleware.
+
+```csharp
+await WebApp<MyRootModule>.RunAsync(
+    args,
+    options =>
+    {
+        options.Cors.EnableCors = true;
+        options.Cors.AllowedOrigins = ["https://app.example.com"];
+        options.Cors.AllowedHeaders = ["Content-Type", "X-Request-Id"];
+        options.Cors.AllowedMethods = [HttpMethods.Get, HttpMethods.Post];
+    });
+```
+
+The production default is deliberately stricter than older AppSurface previews: `AllowedOrigins` decides which browser
+frontends may read cross-origin responses, while `AllowedHeaders` and `AllowedMethods` decide which preflighted browser
+requests are accepted from those origins. Keep them explicit for production APIs, especially when credentials are
+allowed.
 
 ### Endpoint Routing
 

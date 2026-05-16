@@ -39,6 +39,15 @@ public class CorsOptionsTests
     }
 
     [Fact]
+    public void Defaults_RequireExplicitHeadersAndMethods()
+    {
+        var options = new CorsOptions();
+
+        Assert.Empty(options.AllowedHeaders);
+        Assert.Empty(options.AllowedMethods);
+    }
+
+    [Fact]
     public async Task EnableAllOriginsInDevelopment_AllowsAnyOrigin()
     {
         var previous = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
@@ -64,6 +73,46 @@ public class CorsOptionsTests
             var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), "DefaultCorsPolicy");
 
             Assert.True(policy!.AllowAnyOrigin);
+            Assert.True(policy.AllowAnyHeader);
+            Assert.True(policy.AllowAnyMethod);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previous);
+        }
+    }
+
+    [Fact]
+    public async Task EnableAllOriginsInDevelopment_PreservesConfiguredHeadersAndMethods()
+    {
+        var previous = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        try
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", Environments.Development);
+
+            var startup = new TestStartup();
+            startup.WithOptions(o =>
+            {
+                o.Cors.EnableCors = true;
+                o.Cors.EnableAllOriginsInDevelopment = true;
+                o.Cors.AllowedHeaders = ["Content-Type"];
+                o.Cors.AllowedMethods = [HttpMethods.Post];
+            });
+
+            var context = new StartupContext([], new TestWebModule());
+
+            var services = new ServiceCollection();
+            startup.ConfigureServicesPublic(context, services);
+
+            var provider = services.BuildServiceProvider();
+            var policyProvider = provider.GetRequiredService<ICorsPolicyProvider>();
+            var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), "DefaultCorsPolicy");
+
+            Assert.True(policy!.AllowAnyOrigin);
+            Assert.False(policy.AllowAnyHeader);
+            Assert.False(policy.AllowAnyMethod);
+            Assert.Equal(["Content-Type"], policy.Headers);
+            Assert.Equal([HttpMethods.Post], policy.Methods);
         }
         finally
         {
@@ -98,6 +147,82 @@ public class CorsOptionsTests
 
             Assert.False(policy!.AllowAnyOrigin);
             Assert.Contains("https://example.com", policy.Origins);
+            Assert.False(policy.AllowAnyHeader);
+            Assert.False(policy.AllowAnyMethod);
+            Assert.Empty(policy.Headers);
+            Assert.Empty(policy.Methods);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previous);
+        }
+    }
+
+    [Fact]
+    public async Task AllowedHeadersAndMethods_RestrictCorsPolicy()
+    {
+        var previous = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        try
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", Environments.Production);
+
+            var startup = new TestStartup();
+            startup.WithOptions(o =>
+            {
+                o.Cors.EnableCors = true;
+                o.Cors.AllowedOrigins = ["https://example.com"];
+                o.Cors.AllowedHeaders = ["Content-Type", "X-Request-Id"];
+                o.Cors.AllowedMethods = [HttpMethods.Get, HttpMethods.Post];
+            });
+
+            var context = new StartupContext([], new TestWebModule());
+
+            var services = new ServiceCollection();
+            startup.ConfigureServicesPublic(context, services);
+
+            var provider = services.BuildServiceProvider();
+            var policyProvider = provider.GetRequiredService<ICorsPolicyProvider>();
+            var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), "DefaultCorsPolicy");
+
+            Assert.False(policy!.AllowAnyHeader);
+            Assert.False(policy.AllowAnyMethod);
+            Assert.Equal(["Content-Type", "X-Request-Id"], policy.Headers);
+            Assert.Equal([HttpMethods.Get, HttpMethods.Post], policy.Methods);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previous);
+        }
+    }
+
+    [Fact]
+    public async Task WildcardHeadersAndMethods_AllowAnyPreflightContract()
+    {
+        var previous = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        try
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", Environments.Production);
+
+            var startup = new TestStartup();
+            startup.WithOptions(o =>
+            {
+                o.Cors.EnableCors = true;
+                o.Cors.AllowedOrigins = ["https://example.com"];
+                o.Cors.AllowedHeaders = ["*"];
+                o.Cors.AllowedMethods = ["*"];
+            });
+
+            var context = new StartupContext([], new TestWebModule());
+
+            var services = new ServiceCollection();
+            startup.ConfigureServicesPublic(context, services);
+
+            var provider = services.BuildServiceProvider();
+            var policyProvider = provider.GetRequiredService<ICorsPolicyProvider>();
+            var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), "DefaultCorsPolicy");
+
+            Assert.True(policy!.AllowAnyHeader);
+            Assert.True(policy.AllowAnyMethod);
         }
         finally
         {
