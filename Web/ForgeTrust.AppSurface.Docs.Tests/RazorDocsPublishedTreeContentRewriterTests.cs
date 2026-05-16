@@ -41,6 +41,26 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
     }
 
     [Fact]
+    public void RewriteHtml_ShouldRebaseMiniSearchUrlWithoutSuffix()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":"/docs/minisearch.min.js","docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body></body>
+            </html>
+            """;
+
+        var rewritten = RazorDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs/v/1.2.3");
+
+        Assert.Contains("\"miniSearchUrl\":\"/docs/v/1.2.3/minisearch.min.js\"", rewritten);
+        Assert.DoesNotContain("minisearch.min.js?", rewritten);
+    }
+
+    [Fact]
     public void RewriteHtml_ShouldRebaseStableDocsLinksToCustomRouteRoot()
     {
         const string html =

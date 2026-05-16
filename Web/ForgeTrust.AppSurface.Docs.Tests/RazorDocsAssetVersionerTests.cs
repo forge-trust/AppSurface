@@ -16,6 +16,34 @@ public sealed class RazorDocsAssetVersionerTests
     }
 
     [Fact]
+    public void BuildVersionedDocsAssetUrl_ShouldAppendContentVersionToRootMountedAssetUrl()
+    {
+        var versioner = new RazorDocsAssetVersioner();
+        var docsUrlBuilder = new DocsUrlBuilder(
+            new RazorDocsOptions
+            {
+                Routing = new RazorDocsRoutingOptions
+                {
+                    DocsRootPath = "/"
+                }
+            });
+
+        var url = versioner.BuildVersionedDocsAssetUrl(docsUrlBuilder, "search.css");
+
+        Assert.Matches("^/search\\.css\\?v=[A-Za-z0-9_-]+$", url);
+    }
+
+    [Fact]
+    public void AppendVersion_ShouldNormalizeEmbeddedAssetPathBeforeHashing()
+    {
+        var versioner = new RazorDocsAssetVersioner();
+
+        var url = versioner.AppendVersion("/docs/search.css", "/docs\\search.css");
+
+        Assert.Matches("^/docs/search\\.css\\?v=[A-Za-z0-9_-]+$", url);
+    }
+
+    [Fact]
     public void AppendVersion_ShouldPreserveExistingQueryAndFragment()
     {
         var versioner = new RazorDocsAssetVersioner();
