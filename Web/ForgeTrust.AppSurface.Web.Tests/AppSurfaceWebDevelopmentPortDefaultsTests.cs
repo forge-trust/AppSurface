@@ -74,9 +74,9 @@ public sealed class AppSurfaceWebDevelopmentPortDefaultsTests
             appBaseDirectory,
             _ => null);
 
-        Assert.NotNull(resolution.AppliedPort);
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
         Assert.Equal(
-            ["--environment", Environments.Development, "--urls", $"http://localhost:{resolution.AppliedPort.Value}"],
+            ["--environment", Environments.Development, "--urls", $"http://localhost:{appliedPort}"],
             resolution.Args);
     }
 
@@ -94,9 +94,9 @@ public sealed class AppSurfaceWebDevelopmentPortDefaultsTests
             appBaseDirectory,
             _ => null);
 
-        Assert.NotNull(resolution.AppliedPort);
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
         Assert.Equal(
-            [$"--environment={Environments.Development}", "--urls", $"http://localhost:{resolution.AppliedPort.Value}"],
+            [$"--environment={Environments.Development}", "--urls", $"http://localhost:{appliedPort}"],
             resolution.Args);
     }
 
@@ -134,8 +134,8 @@ public sealed class AppSurfaceWebDevelopmentPortDefaultsTests
             appBaseDirectory,
             ReadDevelopmentEnvironment);
 
-        Assert.NotNull(resolution.AppliedPort);
-        Assert.Equal([environmentOption, "--urls", $"http://localhost:{resolution.AppliedPort.Value}"], resolution.Args);
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal([environmentOption, "--urls", $"http://localhost:{appliedPort}"], resolution.Args);
     }
 
     [Fact]
@@ -152,8 +152,8 @@ public sealed class AppSurfaceWebDevelopmentPortDefaultsTests
             appBaseDirectory,
             ReadDevelopmentEnvironment);
 
-        Assert.NotNull(resolution.AppliedPort);
-        Assert.Equal(["--environment", " ", "--urls", $"http://localhost:{resolution.AppliedPort.Value}"], resolution.Args);
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal(["--environment", " ", "--urls", $"http://localhost:{appliedPort}"], resolution.Args);
     }
 
     [Fact]
