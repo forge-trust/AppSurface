@@ -11,9 +11,14 @@
 
     const outlineSelector = "#docs-page-outline";
     const outlineLinkSelector = "a[data-doc-outline-link='true']";
+    const copyButtonSelector = "button[data-doc-section-copy]";
+    const insertedCopyButtonSelector = "button[data-doc-section-copy-inserted='true']";
+    const copyStatusSelector = "[data-doc-section-copy-status]";
+    const copyFallbackSelector = "[data-doc-section-copy-fallback='true']";
     const compactMediaQuery = "(max-width: 79.999rem)";
     const outlineClickScrollDurationMs = 620;
     const outlineContextRollDurationMs = 180;
+    const copyFeedbackDurationMs = 1800;
 
     let lifecycleController = null;
     let activeObserver = null;
@@ -25,6 +30,11 @@
     let turboLoadHandler = null;
     let turboFrameLoadHandler = null;
     let domContentLoadedHandler = null;
+    let copyFeedbackTimers = [];
+    let activeCopyFallback = null;
+    let activeCopyFallbackButton = null;
+    let activeCopyFallbackShell = null;
+    let activeCopyFallbackPointerDown = null;
 
     function decodeHash(hash) {
         if (!hash) {
@@ -240,6 +250,271 @@
             .filter(entry => entry !== null);
     }
 
+    function buildSectionUrl(targetId) {
+        const url = new URL(window.location.href);
+        url.hash = targetId;
+        return url.toString();
+    }
+
+    function getSectionTitle(button) {
+        return button.dataset.docSectionCopyTitle?.trim() || "section";
+    }
+
+    function setCopyStatus(shell, message) {
+        const status = shell.querySelector(copyStatusSelector);
+        if (status) {
+            status.textContent = message;
+        }
+    }
+
+    function clearCopyFeedbackTimer(button) {
+        const timer = Number.parseInt(button.dataset.docSectionCopyTimer ?? "", 10);
+        if (Number.isFinite(timer) && timer > 0) {
+            window.clearTimeout(timer);
+            copyFeedbackTimers = copyFeedbackTimers.filter(candidate => candidate !== timer);
+        }
+
+        button.removeAttribute("data-doc-section-copy-timer");
+    }
+
+    function clearCopyFeedback(button) {
+        clearCopyFeedbackTimer(button);
+        button.removeAttribute("data-copy-state");
+        button.removeAttribute("data-doc-section-copy-message");
+
+        const title = getSectionTitle(button);
+        button.setAttribute("aria-label", `Copy link to ${title}`);
+    }
+
+    function createCopyIcon() {
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.classList.add("docs-section-copy-icon");
+        svg.setAttribute("aria-hidden", "true");
+        svg.setAttribute("focusable", "false");
+        svg.setAttribute("viewBox", "0 0 24 24");
+
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", "9");
+        rect.setAttribute("y", "9");
+        rect.setAttribute("width", "11");
+        rect.setAttribute("height", "11");
+        rect.setAttribute("rx", "2");
+        rect.setAttribute("ry", "2");
+        svg.append(rect);
+
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "M5 15V6a2 2 0 0 1 2-2h9");
+        svg.append(path);
+
+        return svg;
+    }
+
+    function showCopiedFeedback(button, shell) {
+        hideCopyFallback();
+        clearCopyFeedbackTimer(button);
+
+        const title = getSectionTitle(button);
+        button.dataset.copyState = "copied";
+        button.dataset.docSectionCopyMessage = "Copied";
+        button.setAttribute("aria-label", `Copied link to ${title}`);
+        setCopyStatus(shell, `Copied link to ${title}.`);
+
+        const timer = window.setTimeout(() => {
+            copyFeedbackTimers = copyFeedbackTimers.filter(candidate => candidate !== timer);
+            button.removeAttribute("data-doc-section-copy-timer");
+            clearCopyFeedback(button);
+            setCopyStatus(shell, "");
+        }, copyFeedbackDurationMs);
+
+        button.dataset.docSectionCopyTimer = String(timer);
+        copyFeedbackTimers.push(timer);
+    }
+
+    function createCopyButton(targetId, title, className) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `docs-section-copy ${className}`;
+        button.dataset.docSectionCopy = targetId;
+        button.dataset.docSectionCopyTitle = title;
+        button.dataset.docSectionCopyInserted = "true";
+        button.setAttribute("aria-label", `Copy link to ${title}`);
+
+        button.append(createCopyIcon());
+
+        return button;
+    }
+
+    function getHeaderForCopyTarget(target) {
+        if (!(target instanceof HTMLElement)) {
+            return null;
+        }
+
+        if (/^H[1-6]$/u.test(target.tagName)) {
+            return target;
+        }
+
+        return Array.from(target.children).find(child =>
+            child instanceof HTMLElement
+            && (child.classList.contains("doc-type-header")
+                || child.classList.contains("doc-method-group-header"))) ?? null;
+    }
+
+    function getTitleForCopyTarget(entry) {
+        return entry.link.textContent?.trim() || entry.target.id || "section";
+    }
+
+    function enhanceContentCopyTargets(entries, shell) {
+        for (const entry of entries) {
+            const targetId = entry.target.id;
+            if (!targetId) {
+                continue;
+            }
+
+            const header = getHeaderForCopyTarget(entry.target);
+            if (!header || header.querySelector(`:scope > ${copyButtonSelector}`)) {
+                continue;
+            }
+
+            const title = getTitleForCopyTarget(entry);
+            const button = createCopyButton(targetId, title, "docs-content-copy");
+            header.classList.add("docs-section-copy-target");
+            header.append(button);
+            enhanceCopyButton(button, shell);
+        }
+    }
+
+    function enhanceCopyButtons(shell) {
+        const buttons = Array.from(document.querySelectorAll(copyButtonSelector))
+            .filter(button => button instanceof HTMLButtonElement);
+
+        for (const button of buttons) {
+            enhanceCopyButton(button, shell);
+        }
+    }
+
+    function enhanceCopyButton(button, shell) {
+        if (!(button instanceof HTMLButtonElement)
+            || button.dataset.docSectionCopyEnhanced === "true") {
+            return;
+        }
+
+        button.dataset.docSectionCopyEnhanced = "true";
+        addLifecycleEventListener(button, "click", event => {
+            event.preventDefault();
+            event.stopPropagation();
+            copySectionLink(button, shell);
+        });
+    }
+
+    function copySectionLink(button, shell) {
+        const targetId = button.dataset.docSectionCopy?.trim();
+        if (!targetId) {
+            return;
+        }
+
+        const sectionUrl = buildSectionUrl(targetId);
+
+        if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(sectionUrl)
+                .then(() => showCopiedFeedback(button, shell))
+                .catch(() => showCopyFallback(button, shell, sectionUrl));
+            return;
+        }
+
+        showCopyFallback(button, shell, sectionUrl);
+    }
+
+    function hideCopyFallback() {
+        if (activeCopyFallbackPointerDown) {
+            document.removeEventListener("pointerdown", activeCopyFallbackPointerDown);
+            activeCopyFallbackPointerDown = null;
+        }
+
+        const button = activeCopyFallbackButton;
+        const shell = activeCopyFallbackShell;
+        activeCopyFallback?.remove();
+        activeCopyFallback = null;
+        activeCopyFallbackButton = null;
+        activeCopyFallbackShell = null;
+
+        if (button) {
+            clearCopyFeedback(button);
+        }
+
+        if (shell) {
+            setCopyStatus(shell, "");
+        }
+    }
+
+    function showCopyFallback(button, shell, sectionUrl) {
+        hideCopyFallback();
+
+        const title = getSectionTitle(button);
+        const fallback = document.createElement("span");
+        fallback.className = "docs-section-copy-fallback";
+        fallback.dataset.docSectionCopyFallback = "true";
+        fallback.setAttribute("role", "dialog");
+        fallback.setAttribute("aria-label", `Copy link to ${title}`);
+
+        const label = document.createElement("label");
+        label.className = "docs-section-copy-fallback-label";
+        label.textContent = "Section link";
+
+        const input = document.createElement("input");
+        input.className = "docs-section-copy-fallback-input";
+        input.type = "text";
+        input.readOnly = true;
+        input.value = sectionUrl;
+
+        const close = document.createElement("button");
+        close.className = "docs-section-copy-fallback-close";
+        close.type = "button";
+        close.textContent = "Close";
+
+        label.append(input);
+        fallback.append(label, close);
+        button.after(fallback);
+        activeCopyFallback = fallback;
+        activeCopyFallbackButton = button;
+        activeCopyFallbackShell = shell;
+
+        button.dataset.copyState = "fallback";
+        button.dataset.docSectionCopyMessage = "Copy";
+        setCopyStatus(shell, `Copy link to ${title} from the open text field.`);
+
+        addLifecycleEventListener(close, "click", hideCopyFallback);
+        addLifecycleEventListener(fallback, "keydown", event => {
+            if (event.key === "Escape") {
+                hideCopyFallback();
+                button.focus();
+            }
+        });
+        addLifecycleEventListener(fallback, "focusout", event => {
+            const nextTarget = event.relatedTarget;
+            if (nextTarget instanceof Node && fallback.contains(nextTarget)) {
+                return;
+            }
+
+            window.setTimeout(() => {
+                if (!fallback.contains(document.activeElement)) {
+                    hideCopyFallback();
+                }
+            }, 0);
+        });
+        activeCopyFallbackPointerDown = event => {
+            const target = event.target;
+            if (target instanceof Node
+                && !fallback.contains(target)
+                && target !== button) {
+                hideCopyFallback();
+            }
+        };
+        document.addEventListener("pointerdown", activeCopyFallbackPointerDown);
+
+        input.focus();
+        input.select();
+    }
+
     function getActiveEntryFromScrollPosition(entries, root) {
         const rootTop = root.getBoundingClientRect().top;
         const activationTop = rootTop + 64;
@@ -399,6 +674,36 @@
         }
     }
 
+    function clearCopyArtifacts() {
+        for (const timer of copyFeedbackTimers) {
+            window.clearTimeout(timer);
+        }
+
+        copyFeedbackTimers = [];
+        hideCopyFallback();
+
+        for (const button of document.querySelectorAll(copyButtonSelector)) {
+            button.removeAttribute("data-doc-section-copy-enhanced");
+            clearCopyFeedback(button);
+        }
+
+        for (const button of document.querySelectorAll(insertedCopyButtonSelector)) {
+            button.remove();
+        }
+
+        for (const fallback of document.querySelectorAll(copyFallbackSelector)) {
+            fallback.remove();
+        }
+
+        for (const target of document.querySelectorAll(".docs-section-copy-target")) {
+            target.classList.remove("docs-section-copy-target");
+        }
+
+        for (const status of document.querySelectorAll(copyStatusSelector)) {
+            status.textContent = "";
+        }
+    }
+
     function syncOutlinePlacement(shell, primary, compact) {
         const layout = shell.parentElement;
         if (!layout || !primary || primary.parentElement !== layout) {
@@ -428,6 +733,7 @@
         lifecycleController?.abort();
         lifecycleController = null;
         lastActiveIndex = -1;
+        clearCopyArtifacts();
     }
 
     function removeDocumentLifecycleEventListeners() {
@@ -495,6 +801,8 @@
         lifecycleController = createLifecycleController();
         shell.dataset.outlineEnhanced = "true";
         shell.dataset.outlineClientVersion = clientVersion;
+        enhanceContentCopyTargets(entries, shell);
+        enhanceCopyButtons(shell);
 
         const compactMedia = window.matchMedia ? window.matchMedia(compactMediaQuery) : null;
         const syncViewportState = () => {

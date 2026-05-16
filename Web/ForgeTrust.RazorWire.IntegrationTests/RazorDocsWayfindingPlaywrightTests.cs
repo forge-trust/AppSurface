@@ -148,6 +148,242 @@ public sealed class RazorDocsWayfindingPlaywrightTests
 
         Assert.Equal(1, await page.Locator("#docs-page-outline").CountAsync());
         Assert.Equal("true", await page.GetAttributeAsync("#docs-page-outline", "data-outline-enhanced"));
+        Assert.Equal(
+            await page.Locator("#docs-page-outline a[data-doc-outline-link='true']").CountAsync(),
+            await page.Locator("#docs-page-outline button[data-doc-section-copy]").CountAsync());
+
+        await page.EvaluateAsync(
+            """
+            () => document
+              .getElementById('doc-content')
+              ?.dispatchEvent(new Event('turbo:frame-load', { bubbles: true }))
+            """);
+        Assert.Equal(
+            await page.Locator("#docs-page-outline a[data-doc-outline-link='true']").CountAsync(),
+            await page.Locator("#docs-page-outline button[data-doc-section-copy]").CountAsync());
+        Assert.Equal(
+            1,
+            await page.Locator(".docs-content button[data-doc-section-copy='files-behind-the-hero-flow']").CountAsync());
+    }
+
+    [Fact]
+    public async Task SectionCopyButtons_CopyDeepLinks_WithoutNavigatingOrMutatingHash()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1440,
+                Height = 900
+            }
+        });
+        await GrantSectionClipboardPermissionsAsync(context);
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/Namespaces/ForgeTrust.AppSurface.Aspire.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.WaitForSelectorAsync(
+            ".docs-content button[data-doc-section-copy]",
+            new PageWaitForSelectorOptions { Timeout = 30_000, State = WaitForSelectorState.Attached });
+        await WaitForSectionCopyTargetCountAsync(page, 3);
+        var contentCopyButton = page.Locator(".docs-content button[data-doc-section-copy]").Nth(2);
+        var targetId = await contentCopyButton.GetAttributeAsync("data-doc-section-copy")
+            ?? throw new InvalidOperationException("Expected a section copy target.");
+
+        var expectedUrl = await BuildSectionCopyExpectedUrlAsync(page, targetId);
+        await InstallSectionCopyHistoryCountersAsync(page);
+        await SetMainContentScrollTopAsync(page, 320);
+        var outlineInitialScrollTop = await GetMainContentScrollTopAsync(page);
+        Assert.True(outlineInitialScrollTop > 0);
+
+        await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
+        await page.WaitForSelectorAsync(
+            $"#docs-page-outline button[data-doc-section-copy='{targetId}'][data-copy-state='copied']",
+            new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Attached });
+
+        Assert.Equal(expectedUrl, await ReadClipboardTextAsync(page));
+        Assert.Equal(string.Empty, await page.EvaluateAsync<string>("() => window.location.hash"));
+        Assert.Equal(outlineInitialScrollTop, await GetMainContentScrollTopAsync(page));
+        await AssertSectionCopyDidNotMutateHistoryAsync(page);
+
+        await contentCopyButton.ScrollIntoViewIfNeededAsync();
+        var contentInitialScrollTop = await GetMainContentScrollTopAsync(page);
+        await contentCopyButton.ClickAsync();
+        await page.WaitForSelectorAsync(
+            $".docs-content button[data-doc-section-copy='{targetId}'][data-copy-state='copied']",
+            new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Attached });
+
+        Assert.Equal(expectedUrl, await ReadClipboardTextAsync(page));
+        Assert.Equal(string.Empty, await page.EvaluateAsync<string>("() => window.location.hash"));
+        Assert.Equal(contentInitialScrollTop, await GetMainContentScrollTopAsync(page));
+        await AssertSectionCopyDidNotMutateHistoryAsync(page);
+    }
+
+    [Fact]
+    public async Task SectionCopyButtons_ShowManualCopyFallback_WhenClipboardWriteIsDenied()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1440,
+                Height = 900
+            }
+        });
+        var page = await context.NewPageAsync();
+        await page.AddInitScriptAsync(
+            """
+            Object.defineProperty(navigator, "clipboard", {
+              configurable: true,
+              value: {
+                writeText: () => Promise.reject(new DOMException("Denied", "NotAllowedError"))
+              }
+            });
+            """);
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/Namespaces/ForgeTrust.AppSurface.Aspire.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        var targetId = await page.Locator(".docs-content button[data-doc-section-copy]").First.GetAttributeAsync("data-doc-section-copy")
+            ?? throw new InvalidOperationException("Expected a section copy target.");
+
+        var expectedUrl = await BuildSectionCopyExpectedUrlAsync(page, targetId);
+
+        await AssertSectionCopyFallbackAsync(page, targetId, expectedUrl);
+    }
+
+    [Fact]
+    public async Task SectionCopyButtons_ShowManualCopyFallback_WhenClipboardUnavailable()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1440,
+                Height = 900
+            }
+        });
+        var page = await context.NewPageAsync();
+        await page.AddInitScriptAsync(
+            """
+            Object.defineProperty(navigator, "clipboard", {
+              configurable: true,
+              value: undefined
+            });
+            """);
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/Namespaces/ForgeTrust.AppSurface.Aspire.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        var targetId = await page.Locator(".docs-content button[data-doc-section-copy]").First.GetAttributeAsync("data-doc-section-copy")
+            ?? throw new InvalidOperationException("Expected a section copy target.");
+
+        var expectedUrl = await BuildSectionCopyExpectedUrlAsync(page, targetId);
+
+        await AssertSectionCopyFallbackAsync(page, targetId, expectedUrl);
+    }
+
+    [Fact]
+    public async Task SectionCopyButtons_AttachToApiHeaders_AndAvoidCodeOrSummaryBlocks()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1440,
+                Height = 900
+            }
+        });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/Namespaces/ForgeTrust.AppSurface.Aspire.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.WaitForSelectorAsync(
+            ".doc-type > .doc-type-header > button[data-doc-section-copy]",
+            new PageWaitForSelectorOptions { Timeout = 30_000, State = WaitForSelectorState.Attached });
+
+        Assert.True(await page.Locator(".doc-type > .doc-type-header > button[data-doc-section-copy]").CountAsync() > 0);
+        Assert.True(await page.Locator(".doc-method-group > .doc-method-group-header > button[data-doc-section-copy]").CountAsync() > 0);
+        Assert.True(await page.Locator(".docs-content button[data-doc-section-copy] .docs-section-copy-icon").CountAsync() > 0);
+        Assert.Equal(
+            string.Empty,
+            await page.Locator(".docs-content button[data-doc-section-copy]").First.TextContentAsync());
+        Assert.True(await page.Locator(".docs-content button[data-doc-section-copy]").First.EvaluateAsync<bool>(
+            """
+            button => {
+              const style = getComputedStyle(button);
+              return style.visibility === 'visible'
+                && style.display !== 'none'
+                && style.borderTopWidth === '0px'
+                && style.backgroundColor === 'rgba(0, 0, 0, 0)'
+                && Number.parseFloat(style.opacity) > 0.7;
+            }
+            """));
+        Assert.Equal(0, await page.Locator("summary button[data-doc-section-copy]").CountAsync());
+        Assert.Equal(0, await page.Locator(".doc-signature button[data-doc-section-copy]").CountAsync());
+        Assert.Equal(0, await page.Locator(".doc-symbol-source-link button[data-doc-section-copy]").CountAsync());
+        Assert.Equal(0, await page.Locator("pre button[data-doc-section-copy], code button[data-doc-section-copy]").CountAsync());
+    }
+
+    [Fact]
+    public async Task MobileSectionCopyButton_CopiesDeepLinkWithoutCollapsingOutline()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        await GrantSectionClipboardPermissionsAsync(context);
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/Namespaces/ForgeTrust.AppSurface.Aspire.html");
+        await page.WaitForSelectorAsync("#docs-page-outline", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        await page.ClickAsync("#docs-page-outline [data-doc-outline-toggle]");
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('#docs-page-outline [data-doc-outline-toggle]')?.getAttribute('aria-expanded') === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+        await WaitForSectionCopyTargetCountAsync(page, 3);
+
+        var targetId = await page.Locator(".docs-content button[data-doc-section-copy]").Nth(2).GetAttributeAsync("data-doc-section-copy")
+            ?? throw new InvalidOperationException("Expected a section copy target.");
+        var expectedUrl = await BuildSectionCopyExpectedUrlAsync(page, targetId);
+        await InstallSectionCopyHistoryCountersAsync(page);
+        await SetMainContentScrollTopAsync(page, 260);
+        var initialScrollTop = await GetMainContentScrollTopAsync(page);
+        Assert.True(initialScrollTop > 0);
+
+        await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
+        await page.WaitForSelectorAsync(
+            $"#docs-page-outline button[data-doc-section-copy='{targetId}'][data-copy-state='copied']",
+            new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Attached });
+
+        Assert.Equal(expectedUrl, await ReadClipboardTextAsync(page));
+        Assert.Equal("true", await page.GetAttributeAsync("#docs-page-outline [data-doc-outline-toggle]", "aria-expanded"));
+        Assert.Equal(string.Empty, await page.EvaluateAsync<string>("() => window.location.hash"));
+        Assert.Equal(initialScrollTop, await GetMainContentScrollTopAsync(page));
+        await AssertSectionCopyDidNotMutateHistoryAsync(page);
     }
 
     [Fact]
@@ -1218,6 +1454,153 @@ public sealed class RazorDocsWayfindingPlaywrightTests
         public bool ToggleVisible { get; init; }
 
         public bool PanelVisible { get; init; }
+    }
+
+    private Task GrantSectionClipboardPermissionsAsync(IBrowserContext context)
+    {
+        var origin = new Uri(_fixture.DocsUrl).GetLeftPart(UriPartial.Authority);
+        return context.GrantPermissionsAsync(
+            ["clipboard-read", "clipboard-write"],
+            new BrowserContextGrantPermissionsOptions
+            {
+                Origin = origin
+            });
+    }
+
+    private static Task<string> ReadClipboardTextAsync(IPage page)
+    {
+        return page.EvaluateAsync<string>("() => navigator.clipboard.readText()");
+    }
+
+    private static async Task WaitForSectionCopyTargetCountAsync(IPage page, int minimumCount)
+    {
+        await page.WaitForFunctionAsync(
+            """
+            minimumCount => document.querySelectorAll('.docs-content button[data-doc-section-copy]').length >= minimumCount
+            """,
+            minimumCount,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+    }
+
+    private static Task<string> BuildSectionCopyExpectedUrlAsync(IPage page, string targetId)
+    {
+        return page.EvaluateAsync<string>(
+            """
+            targetId => {
+              const url = new URL(window.location.href);
+              url.hash = targetId;
+              return url.toString();
+            }
+            """,
+            targetId);
+    }
+
+    private static Task InstallSectionCopyHistoryCountersAsync(IPage page)
+    {
+        return page.EvaluateAsync(
+            """
+            () => {
+              history.replaceState(null, "", window.location.pathname);
+              window.__sectionCopyPushStateCalls = 0;
+              window.__sectionCopyReplaceStateCalls = 0;
+              const originalPushState = history.pushState.bind(history);
+              const originalReplaceState = history.replaceState.bind(history);
+              history.pushState = (...args) => {
+                window.__sectionCopyPushStateCalls += 1;
+                return originalPushState(...args);
+              };
+              history.replaceState = (...args) => {
+                window.__sectionCopyReplaceStateCalls += 1;
+                return originalReplaceState(...args);
+              };
+            }
+            """);
+    }
+
+    private static Task SetMainContentScrollTopAsync(IPage page, int scrollTop)
+    {
+        return page.EvaluateAsync(
+            """
+            scrollTop => {
+              const main = document.getElementById('main-content');
+              if (main) {
+                main.scrollTo(0, scrollTop);
+              }
+            }
+            """,
+            scrollTop);
+    }
+
+    private static Task<int> GetMainContentScrollTopAsync(IPage page)
+    {
+        return page.EvaluateAsync<int>(
+            "() => Math.round(document.getElementById('main-content')?.scrollTop ?? -1)");
+    }
+
+    private static async Task AssertSectionCopyDidNotMutateHistoryAsync(IPage page)
+    {
+        Assert.Equal(0, await page.EvaluateAsync<int>("() => window.__sectionCopyPushStateCalls"));
+        Assert.Equal(0, await page.EvaluateAsync<int>("() => window.__sectionCopyReplaceStateCalls"));
+    }
+
+    private static async Task AssertSectionCopyFallbackAsync(IPage page, string targetId, string expectedUrl)
+    {
+        await InstallSectionCopyHistoryCountersAsync(page);
+        await SetMainContentScrollTopAsync(page, 260);
+        var initialScrollTop = await GetMainContentScrollTopAsync(page);
+        Assert.True(initialScrollTop > 0);
+
+        await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
+        await page.WaitForSelectorAsync(
+            "[data-doc-section-copy-fallback='true'] input",
+            new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Visible });
+
+        Assert.Equal(expectedUrl, await page.InputValueAsync("[data-doc-section-copy-fallback='true'] input"));
+        await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
+        Assert.True(await page.Locator("[data-doc-section-copy-fallback='true']").EvaluateAsync<bool>(
+            """
+            fallback => {
+              const input = fallback.querySelector("input");
+              return document.activeElement === input
+                && input.selectionStart === 0
+                && input.selectionEnd === input.value.length;
+            }
+            """));
+
+        await page.ClickAsync("[data-doc-section-copy-fallback='true'] input");
+        Assert.Equal(1, await page.Locator("[data-doc-section-copy-fallback='true']").CountAsync());
+
+        await page.Keyboard.PressAsync("Escape");
+        await page.WaitForSelectorAsync(
+            "[data-doc-section-copy-fallback='true']",
+            new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Detached });
+        Assert.Null(await page.GetAttributeAsync(
+            $"#docs-page-outline button[data-doc-section-copy='{targetId}']",
+            "data-copy-state"));
+        await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
+
+        await page.ClickAsync($"#docs-page-outline button[data-doc-section-copy='{targetId}']");
+        await page.WaitForSelectorAsync(
+            "[data-doc-section-copy-fallback='true'] input",
+            new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Visible });
+
+        Assert.Equal(expectedUrl, await page.InputValueAsync("[data-doc-section-copy-fallback='true'] input"));
+        await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
+        await page.ClickAsync("[data-doc-section-copy-fallback='true'] input");
+        Assert.Equal(1, await page.Locator("[data-doc-section-copy-fallback='true']").CountAsync());
+
+        await page.Keyboard.PressAsync("Escape");
+        await page.WaitForSelectorAsync(
+            "[data-doc-section-copy-fallback='true']",
+            new PageWaitForSelectorOptions { Timeout = 15_000, State = WaitForSelectorState.Detached });
+        await AssertSectionCopyPreservedNavigationAsync(page, initialScrollTop);
+    }
+
+    private static async Task AssertSectionCopyPreservedNavigationAsync(IPage page, int initialScrollTop)
+    {
+        Assert.Equal(string.Empty, await page.EvaluateAsync<string>("() => window.location.hash"));
+        Assert.Equal(initialScrollTop, await GetMainContentScrollTopAsync(page));
+        await AssertSectionCopyDidNotMutateHistoryAsync(page);
     }
 
     private const string ScrollMainContentToBottomScript =

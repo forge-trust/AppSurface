@@ -100,6 +100,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorDocs details pages now render those `On this page` outlines as a page-local navigation surface, using a sticky desktop rail, a compact narrow-viewport drawer, and active-section state that keeps the reader oriented without competing with the global sidebar.
 - RazorDocs compact `On this page` outlines now stay visible while reading on narrow viewports, showing smaller previous/next context around the current section with reduced-motion-safe rolling label updates.
 - RazorDocs compact `On this page` outlines now contain their own scrolling while expanded, preventing touch or wheel input over the outline from scrolling the article behind it.
+- RazorDocs detail-page outlines and section headers now include copy-link actions for deep section URLs, with a manual-copy fallback when clipboard writes are unavailable or denied.
 - RazorDocs details pages now emit the outline client as a normal deferred script asset, so static exports publish `/docs/outline-client.js` through the existing asset crawler instead of depending on an inline loader.
 - RazorDocs detail-page outlines now keep long-section active states and the desktop right rail aligned, including the full-height rail rule, active-item visibility on long pages, and animated section jumps.
 - Public docs navigation now groups pages by intent-first sections, preserves authored editorial breadcrumbs, and keeps Start Here recovery links hidden when that section is unavailable.

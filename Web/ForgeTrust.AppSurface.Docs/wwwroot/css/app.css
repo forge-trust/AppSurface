@@ -82,6 +82,8 @@
     --docs-color-skeleton-mid: rgba(51, 65, 85, 0.55);
     --docs-focus-ring-inset: 0 0 0 1px var(--docs-color-accent-strong) inset;
     --docs-focus-outline: 2px solid var(--docs-color-accent-strong);
+    --docs-shadow-copy-feedback: 0 14px 34px rgba(2, 6, 23, 0.32);
+    --docs-shadow-copy-fallback: 0 18px 46px rgba(2, 6, 23, 0.46);
 }
 
 body {
@@ -551,10 +553,19 @@ body {
     list-style: none;
 }
 
+.docs-outline-item {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.25rem;
+}
+
 .docs-outline-link {
     position: relative;
     display: block;
     max-width: 100%;
+    min-width: 0;
     min-height: 2rem;
     padding: 0.38rem 0.65rem 0.38rem 0.8rem;
     overflow-wrap: anywhere;
@@ -600,6 +611,147 @@ body {
     width: 2px;
     border-radius: 9999px;
     background: var(--docs-color-accent-strong);
+}
+
+.docs-section-copy {
+    position: relative;
+    display: inline-flex;
+    width: 1.85rem;
+    height: 1.85rem;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 0.45rem;
+    background: transparent;
+    color: var(--docs-color-text-subtle);
+    cursor: pointer;
+    font: inherit;
+    line-height: 1;
+    opacity: 0.78;
+    transition: color 140ms ease, opacity 140ms ease;
+}
+
+.docs-section-copy-icon {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.9;
+}
+
+.docs-section-copy:hover,
+.docs-section-copy:focus-visible,
+.docs-section-copy[data-copy-state="copied"],
+.docs-section-copy[data-copy-state="fallback"] {
+    color: var(--docs-color-accent-soft);
+    opacity: 1;
+}
+
+.docs-section-copy:focus-visible {
+    outline: var(--docs-focus-outline);
+    outline-offset: 2px;
+}
+
+.docs-section-copy[data-doc-section-copy-message]::after {
+    content: attr(data-doc-section-copy-message);
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 0.35rem);
+    z-index: 30;
+    min-width: max-content;
+    padding: 0.28rem 0.45rem;
+    border: 1px solid var(--docs-color-border-accent-active);
+    border-radius: 0.45rem;
+    background: var(--docs-color-surface-overlay-strong);
+    box-shadow: var(--docs-shadow-copy-feedback);
+    color: var(--docs-color-accent-soft);
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1.1;
+    pointer-events: none;
+}
+
+.docs-content-copy {
+    width: 1.95rem;
+    height: 1.95rem;
+    margin-left: 0.25rem;
+    vertical-align: 0.08em;
+}
+
+.docs-section-copy-target {
+    position: relative;
+}
+
+.docs-section-copy-fallback {
+    position: absolute;
+    right: 0;
+    z-index: 40;
+    width: min(22rem, calc(100vw - 2rem));
+    margin-top: 0.45rem;
+    padding: 0.75rem;
+    border: 1px solid var(--docs-color-border-accent);
+    border-radius: 0.55rem;
+    background: var(--docs-color-surface-overlay-strong);
+    box-shadow: var(--docs-shadow-copy-fallback);
+}
+
+.docs-section-copy-fallback-label {
+    display: grid;
+    gap: 0.35rem;
+    color: var(--docs-color-text-muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+
+.docs-section-copy-fallback-input {
+    width: 100%;
+    min-width: 0;
+    padding: 0.48rem 0.55rem;
+    border: 1px solid var(--docs-color-border-default);
+    border-radius: 0.42rem;
+    background: var(--docs-color-surface-panel-heavy);
+    color: var(--docs-color-text-default);
+    font: inherit;
+    font-size: 0.78rem;
+}
+
+.docs-section-copy-fallback-input:focus-visible {
+    outline: var(--docs-focus-outline);
+    outline-offset: 2px;
+}
+
+.docs-section-copy-fallback-close {
+    margin-top: 0.55rem;
+    padding: 0.42rem 0.65rem;
+    border: 1px solid var(--docs-color-border-default);
+    border-radius: 0.42rem;
+    background: var(--docs-color-surface-panel-elevated);
+    color: var(--docs-color-text-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.docs-section-copy-fallback-close:hover,
+.docs-section-copy-fallback-close:focus-visible {
+    border-color: var(--docs-color-border-accent-strong);
+    color: var(--docs-color-accent-soft);
+}
+
+.docs-section-copy-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    border: 0;
+    white-space: nowrap;
 }
 
 .docs-outline-shell[data-outline-enhanced="true"][data-outline-expanded="false"] .docs-outline-panel {
@@ -648,6 +800,13 @@ body {
 @media (min-width: 64rem) and (max-width: 79.999rem) {
     .docs-outline-shell[data-outline-enhanced="true"] {
         --docs-outline-compact-bleed: 2rem;
+    }
+}
+
+@media (hover: none) {
+    #docs-page-outline .docs-section-copy,
+    .docs-content-copy {
+        opacity: 1;
     }
 }
 
