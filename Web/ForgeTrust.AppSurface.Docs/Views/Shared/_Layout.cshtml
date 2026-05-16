@@ -1,22 +1,24 @@
 @using System.Text.Json
 @inject ForgeTrust.AppSurface.Docs.RazorDocsAssetPathResolver AssetPathResolver
+@inject ForgeTrust.AppSurface.Docs.RazorDocsAssetVersioner AssetVersioner
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
-    var stylesheetPath = AssetPathResolver.StylesheetPath;
+    var stylesheetPath = AssetVersioner.AppendVersion(AssetPathResolver.StylesheetPath, "css/site.gen.css");
     var docsRoutes = DocsUrlBuilder.Routes;
     var docsHomeUrl = Url.PathBaseAware(docsRoutes.Home);
     var docsSearchUrl = Url.PathBaseAware(docsRoutes.Search);
     var docsSearchIndexUrl = Url.PathBaseAware(docsRoutes.SearchIndex);
-    var docsSearchStylesheetUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("search.css"));
-    var docsMiniSearchUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("minisearch.min.js"));
-    var docsSearchClientUrl = Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl("search-client.js"));
+    var docsSearchStylesheetUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "search.css"));
+    var docsMiniSearchUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "minisearch.min.js"));
+    var docsSearchClientUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "search-client.js"));
     var docsBrandIconUrl = Url.Content(AssetPathResolver.BrandIconPath);
     var docsClientConfigJson = JsonSerializer.Serialize(
         new
         {
             docsRootPath = docsHomeUrl,
             docsSearchUrl,
-            docsSearchIndexUrl
+            docsSearchIndexUrl,
+            miniSearchUrl = docsMiniSearchUrl
         });
     var isSearchPage = string.Equals(
         ViewContext.RouteData.Values["action"]?.ToString(),
@@ -29,8 +31,8 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>@ViewData["Title"] - AppSurface</title>
-    <link rel="stylesheet" href="@stylesheetPath" asp-append-version="true" />
-    <link rel="stylesheet" href="@docsSearchStylesheetUrl" />
+    <link rel="stylesheet" href="@stylesheetPath" asp-append-version="false" />
+    <link rel="stylesheet" href="@docsSearchStylesheetUrl" asp-append-version="false" />
     @if (isSearchPage)
     {
         <link rel="preload" href="@docsSearchIndexUrl" as="fetch" crossorigin="use-credentials" />
@@ -38,10 +40,10 @@
     <rw:scripts/>
     @if (isSearchPage)
     {
-        <script src="@docsMiniSearchUrl" defer data-rw-search-runtime="minisearch"></script>
+        <script src="@docsMiniSearchUrl" defer data-rw-search-runtime="minisearch" asp-append-version="false"></script>
     }
     <script>window.__razorDocsConfig = @Html.Raw(docsClientConfigJson);</script>
-    <script src="@docsSearchClientUrl" defer></script>
+    <script src="@docsSearchClientUrl" defer asp-append-version="false"></script>
 </head>
 <body class="h-full flex flex-col text-slate-200 overflow-hidden">
 <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-0 focus:left-0 focus:z-50 focus:p-4 focus:bg-[#0d182a] focus:text-white">Skip to content</a>

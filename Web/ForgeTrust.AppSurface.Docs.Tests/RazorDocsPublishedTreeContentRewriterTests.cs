@@ -15,7 +15,7 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
               <link rel="stylesheet" href="/docs/search.css" />
               <link rel="preload" href="/docs/search-index.json" as="fetch" crossorigin="use-credentials" />
               <script src="/docs/outline-client.js"></script>
-              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","docsVersionsUrl":"/docs/versions"};</script>
+              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":"/docs/minisearch.min.js?v=abc","docsVersionsUrl":"/docs/versions"};</script>
             </head>
             <body>
               <a href="/docs/guide.html">Guide</a>
@@ -35,8 +35,50 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
         Assert.Contains("\"docsRootPath\":\"/docs/v/1.2.3\"", rewritten);
         Assert.Contains("\"docsSearchUrl\":\"/docs/v/1.2.3/search\"", rewritten);
         Assert.Contains("\"docsSearchIndexUrl\":\"/docs/v/1.2.3/search-index.json\"", rewritten);
+        Assert.Contains("\"miniSearchUrl\":\"/docs/v/1.2.3/minisearch.min.js?v=abc\"", rewritten);
         Assert.DoesNotContain("docsVersionsUrl", rewritten);
         Assert.Contains("href=\"/docs/versions\"", rewritten);
+    }
+
+    [Fact]
+    public void RewriteHtml_ShouldRebaseMiniSearchUrlWithoutSuffix()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":"/docs/minisearch.min.js","docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body></body>
+            </html>
+            """;
+
+        var rewritten = RazorDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs/v/1.2.3");
+
+        Assert.Contains("\"miniSearchUrl\":\"/docs/v/1.2.3/minisearch.min.js\"", rewritten);
+        Assert.DoesNotContain("minisearch.min.js?", rewritten);
+    }
+
+    [Fact]
+    public void RewriteHtml_ShouldLeaveNonStringMiniSearchUrlUnchanged()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":404,"docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body></body>
+            </html>
+            """;
+
+        var rewritten = RazorDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs/v/1.2.3");
+
+        Assert.Contains("\"docsRootPath\":\"/docs/v/1.2.3\"", rewritten);
+        Assert.Contains("\"miniSearchUrl\":404", rewritten);
+        Assert.DoesNotContain("docsVersionsUrl", rewritten);
     }
 
     [Fact]
@@ -48,7 +90,7 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
             <html>
             <head>
               <link rel="stylesheet" href="/docs/search.css" />
-              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","docsVersionsUrl":"/docs/versions"};</script>
+              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":"/docs/minisearch.min.js?v=abc","docsVersionsUrl":"/docs/versions"};</script>
             </head>
             <body>
               <a href="/docs/guide.html">Guide</a>
@@ -119,7 +161,7 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
             <!DOCTYPE html>
             <html>
             <head>
-              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","docsVersionsUrl":"/docs/versions"};</script>
+              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":"/docs/minisearch.min.js?v=abc","docsVersionsUrl":"/docs/versions"};</script>
             </head>
             <body>
               <a href="/docs/guide.html">Guide</a>
@@ -142,7 +184,7 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
             <head>
               <link rel="stylesheet" href="/docs/search.css" />
               <script src="/docs/outline-client.js"></script>
-              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","docsVersionsUrl":"/docs/versions"};</script>
+              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":"/docs/minisearch.min.js?v=abc","docsVersionsUrl":"/docs/versions"};</script>
             </head>
             <body>
               <a href="/docs/guide.html">Guide</a>
@@ -166,6 +208,7 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
         Assert.Contains("\"docsRootPath\":\"/some-base/docs/v/1.2.3\"", rewritten);
         Assert.Contains("\"docsSearchUrl\":\"/some-base/docs/v/1.2.3/search\"", rewritten);
         Assert.Contains("\"docsSearchIndexUrl\":\"/some-base/docs/v/1.2.3/search-index.json\"", rewritten);
+        Assert.Contains("\"miniSearchUrl\":\"/some-base/docs/v/1.2.3/minisearch.min.js?v=abc\"", rewritten);
         Assert.DoesNotContain("docsVersionsUrl", rewritten);
     }
 
