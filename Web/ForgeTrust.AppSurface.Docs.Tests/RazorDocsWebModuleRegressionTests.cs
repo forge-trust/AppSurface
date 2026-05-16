@@ -138,7 +138,7 @@ public class RazorDocsWebModuleRegressionTests
             Assert.False(string.IsNullOrWhiteSpace(body));
             Assert.Contains("#docs-search-input", body);
             Assert.Contains(".docs-search-page-results", body);
-            Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #020617);", body);
+            Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #050b17);", body);
             Assert.Contains("var(--docs-search-color-border-default)", body);
         }
         finally

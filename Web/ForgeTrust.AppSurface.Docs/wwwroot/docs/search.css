@@ -3,35 +3,35 @@
 }
 
 :root {
-    --docs-search-color-border-default: var(--docs-color-border-default, #334155);
-    --docs-search-color-border-muted: var(--docs-color-border-muted, #1e293b);
-    --docs-search-color-border-strong: var(--docs-color-border-strong, #475569);
-    --docs-search-color-border-accent-hover: var(--docs-color-border-accent-hover, rgba(34, 211, 238, 0.45));
-    --docs-search-color-border-accent-muted: var(--docs-color-border-accent-muted, rgba(34, 211, 238, 0.3));
-    --docs-search-color-border-accent-active: var(--docs-color-border-accent-active, rgba(34, 211, 238, 0.42));
-    --docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #020617);
-    --docs-search-color-surface-raised: var(--docs-color-surface-raised, #0f172a);
-    --docs-search-color-surface-panel: var(--docs-color-surface-panel, rgba(15, 23, 42, 0.72));
-    --docs-search-color-surface-panel-elevated: var(--docs-color-surface-panel-elevated, rgba(15, 23, 42, 0.86));
-    --docs-search-color-surface-panel-heavy: var(--docs-color-surface-panel-heavy, rgba(15, 23, 42, 0.88));
-    --docs-search-color-surface-overlay: var(--docs-color-surface-overlay, rgba(2, 6, 23, 0.78));
-    --docs-search-color-surface-overlay-soft: var(--docs-color-surface-overlay-soft, rgba(2, 6, 23, 0.65));
+    --docs-search-color-border-default: var(--docs-color-border-default, #314461);
+    --docs-search-color-border-muted: var(--docs-color-border-muted, #1b2a43);
+    --docs-search-color-border-strong: var(--docs-color-border-strong, #526987);
+    --docs-search-color-border-accent-hover: var(--docs-color-border-accent-hover, rgba(20, 184, 166, 0.56));
+    --docs-search-color-border-accent-muted: var(--docs-color-border-accent-muted, rgba(37, 99, 235, 0.34));
+    --docs-search-color-border-accent-active: var(--docs-color-border-accent-active, rgba(20, 184, 166, 0.48));
+    --docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #050b17);
+    --docs-search-color-surface-raised: var(--docs-color-surface-raised, #0d182a);
+    --docs-search-color-surface-panel: var(--docs-color-surface-panel, rgba(13, 24, 42, 0.72));
+    --docs-search-color-surface-panel-elevated: var(--docs-color-surface-panel-elevated, rgba(13, 24, 42, 0.88));
+    --docs-search-color-surface-panel-heavy: var(--docs-color-surface-panel-heavy, rgba(13, 24, 42, 0.92));
+    --docs-search-color-surface-overlay: var(--docs-color-surface-overlay, rgba(5, 11, 23, 0.78));
+    --docs-search-color-surface-overlay-soft: var(--docs-color-surface-overlay-soft, rgba(5, 11, 23, 0.68));
     --docs-search-color-text-strong: var(--docs-color-text-strong, #f8fafc);
-    --docs-search-color-text-default: var(--docs-color-text-default, #e2e8f0);
-    --docs-search-color-text-muted: var(--docs-color-text-muted, #cbd5e1);
-    --docs-search-color-text-subtle: var(--docs-color-text-subtle, #94a3b8);
-    --docs-search-color-text-faint: var(--docs-color-text-faint, #64748b);
-    --docs-search-color-text-info-muted: var(--docs-color-text-info-muted, #bfdbfe);
-    --docs-search-color-text-mark: var(--docs-color-text-mark, #ecfeff);
-    --docs-search-color-accent: var(--docs-color-accent, #67e8f9);
-    --docs-search-color-accent-strong: var(--docs-color-accent-strong, #22d3ee);
-    --docs-search-color-accent-soft: var(--docs-color-accent-soft, #cffafe);
-    --docs-search-color-accent-muted: var(--docs-color-accent-muted, #a5f3fc);
-    --docs-search-color-accent-mark-fill: var(--docs-color-accent-mark-fill, rgba(34, 211, 238, 0.25));
-    --docs-search-color-state-active-fill: var(--docs-color-state-active-fill, rgba(8, 47, 73, 0.35));
-    --docs-search-color-state-active-fill-strong: var(--docs-color-state-active-fill-strong, rgba(8, 47, 73, 0.45));
-    --docs-search-color-skeleton-edge: var(--docs-color-skeleton-edge, rgba(30, 41, 59, 0.9));
-    --docs-search-color-skeleton-mid: var(--docs-color-skeleton-mid, rgba(51, 65, 85, 0.55));
+    --docs-search-color-text-default: var(--docs-color-text-default, #e5e7eb);
+    --docs-search-color-text-muted: var(--docs-color-text-muted, #c8d0dc);
+    --docs-search-color-text-subtle: var(--docs-color-text-subtle, #9aa8bc);
+    --docs-search-color-text-faint: var(--docs-color-text-faint, #728098);
+    --docs-search-color-text-info-muted: var(--docs-color-text-info-muted, #c7d2fe);
+    --docs-search-color-text-mark: var(--docs-color-text-mark, #f5f7fb);
+    --docs-search-color-accent: var(--docs-color-accent, #14b8a6);
+    --docs-search-color-accent-strong: var(--docs-color-accent-strong, #2563eb);
+    --docs-search-color-accent-soft: var(--docs-color-accent-soft, #ccfbf1);
+    --docs-search-color-accent-muted: var(--docs-color-accent-muted, #99f6e4);
+    --docs-search-color-accent-mark-fill: var(--docs-color-accent-mark-fill, rgba(20, 184, 166, 0.28));
+    --docs-search-color-state-active-fill: var(--docs-color-state-active-fill, rgba(37, 99, 235, 0.24));
+    --docs-search-color-state-active-fill-strong: var(--docs-color-state-active-fill-strong, rgba(37, 99, 235, 0.34));
+    --docs-search-color-skeleton-edge: var(--docs-color-skeleton-edge, rgba(27, 42, 67, 0.92));
+    --docs-search-color-skeleton-mid: var(--docs-color-skeleton-mid, rgba(65, 87, 121, 0.55));
     --docs-search-focus-ring-inset: var(--docs-focus-ring-inset, 0 0 0 1px var(--docs-search-color-accent-strong) inset);
 }
 

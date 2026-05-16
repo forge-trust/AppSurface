@@ -16,6 +16,7 @@ internal sealed class RazorDocsAssetPathResolver
 {
     internal const string RootStylesheetPath = "~/css/site.gen.css";
     internal const string PackagedStylesheetPath = "~/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css";
+    internal const string PackagedBrandIconPath = "~/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg";
 
     private static readonly Assembly RazorDocsAssembly = typeof(RazorDocsWebModule).Assembly;
 
@@ -28,6 +29,20 @@ internal sealed class RazorDocsAssetPathResolver
     /// Gets the application-relative stylesheet path to use from RazorDocs layouts.
     /// </summary>
     public string StylesheetPath { get; }
+
+    /// <summary>
+    /// Gets the application-relative path for the AppSurface brand mark static asset.
+    /// </summary>
+    /// <remarks>
+    /// The value resolves to <see cref="PackagedBrandIconPath"/>, the bundled static-web-assets location
+    /// <c>~/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg</c>. Razor views should use this
+    /// property when referencing the AppSurface brand mark served by the docs host so the packaged asset path is
+    /// maintained in one place instead of being repeated in layout markup. The returned path is application-relative;
+    /// callers that render under a path base should pass it through URL helpers such as <c>Url.Content</c>, and hosts
+    /// that rewrite assets through a CDN or a non-standard static-web-assets layout should use their explicit asset URL
+    /// instead.
+    /// </remarks>
+    public string BrandIconPath => PackagedBrandIconPath;
 
     /// <summary>
     /// Creates the default asset-path resolver used when only the RazorDocs services are registered.
