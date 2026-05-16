@@ -7,6 +7,7 @@
 :root {
     --docs-brand-navy: #0d182a;
     --docs-brand-blue: #2563eb;
+    --docs-brand-wordmark-blue: #3b82f6;
     --docs-brand-teal: #14b8a6;
     --docs-brand-violet: #8b5cf6;
     --docs-brand-ice: #e5e7eb;
@@ -101,6 +102,7 @@
     --docs-color-brand-ice-highlight: rgba(229, 231, 235, 0.05);
     --docs-color-brand-panel-border: rgba(65, 87, 121, 0.62);
     --docs-color-panel-depth-shadow: rgba(0, 0, 0, 0.22);
+    --docs-color-wordmark-edge-shadow: rgba(0, 0, 0, 0.45);
     --docs-focus-ring-inset: 0 0 0 1px var(--docs-color-accent-strong) inset;
     --docs-focus-outline: 2px solid var(--docs-color-accent-strong);
     color-scheme: dark;
@@ -152,6 +154,7 @@ body {
     text-decoration: none;
 }
 
+.docs-brand:hover .docs-wordmark,
 .docs-brand:hover .docs-brand-wordmark {
     filter: brightness(1.1);
 }
@@ -166,19 +169,20 @@ body {
         drop-shadow(0 0 0.75rem var(--docs-color-brand-teal-shadow));
 }
 
+.docs-wordmark,
 .docs-brand-wordmark {
     min-width: 0;
+    color: var(--docs-color-text-strong);
     font-weight: 800;
     letter-spacing: 0;
     line-height: 1;
     white-space: nowrap;
+    text-shadow: 0 1px 2px var(--docs-color-wordmark-edge-shadow);
 }
 
+.docs-wordmark-highlight,
 .docs-brand-wordmark-highlight {
-    background: linear-gradient(90deg, var(--docs-brand-blue), var(--docs-brand-teal) 52%, var(--docs-brand-violet));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: var(--docs-brand-wordmark-blue);
 }
 
 .docs-brand-kicker {
@@ -217,6 +221,7 @@ body {
         height: 2.25rem;
     }
 
+    .docs-sidebar-header .docs-wordmark,
     .docs-sidebar-header .docs-brand-wordmark {
         overflow: hidden;
         font-size: 1.05rem;

@@ -1,8 +1,8 @@
-# AppSurface Docs Design Language
+# AppSurface Documentation Design Language
 
 ## Purpose
 
-AppSurface Docs should feel like a focused documentation workspace, not a marketing site and not a generic SaaS dashboard. The UI should help people orient quickly, scan densely, and move deeper into docs with very little friction.
+AppSurface documentation should feel like a focused documentation workspace, not a marketing site and not a generic SaaS dashboard. The UI should help people orient quickly, scan densely, and move deeper into docs with very little friction.
 
 ## Core Tone
 
@@ -30,9 +30,17 @@ If a new surface starts to feel like a feature grid, a landing page, or an AI-ge
 - Borders and separators should do most of the structure work
 - Avoid adding extra accent colors unless the feature truly needs semantic differentiation
 
+### Brand
+
+The AppSurface wordmark is a two-tone text treatment: `App` uses ice white (`--docs-color-text-strong`, `#F8FAFC`) and `Surface` uses readable brand blue (`--docs-brand-wordmark-blue`, `#3B82F6`). Use the shared `.docs-wordmark` and `.docs-wordmark-highlight` classes anywhere the AppSurface wordmark is rendered in text.
+
+Do not use page-title gradients, teal, violet, or ad hoc Tailwind color utilities for the wordmark. `--docs-brand-blue` (`#2563EB`) remains the cobalt product/control accent, but it is too low-contrast for normal-size wordmark text on raised navy surfaces such as `#0D182A`. The wordmark blue `#3B82F6` clears WCAG AA for normal text on the docs navy surfaces, including `#0D182A`.
+
+The layered AppSurface mark uses the same brand family: navy base (`#0D182A`), cobalt (`#2563EB`), teal (`#14B8A6`), violet (`#8B5CF6`), and ice (`#E5E7EB`). Keep the mark glow on the icon, not the text; the text wordmark may use a subtle dark edge shadow for crispness over dark or glowing backgrounds.
+
 ### Style Tokens
 
-AppSurface Docs expresses the ForgeTrust AppSurface brand system through internal `--docs-*` CSS custom properties in `wwwroot/css/app.css`.
+AppSurface documentation expresses the ForgeTrust AppSurface brand system through internal `--docs-*` CSS custom properties in `wwwroot/css/app.css`.
 
 The token layer exists so contributors can preserve the same visual language without rediscovering which hardcoded navy, cobalt, teal, violet, or translucent fill belongs to each shared primitive. Token names should describe the design job: surface, border, text, accent, focus, active state, code chrome, table chrome, or skeleton. Do not name tokens after Tailwind hues unless the hue itself is the contract, which it usually is not.
 
@@ -42,7 +50,7 @@ Default rule:
 2. If a color represents a repeated state such as focus, active, muted, raised, loading, or default border, use or add a token.
 3. If a color is local to syntax highlighting, generated API signature colorization, or a one-off semantic badge family, keep it local and document the category.
 
-These tokens are not a public theming API yet. Hosts should not rely on overriding `--docs-*` names until a future theming feature explicitly documents that contract. Inside AppSurface Docs, though, shared package chrome and search-specific UI should consume the same root token layer so future theming can change the system deliberately. Search CSS may route through `--docs-search-*` aliases with fallbacks because exact published release trees can serve `search.css` without the generated package stylesheet.
+These tokens are not a public theming API yet. Hosts should not rely on overriding `--docs-*` names until a future theming feature explicitly documents that contract. Inside AppSurface documentation, though, shared package chrome and search-specific UI should consume the same root token layer so future theming can change the system deliberately. Search CSS may route through `--docs-search-*` aliases with fallbacks because exact published release trees can serve `search.css` without the generated package stylesheet.
 
 ### Surfaces
 

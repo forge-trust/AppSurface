@@ -9,13 +9,20 @@
     <div class="mb-8 docs-hero-panel rounded-lg p-5 sm:p-6">
         <div class="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div class="max-w-3xl">
-                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#14b8a6]">ForgeTrust Documentation</p>
-                <h1 class="docs-gradient-title mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">@Model.Heading</h1>
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#14b8a6]">ForgeTrust AppSurface</p>
+                @if (string.Equals(Model.Heading, "AppSurface", StringComparison.Ordinal))
+                {
+                    <h1 class="docs-wordmark mt-3 text-3xl sm:text-4xl">App<span class="docs-wordmark-highlight">Surface</span></h1>
+                }
+                else
+                {
+                    <h1 class="docs-gradient-title mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">@Model.Heading</h1>
+                }
                 <p class="mt-4 max-w-2xl text-base leading-7 text-slate-300">@Model.Description</p>
             </div>
             <div class="flex items-center gap-4 sm:flex-col sm:items-end">
                 <img class="docs-brand-mark docs-brand-mark--lg" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
-                <span class="docs-brand-kicker">AppSurface Docs</span>
+                <span class="docs-brand-kicker">Documentation</span>
             </div>
         </div>
     </div>

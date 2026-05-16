@@ -28,7 +28,7 @@
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>@ViewData["Title"] - AppSurface Docs</title>
+    <title>@ViewData["Title"] - AppSurface</title>
     <link rel="stylesheet" href="@stylesheetPath" asp-append-version="true" />
     <link rel="stylesheet" href="@docsSearchStylesheetUrl" />
     @if (isSearchPage)
@@ -61,7 +61,7 @@
         <div class="docs-sidebar-header flex items-center justify-between p-4 border-b border-[#1b2a43] md:hidden">
             <a href="@docsHomeUrl" class="docs-brand">
                 <img class="docs-brand-mark docs-brand-mark--sm" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
-                <span class="docs-brand-wordmark text-xl">App<span class="docs-brand-wordmark-highlight">Surface</span></span>
+                <span class="docs-wordmark text-xl">App<span class="docs-wordmark-highlight">Surface</span></span>
             </a>
             <button id="docs-sidebar-close"
                     type="button"
@@ -73,8 +73,7 @@
             <a href="@docsHomeUrl" class="docs-brand">
                 <img class="docs-brand-mark" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
                 <span class="min-w-0">
-                    <span class="docs-brand-wordmark block text-2xl">App<span class="docs-brand-wordmark-highlight">Surface</span></span>
-                    <span class="docs-brand-kicker block">Docs</span>
+                    <span class="docs-wordmark block text-2xl">App<span class="docs-wordmark-highlight">Surface</span></span>
                 </span>
             </a>
         </div>
@@ -119,7 +118,7 @@
             </button>
             <a href="@docsHomeUrl" class="docs-brand min-w-0">
                 <img class="docs-brand-mark docs-brand-mark--sm" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
-                <span class="docs-brand-wordmark truncate text-lg">App<span class="docs-brand-wordmark-highlight">Surface</span></span>
+                <span class="docs-wordmark truncate text-lg">App<span class="docs-wordmark-highlight">Surface</span></span>
             </a>
             <a href="@docsSearchUrl" class="ml-auto inline-flex items-center gap-2 rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-3 py-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-[#bfdbfe] hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
                 <span>Search</span>
