@@ -33,24 +33,28 @@ public record CorsOptions
     public string[] AllowedOrigins { get; set; } = [];
 
     /// <summary>
-    /// Gets or sets the request headers permitted by the CORS policy during browser preflight requests.
-    /// Defaults to an empty array, which allows no custom preflight request headers in production.
+    /// Gets or sets the request headers advertised by the CORS policy during browser preflight requests.
+    /// Defaults to an empty array, which advertises no custom preflight request headers in production.
     /// </summary>
     /// <remarks>
-    /// Configure explicit header names, such as <c>Content-Type</c> or <c>X-Request-Id</c>, when cross-origin callers
-    /// need them. Use <c>*</c> only when the application intentionally accepts any request header from allowed origins.
+    /// Configure explicit header names, such as <c>Content-Type</c> or <c>X-Request-Id</c>, when preflighted
+    /// cross-origin callers need them. Use <c>*</c> only when the application intentionally accepts any request header
+    /// from allowed origins. Non-preflight CORS responses are still governed by origin policy and browser safelisted
+    /// request behavior; this collection defines the <c>Access-Control-Allow-Headers</c> preflight response contract.
     /// When <see cref="EnableAllOriginsInDevelopment"/> applies, AppSurface still allows any header for local
     /// development convenience unless this collection contains one or more configured values.
     /// </remarks>
     public string[] AllowedHeaders { get; set; } = [];
 
     /// <summary>
-    /// Gets or sets the HTTP methods permitted by the CORS policy during browser preflight requests.
-    /// Defaults to an empty array, which allows no preflight-only HTTP methods in production.
+    /// Gets or sets the HTTP methods advertised by the CORS policy during browser preflight requests.
+    /// Defaults to an empty array, which advertises no preflight-only HTTP methods in production.
     /// </summary>
     /// <remarks>
-    /// Configure explicit method names, such as <c>GET</c> or <c>POST</c>, when cross-origin callers need them. Use
-    /// <c>*</c> only when the application intentionally accepts any method from allowed origins. When
+    /// Configure explicit method names, such as <c>GET</c> or <c>POST</c>, when preflighted cross-origin callers need
+    /// them. Use <c>*</c> only when the application intentionally accepts any method from allowed origins.
+    /// Non-preflight CORS responses are still governed by origin policy and browser method safelisting; this collection
+    /// defines the <c>Access-Control-Allow-Methods</c> preflight response contract. When
     /// <see cref="EnableAllOriginsInDevelopment"/> applies, AppSurface still allows any method for local development
     /// convenience unless this collection contains one or more configured values.
     /// </remarks>

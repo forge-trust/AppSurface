@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.AppSurface.Web.Tests;
 
+[Collection("Cors environment variable tests")]
 public class CorsOptionsTests
 {
     private class TestWebModule : IAppSurfaceWebModule
@@ -68,7 +69,7 @@ public class CorsOptionsTests
             var services = new ServiceCollection();
             startup.ConfigureServicesPublic(context, services);
 
-            var provider = services.BuildServiceProvider();
+            using var provider = services.BuildServiceProvider();
             var policyProvider = provider.GetRequiredService<ICorsPolicyProvider>();
             var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), "DefaultCorsPolicy");
 
@@ -104,7 +105,7 @@ public class CorsOptionsTests
             var services = new ServiceCollection();
             startup.ConfigureServicesPublic(context, services);
 
-            var provider = services.BuildServiceProvider();
+            using var provider = services.BuildServiceProvider();
             var policyProvider = provider.GetRequiredService<ICorsPolicyProvider>();
             var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), "DefaultCorsPolicy");
 
@@ -141,7 +142,7 @@ public class CorsOptionsTests
             var services = new ServiceCollection();
             startup.ConfigureServicesPublic(context, services);
 
-            var provider = services.BuildServiceProvider();
+            using var provider = services.BuildServiceProvider();
             var policyProvider = provider.GetRequiredService<ICorsPolicyProvider>();
             var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), "DefaultCorsPolicy");
 
@@ -180,7 +181,7 @@ public class CorsOptionsTests
             var services = new ServiceCollection();
             startup.ConfigureServicesPublic(context, services);
 
-            var provider = services.BuildServiceProvider();
+            using var provider = services.BuildServiceProvider();
             var policyProvider = provider.GetRequiredService<ICorsPolicyProvider>();
             var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), "DefaultCorsPolicy");
 
@@ -217,7 +218,7 @@ public class CorsOptionsTests
             var services = new ServiceCollection();
             startup.ConfigureServicesPublic(context, services);
 
-            var provider = services.BuildServiceProvider();
+            using var provider = services.BuildServiceProvider();
             var policyProvider = provider.GetRequiredService<ICorsPolicyProvider>();
             var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), "DefaultCorsPolicy");
 
@@ -252,3 +253,6 @@ public class CorsOptionsTests
         }
     }
 }
+
+[CollectionDefinition("Cors environment variable tests", DisableParallelization = true)]
+public sealed class CorsEnvironmentVariableTestCollection;
