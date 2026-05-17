@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using CliFx;
@@ -609,6 +608,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
 {
     private readonly ILogger<RazorDocsInProcessExportRunner> _logger;
     private readonly IRazorWireStaticExporter _exporter;
+    private readonly IRazorDocsExportHostStarter _hostStarter;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RazorDocsInProcessExportRunner"/> class.
@@ -618,12 +618,22 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
     public RazorDocsInProcessExportRunner(
         ILogger<RazorDocsInProcessExportRunner> logger,
         IRazorWireStaticExporter exporter)
+        : this(logger, exporter, new RazorDocsStandaloneExportHostStarter())
+    {
+    }
+
+    internal RazorDocsInProcessExportRunner(
+        ILogger<RazorDocsInProcessExportRunner> logger,
+        IRazorWireStaticExporter exporter,
+        IRazorDocsExportHostStarter hostStarter)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(exporter);
+        ArgumentNullException.ThrowIfNull(hostStarter);
 
         _logger = logger;
         _exporter = exporter;
+        _hostStarter = hostStarter;
     }
 
     /// <inheritdoc />
@@ -632,33 +642,11 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         cancellationToken.ThrowIfCancellationRequested();
 
         var environmentName = args.HostArgs.EnvironmentName ?? Environments.Production;
-        var stopwatch = Stopwatch.StartNew();
-        using var startupTimeout = CreateStartupTimeout(args.HostArgs.StartupTimeout, cancellationToken);
-        var startupToken = startupTimeout?.Token ?? cancellationToken;
         IHost? host = null;
-        var startupCompleted = false;
 
         try
         {
-            var builder = RazorDocsStandaloneHost.CreateBuilder(
-                args.HostArgs.Args,
-                new FixedEnvironmentProvider(environmentName),
-                options => RazorDocsCliHost.ConfigurePackagedToolHost(options, args.HostArgs.StartupTimeout));
-
-            builder.UseContentRoot(args.HostArgs.RepositoryRoot);
-            builder.ConfigureWebHost(webHost =>
-            {
-                webHost.UseEnvironment(environmentName);
-                webHost.UseUrls(args.RequestedBaseUrl);
-            });
-
-            ThrowIfStartupTimeoutElapsed(args.HostArgs.StartupTimeout, stopwatch);
-            host = builder.Build();
-            ThrowIfStartupTimeoutElapsed(args.HostArgs.StartupTimeout, stopwatch);
-
-            await host.StartAsync(startupToken);
-            ThrowIfStartupTimeoutElapsed(args.HostArgs.StartupTimeout, stopwatch);
-            startupCompleted = true;
+            host = await BuildAndStartHostWithTimeoutAsync(args, environmentName, cancellationToken);
 
             var baseUrl = ResolveBoundBaseUrl(host);
             _logger.LogInformation("RazorDocs export host started at {BaseUrl}.", baseUrl);
@@ -672,13 +660,8 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
 
             await _exporter.ExportAsync(context, cancellationToken);
         }
-        catch (OperationCanceledException ex) when (!startupCompleted && !cancellationToken.IsCancellationRequested && args.HostArgs.StartupTimeout is not null)
-        {
-            throw CreateStartupTimeoutException(args.HostArgs.StartupTimeout.Value, ex);
-        }
         finally
         {
-            stopwatch.Stop();
             if (host is not null)
             {
                 await StopAndDisposeHostAsync(host);
@@ -720,23 +703,84 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         return uri.GetLeftPart(UriPartial.Authority);
     }
 
-    private static CancellationTokenSource? CreateStartupTimeout(TimeSpan? startupTimeout, CancellationToken cancellationToken)
+    private async Task<IHost> BuildAndStartHostWithTimeoutAsync(
+        RazorDocsExportArgs args,
+        string environmentName,
+        CancellationToken cancellationToken)
     {
+        var startupTimeout = args.HostArgs.StartupTimeout;
         if (startupTimeout is null)
         {
-            return null;
+            return await _hostStarter.BuildAndStartAsync(args, environmentName, cancellationToken);
         }
 
+        var startCts = CreateStartupTimeout(startupTimeout.Value, cancellationToken);
+        CancellationTokenSource? startupTimeoutCts = startCts;
+        var startTask = Task.Run(
+            () => _hostStarter.BuildAndStartAsync(args, environmentName, startCts.Token),
+            CancellationToken.None);
+
+        try
+        {
+            var completedTask = await Task.WhenAny(startTask, Task.Delay(startupTimeout.Value, cancellationToken));
+            if (completedTask != startTask)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (startTask.IsCompleted)
+                {
+                    return await startTask;
+                }
+
+                await startCts.CancelAsync();
+                ObserveTimedOutStartupTask(startTask, startCts);
+                startupTimeoutCts = null;
+                throw CreateStartupTimeoutException(startupTimeout.Value, innerException: null);
+            }
+
+            return await startTask;
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw CreateStartupTimeoutException(startupTimeout.Value, ex);
+        }
+        catch (OperationCanceledException)
+        {
+            ObserveTimedOutStartupTask(startTask, startCts);
+            startupTimeoutCts = null;
+            throw;
+        }
+        finally
+        {
+            startupTimeoutCts?.Dispose();
+        }
+    }
+
+    private static CancellationTokenSource CreateStartupTimeout(TimeSpan startupTimeout, CancellationToken cancellationToken)
+    {
         var startupTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        startupTimeoutCts.CancelAfter(startupTimeout.Value);
+        startupTimeoutCts.CancelAfter(startupTimeout);
         return startupTimeoutCts;
     }
 
-    private static void ThrowIfStartupTimeoutElapsed(TimeSpan? startupTimeout, Stopwatch stopwatch)
+    private void ObserveTimedOutStartupTask(Task<IHost> startTask, CancellationTokenSource startupTimeoutCts)
     {
-        if (startupTimeout is not null && stopwatch.Elapsed > startupTimeout.Value)
+        _ = ObserveTimedOutStartupTaskAsync(startTask, startupTimeoutCts);
+    }
+
+    private async Task ObserveTimedOutStartupTaskAsync(Task<IHost> startTask, CancellationTokenSource startupTimeoutCts)
+    {
+        try
         {
-            throw CreateStartupTimeoutException(startupTimeout.Value, innerException: null);
+            var startedHost = await startTask.ConfigureAwait(false);
+            await StopAndDisposeHostAsync(startedHost).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsNonFatalException(ex))
+        {
+            _logger.LogDebug(ex, "RazorDocs export host startup task completed after the startup timeout.");
+        }
+        finally
+        {
+            startupTimeoutCts.Dispose();
         }
     }
 
@@ -754,17 +798,92 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         {
             await host.StopAsync(CancellationToken.None);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException
+        catch (Exception ex) when (IsNonFatalException(ex))
+        {
+            _logger.LogWarning(ex, "RazorDocs export host failed during shutdown.");
+        }
+    }
+
+    private static bool IsNonFatalException(Exception ex)
+    {
+        return ex is not OutOfMemoryException
             and not StackOverflowException
             and not AccessViolationException
             and not AppDomainUnloadedException
             and not BadImageFormatException
             and not CannotUnloadAppDomainException
             and not InvalidProgramException
-            and not ThreadAbortException)
+            and not ThreadAbortException;
+    }
+
+}
+
+/// <summary>
+/// Builds and starts the in-process AppSurface Docs export host.
+/// </summary>
+internal interface IRazorDocsExportHostStarter
+{
+    /// <summary>
+    /// Builds the standalone docs host, starts Kestrel, and returns the started host for export.
+    /// </summary>
+    /// <param name="args">Resolved export arguments.</param>
+    /// <param name="environmentName">Resolved host environment.</param>
+    /// <param name="cancellationToken">Token observed while starting the host.</param>
+    /// <returns>The started host.</returns>
+    Task<IHost> BuildAndStartAsync(
+        RazorDocsExportArgs args,
+        string environmentName,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Production <see cref="IRazorDocsExportHostStarter"/> that uses the RazorDocs standalone host builder.
+/// </summary>
+[ExcludeFromCodeCoverage(
+    Justification = "Production adapter delegates into the real standalone host builder and Kestrel; command and runner tests cover behavior before this boundary.")]
+internal sealed class RazorDocsStandaloneExportHostStarter : IRazorDocsExportHostStarter
+{
+    /// <inheritdoc />
+    public async Task<IHost> BuildAndStartAsync(
+        RazorDocsExportArgs args,
+        string environmentName,
+        CancellationToken cancellationToken)
+    {
+        var builder = RazorDocsStandaloneHost.CreateBuilder(
+            args.HostArgs.Args,
+            new FixedEnvironmentProvider(environmentName),
+            options => RazorDocsCliHost.ConfigurePackagedToolHost(options, args.HostArgs.StartupTimeout));
+
+        builder.UseContentRoot(args.HostArgs.RepositoryRoot);
+        builder.ConfigureWebHost(webHost =>
         {
-            _logger.LogWarning(ex, "RazorDocs export host failed during shutdown.");
+            webHost.UseEnvironment(environmentName);
+            webHost.UseUrls(args.RequestedBaseUrl);
+        });
+
+        var host = builder.Build();
+        try
+        {
+            await host.StartAsync(cancellationToken);
+            return host;
         }
+        catch (Exception ex) when (IsNonFatalException(ex))
+        {
+            host.Dispose();
+            throw;
+        }
+    }
+
+    private static bool IsNonFatalException(Exception ex)
+    {
+        return ex is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException
+            and not BadImageFormatException
+            and not CannotUnloadAppDomainException
+            and not InvalidProgramException
+            and not ThreadAbortException;
     }
 
     private sealed class FixedEnvironmentProvider : IEnvironmentProvider

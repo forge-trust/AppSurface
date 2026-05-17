@@ -3,6 +3,9 @@ using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.RazorWire.Cli;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -312,7 +315,7 @@ public sealed class ProgramEntryPointTests
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         using var output = TempDirectory.Create("appsurface-docs-output-");
-        var seedFile = System.IO.Path.Combine(repository.Path, "seeds.txt");
+        var seedFile = System.IO.Path.Join(repository.Path, "seeds.txt");
         await File.WriteAllLinesAsync(seedFile, ["/", "/reference/next"]);
         var runner = new CapturingRazorDocsExportRunner();
 
@@ -418,6 +421,24 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsExportCommand_Should_Translate_Startup_Timeout_Failures()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        var runner = new CapturingRazorDocsExportRunner
+        {
+            Exception = new TimeoutException("RazorDocs export host did not start within 10 seconds.")
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "export", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("RazorDocs export host did not start within 10 seconds.", result.AllText, StringComparison.Ordinal);
+        Assert.NotNull(runner.Args);
+    }
+
+    [Fact]
     public void RazorDocsInProcessExportRunner_Should_Resolve_Single_Bound_BaseUrl()
     {
         var result = RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://127.0.0.1:51234"]);
@@ -441,6 +462,153 @@ public sealed class ProgramEntryPointTests
             () => RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://127.0.0.1:1", "http://127.0.0.1:2"]));
 
         Assert.Contains("published 2 listening URLs", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RazorDocsInProcessExportRunner_Should_Reject_Invalid_Bound_BaseUrl()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(["not-a-url"]));
+
+        Assert.Contains("did not publish a valid listening URL", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RazorDocsInProcessExportRunner_Should_Export_When_Startup_Timeout_Is_Disabled()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        var exporter = new CapturingStaticExporter();
+        var host = new TrackingHost("http://127.0.0.1:61234");
+        var hostStarter = new ImmediateExportHostStarter(host);
+        var runner = new RazorDocsInProcessExportRunner(
+            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+            exporter,
+            hostStarter);
+
+        await runner.ExportAsync(CreateExportArgs(repository.Path, output.Path, startupTimeout: null), CancellationToken.None);
+
+        Assert.NotNull(exporter.Context);
+        Assert.Equal("http://127.0.0.1:61234", exporter.Context.BaseUrl);
+        Assert.Equal(output.Path, exporter.Context.OutputPath);
+        Assert.Equal(["/"], exporter.Context.InitialSeedRoutes);
+        Assert.Equal("Production", hostStarter.EnvironmentName);
+        Assert.False(hostStarter.StartupToken.CanBeCanceled);
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
+    }
+
+    [Fact]
+    public async Task RazorDocsInProcessExportRunner_Should_Translate_Startup_Cancellation_To_Startup_Timeout()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        var exporter = new CapturingStaticExporter();
+        var runner = new RazorDocsInProcessExportRunner(
+            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+            exporter,
+            new CancelingExportHostStarter());
+
+        var ex = await Assert.ThrowsAsync<TimeoutException>(
+            () => runner.ExportAsync(
+                CreateExportArgs(repository.Path, output.Path, TimeSpan.FromSeconds(30)),
+                CancellationToken.None));
+
+        Assert.Contains("RazorDocs export host did not start within 30 seconds.", ex.Message, StringComparison.Ordinal);
+        Assert.IsType<OperationCanceledException>(ex.InnerException);
+        Assert.Null(exporter.Context);
+    }
+
+    [Fact]
+    public async Task RazorDocsInProcessExportRunner_Should_Preserve_External_Cancellation_During_Startup()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        using var cts = new CancellationTokenSource();
+        var exporter = new CapturingStaticExporter();
+        var hostStarter = new ControllableExportHostStarter();
+        var runner = new RazorDocsInProcessExportRunner(
+            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+            exporter,
+            hostStarter);
+
+        var exportTask = runner.ExportAsync(
+            CreateExportArgs(repository.Path, output.Path, TimeSpan.FromSeconds(30)),
+            cts.Token);
+        await hostStarter.Started.WaitAsync(TimeSpan.FromSeconds(1));
+        cts.Cancel();
+
+        try
+        {
+            var completedTask = await Task.WhenAny(exportTask, Task.Delay(TimeSpan.FromSeconds(2)));
+            Assert.Same(exportTask, completedTask);
+            await Assert.ThrowsAsync<OperationCanceledException>(() => exportTask);
+
+            Assert.True(hostStarter.StartupToken.IsCancellationRequested);
+            Assert.Null(exporter.Context);
+
+            var lateHost = new TrackingHost();
+            hostStarter.Complete(lateHost);
+
+            await lateHost.Disposed.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.True(lateHost.StopCalled);
+        }
+        finally
+        {
+            hostStarter.Complete(new TrackingHost());
+        }
+    }
+
+    [Fact]
+    public async Task RazorDocsInProcessExportRunner_Should_Log_When_Late_Startup_Faults_After_Timeout()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Debug);
+            builder.AddProvider(loggerProvider);
+        });
+        var hostStarter = new ControllableExportHostStarter();
+        var runner = new RazorDocsInProcessExportRunner(
+            loggerFactory.CreateLogger<RazorDocsInProcessExportRunner>(),
+            new CapturingStaticExporter(),
+            hostStarter);
+
+        var exportTask = runner.ExportAsync(
+            CreateExportArgs(repository.Path, output.Path, TimeSpan.FromMilliseconds(50)),
+            CancellationToken.None);
+        await hostStarter.Started.WaitAsync(TimeSpan.FromSeconds(1));
+
+        var completedTask = await Task.WhenAny(exportTask, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.Same(exportTask, completedTask);
+        await Assert.ThrowsAsync<TimeoutException>(() => exportTask);
+
+        hostStarter.Fail(new InvalidOperationException("Late startup fault."));
+        await WaitForLogMessageAsync(loggerProvider, "completed after the startup timeout.");
+    }
+
+    [Fact]
+    public async Task RazorDocsInProcessExportRunner_Should_Log_And_Dispose_When_Host_Stop_Fails()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
+        var host = new TrackingHost("http://127.0.0.1:61235", throwOnStop: true);
+        var runner = new RazorDocsInProcessExportRunner(
+            loggerFactory.CreateLogger<RazorDocsInProcessExportRunner>(),
+            new CapturingStaticExporter(),
+            new ImmediateExportHostStarter(host));
+
+        await runner.ExportAsync(CreateExportArgs(repository.Path, output.Path, startupTimeout: null), CancellationToken.None);
+
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
+        Assert.Contains(
+            loggerProvider.GetMessages(),
+            message => message.Contains("RazorDocs export host failed during shutdown.", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -475,6 +643,60 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal("Export canceled after startup.", ex.Message);
         Assert.NotNull(exporter.Context);
+    }
+
+    [Fact]
+    public async Task RazorDocsInProcessExportRunner_Should_Timeout_When_Host_Build_Does_Not_Complete()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        var exporter = new CapturingStaticExporter();
+        var hostStarter = new ControllableExportHostStarter();
+        var runner = new RazorDocsInProcessExportRunner(
+            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+            exporter,
+            hostStarter);
+        var hostArgs = new RazorDocsHostArgs(
+            repository.Path,
+            [
+                "--RazorDocs:Source:RepositoryRoot",
+                repository.Path,
+                "--environment",
+                "Production"
+            ],
+            TimeSpan.FromMilliseconds(50),
+            "Production");
+        var exportArgs = new RazorDocsExportArgs(
+            hostArgs,
+            output.Path,
+            SeedRoutesPath: null,
+            InitialSeedRoutes: ["/"],
+            ExportMode.Cdn,
+            "http://127.0.0.1:0");
+
+        var exportTask = runner.ExportAsync(exportArgs, CancellationToken.None);
+        await hostStarter.Started.WaitAsync(TimeSpan.FromSeconds(1));
+
+        try
+        {
+            var completedTask = await Task.WhenAny(exportTask, Task.Delay(TimeSpan.FromSeconds(2)));
+            Assert.Same(exportTask, completedTask);
+            var ex = await Assert.ThrowsAsync<TimeoutException>(() => exportTask);
+
+            Assert.Contains("RazorDocs export host did not start within 0.05 seconds.", ex.Message, StringComparison.Ordinal);
+            Assert.True(hostStarter.StartupToken.IsCancellationRequested);
+            Assert.Null(exporter.Context);
+
+            var lateHost = new TrackingHost();
+            hostStarter.Complete(lateHost);
+
+            await lateHost.Disposed.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.True(lateHost.StopCalled);
+        }
+        finally
+        {
+            hostStarter.Complete(new TrackingHost());
+        }
     }
 
     [Fact]
@@ -614,6 +836,49 @@ public sealed class ProgramEntryPointTests
         options.CustomRegistrations.Add(services => services.AddSingleton<IRazorDocsExportRunner>(runner));
     }
 
+    private static RazorDocsExportArgs CreateExportArgs(
+        string repositoryPath,
+        string outputPath,
+        TimeSpan? startupTimeout)
+    {
+        var hostArgs = new RazorDocsHostArgs(
+            repositoryPath,
+            [
+                "--RazorDocs:Source:RepositoryRoot",
+                repositoryPath,
+                "--environment",
+                "Production"
+            ],
+            startupTimeout,
+            "Production");
+
+        return new RazorDocsExportArgs(
+            hostArgs,
+            outputPath,
+            SeedRoutesPath: null,
+            InitialSeedRoutes: ["/"],
+            ExportMode.Cdn,
+            "http://127.0.0.1:0");
+    }
+
+    private static async Task WaitForLogMessageAsync(InMemoryLoggerProvider loggerProvider, string expectedMessage)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(1);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (loggerProvider.GetMessages().Any(message => message.Contains(expectedMessage, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(10));
+        }
+
+        Assert.Contains(
+            loggerProvider.GetMessages(),
+            message => message.Contains(expectedMessage, StringComparison.Ordinal));
+    }
+
     private static string NormalizeDirectoryForComparison(string? path)
     {
         Assert.NotNull(path);
@@ -690,6 +955,150 @@ public sealed class ProgramEntryPointTests
         {
             Context = context;
             throw new OperationCanceledException("Export canceled after startup.");
+        }
+    }
+
+    private sealed class CapturingStaticExporter : IRazorWireStaticExporter
+    {
+        public ExportContext? Context { get; private set; }
+
+        public Task ExportAsync(ExportContext context, CancellationToken cancellationToken)
+        {
+            Context = context;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ImmediateExportHostStarter(IHost host) : IRazorDocsExportHostStarter
+    {
+        public string? EnvironmentName { get; private set; }
+
+        public CancellationToken StartupToken { get; private set; }
+
+        public Task<IHost> BuildAndStartAsync(
+            RazorDocsExportArgs args,
+            string environmentName,
+            CancellationToken cancellationToken)
+        {
+            EnvironmentName = environmentName;
+            StartupToken = cancellationToken;
+            return Task.FromResult(host);
+        }
+    }
+
+    private sealed class CancelingExportHostStarter : IRazorDocsExportHostStarter
+    {
+        public Task<IHost> BuildAndStartAsync(
+            RazorDocsExportArgs args,
+            string environmentName,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromException<IHost>(new OperationCanceledException(cancellationToken));
+        }
+    }
+
+    private sealed class ControllableExportHostStarter : IRazorDocsExportHostStarter
+    {
+        private readonly TaskCompletionSource<IHost> _hostCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<object?> _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public CancellationToken StartupToken { get; private set; }
+
+        public Task<IHost> BuildAndStartAsync(
+            RazorDocsExportArgs args,
+            string environmentName,
+            CancellationToken cancellationToken)
+        {
+            StartupToken = cancellationToken;
+            _started.TrySetResult(null);
+            return _hostCompletion.Task;
+        }
+
+        public void Complete(IHost host)
+        {
+            _hostCompletion.TrySetResult(host);
+        }
+
+        public void Fail(Exception exception)
+        {
+            _hostCompletion.TrySetException(exception);
+        }
+    }
+
+    private sealed class TrackingHost : IHost
+    {
+        private readonly bool _throwOnStop;
+        private readonly ServiceProvider _services;
+        private readonly TaskCompletionSource<object?> _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TrackingHost(string boundAddress = "http://127.0.0.1:51234", bool throwOnStop = false)
+        {
+            _throwOnStop = throwOnStop;
+            _services = new ServiceCollection()
+                .AddSingleton<IServer>(new FakeServer(boundAddress))
+                .BuildServiceProvider();
+        }
+
+        public IServiceProvider Services => _services;
+
+        public bool StopCalled { get; private set; }
+
+        public bool DisposeCalled { get; private set; }
+
+        public Task Disposed => _disposed.Task;
+
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            StopCalled = true;
+            if (_throwOnStop)
+            {
+                throw new InvalidOperationException("Host stop failed.");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public void Dispose()
+        {
+            DisposeCalled = true;
+            _services.Dispose();
+            _disposed.TrySetResult(null);
+        }
+    }
+
+    private sealed class FakeServer : IServer
+    {
+        public FakeServer(string boundAddress)
+        {
+            var addresses = new ServerAddressesFeature();
+            addresses.Addresses.Add(boundAddress);
+            Features.Set<IServerAddressesFeature>(addresses);
+        }
+
+        public IFeatureCollection Features { get; } = new FeatureCollection();
+
+        public Task StartAsync<TContext>(
+            Microsoft.AspNetCore.Hosting.Server.IHttpApplication<TContext> application,
+            CancellationToken cancellationToken)
+            where TContext : notnull
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
+        public void Dispose()
+        {
         }
     }
 

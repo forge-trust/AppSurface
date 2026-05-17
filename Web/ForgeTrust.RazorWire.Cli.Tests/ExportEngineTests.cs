@@ -219,7 +219,7 @@ public class ExportEngineTests
     [Fact]
     public async Task ExtractAssets_Should_Extract_Turbo_Frame_Dependencies_During_Run()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -246,7 +246,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Throw_When_Seed_File_Is_Missing()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
         try
         {
@@ -313,7 +313,7 @@ public class ExportEngineTests
                 baseUrl: "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs.html")));
             Assert.Contains("/docs", handler.RequestPaths);
             Assert.DoesNotContain("/", context.RouteOutcomes.Keys);
         }
@@ -329,7 +329,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Fallback_To_Root_When_InMemory_Seed_Routes_Have_No_Valid_Routes()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -345,7 +345,7 @@ public class ExportEngineTests
                 baseUrl: "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
         }
         finally
         {
