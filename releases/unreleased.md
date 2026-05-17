@@ -38,7 +38,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 ### Console and CLI polish
 
 - AppSurface console apps can now opt into a command-first output contract so public CLI help and validation flows stay quiet instead of printing Generic Host lifecycle chatter.
-- AppSurface now plans two public CLI tools: `appsurface` for repository-level AppSurface workflows, starting with `appsurface docs` for RazorDocs preview, and `razorwire` for RazorWire-specific export workflows.
+- AppSurface now plans two public CLI tools: `appsurface` for repository-level AppSurface workflows, starting with `appsurface docs` for RazorDocs preview and `appsurface docs export` for repo-owned RazorDocs static export, and `razorwire` for RazorWire-specific export workflows.
 - RazorWire CLI now uses that contract for `--help`, `export --help`, invalid option output, and missing-source validation while still preserving command-owned export progress logs.
 - RazorWire CLI now names export seed-route files with `-r|--seeds`, matching the seed terminology used throughout the exporter and docs.
 - The shared console startup seam now exposes `ConsoleOptions` and `ConsoleOutputMode`, so future public AppSurface CLIs can adopt the same behavior without forking startup logic.
@@ -124,6 +124,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorDocs generated C# API references can now render per-symbol source links for documented types, methods, properties, and enums that point at the exact source file and line, with immutable refs available when hosts want links pinned to the code version used to build the docs.
 - The primary RazorDocs Pages deployment now configures commit-pinned symbol source links, so generated C# API `Source` chips resolve to the exact file and line from the CI build revision.
 - Pull requests now run the RazorDocs CDN static export during PR validation, while Pages artifact upload and deployment remain limited to `main`, so broken managed links are caught before the public docs pipeline reaches deployment.
+- The primary RazorDocs Pages export now uses `appsurface docs export --repo .` instead of the generic `razorwire export --project` child-process path, so CI exercises the public AppSurface docs command, in-process standalone host startup, strict harvest failure, and CDN validation together.
 - RazorWire CDN export now ignores authoring-only source-navigation anchors, including repo-relative links to common source and project files and app-rendered anchors marked with `data-rw-export-ignore`.
 - RazorDocs snapshot caching is now configurable with `RazorDocs:CacheExpirationMinutes`, so development hosts can shorten reuse while production hosts can choose a longer docs and search-index cache lifetime.
 - Shared RazorDocs badges, metadata chips, provenance strips, and trust bars now live in the shared package stylesheet while `search.css` stays focused on search-specific UI.

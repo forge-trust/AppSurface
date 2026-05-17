@@ -99,9 +99,9 @@ jobs:
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj -- verify
 
-      - name: Build RazorWire CLI (Release)
+      - name: Build AppSurface CLI (Release)
         run: |
-          dotnet build Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj -c Release
+          dotnet build Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release
 
       - name: Export RazorDocs static site with CDN validation
         env:
@@ -113,12 +113,13 @@ jobs:
           RazorDocs__Contributor__LastUpdatedMode: Git
         run: |
           printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/razordocs-seeds.txt"
-          dotnet run --project Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj -c Release -- \
-            export \
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+            docs export \
+            --repo . \
             --mode cdn \
             --seeds "$RUNNER_TEMP/razordocs-seeds.txt" \
             --output "$RUNNER_TEMP/razordocs-pages" \
-            --project Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj
+            --strict
 
       - name: Upload Pages artifact
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}

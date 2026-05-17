@@ -123,12 +123,15 @@ For both `--project` and `--dll`:
 
 When the target app hosts RazorDocs:
 
+- Use `appsurface docs export --repo .` for AppSurface's own repository docs surface. That command starts the AppSurface Docs standalone host in-process, uses the same packaged static-asset fallbacks as preview, derives default seeds from RazorDocs routing, and keeps `-r` reserved for `--repo`.
 - Export the live unreleased preview surface from its configured live docs root, such as `/docs` when versioning is off, `/docs/next` when versioning is on with defaults, or `/foo/bar/next` when the host sets `RazorDocs:Routing:RouteRootPath` to `/foo/bar`.
 - Export exact published release trees as standalone static subtrees that already contain their own `index.html`, `search.html`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, section routes, and detail pages.
 - Treat those exact release trees as immutable publish artifacts. The RazorDocs runtime mounts them later under `{RouteRootPath}/v/{version}` and may also mount the recommended one at `{RouteRootPath}`.
 - The exporter recognizes custom-root RazorDocs pages by their RazorDocs client configuration or `doc-content` frame, not just by a `/docs` URL prefix. This keeps static partial generation working for mounted roots such as `/foo/bar/next`.
 - Use `--seeds` when you want deterministic seeds for docs-specific surfaces instead of relying only on crawl discovery.
 - For release publishing, set `RazorDocs__Harvest__FailOnFailure=true` in the parent environment before `razorwire export --project` or `razorwire export --dll`. The launched target app inherits that setting, fails before listening when aggregate harvest health is `Failed`, and the export command surfaces the target app's startup output. The strict exception summary is redacted, but ordinary target host logs may still contain operator diagnostics such as repository paths or raw exception messages.
+
+Keep `razorwire export` for arbitrary RazorWire apps where the CLI must launch a `--project`, launch a `--dll`, or crawl a pre-running `--url`. Use `appsurface docs export` when the AppSurface CLI owns the RazorDocs repository host and should avoid the generic child-process startup path.
 
 **Example:**
 

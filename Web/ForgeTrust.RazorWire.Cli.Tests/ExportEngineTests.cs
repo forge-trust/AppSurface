@@ -295,6 +295,68 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_Use_InMemory_Seed_Routes_When_No_Seed_File_Is_Provided()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var handler = new DocsSeedHandler();
+            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/docs"],
+                baseUrl: "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Combine(tempDir, "docs.html")));
+            Assert.Contains("/docs", handler.RequestPaths);
+            Assert.DoesNotContain("/", context.RouteOutcomes.Keys);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fallback_To_Root_When_InMemory_Seed_Routes_Have_No_Valid_Routes()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var handler = new TestHttpMessageHandler();
+            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["mailto:test@example.com", "javascript:void(0)", ""],
+                baseUrl: "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Normalize_Absolute_Seed_Urls_Against_BaseUrl_PathBase()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -1496,6 +1558,21 @@ public class ExportEngineTests
 
             return path == "/app/docs"
                 ? Html("<html><body><h1>Path base docs</h1></body></html>")
+                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class DocsSeedHandler : HttpMessageHandler
+    {
+        public List<string> RequestPaths { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            RequestPaths.Add(path);
+
+            return path == "/docs"
+                ? Html("<html><body><h1>Docs</h1></body></html>")
                 : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         }
     }
