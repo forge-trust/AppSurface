@@ -142,6 +142,30 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void ExtractWithDiagnostics_ShouldTreatCaseOnlyLocalizationValuesAsEquivalent()
+    {
+        var markdown = """
+            ---
+            locale: FR
+            translation_key: Guides/Getting-Started
+            locale_fallback: disabled
+            localization:
+              locale: fr
+              translation_key: guides/getting-started
+              locale_fallback: Disabled
+            ---
+            # Démarrer
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Equal("FR", result.Metadata?.Localization?.Locale);
+        Assert.Equal("Guides/Getting-Started", result.Metadata?.Localization?.TranslationKey);
+        Assert.Equal(RazorDocsLocaleFallbackMode.Disabled, result.Metadata?.Localization?.LocaleFallback);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
     public void Extract_ShouldParseFeaturedPageGroups()
     {
         var markdown = """

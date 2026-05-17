@@ -300,6 +300,33 @@ public sealed class LocalizedDocsGraphBuilderTests
     }
 
     [Fact]
+    public void RouteCatalog_ShouldAvoidDoublePrefixForFolderInferredLocaleCandidates()
+    {
+        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var docs = new[]
+        {
+            RazorDocsLocalizationFixture.MarkdownDoc("guides/getting-started.md", "Getting started"),
+            RazorDocsLocalizationFixture.MarkdownDoc(
+                "fr/guides/getting-started.md",
+                "Démarrer",
+                translationKey: "guides/getting-started")
+        };
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        var graph = new LocalizedDocsGraphBuilder(options).Build(docs, catalog);
+
+        var candidates = catalog.BuildLocalizedRouteCandidates(graph, options);
+
+        Assert.Contains(
+            candidates,
+            candidate => candidate.Locale == "fr"
+                         && candidate.SourcePath == "fr/guides/getting-started.md"
+                         && candidate.PublicRoutePath == "fr/guides/getting-started");
+        Assert.DoesNotContain(
+            candidates,
+            candidate => candidate.PublicRoutePath == "fr/fr/guides/getting-started");
+    }
+
+    [Fact]
     public void RouteCatalog_ShouldBuildHomeLocaleRouteCandidateWithoutTrailingSlash()
     {
         var options = RazorDocsLocalizationFixture.CreateOptions();

@@ -293,9 +293,12 @@ internal sealed class LocalizedDocsGraphBuilder
             }
         }
 
+        var folderSourceWithoutLocalePrefix = explicitLocale is null && folderLocale is not null
+            ? StripFolderLocalePrefix(sourcePath, folderLocale)
+            : null;
         var routeSourcePath = !string.IsNullOrWhiteSpace(doc.Metadata?.CanonicalSlug)
             ? sourcePath
-            : sourceWithoutSuffix ?? sourcePath;
+            : sourceWithoutSuffix ?? folderSourceWithoutLocalePrefix ?? sourcePath;
 
         return new ResolvedLocalizationFacts(
             normalizedLocale,
@@ -401,6 +404,23 @@ internal sealed class LocalizedDocsGraphBuilder
 
         locale = configuredLocale.Code;
         return true;
+    }
+
+    private string? StripFolderLocalePrefix(string sourcePath, string folderLocale)
+    {
+        if (!_localesByCode.TryGetValue(folderLocale, out var configuredLocale))
+        {
+            return null;
+        }
+
+        var routePrefix = configuredLocale.ResolveRoutePrefix().Trim('/');
+        if (routePrefix.Length == 0
+            || !sourcePath.StartsWith(routePrefix + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return sourcePath[(routePrefix.Length + 1)..];
     }
 
     private string? NormalizeConfiguredLocale(string value)

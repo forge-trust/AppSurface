@@ -557,9 +557,10 @@ internal static class MarkdownFrontMatterParser
         string? nestedValue,
         List<RazorDocsMetadataDiagnostic> diagnostics)
     {
+        var comparison = GetLocalizationConflictComparison(flatFieldPath);
         if (flatValue is null
             || nestedValue is null
-            || string.Equals(flatValue, nestedValue, StringComparison.Ordinal))
+            || string.Equals(flatValue, nestedValue, comparison))
         {
             return;
         }
@@ -571,6 +572,13 @@ internal static class MarkdownFrontMatterParser
                 $"The flat localization {fieldName} conflicts with {nestedFieldPath}.",
                 "RazorDocs prefers the flat front matter value and ignores the nested value for that field.",
                 $"Keep only {flatFieldPath} or {nestedFieldPath}, or make both values match."));
+    }
+
+    private static StringComparison GetLocalizationConflictComparison(string flatFieldPath)
+    {
+        return flatFieldPath is "locale" or "translation_key" or "locale_fallback"
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
     }
 
     private sealed class FrontMatterDocument
