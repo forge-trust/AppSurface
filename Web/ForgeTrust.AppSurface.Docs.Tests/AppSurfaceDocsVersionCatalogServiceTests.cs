@@ -14,7 +14,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
 
     public AppSurfaceDocsVersionCatalogServiceTests()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "appsurfacedocs-version-catalog-tests", Guid.NewGuid().ToString("N"));
+        _tempDirectory = Path.Join(Path.GetTempPath(), "appsurfacedocs-version-catalog-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDirectory);
     }
 

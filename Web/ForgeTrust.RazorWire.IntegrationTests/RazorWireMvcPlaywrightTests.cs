@@ -1,9 +1,10 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Net;
 using System.Text.RegularExpressions;
+using CliWrap;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Playwright;
+using CliCommandResult = CliWrap.CommandResult;
 
 namespace ForgeTrust.RazorWire.IntegrationTests;
 
@@ -839,7 +840,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
     private readonly ConcurrentQueue<string> _appLogs = new();
     private readonly TaskCompletionSource<string> _boundBaseUrlSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private Process? _appProcess;
+    private CliWrapProcessLease? _appProcess;
     private IPlaywright? _playwright;
 
     public IBrowser Browser { get; private set; } = null!;
@@ -857,7 +858,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
             Headless = true
         });
 
-        _appProcess = StartExampleApp("http://127.0.0.1:0");
+        StartExampleApp("http://127.0.0.1:0");
         var boundBaseUrl = await WaitForBoundBaseUrlAsync(TimeSpan.FromSeconds(60));
         var browserBaseUrl = ReplaceLoopbackIpHostWithLocalhost(boundBaseUrl);
 
@@ -882,13 +883,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
         }
         finally
         {
-            if (_appProcess is not null && !_appProcess.HasExited)
-            {
-                _appProcess.Kill(entireProcessTree: true);
-                await _appProcess.WaitForExitAsync();
-            }
-
-            _appProcess?.Dispose();
+            await DisposeAppProcessAsync();
         }
     }
 
@@ -921,7 +916,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
         }
     }
 
-    private Process StartExampleApp(string baseUrl)
+    private void StartExampleApp(string baseUrl)
     {
         const string readmeProjectPath = "examples/razorwire-mvc/RazorWireWebExample.csproj";
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
@@ -932,38 +927,37 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
             throw new FileNotFoundException("Could not find RazorWire MVC example project.", projectPath);
         }
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            WorkingDirectory = repoRoot,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
+        var appProcess = CliWrapProcessLease.Start(Cli.Wrap("dotnet")
+            .WithArguments(BuildExampleAppArguments(repoRoot, readmeProjectPath))
+            .WithWorkingDirectory(repoRoot)
+            .WithEnvironmentVariables(new Dictionary<string, string?>
+            {
+                ["ASPNETCORE_URLS"] = baseUrl,
+                ["DOTNET_ENVIRONMENT"] = "Development",
+                ["ASPNETCORE_ENVIRONMENT"] = "Development"
+            })
+            .WithValidation(CommandResultValidation.None)
+            .WithStandardOutputPipe(PipeTarget.ToDelegate(CaptureAppLog))
+            .WithStandardErrorPipe(PipeTarget.ToDelegate(CaptureAppLog)));
+        _appProcess = appProcess;
 
-        AddExampleAppArguments(startInfo, repoRoot, readmeProjectPath);
-        startInfo.Environment["ASPNETCORE_URLS"] = baseUrl;
-        startInfo.Environment["DOTNET_ENVIRONMENT"] = "Development";
-        startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
+        _ = appProcess.Completion.ContinueWith(
+            task =>
+            {
+                if (appProcess.IsCancellationRequested)
+                {
+                    return;
+                }
 
-        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, args) => CaptureAppLog(args.Data);
-        process.ErrorDataReceived += (_, args) => CaptureAppLog(args.Data);
-        process.Exited += (_, _) =>
-        {
-            _boundBaseUrlSource.TrySetException(
-                new InvalidOperationException($"RazorWire MVC example exited before publishing a listening URL.{Environment.NewLine}{GetRecentLogs()}"));
-        };
-
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        return process;
+                _boundBaseUrlSource.TrySetException(
+                    new InvalidOperationException($"RazorWire MVC example {DescribeExampleAppExit(task)} before publishing a listening URL.{Environment.NewLine}{GetRecentLogs()}"));
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
-    private static void AddExampleAppArguments(ProcessStartInfo startInfo, string repoRoot, string projectPath)
+    private static IReadOnlyList<string> BuildExampleAppArguments(string repoRoot, string projectPath)
     {
         var configuration = ResolveCurrentConfiguration();
         var targetFramework = "net10.0";
@@ -978,16 +972,36 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
 
         if (File.Exists(builtAssemblyPath))
         {
-            startInfo.ArgumentList.Add(builtAssemblyPath);
+            return [builtAssemblyPath];
+        }
+
+        return ["run", "--project", projectPath, "--no-launch-profile", "--configuration", configuration];
+    }
+
+    private static string DescribeExampleAppExit(Task<CliCommandResult> task)
+    {
+        if (task.IsFaulted)
+        {
+            return $"failed with {task.Exception.GetBaseException().Message}";
+        }
+
+        if (task.IsCanceled)
+        {
+            return "was canceled";
+        }
+
+        return $"exited with code {task.Result.ExitCode}";
+    }
+
+    private async ValueTask DisposeAppProcessAsync()
+    {
+        if (_appProcess is null)
+        {
             return;
         }
 
-        startInfo.ArgumentList.Add("run");
-        startInfo.ArgumentList.Add("--project");
-        startInfo.ArgumentList.Add(projectPath);
-        startInfo.ArgumentList.Add("--no-launch-profile");
-        startInfo.ArgumentList.Add("--configuration");
-        startInfo.ArgumentList.Add(configuration);
+        await _appProcess.DisposeAsync();
+        _appProcess = null;
     }
 
     private static string ResolveCurrentConfiguration()
@@ -1041,9 +1055,14 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
 
         while (!timeoutCts.Token.IsCancellationRequested)
         {
-            if (_appProcess is null || _appProcess.HasExited)
+            if (_appProcess is null)
             {
                 throw new InvalidOperationException($"RazorWire MVC example exited before it became ready.{Environment.NewLine}{GetRecentLogs()}");
+            }
+
+            if (_appProcess.Completion.IsCompleted)
+            {
+                throw new InvalidOperationException($"RazorWire MVC example {DescribeExampleAppExit(_appProcess.Completion)} before it became ready.{Environment.NewLine}{GetRecentLogs()}");
             }
 
             try
@@ -1205,6 +1224,47 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
     private string GetRecentLogs()
     {
         return string.Join(Environment.NewLine, _appLogs);
+    }
+
+    private sealed class CliWrapProcessLease : IAsyncDisposable
+    {
+        private readonly CancellationTokenSource _cancellation = new();
+        private readonly CommandTask<CliCommandResult> _commandTask;
+
+        private CliWrapProcessLease(CliWrap.Command command)
+        {
+            _commandTask = command.ExecuteAsync(_cancellation.Token);
+        }
+
+        public Task<CliCommandResult> Completion => _commandTask.Task;
+
+        public bool IsCancellationRequested => _cancellation.IsCancellationRequested;
+
+        public static CliWrapProcessLease Start(CliWrap.Command command)
+        {
+            return new CliWrapProcessLease(command);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            using var cancellation = _cancellation;
+            using var commandTask = _commandTask;
+
+            await cancellation.CancelAsync();
+
+            try
+            {
+                await commandTask.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+                // CliWrap converts cancellation into process-tree termination for this test child process.
+            }
+            catch (TimeoutException)
+            {
+                // Best-effort fixture cleanup should not hide the original test failure.
+            }
+        }
     }
 
 }

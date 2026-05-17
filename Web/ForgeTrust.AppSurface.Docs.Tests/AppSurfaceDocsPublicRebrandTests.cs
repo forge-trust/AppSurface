@@ -94,7 +94,18 @@ public sealed class AppSurfaceDocsPublicRebrandTests
             throw new InvalidOperationException($"Public surface root must be relative: {relativePath}");
         }
 
-        return Path.Combine(repoRoot, relativePath);
+        var repoRootFullPath = Path.GetFullPath(repoRoot);
+        var candidateFullPath = Path.GetFullPath(Path.Join(repoRootFullPath, relativePath));
+        var relativeToRoot = Path.GetRelativePath(repoRootFullPath, candidateFullPath);
+        if (Path.IsPathRooted(relativeToRoot)
+            || relativeToRoot.Equals("..", StringComparison.Ordinal)
+            || relativeToRoot.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            || relativeToRoot.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Public surface root must stay under the repository root: {relativePath}");
+        }
+
+        return candidateFullPath;
     }
 
     private static IEnumerable<string> EnumerateProseFiles(string path)

@@ -12,7 +12,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
     public AppSurfaceDocsPublishedTreeHandlerTests()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "appsurfacedocs-published-tree-handler-tests", Guid.NewGuid().ToString("N"));
+        _tempDirectory = Path.Join(Path.GetTempPath(), "appsurfacedocs-published-tree-handler-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDirectory);
     }
 

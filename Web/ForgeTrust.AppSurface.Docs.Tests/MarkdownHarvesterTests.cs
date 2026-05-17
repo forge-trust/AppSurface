@@ -18,7 +18,7 @@ public class MarkdownHarvesterTests : IDisposable
     {
         _loggerFake = A.Fake<ILogger<MarkdownHarvester>>();
         _harvester = new MarkdownHarvester(_loggerFake);
-        _testRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MD", Guid.NewGuid().ToString());
+        _testRoot = Path.Join(Path.GetTempPath(), "AppSurfaceDocsTests_MD", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testRoot);
     }
 

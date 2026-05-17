@@ -1,8 +1,9 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
+using CliWrap;
+using CliCommand = CliWrap.Cli;
 
 namespace ForgeTrust.RazorWire.Cli.Tests;
 
@@ -29,6 +30,7 @@ public sealed class ToolPackageContractTests
             repositoryRoot,
             new Dictionary<string, string?>
             {
+                ["MSBUILDDISABLENODEREUSE"] = "1",
                 ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
                 ["DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE"] = "1",
                 ["DOTNET_NOLOGO"] = "1",
@@ -41,6 +43,7 @@ public sealed class ToolPackageContractTests
                 ["DOTNET_CLI_HOME"] = cliHomeDirectory.Path,
                 // Keep package assets pointed at a stable cache while isolating .NET CLI first-run state.
                 ["NUGET_PACKAGES"] = nugetPackagesDirectory,
+                ["MSBUILDDISABLENODEREUSE"] = "1",
                 ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
                 ["DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE"] = "1",
                 ["DOTNET_NOLOGO"] = "1",
@@ -208,85 +211,27 @@ public sealed class ToolPackageContractTests
             params string[] arguments)
         {
             using var timeoutSource = new CancellationTokenSource(timeout);
-            using var process = new Process();
-            process.StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            foreach (var argument in arguments)
-            {
-                process.StartInfo.ArgumentList.Add(argument);
-            }
-
-            foreach (var (key, value) in environmentOverrides)
-            {
-                if (value == null)
-                {
-                    process.StartInfo.Environment.Remove(key);
-                }
-                else
-                {
-                    process.StartInfo.Environment[key] = value;
-                }
-            }
-
+            var stdout = new StringBuilder();
+            var stderr = new StringBuilder();
             var commandLine = BuildCommandLine(fileName, arguments);
-            if (!process.Start())
-            {
-                throw new InvalidOperationException($"Unable to start process: {commandLine}");
-            }
-
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            var timedOut = false;
 
             try
             {
-                await process.WaitForExitAsync(timeoutSource.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                timedOut = true;
-                try
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-                catch (InvalidOperationException)
-                {
-                    // The process may have exited between the timeout and the kill attempt.
-                }
+                var result = await CliCommand.Wrap(fileName)
+                    .WithArguments(arguments)
+                    .WithWorkingDirectory(workingDirectory)
+                    .WithEnvironmentVariables(environmentOverrides)
+                    .WithValidation(CommandResultValidation.None)
+                    .WithStandardOutputPipe(PipeTarget.ToStringBuilder(stdout))
+                    .WithStandardErrorPipe(PipeTarget.ToStringBuilder(stderr))
+                    .ExecuteAsync(timeoutSource.Token);
 
-                await process.WaitForExitAsync();
+                return new ToolProcessResult(commandLine, result.ExitCode, TimedOut: false, stdout.ToString(), stderr.ToString());
             }
-
-            string stdout;
-            string stderr;
-            try
+            catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested)
             {
-                stdout = await stdoutTask.WaitAsync(TimeSpan.FromSeconds(5));
+                return new ToolProcessResult(commandLine, ExitCode: null, TimedOut: true, stdout.ToString(), stderr.ToString());
             }
-            catch (TimeoutException)
-            {
-                stdout = string.Empty;
-            }
-
-            try
-            {
-                stderr = await stderrTask.WaitAsync(TimeSpan.FromSeconds(5));
-            }
-            catch (TimeoutException)
-            {
-                stderr = string.Empty;
-            }
-
-            int? exitCode = timedOut ? null : process.ExitCode;
-            return new ToolProcessResult(commandLine, exitCode, timedOut, stdout, stderr);
         }
 
         private static string BuildCommandLine(string fileName, IReadOnlyList<string> arguments)

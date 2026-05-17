@@ -21,7 +21,7 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
 
     public AppSurfaceDocsVersionArchiveControllerTests()
     {
-        _tempDirectory = Path.Combine(Path.GetTempPath(), "appsurfacedocs-version-archive-controller-tests", Guid.NewGuid().ToString("N"));
+        _tempDirectory = Path.Join(Path.GetTempPath(), "appsurfacedocs-version-archive-controller-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDirectory);
     }
 

@@ -17,7 +17,7 @@ public class CSharpDocHarvesterTests : IDisposable
     {
         var loggerFake = A.Fake<ILogger<CSharpDocHarvester>>();
         _harvester = new CSharpDocHarvester(loggerFake);
-        _testRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests", Guid.NewGuid().ToString());
+        _testRoot = Path.Join(Path.GetTempPath(), "AppSurfaceDocsTests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testRoot);
     }
 
