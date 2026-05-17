@@ -165,6 +165,20 @@ public class AppSurfaceStartupTests
         Assert.Equal(1, dep.AfterCalled);
     }
 
+    [Fact]
+    public void RegisterDependencies_CanPrepareGraphBeforeCreateHostBuilder_WithoutRegisteringTwice()
+    {
+        var root = new CountingRootModule();
+        var startup = new DependencyPreparingStartup();
+        var context = new StartupContext([], root);
+
+        startup.PrepareDependencies(context);
+        ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+
+        Assert.Equal(1, root.RegisterDependentModulesCalled);
+        Assert.Contains(context.GetDependencies(), module => module is CountingDepModule);
+    }
+
     private class ServiceFromRoot
     {
     }
@@ -333,6 +347,49 @@ public class AppSurfaceStartupTests
 
     private class TrackingStartup : AppSurfaceStartup<TrackingRootModule>
     {
+        protected override void ConfigureServicesForAppType(StartupContext context, IServiceCollection services)
+        {
+        }
+    }
+
+    private class CountingDepModule : IAppSurfaceModule
+    {
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+        }
+    }
+
+    private class CountingRootModule : IAppSurfaceHostModule
+    {
+        public int RegisterDependentModulesCalled { get; private set; }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+            RegisterDependentModulesCalled++;
+            builder.AddModule<CountingDepModule>();
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+    }
+
+    private class DependencyPreparingStartup : AppSurfaceStartup<CountingRootModule>
+    {
+        public void PrepareDependencies(StartupContext context) => RegisterDependencies(context);
+
         protected override void ConfigureServicesForAppType(StartupContext context, IServiceCollection services)
         {
         }

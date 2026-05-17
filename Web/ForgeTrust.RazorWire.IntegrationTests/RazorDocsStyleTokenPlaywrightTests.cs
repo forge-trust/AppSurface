@@ -63,12 +63,12 @@ public sealed class RazorDocsStyleTokenPlaywrightTests
             }
             """);
 
-        AssertCssColor(searchStyles[0], "34, 211, 238");
-        AssertCssColor(searchStyles[1], "34, 211, 238");
-        AssertCssColor(searchStyles[2], "226, 232, 240");
-        AssertCssColor(searchStyles[3], "8, 47, 73");
-        AssertCssColor(searchStyles[4], "207, 250, 254");
-        AssertCssColor(searchStyles[5], "34, 211, 238");
+        AssertCssColor(searchStyles[0], "37, 99, 235");
+        AssertCssColor(searchStyles[1], "37, 99, 235");
+        AssertCssColor(searchStyles[2], "229, 231, 235");
+        AssertCssColor(searchStyles[3], "37, 99, 235");
+        AssertCssColor(searchStyles[4], "204, 251, 241");
+        AssertCssColor(searchStyles[5], "20, 184, 166");
 
         await RazorDocsRouteHelper.GotoFirstAvailableAsync(
             page,
@@ -104,10 +104,10 @@ public sealed class RazorDocsStyleTokenPlaywrightTests
             }
             """);
 
-        AssertCssColor(detailStyles[0], "34, 211, 238");
-        AssertCssColor(detailStyles[1], "125, 211, 252");
-        AssertCssColor(detailStyles[2], "51, 65, 85");
-        AssertCssColor(detailStyles[3], "15, 23, 42");
+        AssertCssColor(detailStyles[0], "37, 99, 235");
+        AssertCssColor(detailStyles[1], "147, 197, 253");
+        AssertCssColor(detailStyles[2], "65, 87, 121");
+        AssertCssColor(detailStyles[3], "13, 24, 42");
 
         await RazorDocsRouteHelper.GotoFirstAvailableAsync(
             page,
@@ -138,10 +138,10 @@ public sealed class RazorDocsStyleTokenPlaywrightTests
             }
             """);
 
-        AssertCssColor(trustStyles[0], "51, 65, 85");
-        AssertCssColor(trustStyles[1], "103, 232, 249");
-        AssertCssColor(trustStyles[2], "34, 211, 238");
-        AssertCssColor(trustStyles[3], "103, 232, 249");
+        AssertCssColor(trustStyles[0], "65, 87, 121");
+        AssertCssColor(trustStyles[1], "20, 184, 166");
+        AssertCssColor(trustStyles[2], "37, 99, 235");
+        AssertCssColor(trustStyles[3], "20, 184, 166");
     }
 
     private static void AssertCssColor(string actual, string expectedRgbChannels)

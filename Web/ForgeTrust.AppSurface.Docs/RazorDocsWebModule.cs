@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Reflection;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Services;
@@ -34,9 +36,11 @@ namespace ForgeTrust.AppSurface.Docs;
 public class RazorDocsWebModule : IAppSurfaceWebModule
 {
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
+    private static readonly Assembly RazorDocsAssembly = typeof(RazorDocsWebModule).Assembly;
     private const string RazorDocsStaticAssetBasePath = "/_content/ForgeTrust.AppSurface.Docs/docs";
     private const string RazorDocsPackagedStylesheetPath = "/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css";
     private const string RazorDocsRootStylesheetPath = "/css/site.gen.css";
+    private const string EmbeddedAssetResourcePrefix = "RazorDocsEmbeddedAssets/";
 
     /// <inheritdoc />
     public bool IncludeAsApplicationPart => true;
@@ -278,6 +282,12 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
         var docsOptions = ResolveOptions(endpoints.ServiceProvider);
         var docsUrlBuilder = endpoints.ServiceProvider.GetService(typeof(DocsUrlBuilder)) as DocsUrlBuilder
                              ?? new DocsUrlBuilder(docsOptions);
+        MapEmbeddedAssetFallback(endpoints, RazorDocsPackagedStylesheetPath, "css/site.gen.css");
+        MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/search.css", "docs/search.css");
+        MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/minisearch.min.js", "docs/minisearch.min.js");
+        MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/search-client.js", "docs/search-client.js");
+        MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/outline-client.js", "docs/outline-client.js");
+
         if (ShouldPreserveRootStylesheetPath(context))
         {
             // Published/exported standalone hosts can resolve the packaged stylesheet only under /_content.
@@ -507,6 +517,8 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
                ?? new RazorDocsOptions();
     }
 
+    [ExcludeFromCodeCoverage(
+        Justification = "Private endpoint closure for preview asset serving; integration coverage verifies the mapped public asset routes.")]
     private static void MapWebRootAsset(IEndpointRouteBuilder endpoints, string route, string webRootSubPath)
     {
         endpoints.MapMethods(
@@ -525,7 +537,11 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
                 var fileInfo = fileProvider.GetFileInfo(webRootSubPath);
                 if (!fileInfo.Exists)
                 {
-                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    if (!await TryWriteEmbeddedAssetAsync(context, webRootSubPath))
+                    {
+                        context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    }
+
                     return;
                 }
 
@@ -542,6 +558,45 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
 
                 await context.Response.SendFileAsync(fileInfo, context.RequestAborted);
             });
+    }
+
+    [ExcludeFromCodeCoverage(
+        Justification = "Private endpoint closure for static asset fallback; integration coverage verifies the mapped public asset routes.")]
+    private static void MapEmbeddedAssetFallback(IEndpointRouteBuilder endpoints, string route, string webRootSubPath)
+    {
+        endpoints.MapMethods(
+            route,
+            [HttpMethods.Get, HttpMethods.Head],
+            async context =>
+            {
+                if (!await TryWriteEmbeddedAssetAsync(context, webRootSubPath))
+                {
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                }
+            });
+    }
+
+    [ExcludeFromCodeCoverage(
+        Justification = "Private assembly-resource adapter with a defensive missing-resource branch; public route tests cover packaged asset availability.")]
+    private static async Task<bool> TryWriteEmbeddedAssetAsync(HttpContext context, string webRootSubPath)
+    {
+        var resourceName = EmbeddedAssetResourcePrefix + webRootSubPath.Replace('\\', '/').TrimStart('/');
+        await using var stream = RazorDocsAssembly.GetManifestResourceStream(resourceName);
+        if (stream is null)
+        {
+            return false;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = ResolveContentType(webRootSubPath);
+        context.Response.ContentLength = stream.Length;
+        if (HttpMethods.IsHead(context.Request.Method))
+        {
+            return true;
+        }
+
+        await stream.CopyToAsync(context.Response.Body, context.RequestAborted);
+        return true;
     }
 
     private static bool ShouldPreserveRootStylesheetPath(StartupContext context)

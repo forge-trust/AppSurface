@@ -309,6 +309,13 @@ RazorWire also supports hybrid islands where a server-rendered region mounts a c
 </rw:island>
 ```
 
+RazorWire serves `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`,
+`razorwire.islands.js`, and the package demo assets as normal Razor Class Library
+static web assets when the host has a static-web-assets manifest. The same files
+are also embedded into the `ForgeTrust.RazorWire` assembly and mapped as endpoint
+fallbacks by `RazorWireWebModule`, so packaged command-line hosts can serve the
+runtime even when only compiled assemblies are present.
+
 ## Static Export
 
 RazorWire can generate CDN-ready static output with the installable `razorwire`

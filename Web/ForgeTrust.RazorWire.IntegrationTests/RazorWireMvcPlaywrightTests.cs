@@ -935,7 +935,6 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"run --project {readmeProjectPath} --no-launch-profile",
             WorkingDirectory = repoRoot,
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -943,6 +942,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
             CreateNoWindow = true
         };
 
+        AddExampleAppArguments(startInfo, repoRoot, readmeProjectPath);
         startInfo.Environment["ASPNETCORE_URLS"] = baseUrl;
         startInfo.Environment["DOTNET_ENVIRONMENT"] = "Development";
         startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
@@ -961,6 +961,50 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
         process.BeginErrorReadLine();
 
         return process;
+    }
+
+    private static void AddExampleAppArguments(ProcessStartInfo startInfo, string repoRoot, string projectPath)
+    {
+        var configuration = ResolveCurrentConfiguration();
+        var targetFramework = "net10.0";
+        var builtAssemblyPath = Path.Combine(
+            repoRoot,
+            "examples",
+            "razorwire-mvc",
+            "bin",
+            configuration,
+            targetFramework,
+            "RazorWireWebExample.dll");
+
+        if (File.Exists(builtAssemblyPath))
+        {
+            startInfo.ArgumentList.Add(builtAssemblyPath);
+            return;
+        }
+
+        startInfo.ArgumentList.Add("run");
+        startInfo.ArgumentList.Add("--project");
+        startInfo.ArgumentList.Add(projectPath);
+        startInfo.ArgumentList.Add("--no-launch-profile");
+        startInfo.ArgumentList.Add("--configuration");
+        startInfo.ArgumentList.Add(configuration);
+    }
+
+    private static string ResolveCurrentConfiguration()
+    {
+        var baseDirectoryParts = AppContext.BaseDirectory.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        for (var index = 0; index < baseDirectoryParts.Length - 1; index++)
+        {
+            if (string.Equals(baseDirectoryParts[index], "bin", StringComparison.OrdinalIgnoreCase))
+            {
+                return baseDirectoryParts[index + 1];
+            }
+        }
+
+        return "Debug";
     }
 
     private async Task<string> WaitForBoundBaseUrlAsync(TimeSpan timeout)

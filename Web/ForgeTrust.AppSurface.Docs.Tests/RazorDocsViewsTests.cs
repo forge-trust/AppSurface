@@ -36,15 +36,15 @@ public class RazorDocsViewsTests
         var layout = ReadLayoutMarkup();
         Assert.Contains("id=\"docs-search-input\"", layout);
         Assert.Contains("id=\"docs-search-results\"", layout);
-        Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"search.css\"))", layout);
+        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search.css\")", layout);
         Assert.Contains("docsSearchIndexUrl", layout);
         Assert.Contains("var isSearchPage = string.Equals(", layout);
         Assert.Contains("crossorigin=\"use-credentials\"", layout);
         Assert.Contains("data-rw-search-runtime=\"minisearch\"", layout);
         Assert.DoesNotContain("src=\"~/docs/outline-client.js\"", layout);
         Assert.Contains("window.__razorDocsConfig", layout);
-        Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"search-client.js\"))", layout);
-        Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"minisearch.min.js\"))", layout);
+        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search-client.js\")", layout);
+        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"minisearch.min.js\")", layout);
     }
 
     [Fact]
@@ -80,12 +80,13 @@ public class RazorDocsViewsTests
             c => c.Search(),
             pathBase: "/some-base");
 
-        Assert.Contains("href=\"/some-base/docs/search.css\"", html);
-        Assert.Contains("src=\"/some-base/docs/minisearch.min.js\"", html);
-        Assert.Contains("src=\"/some-base/docs/search-client.js\"", html);
+        Assert.Matches("href=\"/some-base/docs/search\\.css\\?v=[^\"]+\"", html);
+        Assert.Matches("src=\"/some-base/docs/minisearch\\.min\\.js\\?v=[^\"]+\"", html);
+        Assert.Matches("src=\"/some-base/docs/search-client\\.js\\?v=[^\"]+\"", html);
         Assert.Contains("\"docsRootPath\":\"/some-base/docs\"", html);
         Assert.Contains("\"docsSearchUrl\":\"/some-base/docs/search\"", html);
         Assert.Contains("\"docsSearchIndexUrl\":\"/some-base/docs/search-index.json\"", html);
+        Assert.Matches("\"miniSearchUrl\":\"/some-base/docs/minisearch\\.min\\.js\\?v=[^\"]+\"", html);
     }
 
     [Fact]
@@ -168,6 +169,9 @@ public class RazorDocsViewsTests
         Assert.Contains(".docs-outline-context-row[data-outline-empty=\"true\"]", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-toggle-context--rolling", tailwindEntryStylesheet);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", tailwindEntryStylesheet);
+        Assert.Contains("#docs-page-outline .docs-section-copy", tailwindEntryStylesheet);
+        Assert.Contains(".docs-section-copy", tailwindEntryStylesheet);
+        Assert.Contains(".docs-section-copy-fallback", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-toggle", tailwindEntryStylesheet);
         Assert.Contains(".docs-outline-shell[data-outline-enhanced=\"true\"] .docs-outline-label", tailwindEntryStylesheet);
         Assert.Contains("@media (max-width: 79.999rem)", tailwindEntryStylesheet);
@@ -194,6 +198,7 @@ public class RazorDocsViewsTests
         Assert.DoesNotContain(".docs-outline-shell", searchStylesheet);
         Assert.DoesNotContain(".docs-outline-link", searchStylesheet);
         Assert.DoesNotContain(".docs-outline-toggle-context", searchStylesheet);
+        Assert.DoesNotContain(".docs-section-copy", searchStylesheet);
     }
 
     [Fact]
@@ -203,17 +208,25 @@ public class RazorDocsViewsTests
         var searchStylesheet = ReadSearchStylesheetMarkup();
 
         Assert.Contains(":root {", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-surface-canvas: #020617;", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-border-default: #334155;", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-text-default: #e2e8f0;", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-accent-strong: #22d3ee;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-navy: #0d182a;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-blue: #2563eb;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-wordmark-blue: #3b82f6;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-teal: #14b8a6;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-violet: #8b5cf6;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-surface-canvas: #050b17;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-border-default: #314461;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-text-default: #e5e7eb;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-accent-strong: #2563eb;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-wordmark-edge-shadow: rgba(0, 0, 0, 0.45);", tailwindEntryStylesheet);
         Assert.Contains("--docs-focus-ring-inset:", tailwindEntryStylesheet);
 
         Assert.Contains("border: 1px solid var(--docs-color-border-default);", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-accent);", tailwindEntryStylesheet);
+        Assert.Contains("color: var(--docs-brand-wordmark-blue);", tailwindEntryStylesheet);
+        Assert.Contains("text-shadow: 0 1px 2px var(--docs-color-wordmark-edge-shadow);", tailwindEntryStylesheet);
         Assert.Contains("outline: var(--docs-focus-outline);", tailwindEntryStylesheet);
 
-        Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #020617);", searchStylesheet);
+        Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #050b17);", searchStylesheet);
         Assert.Contains("--docs-search-focus-ring-inset: var(--docs-focus-ring-inset,", searchStylesheet);
         Assert.Contains("background: var(--docs-search-color-surface-canvas);", searchStylesheet);
         Assert.Contains("border: 1px solid var(--docs-search-color-border-default);", searchStylesheet);
@@ -266,6 +279,11 @@ public class RazorDocsViewsTests
         Assert.Contains("function addLifecycleEventListener", outlineClient);
         Assert.Contains("removeEventListener", outlineClient);
         Assert.Contains("addListener", outlineClient);
+        Assert.Contains("navigator.clipboard.writeText", outlineClient);
+        Assert.Contains("function enhanceContentCopyTargets", outlineClient);
+        Assert.Contains("function clearCopyArtifacts", outlineClient);
+        Assert.Contains("data-doc-section-copy-inserted", outlineClient);
+        Assert.Contains("data-doc-section-copy-fallback", outlineClient);
     }
 
     [Fact]
@@ -309,7 +327,7 @@ public class RazorDocsViewsTests
         var layout = ReadLayoutMarkup();
 
         Assert.Contains("<div class=\"flex h-full min-h-0 overflow-hidden\">", layout);
-        Assert.Contains("id=\"main-content\" role=\"main\" class=\"h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-slate-900\"", layout);
+        Assert.Contains("id=\"main-content\" role=\"main\" tabindex=\"-1\" class=\"h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-transparent\"", layout);
     }
 
     [Fact]
@@ -386,7 +404,8 @@ public class RazorDocsViewsTests
 
         var html = await RenderDocsViewAsync(services, "Index", c => c.Index());
 
-        Assert.Contains(">AppSurface</h1>", html);
+        Assert.Contains("<h1 class=\"docs-wordmark mt-3 text-3xl sm:text-4xl\">", html);
+        Assert.Contains("App<span class=\"docs-wordmark-highlight\">Surface</span></h1>", html);
         Assert.Contains("Proof before promises.", html);
         Assert.Contains(">Test</h3>", html);
         Assert.Contains("How does composition work?", html);
@@ -2406,13 +2425,24 @@ public class RazorDocsViewsTests
         Assert.NotNull(document.QuerySelector("#docs-page-outline-panel[aria-label='On this page']"));
         Assert.NotNull(document.QuerySelector("a.docs-outline-link[href='#install']"));
         Assert.NotNull(document.QuerySelector("a.docs-outline-link--level-3[href='#verify']"));
+        Assert.NotNull(document.QuerySelector(".docs-section-copy-status[data-doc-section-copy-status][aria-live='polite']"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-item > button.docs-outline-copy[data-doc-section-copy='install'][data-doc-section-copy-title='Install'][aria-label='Copy link to Install']"));
+        Assert.NotNull(document.QuerySelector(".docs-outline-item > button.docs-outline-copy[data-doc-section-copy='verify'][data-doc-section-copy-title='Verify'][aria-label='Copy link to Verify']"));
+        Assert.Equal(2, document.QuerySelectorAll("#docs-page-outline .docs-section-copy-icon[aria-hidden='true'][viewBox='0 0 24 24']").Length);
+        Assert.DoesNotContain(
+            "#",
+            document.QuerySelector(".docs-outline-item > button.docs-outline-copy[data-doc-section-copy='install']")!.TextContent);
+        Assert.Equal(2, document.QuerySelectorAll("#docs-page-outline button[data-doc-section-copy]").Length);
         Assert.Null(document.QuerySelector("a.docs-outline-link[href='#missing-title']"));
+        Assert.Null(document.QuerySelector("button[data-doc-section-copy='missing-title']"));
         Assert.DoesNotContain("Missing fragment", html);
         Assert.Single(document.QuerySelectorAll("#docs-page-outline nav"));
         Assert.True(
             document.QuerySelector(".docs-detail-primary")!.CompareDocumentPosition(document.QuerySelector("#docs-page-outline")!)
                 .HasFlag(DocumentPositions.Following));
-        Assert.NotNull(document.QuerySelector("script[src='/docs/outline-client.js?v=rolling-context'][data-doc-outline-client='true']"));
+        var outlineScript = document.QuerySelector("script[data-doc-outline-client='true']");
+        Assert.NotNull(outlineScript);
+        Assert.Matches("^/docs/outline-client\\.js\\?v=.+", outlineScript!.GetAttribute("src") ?? string.Empty);
         Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", html);
         Assert.DoesNotContain("rounded-2xl border border-slate-800 bg-slate-900/60", html);
 
@@ -2423,7 +2453,9 @@ public class RazorDocsViewsTests
             pathBase: "/tenant");
         var tenantDocument = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(tenantHtml);
 
-        Assert.NotNull(tenantDocument.QuerySelector("script[src='/tenant/docs/outline-client.js?v=rolling-context'][data-doc-outline-client='true']"));
+        var tenantOutlineScript = tenantDocument.QuerySelector("script[data-doc-outline-client='true']");
+        Assert.NotNull(tenantOutlineScript);
+        Assert.Matches("^/tenant/docs/outline-client\\.js\\?v=.+", tenantOutlineScript!.GetAttribute("src") ?? string.Empty);
         Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", tenantHtml);
     }
 
@@ -3385,7 +3417,7 @@ public class RazorDocsViewsTests
 
         Assert.DoesNotContain("href=\"/docs/search-index.json\"", html);
         Assert.DoesNotContain("data-rw-search-runtime=\"minisearch\"", html);
-        Assert.Contains("src=\"/docs/search-client.js\"", html);
+        Assert.Matches("src=\"/docs/search-client\\.js\\?v=[^\"]+\"", html);
         Assert.DoesNotContain("src=\"/docs/outline-client.js\"", html);
         Assert.Contains("id=\"docs-search-input\"", html);
     }

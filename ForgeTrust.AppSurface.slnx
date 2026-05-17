@@ -14,6 +14,10 @@
     <Project Path="Caching/ForgeTrust.AppSurface.Caching/ForgeTrust.AppSurface.Caching.csproj" />
     <Project Path="Caching/ForgeTrust.AppSurface.Caching.Tests/ForgeTrust.AppSurface.Caching.Tests.csproj" />
   </Folder>
+  <Folder Name="/Cli/">
+    <Project Path="Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj" />
+    <Project Path="Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj" />
+  </Folder>
   <Folder Name="/Config/">
     <Project Path="Config/ForgeTrust.AppSurface.Config.Tests/ForgeTrust.AppSurface.Config.Tests.csproj" />
     <Project Path="Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj" />

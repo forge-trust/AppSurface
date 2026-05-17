@@ -15,6 +15,7 @@ The Core library is designed to be lightweight and implementation-agnostic. It p
 - **`StartupContext`**: Provides metadata about the running application, including the user-facing application label, assembly-backed host identity, application discovery assembly, environment, and startup-level console output mode.
 - **`ConsoleOutputMode`**: Shared core enum that lets console-oriented packages describe whether command output should remain host-centric or command-first.
 - **`AppSurfaceStartup`**: The base class that orchestrates the host building and service registration process.
+- **`AppSurfaceStartup.RegisterDependencies`**: A protected seam for specialized startup types that need the module graph prepared before they build the Generic Host.
 
 ## Application labels and host identity
 
@@ -25,6 +26,25 @@ The Core library is designed to be lightweight and implementation-agnostic. It p
 `StartupContext.EntryPointAssembly` is the assembly AppSurface scans for application-owned commands, MVC application parts, Aspire components, and similar extensibility points. It defaults to the root module assembly so test runners and shared outer hosts do not accidentally scan the xUnit/VSTest process entry assembly. When `StartupContext.OverrideEntryPointAssembly` is set, that override applies to both discovery and host manifest identity.
 
 Keep these values separate. ASP.NET static web assets use the host application name to find runtime manifests. Passing a custom display label such as `CustomDocsHost` into the host environment can make static asset requests resolve against a manifest that does not exist. When a test or custom host needs a different manifest identity, set `StartupContext.OverrideEntryPointAssembly` instead of overloading `ApplicationName`.
+
+## Environment resolution
+
+`StartupContext.EnvironmentProvider` defaults to `DefaultEnvironmentProvider`, which keeps AppSurface module decisions aligned with the Generic Host arguments. When startup receives `--environment Development` or `--environment=Development`, `StartupContext.IsDevelopment` reports `true` before module hooks run.
+
+If no command-line environment is supplied, AppSurface falls back to `ASPNETCORE_ENVIRONMENT`, then `DOTNET_ENVIRONMENT`, then `Production`. Pass a custom `IEnvironmentProvider` to `StartupContext` when a test, embedded host, or specialized runner needs a different source of truth. `DefaultEnvironmentProvider.ResolveEnvironmentArgument` is the shared parser for AppSurface hosts: blank, switch-like, and assignment-shaped split values are ignored, while duplicate `--environment` keys use the last valid value to match Microsoft configuration behavior.
+
+Pitfalls:
+
+- Do not read only `IHostEnvironment` when writing module startup decisions. Module hooks receive `StartupContext` before the built host exists.
+- Do not pass `--environment` only to the Generic Host if an AppSurface module also needs the same value. Put it in `StartupContext.Args`, or pass a matching custom `IEnvironmentProvider`.
+
+## Startup dependency graph
+
+`AppSurfaceStartup` registers framework dependencies and root-module dependencies exactly once per `StartupContext`. Standard hosts do not need to call anything directly: the registration happens during host-builder creation before module hooks and service registration run.
+
+Specialized startup types can call the protected `RegisterDependencies(StartupContext context)` seam earlier when they need module-derived options before `IHostBuilder.Build()`. AppSurface Web uses this to resolve `WebOptions.StartupTimeout` before arming its startup watchdog around host creation and startup.
+
+Call `RegisterDependencies` before reading `StartupContext.GetDependencies()` for startup-shaping decisions. Repeated calls with the same context are no-ops, but module registration is still part of startup composition, so avoid calling it from request-time code or from parallel threads.
 
 ## Logging in Static Utilities
 

@@ -18,6 +18,14 @@
   <Import Project="..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets" Condition="Exists('..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets')" />
 
   <ItemGroup>
+    <EmbeddedResource Include="wwwroot\css\site.gen.css" LogicalName="RazorDocsEmbeddedAssets/css/site.gen.css" />
+    <EmbeddedResource Include="wwwroot\docs\minisearch.min.js" LogicalName="RazorDocsEmbeddedAssets/docs/minisearch.min.js" />
+    <EmbeddedResource Include="wwwroot\docs\outline-client.js" LogicalName="RazorDocsEmbeddedAssets/docs/outline-client.js" />
+    <EmbeddedResource Include="wwwroot\docs\search-client.js" LogicalName="RazorDocsEmbeddedAssets/docs/search-client.js" />
+    <EmbeddedResource Include="wwwroot\docs\search.css" LogicalName="RazorDocsEmbeddedAssets/docs/search.css" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="HtmlSanitizer" />
     <PackageReference Include="Markdig" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />

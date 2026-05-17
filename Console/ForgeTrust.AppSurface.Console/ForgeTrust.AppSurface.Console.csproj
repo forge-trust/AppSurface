@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Console.Tests"/>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli"/>
     <InternalsVisibleTo Include="ForgeTrust.RazorWire.Cli"/>
   </ItemGroup>
 </Project>

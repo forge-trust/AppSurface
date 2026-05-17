@@ -26,6 +26,17 @@ public record StartupContext(
 {
     internal ModuleDependencyBuilder Dependencies { get; } = new();
 
+    /// <summary>
+    /// Gets or sets whether startup dependency registration has already run for this context.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see langword="false"/>. <see cref="AppSurfaceStartup{TRootModule}"/> sets this to
+    /// <see langword="true"/> after framework and root-module dependencies are registered so repeated startup-time calls
+    /// are no-ops for the same <see cref="StartupContext"/>. This state is intended for single-threaded startup
+    /// composition and is not safe for concurrent writes.
+    /// </remarks>
+    internal bool DependenciesRegistered { get; set; }
+
     private string? _applicationName = ApplicationName;
 
     /// <summary>
@@ -79,7 +90,7 @@ public record StartupContext(
     /// <summary>
     /// Gets the environment provider for the application.
     /// </summary>
-    public IEnvironmentProvider EnvironmentProvider { get; } = EnvironmentProvider ?? new DefaultEnvironmentProvider();
+    public IEnvironmentProvider EnvironmentProvider { get; } = EnvironmentProvider ?? new DefaultEnvironmentProvider(Args);
 
     /// <summary>
     /// Gets a value indicating whether the current environment is development.

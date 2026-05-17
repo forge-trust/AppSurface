@@ -1,11 +1,14 @@
+using System.Reflection;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire.Caching;
 using ForgeTrust.RazorWire.Forms;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
@@ -17,6 +20,11 @@ namespace ForgeTrust.RazorWire;
 /// </summary>
 public class RazorWireWebModule : IAppSurfaceWebModule
 {
+    private static readonly Assembly RazorWireAssembly = typeof(RazorWireWebModule).Assembly;
+    private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
+    private const string StaticAssetBasePath = "/_content/ForgeTrust.RazorWire";
+    private const string EmbeddedAssetResourcePrefix = "RazorWireEmbeddedAssets/";
+
     /// <summary>
     /// Ensures the application's MVC support level is at least ControllersWithViews.
     /// </summary>
@@ -152,10 +160,62 @@ public class RazorWireWebModule : IAppSurfaceWebModule
     /// <summary>
     /// Maps RazorWire HTTP endpoints into the application's endpoint route builder.
     /// </summary>
+    /// <remarks>
+    /// In addition to the streaming endpoints, this maps assembly-embedded fallbacks for RazorWire's runtime scripts
+    /// and package demo assets. Normal ASP.NET Core static web assets still serve these files first when their manifest
+    /// is available; the endpoint fallback keeps package-hosted tools working when only compiled assemblies are present.
+    /// </remarks>
     /// <param name="context">The startup context providing environment and configuration for module initialization.</param>
     /// <param name="endpoints">The endpoint route builder to which RazorWire routes will be added.</param>
     public void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
     {
+        MapEmbeddedAssetFallback(endpoints, "background.png");
+        MapEmbeddedAssetFallback(endpoints, "exampleJsInterop.js");
+        MapEmbeddedAssetFallback(endpoints, "razorwire/razorwire.js");
+        MapEmbeddedAssetFallback(endpoints, "razorwire/razorwire.islands.js");
+
         endpoints.MapRazorWire();
+    }
+
+    private static void MapEmbeddedAssetFallback(IEndpointRouteBuilder endpoints, string webRootSubPath)
+    {
+        endpoints.MapMethods(
+            $"{StaticAssetBasePath}/{webRootSubPath}",
+            [HttpMethods.Get, HttpMethods.Head],
+            async context =>
+            {
+                if (!await TryWriteEmbeddedAssetAsync(context, webRootSubPath))
+                {
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                }
+            });
+    }
+
+    private static async Task<bool> TryWriteEmbeddedAssetAsync(HttpContext context, string webRootSubPath)
+    {
+        var resourceName = EmbeddedAssetResourcePrefix + webRootSubPath.Replace('\\', '/').TrimStart('/');
+        await using var stream = RazorWireAssembly.GetManifestResourceStream(resourceName);
+        if (stream is null)
+        {
+            return false;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = ResolveContentType(webRootSubPath);
+        context.Response.ContentLength = stream.Length;
+        if (HttpMethods.IsHead(context.Request.Method))
+        {
+            return true;
+        }
+
+        await stream.CopyToAsync(context.Response.Body, context.RequestAborted);
+        return true;
+    }
+
+    private static string ResolveContentType(string relativePath)
+    {
+        return ContentTypeProvider.TryGetContentType(relativePath, out var contentType)
+            ? contentType
+            : "application/octet-stream";
     }
 }
