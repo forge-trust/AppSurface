@@ -189,6 +189,7 @@ internal abstract class RazorDocsPreviewCommand : ICommand
     {
         var hostArgs = BuildHostArgs();
         _logger.LogInformation("Starting RazorDocs preview for {RepositoryRoot}.", hostArgs.RepositoryRoot);
+        using var currentDirectory = CurrentDirectoryScope.ChangeTo(hostArgs.RepositoryRoot);
         await _hostRunner.RunAsync(hostArgs.Args, hostArgs.StartupTimeout, cancellationToken);
     }
 
@@ -278,6 +279,28 @@ internal abstract class RazorDocsPreviewCommand : ICommand
         return StartupTimeoutSeconds == 0
             ? null
             : TimeSpan.FromSeconds(StartupTimeoutSeconds);
+    }
+
+    private sealed class CurrentDirectoryScope : IDisposable
+    {
+        private readonly string _previousDirectory;
+
+        private CurrentDirectoryScope(string previousDirectory)
+        {
+            _previousDirectory = previousDirectory;
+        }
+
+        public static CurrentDirectoryScope ChangeTo(string directory)
+        {
+            var previousDirectory = Directory.GetCurrentDirectory();
+            Directory.SetCurrentDirectory(directory);
+            return new CurrentDirectoryScope(previousDirectory);
+        }
+
+        public void Dispose()
+        {
+            Directory.SetCurrentDirectory(_previousDirectory);
+        }
     }
 }
 
