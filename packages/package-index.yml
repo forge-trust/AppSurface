@@ -89,7 +89,7 @@ packages:
     order: 70
     use_when: Install this first for a normal ASP.NET Core app with AppSurface modules when you want the base web startup pipeline before layering on optional UI or docs packages.
     includes: Base ASP.NET Core hosting, middleware and endpoint composition, conventional browser error-page hooks, and the core AppSurface web module contract.
-    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, or the RazorDocs host.
+    does_not_include: OpenAPI generation, Scalar UI, RazorWire reactive UI, Tailwind build integration, or the AppSurface Docs host.
     start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Web.OpenApi` after `ForgeTrust.AppSurface.Web` when you want generated OpenAPI endpoints.
     expected_dependency_package_ids:
@@ -169,9 +169,9 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 200
-    note: Reusable docs package for harvesting repository docs into a RazorDocs UI. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps.
+    note: Reusable docs package for harvesting repository docs into an AppSurface Docs UI. This is a real package, but it is a proof-host surface rather than the default first install for general AppSurface apps.
     start_here_path: Web/ForgeTrust.AppSurface.Docs/README.md
-    start_here_label: RazorDocs README
+    start_here_label: AppSurface Docs README
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Caching
       - ForgeTrust.AppSurface.Web.Tailwind
@@ -184,7 +184,7 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 210
-    note: Thin export host for serving or exporting RazorDocs. Treat it as a proof host and example app, not a package you install into another project.
+    note: Thin export host for serving or exporting AppSurface Docs. Treat it as a proof host and example app, not a package you install into another project.
     start_here_path: Web/ForgeTrust.AppSurface.Docs.Standalone/README.md
     start_here_label: Standalone host README
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64.csproj
@@ -235,7 +235,7 @@ packages:
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 390
-    note: Planned public `appsurface` .NET tool. The `docs` verb owns RazorDocs preview workflows that were previously sketched as a separate `razordocs` CLI.
+    note: Planned public `appsurface` .NET tool. The `docs` verb owns AppSurface Docs preview workflows that were previously sketched as a separate `appsurfacedocs` CLI.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj

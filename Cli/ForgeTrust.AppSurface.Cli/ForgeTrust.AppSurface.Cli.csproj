@@ -11,7 +11,7 @@
     <ToolCommandName>appsurface</ToolCommandName>
     <PackageId>ForgeTrust.AppSurface.Cli</PackageId>
     <PackageDescription>Command-line tooling for AppSurface repository and documentation workflows.</PackageDescription>
-    <PackageTags>appsurface;razordocs;documentation;cli;dotnet-tool</PackageTags>
+    <PackageTags>appsurface;appsurfacedocs;documentation;cli;dotnet-tool</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

@@ -104,10 +104,10 @@ public class DocAggregator
     private readonly IDocHarvester[] _harvesters;
     private readonly string _repositoryRoot;
     private readonly IMemo _memo;
-    private readonly IRazorDocsHtmlSanitizer _sanitizer;
+    private readonly IAppSurfaceDocsHtmlSanitizer _sanitizer;
     private readonly DocsUrlBuilder _docsUrlBuilder;
     private readonly ILogger<DocAggregator> _logger;
-    private readonly RazorDocsContributorOptions _contributorOptions;
+    private readonly AppSurfaceDocsContributorOptions _contributorOptions;
     private readonly Func<string, CancellationToken, Task<DateTimeOffset?>> _resolveGitLastUpdatedUtcAsync;
     private readonly TimeSpan _harvesterTimeout;
     private readonly TimeSpan _contributorFreshnessTimeout;
@@ -134,7 +134,7 @@ public class DocAggregator
         RegexOptions.NonBacktracking);
 
     private static readonly Regex SymbolSourcePlaceholderRegex = new(
-        """<span\s+data-razordocs-symbol-source="(?<anchor>[^"]*)"\s*></span>""",
+        """<span\s+data-appsurfacedocs-symbol-source="(?<anchor>[^"]*)"\s*></span>""",
         RegexOptions.IgnoreCase | RegexOptions.NonBacktracking);
 
     private static readonly Regex SymbolSourceLinkRegex = new(
@@ -160,17 +160,17 @@ public class DocAggregator
     /// Initializes a new instance of <see cref="DocAggregator"/> with the provided dependencies and determines the repository root.
     /// </summary>
     /// <param name="harvesters">Collection of <see cref="IDocHarvester"/> instances used to harvest documentation nodes.</param>
-    /// <param name="options">Typed RazorDocs options that determine the active source mode and optional repository root override.</param>
+    /// <param name="options">Typed AppSurface Docs options that determine the active source mode and optional repository root override.</param>
     /// <param name="environment">Hosting environment; used to locate the repository root via <see cref="PathUtils.FindRepositoryRoot(string, ILogger)"/> when options do not provide it.</param>
     /// <param name="memo">Memoized cache used to store harvested documentation.</param>
     /// <param name="sanitizer">HTML sanitizer used to clean document content before caching.</param>
     /// <param name="logger">Logger used for recording aggregation events and errors.</param>
     public DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
-        RazorDocsOptions options,
+        AppSurfaceDocsOptions options,
         IWebHostEnvironment environment,
         IMemo memo,
-        IRazorDocsHtmlSanitizer sanitizer,
+        IAppSurfaceDocsHtmlSanitizer sanitizer,
         ILogger<DocAggregator> logger)
         : this(
             harvesters,
@@ -188,7 +188,7 @@ public class DocAggregator
     /// Initializes a new <see cref="DocAggregator"/> with optional contributor-freshness test seams.
     /// </summary>
     /// <param name="harvesters">The documentation harvesters that populate the docs snapshot.</param>
-    /// <param name="options">The resolved RazorDocs options, including source and contributor settings.</param>
+    /// <param name="options">The resolved AppSurface Docs options, including source and contributor settings.</param>
     /// <param name="environment">The host environment used to resolve the repository root when needed.</param>
     /// <param name="memo">The memo cache used for snapshot reuse.</param>
     /// <param name="sanitizer">The HTML sanitizer applied to rendered docs content.</param>
@@ -207,10 +207,10 @@ public class DocAggregator
     /// </param>
     internal DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
-        RazorDocsOptions options,
+        AppSurfaceDocsOptions options,
         IWebHostEnvironment environment,
         IMemo memo,
-        IRazorDocsHtmlSanitizer sanitizer,
+        IAppSurfaceDocsHtmlSanitizer sanitizer,
         ILogger<DocAggregator> logger,
         Func<string, CancellationToken, Task<DateTimeOffset?>>? resolveGitLastUpdatedUtcAsync,
         TimeSpan? harvesterTimeout = null,
@@ -235,7 +235,7 @@ public class DocAggregator
     /// Initializes a new <see cref="DocAggregator"/> with optional contributor-freshness test seams.
     /// </summary>
     /// <param name="harvesters">The documentation harvesters that populate the docs snapshot.</param>
-    /// <param name="options">The resolved RazorDocs options, including source and contributor settings.</param>
+    /// <param name="options">The resolved AppSurface Docs options, including source and contributor settings.</param>
     /// <param name="environment">The host environment used to resolve the repository root when needed.</param>
     /// <param name="memo">The memo cache used for snapshot reuse.</param>
     /// <param name="sanitizer">The HTML sanitizer applied to rendered docs content.</param>
@@ -244,10 +244,10 @@ public class DocAggregator
     [ActivatorUtilitiesConstructor]
     public DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
-        RazorDocsOptions options,
+        AppSurfaceDocsOptions options,
         IWebHostEnvironment environment,
         IMemo memo,
-        IRazorDocsHtmlSanitizer sanitizer,
+        IAppSurfaceDocsHtmlSanitizer sanitizer,
         DocsUrlBuilder docsUrlBuilder,
         ILogger<DocAggregator> logger)
         : this(
@@ -266,7 +266,7 @@ public class DocAggregator
     /// Initializes a new <see cref="DocAggregator"/> with optional contributor-freshness test seams.
     /// </summary>
     /// <param name="harvesters">The documentation harvesters that populate the docs snapshot.</param>
-    /// <param name="options">The resolved RazorDocs options, including source and contributor settings.</param>
+    /// <param name="options">The resolved AppSurface Docs options, including source and contributor settings.</param>
     /// <param name="environment">The host environment used to resolve the repository root when needed.</param>
     /// <param name="memo">The memo cache used for snapshot reuse.</param>
     /// <param name="sanitizer">The HTML sanitizer applied to rendered docs content.</param>
@@ -299,10 +299,10 @@ public class DocAggregator
     /// </remarks>
     internal DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
-        RazorDocsOptions options,
+        AppSurfaceDocsOptions options,
         IWebHostEnvironment environment,
         IMemo memo,
-        IRazorDocsHtmlSanitizer sanitizer,
+        IAppSurfaceDocsHtmlSanitizer sanitizer,
         DocsUrlBuilder docsUrlBuilder,
         ILogger<DocAggregator> logger,
         Func<string, CancellationToken, Task<DateTimeOffset?>>? resolveGitLastUpdatedUtcAsync,
@@ -331,13 +331,13 @@ public class DocAggregator
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
         _repositoryRoot = options.Mode switch
         {
-            RazorDocsMode.Source => ResolveRepositoryRoot(
+            AppSurfaceDocsMode.Source => ResolveRepositoryRoot(
                 options.Source ?? throw new ArgumentNullException(nameof(options.Source)),
                 environment.ContentRootPath,
                 logger),
-            RazorDocsMode.Bundle => throw new NotSupportedException(
-                "RazorDocs bundle mode is not implemented yet. Use RazorDocs:Mode=Source for Slice 1."),
-            _ => throw new NotSupportedException($"Unsupported RazorDocs mode '{options.Mode}'.")
+            AppSurfaceDocsMode.Bundle => throw new NotSupportedException(
+                "AppSurface Docs bundle mode is not implemented yet. Use AppSurfaceDocs:Mode=Source for Slice 1."),
+            _ => throw new NotSupportedException($"Unsupported AppSurface Docs mode '{options.Mode}'.")
         };
         _resolveGitLastUpdatedUtcAsync = resolveGitLastUpdatedUtcAsync ?? DefaultResolveGitLastUpdatedUtcAsync;
 
@@ -347,14 +347,14 @@ public class DocAggregator
         }
     }
 
-    private static TimeSpan ResolveSnapshotCacheDuration(RazorDocsOptions options)
+    private static TimeSpan ResolveSnapshotCacheDuration(AppSurfaceDocsOptions options)
     {
-        if (!RazorDocsOptionsValidator.IsValidCacheExpirationMinutes(options.CacheExpirationMinutes))
+        if (!AppSurfaceDocsOptionsValidator.IsValidCacheExpirationMinutes(options.CacheExpirationMinutes))
         {
             throw new ArgumentOutOfRangeException(
-                nameof(RazorDocsOptions.CacheExpirationMinutes),
+                nameof(AppSurfaceDocsOptions.CacheExpirationMinutes),
                 options.CacheExpirationMinutes,
-                $"RazorDocs cache expiration must be a finite number of minutes between {RazorDocsOptions.MinCacheExpirationMinutes} and {RazorDocsOptions.MaxCacheExpirationMinutes}.");
+                $"AppSurface Docs cache expiration must be a finite number of minutes between {AppSurfaceDocsOptions.MinCacheExpirationMinutes} and {AppSurfaceDocsOptions.MaxCacheExpirationMinutes}.");
         }
 
         return TimeSpan.FromMinutes(options.CacheExpirationMinutes);
@@ -372,14 +372,14 @@ public class DocAggregator
             throw new ArgumentOutOfRangeException(
                 nameof(harvesterTimeout),
                 harvesterTimeout,
-                "RazorDocs harvester timeout must be a positive value.");
+                "AppSurface Docs harvester timeout must be a positive value.");
         }
 
         return harvesterTimeout.Value;
     }
 
     private static string ResolveRepositoryRoot(
-        RazorDocsSourceOptions sourceOptions,
+        AppSurfaceDocsSourceOptions sourceOptions,
         string contentRootPath,
         ILogger logger)
     {
@@ -396,8 +396,8 @@ public class DocAggregator
         if (normalizedRepositoryRoot.Length == 0)
         {
             throw new ArgumentException(
-                "RazorDocs Source RepositoryRoot cannot be whitespace when explicitly configured.",
-                nameof(RazorDocsSourceOptions.RepositoryRoot));
+                "AppSurface Docs Source RepositoryRoot cannot be whitespace when explicitly configured.",
+                nameof(AppSurfaceDocsSourceOptions.RepositoryRoot));
         }
 
         return normalizedRepositoryRoot;
@@ -415,7 +415,7 @@ public class DocAggregator
     }
 
     /// <summary>
-    /// Returns structured health for the current RazorDocs harvest snapshot.
+    /// Returns structured health for the current AppSurface Docs harvest snapshot.
     /// </summary>
     /// <remarks>
     /// The health snapshot is produced by the same memoized harvest used by <see cref="GetDocsAsync(CancellationToken)"/>.
@@ -581,7 +581,7 @@ public class DocAggregator
     /// Caller cancellation does not cancel shared snapshot computation; callers can cancel their own wait.
     /// Harvester execution is bounded by a timeout so a single slow harvester cannot block snapshot regeneration indefinitely.
     /// The memoized cache entry is created with the configured absolute expiration from
-    /// <see cref="RazorDocsOptions.CacheExpirationMinutes"/>.
+    /// <see cref="AppSurfaceDocsOptions.CacheExpirationMinutes"/>.
     /// </remarks>
     /// <returns>A cached snapshot containing both docs and search-index payload.</returns>
     private async Task<CachedDocsSnapshot> GetCachedDocsSnapshotAsync()
@@ -791,8 +791,8 @@ public class DocAggregator
                     DocHarvestDiagnosticCodes.HarvesterCanceled,
                     DocHarvestDiagnosticSeverity.Warning,
                     harvesterType,
-                    "A RazorDocs harvester canceled.",
-                    "The harvester observed cancellation outside RazorDocs' timeout budget, so RazorDocs skipped its docs for this snapshot.",
+                    "An AppSurface Docs harvester canceled.",
+                    "The harvester observed cancellation outside AppSurface Docs' timeout budget, so AppSurface Docs skipped its docs for this snapshot.",
                     "Check whether the harvester is observing an external cancellation token or canceling its own work."));
         }
         catch (Exception ex)
@@ -811,8 +811,8 @@ public class DocAggregator
                     DocHarvestDiagnosticCodes.HarvesterFailed,
                     DocHarvestDiagnosticSeverity.Error,
                     harvesterType,
-                    "A RazorDocs harvester failed.",
-                    "The harvester threw while scanning the docs repository, so RazorDocs skipped its docs for this snapshot.",
+                    "An AppSurface Docs harvester failed.",
+                    "The harvester threw while scanning the docs repository, so AppSurface Docs skipped its docs for this snapshot.",
                     "Inspect the host logs for exception details, then fix the harvester configuration, repository root, or source content."));
         }
     }
@@ -827,8 +827,8 @@ public class DocAggregator
                 DocHarvestDiagnosticCodes.HarvesterTimedOut,
                 DocHarvestDiagnosticSeverity.Warning,
                 harvesterType,
-                "A RazorDocs harvester timed out.",
-                "The harvester did not complete within the per-harvester timeout budget, so RazorDocs skipped its docs for this snapshot.",
+                "An AppSurface Docs harvester timed out.",
+                "The harvester did not complete within the per-harvester timeout budget, so AppSurface Docs skipped its docs for this snapshot.",
                 "Check the harvester for slow filesystem access, long-running parsing, or unobserved cancellation."));
     }
 
@@ -861,8 +861,8 @@ public class DocAggregator
                     DocHarvestDiagnosticCodes.NoHarvesters,
                     DocHarvestDiagnosticSeverity.Information,
                     HarvesterType: null,
-                    "No RazorDocs harvesters are registered.",
-                    "RazorDocs has no configured sources to scan, so the docs corpus is empty by configuration.",
+                    "No AppSurface Docs harvesters are registered.",
+                    "AppSurface Docs has no configured sources to scan, so the docs corpus is empty by configuration.",
                     "Register at least one IDocHarvester if this host should publish source-backed documentation."));
         }
 
@@ -876,13 +876,13 @@ public class DocAggregator
                 DocHarvestDiagnosticCodes.AllFailed,
                 DocHarvestDiagnosticSeverity.Critical,
                 HarvesterType: null,
-                "All RazorDocs harvesters failed.",
-                "Every configured harvester failed, timed out, or canceled, so RazorDocs could not produce a trustworthy docs corpus.",
-                "Inspect the preceding harvester logs, fix the failing source or configuration, and refresh the RazorDocs cache.");
+                "All AppSurface Docs harvesters failed.",
+                "Every configured harvester failed, timed out, or canceled, so AppSurface Docs could not produce a trustworthy docs corpus.",
+                "Inspect the preceding harvester logs, fix the failing source or configuration, and refresh the AppSurface Docs cache.");
             diagnostics.Add(aggregateDiagnostic);
 
             logger.LogCritical(
-                "All RazorDocs harvesters failed at {RepositoryRoot}. {FailedHarvesters}/{TotalHarvesters} harvesters produced no usable docs.",
+                "All AppSurface Docs harvesters failed at {RepositoryRoot}. {FailedHarvesters}/{TotalHarvesters} harvesters produced no usable docs.",
                 repositoryRoot,
                 failedHarvesters,
                 harvesters.Length);
@@ -935,7 +935,7 @@ public class DocAggregator
         }
 
         var gitFreshnessBySourcePath = new Dictionary<string, DateTimeOffset?>(StringComparer.OrdinalIgnoreCase);
-        var contributorFreshnessDeadlineUtc = _contributorOptions.LastUpdatedMode == RazorDocsLastUpdatedMode.Git
+        var contributorFreshnessDeadlineUtc = _contributorOptions.LastUpdatedMode == AppSurfaceDocsLastUpdatedMode.Git
             ? _utcNow().Add(_contributorFreshnessTimeout)
             : (DateTimeOffset?)null;
 
@@ -983,7 +983,7 @@ public class DocAggregator
                     if (!string.IsNullOrWhiteSpace(anchorId) && missingAnchorsLogged.Add(anchorId))
                     {
                         _logger.LogDebug(
-                            "Removing RazorDocs symbol source placeholder for {AnchorId} in {DocPath} because no safe source href was available.",
+                            "Removing AppSurface Docs symbol source placeholder for {AnchorId} in {DocPath} because no safe source href was available.",
                             anchorId,
                             doc.Path);
                     }
@@ -1021,7 +1021,7 @@ public class DocAggregator
                 ambiguousAnchors.Add(anchorId);
                 hrefsByAnchor.Remove(anchorId);
                 _logger.LogDebug(
-                    "Omitting RazorDocs symbol source link for {AnchorId} in {DocPath} because multiple provenance entries were rendered.",
+                    "Omitting AppSurface Docs symbol source link for {AnchorId} in {DocPath} because multiple provenance entries were rendered.",
                     anchorId,
                     doc.Path);
                 continue;
@@ -1035,7 +1035,7 @@ public class DocAggregator
             if (!placeholderCounts.TryGetValue(anchorId, out var placeholderCount))
             {
                 _logger.LogDebug(
-                    "Ignoring RazorDocs symbol source provenance for {AnchorId} in {DocPath} because no placeholder was rendered.",
+                    "Ignoring AppSurface Docs symbol source provenance for {AnchorId} in {DocPath} because no placeholder was rendered.",
                     anchorId,
                     doc.Path);
                 continue;
@@ -1044,7 +1044,7 @@ public class DocAggregator
             if (placeholderCount != 1)
             {
                 _logger.LogDebug(
-                    "Omitting RazorDocs symbol source link for {AnchorId} in {DocPath} because {PlaceholderCount} placeholders were rendered.",
+                    "Omitting AppSurface Docs symbol source link for {AnchorId} in {DocPath} because {PlaceholderCount} placeholders were rendered.",
                     anchorId,
                     doc.Path,
                     placeholderCount);
@@ -1098,7 +1098,7 @@ public class DocAggregator
 
         DateTimeOffset? lastUpdatedUtc = NormalizeContributorLastUpdatedUtc(contributor?.LastUpdatedOverride);
         if (lastUpdatedUtc is null
-            && _contributorOptions.LastUpdatedMode == RazorDocsLastUpdatedMode.Git
+            && _contributorOptions.LastUpdatedMode == AppSurfaceDocsLastUpdatedMode.Git
             && sourcePath is not null)
         {
             if (!TryGetContributorFreshnessTimeout(contributorFreshnessDeadlineUtc!.Value, out var freshnessTimeout))
@@ -2026,7 +2026,7 @@ public class DocAggregator
     /// </returns>
     internal static string MergeNamespaceIntroIntoContent(string namespaceContent, string readmeContent)
     {
-        var introContent = RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(readmeContent, shellOwnsH1: true);
+        var introContent = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(readmeContent, shellOwnsH1: true);
         var introSection = $"<section class=\"doc-namespace-intro\">{introContent}</section>";
         const string namespaceGroupsClassMarker = "doc-namespace-groups";
 

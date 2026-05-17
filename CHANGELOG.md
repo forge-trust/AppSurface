@@ -17,15 +17,15 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 
 ### Added
 
-- AppSurface now has a planned `appsurface` .NET tool surface. Its first verb is `appsurface docs`, which runs RazorDocs preview workflows through the existing standalone docs host instead of minting a separate `razordocs` CLI.
+- AppSurface now has a planned `appsurface` .NET tool surface. Its first verb is `appsurface docs`, which runs AppSurface Docs preview workflows through the existing standalone docs host instead of minting a separate `appsurfacedocs` CLI.
 - AppSurface Web now has a startup watchdog that fails fast when a web host stalls before Kestrel starts listening; `appsurface docs` exposes the same guard through `--startup-timeout-seconds`.
-- RazorDocs and RazorWire runtime assets are now embedded into their assemblies and served through endpoint fallbacks, so packaged CLI hosts can serve docs UI assets without relying on static web asset manifests.
+- AppSurface Docs and RazorWire runtime assets are now embedded into their assemblies and served through endpoint fallbacks, so packaged CLI hosts can serve docs UI assets without relying on static web asset manifests.
 - AppSurface now has a repo-level release contract: a public release hub, an unreleased proof artifact, a pre-1.0 upgrade policy, and a tagged-release template for future versioned notes.
 - RazorWire now has a package-level generated UI design contract that defines ownership scope, data-attribute and CSS custom-property styling surfaces, accessibility expectations, override levels, and anti-patterns for package-owned UI.
-- RazorDocs pages can now render a top-of-page trust bar from structured metadata so release notes and upgrade guidance can show status, safety context, and provenance without custom page code.
-- RazorDocs now supports metadata-driven page wayfinding: harvested outlines, explicit proof-path previous/next links, related pages, and sidebar anchor navigation.
-- RazorDocs detail pages now expose copy-link actions for outline rows and section headers so readers can share deep links without navigating away from their current position.
-- RazorDocs now exposes `DocAggregator.GetHarvestHealthAsync(...)` plus structured harvest health models so hosts can distinguish healthy, empty, degraded, and all-failed source harvest snapshots without parsing logs.
+- AppSurface Docs pages can now render a top-of-page trust bar from structured metadata so release notes and upgrade guidance can show status, safety context, and provenance without custom page code.
+- AppSurface Docs now supports metadata-driven page wayfinding: harvested outlines, explicit proof-path previous/next links, related pages, and sidebar anchor navigation.
+- AppSurface Docs detail pages now expose copy-link actions for outline rows and section headers so readers can share deep links without navigating away from their current position.
+- AppSurface Docs now exposes `DocAggregator.GetHarvestHealthAsync(...)` plus structured harvest health models so hosts can distinguish healthy, empty, degraded, and all-failed source harvest snapshots without parsing logs.
 - RazorWire forms now have convention-based failed-submission UX with default form-local fallbacks, server helpers for handled validation errors, development anti-forgery diagnostics, runtime events, and sample coverage.
 - The root README now includes a single hello-world web quickstart with an explicit local port and a concrete expected response.
 - AppSurface now ships GitHub issue templates for bug reports and documentation feedback.
@@ -39,12 +39,12 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - RazorWire CLI validation errors now include a concrete next command and `razorwire export --help` hint so failed exports are easier to recover from.
 - RazorWire CLI export now defaults to CDN-safe output: managed internal links, frames, scripts, stylesheets, images, `<img>` and `<source>` `srcset`, conventional `404.html`, and CSS `url(...)` references rewrite to emitted static artifacts, with `--mode hybrid` available for extensionless server-routed deployments.
 - Tailwind development watch mode now logs a warning, not a startup error, when the standalone CLI is unavailable and the app can continue serving existing CSS.
-- RazorDocs search now keeps failure recovery markup out of the active search shell until the index actually fails to load.
+- AppSurface Docs search now keeps failure recovery markup out of the active search shell until the index actually fails to load.
 - The RazorWire MVC sample counter button now has an accessible name while preserving the compact icon-only UI.
-- RazorDocs source-path, canonical-path, fragment, and docs-root-prefixed lookups now share one resolver across page details, landing curation, related-page links, and search fallback links.
-- RazorDocs landing curation now renders reader-intent `featured_page_groups` instead of one flat featured list.
-- RazorDocs authored Markdown pages now use a tighter prose layout while generated API pages keep the wider reference treatment.
-- RazorDocs now redirects public Markdown source-shaped requests such as `/docs/packages/README.md` to the clean canonical route instead of returning a 404.
+- AppSurface Docs source-path, canonical-path, fragment, and docs-root-prefixed lookups now share one resolver across page details, landing curation, related-page links, and search fallback links.
+- AppSurface Docs landing curation now renders reader-intent `featured_page_groups` instead of one flat featured list.
+- AppSurface Docs authored Markdown pages now use a tighter prose layout while generated API pages keep the wider reference treatment.
+- AppSurface Docs now redirects public Markdown source-shaped requests such as `/docs/packages/README.md` to the clean canonical route instead of returning a 404.
 - The PackageIndex generator now has a successful `--help`/`-h` path with command and option guidance instead of a bare usage failure.
 - The conventional browser 404 page now favors user recovery, including documentation search for missing docs routes and a home link for other missing pages.
 - AppSurface Web now generalizes conventional browser status pages to empty HTML `401`, `403`, and `404` responses with `BrowserStatusPageMode`, `BrowserStatusPageModel`, preview routes, and status-specific Razor override paths. Static export still writes only `404.html`; conventional production `500` exception pages are tracked separately in issue #224.
@@ -56,10 +56,10 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Before `v0.1.0`, any breaking or behavior-changing update should record provisional guidance in [`releases/unreleased.md`](./releases/unreleased.md) and move finalized steps into the tagged release note once the version ships.
 - Existing `rw-active` forms opt into failed-form request markers and automatic fallback UI by default. Set `options.Forms.EnableFailureUx = false`, `options.Forms.FailureMode = RazorWireFormFailureMode.Manual`, or per-form `data-rw-form-failure="off"` if an app already owns all failure rendering.
 - Existing RazorWire CLI export users who depended on extensionless internal URLs should pass `--mode hybrid`; the default now rewrites exporter-managed URLs for plain static/CDN hosting and fails CDN validation when required frame or asset artifacts cannot be emitted.
-- RazorDocs authors using `featured_pages` should migrate to `featured_page_groups`; the old flat field now logs a warning and no longer renders.
+- AppSurface Docs authors using `featured_pages` should migrate to `featured_page_groups`; the old flat field now logs a warning and no longer renders.
 - Code that expected custom AppSurface labels from `IHostEnvironment.ApplicationName` should use `StartupContext.ApplicationName`; host environment application names now remain tied to assembly identity so ASP.NET static web assets continue to resolve.
 - Web apps with custom conventional 404 overrides should replace `NotFoundPageModel` with `BrowserStatusPageModel`. The old `ConventionalNotFoundPageMode`, `NotFoundPageMode`, `UseConventionalNotFoundPage()`, and `DisableNotFoundPage()` API names have moved to the `BrowserStatusPage*` naming surface before the first public tag.
-- RazorDocs hosts that need operational status for source-backed docs should call `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` and diagnostic codes instead of scraping warning or critical log messages.
+- AppSurface Docs hosts that need operational status for source-backed docs should call `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` and diagnostic codes instead of scraping warning or critical log messages.
 
 ## No tagged releases yet
 

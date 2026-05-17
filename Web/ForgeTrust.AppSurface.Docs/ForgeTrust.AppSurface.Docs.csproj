@@ -13,16 +13,17 @@
     <ProjectReference Include="..\ForgeTrust.RazorWire\ForgeTrust.RazorWire.csproj" />
     <ProjectReference Include="..\ForgeTrust.AppSurface.Web.Tailwind\ForgeTrust.AppSurface.Web.Tailwind.csproj" />
     <ProjectReference Include="..\..\Caching\ForgeTrust.AppSurface.Caching\ForgeTrust.AppSurface.Caching.csproj" />
+    <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config\ForgeTrust.AppSurface.Config.csproj" />
   </ItemGroup>
 
   <Import Project="..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets" Condition="Exists('..\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets')" />
 
   <ItemGroup>
-    <EmbeddedResource Include="wwwroot\css\site.gen.css" LogicalName="RazorDocsEmbeddedAssets/css/site.gen.css" />
-    <EmbeddedResource Include="wwwroot\docs\minisearch.min.js" LogicalName="RazorDocsEmbeddedAssets/docs/minisearch.min.js" />
-    <EmbeddedResource Include="wwwroot\docs\outline-client.js" LogicalName="RazorDocsEmbeddedAssets/docs/outline-client.js" />
-    <EmbeddedResource Include="wwwroot\docs\search-client.js" LogicalName="RazorDocsEmbeddedAssets/docs/search-client.js" />
-    <EmbeddedResource Include="wwwroot\docs\search.css" LogicalName="RazorDocsEmbeddedAssets/docs/search.css" />
+    <EmbeddedResource Include="wwwroot\css\site.gen.css" LogicalName="AppSurfaceDocsEmbeddedAssets/css/site.gen.css" />
+    <EmbeddedResource Include="wwwroot\docs\minisearch.min.js" LogicalName="AppSurfaceDocsEmbeddedAssets/docs/minisearch.min.js" />
+    <EmbeddedResource Include="wwwroot\docs\outline-client.js" LogicalName="AppSurfaceDocsEmbeddedAssets/docs/outline-client.js" />
+    <EmbeddedResource Include="wwwroot\docs\search-client.js" LogicalName="AppSurfaceDocsEmbeddedAssets/docs/search-client.js" />
+    <EmbeddedResource Include="wwwroot\docs\search.css" LogicalName="AppSurfaceDocsEmbeddedAssets/docs/search.css" />
   </ItemGroup>
 
   <ItemGroup>

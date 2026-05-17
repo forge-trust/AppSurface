@@ -19,7 +19,7 @@ namespace ForgeTrust.AppSurface.Docs.ViewComponents;
 public class SidebarViewComponent : ViewComponent
 {
     private readonly DocAggregator _aggregator;
-    private readonly RazorDocsOptions _options;
+    private readonly AppSurfaceDocsOptions _options;
     private readonly DocsUrlBuilder _docsUrlBuilder;
     private readonly IWebHostEnvironment _environment;
     private readonly string[] _namespacePrefixes;
@@ -28,7 +28,7 @@ public class SidebarViewComponent : ViewComponent
     /// Initializes a new instance of the <see cref="SidebarViewComponent"/> class.
     /// </summary>
     /// <remarks>
-    /// This is the convenience overload for callers that only have <see cref="RazorDocsOptions" /> available. It
+    /// This is the convenience overload for callers that only have <see cref="AppSurfaceDocsOptions" /> available. It
     /// creates a fresh <see cref="DocsUrlBuilder"/> from those options and a fallback <see cref="IWebHostEnvironment"/>
     /// initialized to <see cref="Environments.Production"/>. This is suitable for direct construction in tests or ad
     /// hoc usage but does not reuse any shared builder instance or inherit any development chrome or local defaults
@@ -36,8 +36,8 @@ public class SidebarViewComponent : ViewComponent
     /// supply their own <see cref="IWebHostEnvironment"/> through the other constructor overload.
     /// </remarks>
     /// <param name="aggregator">The documentation aggregator used to retrieve document nodes.</param>
-    /// <param name="options">Typed RazorDocs options used for optional namespace prefix simplification settings.</param>
-    public SidebarViewComponent(DocAggregator aggregator, RazorDocsOptions options)
+    /// <param name="options">Typed AppSurface Docs options used for optional namespace prefix simplification settings.</param>
+    public SidebarViewComponent(DocAggregator aggregator, AppSurfaceDocsOptions options)
         : this(aggregator, options, new DocsUrlBuilder(options), new DefaultWebHostEnvironment())
     {
     }
@@ -52,13 +52,13 @@ public class SidebarViewComponent : ViewComponent
     /// preconfigured <see cref="DocsUrlBuilder"/> instance.
     /// </remarks>
     /// <param name="aggregator">The documentation aggregator used to retrieve document nodes.</param>
-    /// <param name="options">Typed RazorDocs options used for optional namespace prefix simplification settings.</param>
+    /// <param name="options">Typed AppSurface Docs options used for optional namespace prefix simplification settings.</param>
     /// <param name="docsUrlBuilder">Shared URL builder for the live source-backed docs surface.</param>
     /// <param name="environment">Host environment used for development-default health chrome visibility.</param>
     [ActivatorUtilitiesConstructor]
     public SidebarViewComponent(
         DocAggregator aggregator,
-        RazorDocsOptions options,
+        AppSurfaceDocsOptions options,
         DocsUrlBuilder docsUrlBuilder,
         IWebHostEnvironment environment)
     {
@@ -87,7 +87,7 @@ public class SidebarViewComponent : ViewComponent
     /// <see cref="InvokeAsync"/> returns a <see cref="DocSidebarViewModel"/> whose sections come from normalized public
     /// section snapshots and whose <see cref="DocSidebarViewModel.HarvestHealth"/> value is resolved by
     /// <see cref="ResolveHarvestHealthAsync"/>. Harvest health is controlled by
-    /// <see cref="RazorDocsHarvestHealthVisibility"/> and may be <c>null</c> when chrome is hidden. When present, it
+    /// <see cref="AppSurfaceDocsHarvestHealthVisibility"/> and may be <c>null</c> when chrome is hidden. When present, it
     /// contains a <see cref="DocSidebarHarvestHealthViewModel.Status"/>,
     /// <see cref="DocSidebarHarvestHealthViewModel.Ok"/>, and an optional
     /// <see cref="DocSidebarHarvestHealthViewModel.Href"/>. The href is omitted when chrome is visible but health
@@ -125,32 +125,32 @@ public class SidebarViewComponent : ViewComponent
     /// Resolves the optional harvest health chrome view model for the current sidebar request.
     /// </summary>
     /// <remarks>
-    /// Returns <c>null</c> when <see cref="RazorDocsHarvestHealthVisibility.ShouldShowChrome(RazorDocsOptions, IHostEnvironment)"/>
+    /// Returns <c>null</c> when <see cref="AppSurfaceDocsHarvestHealthVisibility.ShouldShowChrome(AppSurfaceDocsOptions, IHostEnvironment)"/>
     /// hides chrome. Otherwise it reads the current harvest snapshot through
     /// <see cref="DocAggregator.GetHarvestHealthAsync(CancellationToken)"/>, maps the status and verification result,
     /// and supplies an href from <see cref="DocsUrlBuilder.BuildHealthUrl"/> only when
-    /// <see cref="RazorDocsHarvestHealthVisibility.AreRoutesExposed(RazorDocsOptions, IHostEnvironment)"/> exposes the
+    /// <see cref="AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(AppSurfaceDocsOptions, IHostEnvironment)"/> exposes the
     /// operator route. The aggregation wait respects <see cref="HttpContext.RequestAborted"/> when a view context is
     /// available.
     /// </remarks>
     /// <returns>The sidebar harvest health view model, or <c>null</c> when chrome is hidden.</returns>
     private async Task<DocSidebarHarvestHealthViewModel?> ResolveHarvestHealthAsync()
     {
-        if (!RazorDocsHarvestHealthVisibility.ShouldShowChrome(_options, _environment))
+        if (!AppSurfaceDocsHarvestHealthVisibility.ShouldShowChrome(_options, _environment))
         {
             return null;
         }
 
         var requestAborted = ViewContext?.HttpContext?.RequestAborted ?? CancellationToken.None;
         var health = await _aggregator.GetHarvestHealthAsync(requestAborted);
-        var href = RazorDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment)
+        var href = AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment)
             ? _docsUrlBuilder.BuildHealthUrl()
             : null;
 
         return new DocSidebarHarvestHealthViewModel
         {
             Status = health.Status.ToString(),
-            Ok = RazorDocsHarvestHealthResponse.IsOk(health.Status),
+            Ok = AppSurfaceDocsHarvestHealthResponse.IsOk(health.Status),
             Href = href
         };
     }
@@ -218,7 +218,7 @@ public class SidebarViewComponent : ViewComponent
 
     private sealed class DefaultWebHostEnvironment : IWebHostEnvironment
     {
-        public string ApplicationName { get; set; } = typeof(SidebarViewComponent).Assembly.GetName().Name ?? "RazorDocs";
+        public string ApplicationName { get; set; } = typeof(SidebarViewComponent).Assembly.GetName().Name ?? "AppSurface Docs";
 
         public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
 

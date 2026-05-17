@@ -55,8 +55,8 @@ public class MarkdownHarvester : IDocHarvester
         : this(
             logger,
             readAllTextAsync,
-            RazorDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
-                NullLogger<TextMateSharpRazorDocsCodeHighlighter>.Instance))
+            AppSurfaceDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
+                NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance))
     {
     }
 
@@ -69,7 +69,7 @@ public class MarkdownHarvester : IDocHarvester
     internal MarkdownHarvester(
         ILogger<MarkdownHarvester> logger,
         Func<string, CancellationToken, Task<string>> readAllTextAsync,
-        IRazorDocsCodeHighlighter codeHighlighter)
+        IAppSurfaceDocsCodeHighlighter codeHighlighter)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(readAllTextAsync);
@@ -79,16 +79,16 @@ public class MarkdownHarvester : IDocHarvester
         _readAllTextAsync = readAllTextAsync;
         _pipeline = new MarkdownPipelineBuilder()
             .UseAdvancedExtensions()
-            .Use(new RazorDocsCodeBlockMarkdownExtension(codeHighlighter))
+            .Use(new AppSurfaceDocsCodeBlockMarkdownExtension(codeHighlighter))
             .Build();
     }
 
-    private static IRazorDocsCodeHighlighter CreateDefaultHighlighter(ILoggerFactory loggerFactory)
+    private static IAppSurfaceDocsCodeHighlighter CreateDefaultHighlighter(ILoggerFactory loggerFactory)
     {
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
-        return RazorDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
-            loggerFactory.CreateLogger<TextMateSharpRazorDocsCodeHighlighter>());
+        return AppSurfaceDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
+            loggerFactory.CreateLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>());
     }
 
     /// <summary>
@@ -189,8 +189,8 @@ public class MarkdownHarvester : IDocHarvester
     /// <param name="cancellationToken">A token that can cancel sidecar discovery or file reads.</param>
     /// <returns>The parsed sidecar metadata, or <c>null</c> when no valid sidecar applies.</returns>
     /// <remarks>
-    /// RazorDocs supports paired metadata files named <c>{file}.yml</c> and <c>{file}.yaml</c> such as
-    /// <c>README.md.yml</c>. When both extensions exist for the same Markdown file, RazorDocs logs a warning and ignores
+    /// AppSurface Docs supports paired metadata files named <c>{file}.yml</c> and <c>{file}.yaml</c> such as
+    /// <c>README.md.yml</c>. When both extensions exist for the same Markdown file, AppSurface Docs logs a warning and ignores
     /// both sidecars until the ambiguity is removed. Inline front matter remains the primary metadata source and overrides
     /// any overlapping sidecar fields.
     /// </remarks>
@@ -257,12 +257,12 @@ public class MarkdownHarvester : IDocHarvester
 
     private void LogMetadataDiagnostics(
         string sourcePath,
-        IReadOnlyList<RazorDocsMetadataDiagnostic> diagnostics)
+        IReadOnlyList<AppSurfaceDocsMetadataDiagnostic> diagnostics)
     {
         foreach (var diagnostic in diagnostics)
         {
             _logger.LogWarning(
-                "RazorDocs metadata warning {Code} in {SourcePath} at {FieldPath}: {Problem} Cause: {Cause} Fix: {Fix}",
+                "AppSurface Docs metadata warning {Code} in {SourcePath} at {FieldPath}: {Problem} Cause: {Cause} Fix: {Fix}",
                 diagnostic.Code,
                 sourcePath,
                 diagnostic.FieldPath,

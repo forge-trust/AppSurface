@@ -29,7 +29,7 @@ public sealed class ProgramEntryPointTests
         var result = await InvokeEntryPointAsync(["docs", "--help"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("Preview RazorDocs for a repository.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Preview AppSurface Docs for a repository.", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--repo", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--startup-timeout-seconds", result.AllText, StringComparison.Ordinal);
@@ -38,10 +38,10 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task DocsCommand_Should_Forward_RazorDocs_Host_Arguments()
+    public async Task DocsCommand_Should_Forward_AppSurfaceDocs_Host_Arguments()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             [
@@ -57,15 +57,15 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotNull(runner.Args);
-        Assert.Contains("--RazorDocs:Source:RepositoryRoot", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Source:RepositoryRoot", runner.Args);
         Assert.Contains(repository.Path, runner.Args);
         Assert.Contains("--urls", runner.Args);
         Assert.Contains("http://127.0.0.1:5189", runner.Args);
-        Assert.Contains("--RazorDocs:Harvest:FailOnFailure", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Harvest:FailOnFailure", runner.Args);
         Assert.Contains("true", runner.Args);
-        Assert.Contains("--RazorDocs:Routing:RouteRootPath", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Routing:RouteRootPath", runner.Args);
         Assert.Contains("/reference", runner.Args);
-        Assert.Contains("--RazorDocs:Routing:DocsRootPath", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Routing:DocsRootPath", runner.Args);
         Assert.Contains("/reference/next", runner.Args);
         Assert.Contains("--environment", runner.Args);
         Assert.Contains("Development", runner.Args);
@@ -73,10 +73,10 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task DocsPreviewAlias_Should_Forward_RazorDocs_Host_Arguments()
+    public async Task DocsPreviewAlias_Should_Forward_AppSurfaceDocs_Host_Arguments()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "preview", "--repo", repository.Path, "--port", "5189"],
@@ -84,7 +84,7 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotNull(runner.Args);
-        Assert.Contains("--RazorDocs:Source:RepositoryRoot", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Source:RepositoryRoot", runner.Args);
         Assert.Contains(repository.Path, runner.Args);
         Assert.Contains("--port", runner.Args);
         Assert.Contains("5189", runner.Args);
@@ -95,7 +95,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Allow_Disabling_Startup_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", repository.Path, "--startup-timeout-seconds", "0"],
@@ -109,7 +109,7 @@ public sealed class ProgramEntryPointTests
     [Fact]
     public async Task DocsCommand_Should_Reject_Blank_RepositoryRoot()
     {
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", " "],
@@ -127,7 +127,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Reject_Invalid_Startup_Timeout(string timeout)
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", repository.Path, "--startup-timeout-seconds", timeout],
@@ -145,7 +145,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Reject_Oversized_Startup_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", repository.Path, "--startup-timeout-seconds", "1E+300"],
@@ -166,7 +166,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Reject_Invalid_Port(string port)
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", repository.Path, "--port", port],
@@ -181,7 +181,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Reject_Missing_RepositoryRoot()
     {
         var missingRepository = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", missingRepository],
@@ -319,9 +319,9 @@ public sealed class ProgramEntryPointTests
         });
     }
 
-    private static void RegisterRunner(ConsoleOptions options, CapturingRazorDocsHostRunner runner)
+    private static void RegisterRunner(ConsoleOptions options, CapturingAppSurfaceDocsHostRunner runner)
     {
-        options.CustomRegistrations.Add(services => services.AddSingleton<IRazorDocsHostRunner>(runner));
+        options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsHostRunner>(runner));
     }
 
     private sealed record CapturedCliRun(
@@ -345,7 +345,7 @@ public sealed class ProgramEntryPointTests
                 });
     }
 
-    private sealed class CapturingRazorDocsHostRunner : IRazorDocsHostRunner
+    private sealed class CapturingAppSurfaceDocsHostRunner : IAppSurfaceDocsHostRunner
     {
         public string[]? Args { get; private set; }
 

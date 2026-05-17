@@ -21,7 +21,7 @@
     <PackageReference Include="JunitXml.TestLogger" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Microsoft.Playwright" />
-    <!-- The in-process RazorDocs host runs inside this test output, so keep highlighter runtime assemblies local. -->
+    <!-- The in-process AppSurface Docs host runs inside this test output, so keep highlighter runtime assemblies local. -->
     <PackageReference Include="TextMateSharp" />
     <PackageReference Include="TextMateSharp.Grammars" />
     <PackageReference Include="xunit" />

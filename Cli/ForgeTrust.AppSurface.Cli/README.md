@@ -2,19 +2,19 @@
 
 The **AppSurface CLI** is the command-line home for repository-level AppSurface workflows. It is packaged as a .NET tool with the command name `appsurface`.
 
-The first public verb is `docs`, which replaces the earlier standalone `razordocs preview --repo .` idea with an AppSurface-owned command:
+The first public verb is `docs`, which replaces the earlier standalone `appsurfacedocs preview --repo .` idea with an AppSurface-owned command:
 
 ```bash
 appsurface docs --repo . --urls http://127.0.0.1:5189
 ```
 
-`appsurface docs` runs the same RazorDocs standalone host used by CI and integration tests. It forwards RazorDocs configuration into that host instead of duplicating harvesting, routing, static web asset, or MVC setup in the CLI.
+`appsurface docs` runs the same AppSurface Docs standalone host used by CI and integration tests. It forwards AppSurface Docs configuration into that host instead of duplicating harvesting, routing, static web asset, or MVC setup in the CLI.
 
 ## Commands
 
 ### `appsurface docs`
 
-Preview RazorDocs for a repository checkout.
+Preview AppSurface Docs for a repository checkout.
 
 ```bash
 appsurface docs --repo . --port 5189
@@ -24,11 +24,11 @@ Options:
 
 - `--repo`, `-r`: Repository root to preview. Defaults to the current directory.
 - `--urls`, `-u`: Explicit host URL binding, such as `http://127.0.0.1:5189`.
-- `--port`, `-p`: AppSurface Web port shortcut forwarded to the RazorDocs host.
-- `--strict`: Enables `RazorDocs:Harvest:FailOnFailure=true`, which fails startup when every configured harvester fails.
+- `--port`, `-p`: AppSurface Web port shortcut forwarded to the AppSurface Docs host.
+- `--strict`: Enables `AppSurfaceDocs:Harvest:FailOnFailure=true`, which fails startup when every configured harvester fails.
 - `--route-root`: Route-family root for version and archive routes.
 - `--docs-root`: Live docs preview root.
-- `--environment`, `-e`: Host environment forwarded to the RazorDocs host.
+- `--environment`, `-e`: Host environment forwarded to the AppSurface Docs host.
 - `--startup-timeout-seconds`: Seconds to wait for the web host to start before failing fast. Defaults to `30`; use `0` to disable while investigating intentional pre-bind delays.
 
 `appsurface docs preview` is an alias for the same behavior, kept so the old deferred shape maps cleanly to the new AppSurface command family.

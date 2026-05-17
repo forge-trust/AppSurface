@@ -112,7 +112,7 @@ public sealed class DocContentLinkRewriterTests
                         RedirectAliases = ["old/intro"]
                     })
             ],
-            new DocsUrlBuilder(new RazorDocsOptions()));
+            new DocsUrlBuilder(new AppSurfaceDocsOptions()));
 
         var rewritten = DocContentLinkRewriter.RewriteInternalDocLinks(
             "README.md",

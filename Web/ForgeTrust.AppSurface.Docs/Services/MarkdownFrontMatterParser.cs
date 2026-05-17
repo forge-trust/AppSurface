@@ -38,7 +38,7 @@ internal static class MarkdownFrontMatterParser
     /// </returns>
     /// <remarks>
     /// This is the authoritative internal entry point for inline metadata parsing. Missing front matter returns the
-    /// original Markdown and an empty diagnostic list. Invalid inline YAML returns a <see cref="RazorDocsMetadataDiagnostic"/>
+    /// original Markdown and an empty diagnostic list. Invalid inline YAML returns a <see cref="AppSurfaceDocsMetadataDiagnostic"/>
     /// instead of throwing, and deliberately preserves the original Markdown so a malformed header remains visible to the
     /// reader. Callers should inspect <see cref="MarkdownMetadataParseResult.Diagnostics"/> for authoring warnings instead
     /// of relying on exceptions for inline metadata failures.
@@ -68,7 +68,7 @@ internal static class MarkdownFrontMatterParser
                 new MarkdownMetadataParseResult(
                     null,
                     [
-                        new RazorDocsMetadataDiagnostic(
+                        new AppSurfaceDocsMetadataDiagnostic(
                             "invalid-yaml",
                             "$",
                             "Inline front matter could not be parsed as YAML.",
@@ -103,7 +103,7 @@ internal static class MarkdownFrontMatterParser
     /// <param name="yaml">The raw YAML metadata document to deserialize.</param>
     /// <returns>
     /// A <see cref="MarkdownMetadataParseResult"/> containing optional normalized <see cref="DocMetadata"/> plus any
-    /// <see cref="RazorDocsMetadataDiagnostic"/> warnings produced while normalizing supported metadata fields.
+    /// <see cref="AppSurfaceDocsMetadataDiagnostic"/> warnings produced while normalizing supported metadata fields.
     /// </returns>
     /// <remarks>
     /// This is the authoritative internal entry point for metadata documents that are already known to be YAML, including
@@ -117,7 +117,7 @@ internal static class MarkdownFrontMatterParser
     {
         ArgumentNullException.ThrowIfNull(yaml);
 
-        var diagnostics = new List<RazorDocsMetadataDiagnostic>();
+        var diagnostics = new List<AppSurfaceDocsMetadataDiagnostic>();
         var document = Deserializer.Deserialize<FrontMatterDocument>(yaml);
         if (document is null)
         {
@@ -215,16 +215,16 @@ internal static class MarkdownFrontMatterParser
     private static IReadOnlyList<DocFeaturedPageGroupDefinition>? NormalizeFeaturedPageGroups(
         List<FrontMatterFeaturedPageGroupDefinition?>? groups,
         List<FrontMatterFeaturedPageDefinition?>? stalePages,
-        List<RazorDocsMetadataDiagnostic> diagnostics)
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
     {
         if (stalePages is not null)
         {
             diagnostics.Add(
-                new RazorDocsMetadataDiagnostic(
+                new AppSurfaceDocsMetadataDiagnostic(
                     "stale-featured-pages",
                     "featured_pages",
                     "The flat featured_pages field is no longer rendered.",
-                    "RazorDocs now groups landing curation by reader intent with featured_page_groups.",
+                    "AppSurface Docs now groups landing curation by reader intent with featured_page_groups.",
                     "Move each entry under featured_page_groups[].pages and give each group a label or intent."));
         }
 
@@ -241,7 +241,7 @@ internal static class MarkdownFrontMatterParser
             if (group is null)
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "null-featured-group",
                         groupPath,
                         "A featured page group entry is null.",
@@ -253,7 +253,7 @@ internal static class MarkdownFrontMatterParser
             if (group.HasFlatFeaturedPageShape())
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "flat-looking-featured-group",
                         groupPath,
                         "A featured_page_groups entry looks like an old flat featured page.",
@@ -267,11 +267,11 @@ internal static class MarkdownFrontMatterParser
             if (intent is null && label is null)
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "missing-featured-group-identity",
                         groupPath,
                         "A featured page group has no label or intent.",
-                        "RazorDocs needs one stable identity field for rendering and diagnostics.",
+                        "AppSurface Docs needs one stable identity field for rendering and diagnostics.",
                         "Add label for reader-facing text or intent for a stable slug."));
                 continue;
             }
@@ -279,7 +279,7 @@ internal static class MarkdownFrontMatterParser
             if (group.Pages is null)
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "missing-featured-group-pages",
                         $"{groupPath}.pages",
                         "A featured page group has no pages list.",
@@ -291,7 +291,7 @@ internal static class MarkdownFrontMatterParser
             if (group.Pages.Count == 0)
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "empty-featured-group-pages",
                         $"{groupPath}.pages",
                         "A featured page group has an empty pages list.",
@@ -320,7 +320,7 @@ internal static class MarkdownFrontMatterParser
                     if (question is not null || supportingCopy is not null || page.Order is not null)
                     {
                         diagnostics.Add(
-                            new RazorDocsMetadataDiagnostic(
+                            new AppSurfaceDocsMetadataDiagnostic(
                                 "missing-featured-group-page-path",
                                 $"{pagePath}.path",
                                 "A featured page entry has no path.",
@@ -345,11 +345,11 @@ internal static class MarkdownFrontMatterParser
             if (pages.Count == 0)
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "empty-featured-group-page-entries",
                         $"{groupPath}.pages",
                         "A featured page group has no usable page entries.",
-                        "Every page entry was null or normalized away, so RazorDocs cannot resolve any landing rows.",
+                        "Every page entry was null or normalized away, so AppSurface Docs cannot resolve any landing rows.",
                         "Add at least one page entry with a path, or remove the empty group."));
                 continue;
             }

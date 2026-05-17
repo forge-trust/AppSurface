@@ -54,7 +54,7 @@ internal static class AppSurfaceCliApp
         services.AddSingleton(context);
         services.AddSingleton(context.EnvironmentProvider);
         services.AddSingleton<IOptionSuggester, LevenshteinOptionSuggester>();
-        services.AddSingleton<IRazorDocsHostRunner, RazorDocsStandaloneHostRunner>();
+        services.AddSingleton<IAppSurfaceDocsHostRunner, AppSurfaceDocsStandaloneHostRunner>();
         services.AddLogging(builder =>
         {
             builder.AddConsole();

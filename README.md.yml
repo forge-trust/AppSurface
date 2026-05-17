@@ -59,12 +59,12 @@ featured_page_groups:
         supporting_copy: Start with the public release hub, then drill into the unreleased proof artifact, changelog, and pre-1.0 upgrade policy.
         order: 10
   - intent: build-docs
-    label: Build docs with RazorDocs
+    label: Build docs with AppSurface Docs
     summary: Use this path when you want to host authored docs and generated API reference from your own repository.
     order: 15
     pages:
-      - question: How do I use RazorDocs in my own repository?
-        path: Web/ForgeTrust.AppSurface.Docs/use-razordocs.md
+      - question: How do I use AppSurface Docs in my own repository?
+        path: Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md
         supporting_copy: Follow the consumer landing page for the package thesis, host shape, authoring model, and adoption checklist.
         order: 10
   - intent: see-it-working

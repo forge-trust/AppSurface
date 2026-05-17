@@ -18,7 +18,7 @@ public class MarkdownHarvesterTests : IDisposable
     {
         _loggerFake = A.Fake<ILogger<MarkdownHarvester>>();
         _harvester = new MarkdownHarvester(_loggerFake);
-        _testRoot = Path.Combine(Path.GetTempPath(), "RazorDocsTests_MD", Guid.NewGuid().ToString());
+        _testRoot = Path.Combine(Path.GetTempPath(), "AppSurfaceDocsTests_MD", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testRoot);
     }
 
@@ -221,7 +221,7 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
-    public async Task HarvestAsync_ShouldRenderFencedCodeBlocksThroughRazorDocsHighlighter()
+    public async Task HarvestAsync_ShouldRenderFencedCodeBlocksThroughAppSurfaceDocsHighlighter()
     {
         var highlighter = new RecordingCodeHighlighter();
         var harvester = new MarkdownHarvester(_loggerFake, File.ReadAllTextAsync, highlighter);
@@ -270,7 +270,7 @@ public class MarkdownHarvesterTests : IDisposable
             Info = "csharp title=\"demo\"",
         };
 
-        Assert.Equal("csharp", RazorDocsCodeBlockRenderer.ExtractLanguage(block));
+        Assert.Equal("csharp", AppSurfaceDocsCodeBlockRenderer.ExtractLanguage(block));
     }
 
     [Fact]
@@ -282,7 +282,7 @@ public class MarkdownHarvesterTests : IDisposable
             UnescapedInfo = new StringSlice("json title=\"demo\""),
         };
 
-        Assert.Equal("json", RazorDocsCodeBlockRenderer.ExtractLanguage(block));
+        Assert.Equal("json", AppSurfaceDocsCodeBlockRenderer.ExtractLanguage(block));
     }
 
     [Fact]
@@ -290,7 +290,7 @@ public class MarkdownHarvesterTests : IDisposable
     {
         var block = new FencedCodeBlock(null!);
 
-        Assert.Null(RazorDocsCodeBlockRenderer.ExtractLanguage(block));
+        Assert.Null(AppSurfaceDocsCodeBlockRenderer.ExtractLanguage(block));
     }
 
     [Fact]
@@ -787,7 +787,7 @@ public class MarkdownHarvesterTests : IDisposable
     public void CreateDefaultHighlighter_ShouldThrow_WhenLoggerIsNull()
     {
         Assert.Throws<ArgumentNullException>(
-            () => RazorDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(null!));
+            () => AppSurfaceDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(null!));
     }
 
     [Fact]
@@ -920,15 +920,15 @@ public class MarkdownHarvesterTests : IDisposable
         return message?.Contains(expectedMessageFragment, StringComparison.OrdinalIgnoreCase) == true;
     }
 
-    private sealed class RecordingCodeHighlighter : IRazorDocsCodeHighlighter
+    private sealed class RecordingCodeHighlighter : IAppSurfaceDocsCodeHighlighter
     {
-        internal List<RazorDocsCodeBlock> Blocks { get; } = [];
+        internal List<AppSurfaceDocsCodeBlock> Blocks { get; } = [];
 
-        public RazorDocsHighlightedCode Highlight(RazorDocsCodeBlock block)
+        public AppSurfaceDocsHighlightedCode Highlight(AppSurfaceDocsCodeBlock block)
         {
             Blocks.Add(block);
             var code = Assert.IsType<string>(block.Code);
-            return new RazorDocsHighlightedCode(
+            return new AppSurfaceDocsHighlightedCode(
                 $"<pre class=\"doc-code test-code\"><code>{System.Net.WebUtility.HtmlEncode(code.Trim())}</code></pre>",
                 block.Language ?? "plaintext",
                 IsHighlighted: true);

@@ -359,7 +359,7 @@ public class CSharpDocHarvester : IDocHarvester
 
     private static string CreateSymbolSourcePlaceholder(string anchorId)
     {
-        return $@"<span data-razordocs-symbol-source=""{WebUtility.HtmlEncode(anchorId)}""></span>";
+        return $@"<span data-appsurfacedocs-symbol-source=""{WebUtility.HtmlEncode(anchorId)}""></span>";
     }
 
     private static void AddSymbolSourceProvenance(

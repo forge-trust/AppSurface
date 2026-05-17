@@ -1,10 +1,10 @@
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Normalizes harvested non-Markdown source paths into legacy browser-facing routes used by RazorDocs.
+/// Normalizes harvested non-Markdown source paths into legacy browser-facing routes used by AppSurface Docs.
 /// </summary>
 /// <remarks>
-/// A harvested source path is the repository-relative or generated path assigned to a <c>DocNode</c> before RazorDocs
+/// A harvested source path is the repository-relative or generated path assigned to a <c>DocNode</c> before AppSurface Docs
 /// publishes it. This helper is intentionally narrow: it exists for generated or imported non-Markdown sources such as
 /// XML API reference pages, generated JSON or YAML API specs, and imported HTML fragments that still use the historical
 /// <c>.html</c> route shape. Markdown documents should use <see cref="DocRouteIdentityCatalog"/> instead, because that

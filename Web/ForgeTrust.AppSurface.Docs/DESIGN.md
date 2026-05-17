@@ -1,8 +1,8 @@
-# RazorDocs Design Language
+# AppSurface Docs Design Language
 
 ## Purpose
 
-RazorDocs should feel like a focused documentation workspace, not a marketing site and not a generic SaaS dashboard. The UI should help people orient quickly, scan densely, and move deeper into docs with very little friction.
+AppSurface Docs should feel like a focused documentation workspace, not a marketing site and not a generic SaaS dashboard. The UI should help people orient quickly, scan densely, and move deeper into docs with very little friction.
 
 ## Core Tone
 
@@ -32,7 +32,7 @@ If a new surface starts to feel like a feature grid, a landing page, or an AI-ge
 
 ### Style Tokens
 
-RazorDocs expresses the flagship dark-slate system through internal `--docs-*` CSS custom properties in `wwwroot/css/app.css`.
+AppSurface Docs expresses the flagship dark-slate system through internal `--docs-*` CSS custom properties in `wwwroot/css/app.css`.
 
 The token layer exists so contributors can preserve the same visual language without rediscovering which hardcoded slate, cyan, or translucent fill belongs to each shared primitive. Token names should describe the design job: surface, border, text, accent, focus, active state, code chrome, table chrome, or skeleton. Do not name tokens after Tailwind hues unless the hue itself is the contract, which it usually is not.
 
@@ -42,7 +42,7 @@ Default rule:
 2. If a color represents a repeated state such as focus, active, muted, raised, loading, or default border, use or add a token.
 3. If a color is local to syntax highlighting, generated API signature colorization, or a one-off semantic badge family, keep it local and document the category.
 
-These tokens are not a public theming API yet. Hosts should not rely on overriding `--docs-*` names until a future theming feature explicitly documents that contract. Inside RazorDocs, though, shared package chrome and search-specific UI should consume the same root token layer so future theming can change the system deliberately. Search CSS may route through `--docs-search-*` aliases with fallbacks because exact published release trees can serve `search.css` without the generated package stylesheet.
+These tokens are not a public theming API yet. Hosts should not rely on overriding `--docs-*` names until a future theming feature explicitly documents that contract. Inside AppSurface Docs, though, shared package chrome and search-specific UI should consume the same root token layer so future theming can change the system deliberately. Search CSS may route through `--docs-search-*` aliases with fallbacks because exact published release trees can serve `search.css` without the generated package stylesheet.
 
 ### Surfaces
 
@@ -52,7 +52,7 @@ These tokens are not a public theming API yet. Hosts should not rely on overridi
 
 ## Styling Boundary
 
-RazorDocs uses multiple styling patterns because it is solving different ownership and stability problems.
+AppSurface Docs uses multiple styling patterns because it is solving different ownership and stability problems.
 
 Owned package chrome is local product UI. Harvested content is nested document output. Stateful search UI also needs selectors that both CSS and JavaScript can trust. Treating those surfaces as one blanket styling problem is how teams end up arguing about style purity instead of making the interface easier to maintain.
 
@@ -62,16 +62,16 @@ Use this order when deciding where a new style belongs:
 
 1. Reusable component contract or shared CSS and JavaScript hook: semantic class.
 2. Unowned nested content rendered inside a package wrapper: wrapper-scoped semantic CSS.
-3. One-off package chrome that RazorDocs owns directly: Tailwind utilities in markup.
+3. One-off package chrome that AppSurface Docs owns directly: Tailwind utilities in markup.
 
 `README.md` is the fast rulebook for this decision. This document explains why the rule exists and where contributors usually get tripped up.
 
 ### Why Ownership Beats Style Purity
 
 - One-off owned chrome is easiest to read when the intent stays in the Razor markup that owns it.
-- Harvested content is safest to style through a wrapper such as `.docs-content` because RazorDocs does not control each nested node or authoring shape.
+- Harvested content is safest to style through a wrapper such as `.docs-content` because AppSurface Docs does not control each nested node or authoring shape.
 - Markdown and generated API reference are both harvested content, but they are different reading jobs. Use `.docs-content--markdown` for prose rhythm and keep `.docs-content--api` on the wider base reference treatment.
-- Reusable package components deserve semantic names even when RazorDocs owns the markup, because repeated UI contracts are easier to review and update when they have one stable selector.
+- Reusable package components deserve semantic names even when AppSurface Docs owns the markup, because repeated UI contracts are easier to review and update when they have one stable selector.
 - Search surfaces need semantic hooks because the stylesheet and `search-client.js` both rely on the same stable names across loading, empty, failure, and active-filter states.
 
 ### Edge Cases
@@ -80,7 +80,7 @@ Use this order when deciding where a new style belongs:
 
 Classes such as `docs-page-badge` and `docs-metadata-chip` are not a failure of utility-first styling. They are the right tool when a repeated package component needs one stable contract across multiple views and stylesheets.
 
-Shared reusable primitives belong in the Tailwind entry stylesheet at `wwwroot/css/app.css`, which generates the package stylesheet loaded on every RazorDocs page. Search-specific state and result styling belongs in `wwwroot/docs/search.css`; do not make non-search pages depend on search assets for badges, metadata chips, or trust/provenance chrome.
+Shared reusable primitives belong in the Tailwind entry stylesheet at `wwwroot/css/app.css`, which generates the package stylesheet loaded on every AppSurface Docs page. Search-specific state and result styling belongs in `wwwroot/docs/search.css`; do not make non-search pages depend on search assets for badges, metadata chips, or trust/provenance chrome.
 
 #### Search workspace hooks
 
@@ -98,7 +98,7 @@ Avoid these by default:
 
 - adding semantic classes to static package chrome when local utilities are clearer
 - forcing repeated package UI back into long utility strings when a shared component class is already the simpler contract
-- pushing utility classes into harvested nested HTML that RazorDocs does not fully own
+- pushing utility classes into harvested nested HTML that AppSurface Docs does not fully own
 - treating shared CSS and JavaScript hook classes as a failure of Tailwind instead of a legitimate integration seam
 - moving styles across the boundary without a concrete user-facing benefit
 
@@ -107,7 +107,7 @@ Avoid these by default:
 When reviewing a change, ask:
 
 - Does this surface need a reusable selector that more than one file depends on?
-- Does RazorDocs fully own this markup, or is it styling nested harvested content?
+- Does AppSurface Docs fully own this markup, or is it styling nested harvested content?
 - Will a future contributor understand where the style belongs without reading half the package?
 - Is this change improving usability or maintainability, or just chasing stylistic consistency?
 
@@ -179,7 +179,7 @@ Visual rules:
 - Borrow the active-row treatment from the approved mockup direction: subtle row fill plus a cyan marker.
 - Keep H2 links stronger and H3 links quieter/indented.
 - Use small row radii only. Do not wrap the whole rail in a large rounded card.
-- Preserve the existing RazorDocs global sidebar; do not replace it with icon-only chrome for this pattern.
+- Preserve the existing AppSurface Docs global sidebar; do not replace it with icon-only chrome for this pattern.
 - On compact viewports, the collapsed outline may show previous, current, and next section context. The current section is dominant; previous and next stay smaller and quieter so the control remains a reader aid instead of a second header.
 - When the compact outline is expanded, it is a bounded scroll surface with contained overscroll. Readers should be able to inspect a long `On this page` list without accidentally moving the article behind it.
 

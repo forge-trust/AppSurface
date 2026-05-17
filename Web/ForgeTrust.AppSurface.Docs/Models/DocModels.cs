@@ -69,7 +69,7 @@ public sealed record DocMetadata
     /// Gets the explicit sequence identifier used to connect pages into one proof path.
     /// </summary>
     /// <remarks>
-    /// RazorDocs does not infer sequence membership from folders or filenames in this slice. Pages participate in
+    /// AppSurface Docs does not infer sequence membership from folders or filenames in this slice. Pages participate in
     /// next/previous wayfinding only when authors opt them into the same <see cref="SequenceKey"/> and assign
     /// comparable <see cref="Order"/> values.
     /// </remarks>
@@ -109,7 +109,7 @@ public sealed record DocMetadata
     /// Gets optional landing-page curation groups authored with the documentation page.
     /// </summary>
     /// <remarks>
-    /// RazorDocs parses this metadata on any page so the contract stays page-agnostic. Authors can supply groups either
+    /// AppSurface Docs parses this metadata on any page so the contract stays page-agnostic. Authors can supply groups either
     /// inline in Markdown front matter or through a paired sidecar such as <c>README.md.yml</c>. The built-in docs
     /// landing consumes the repository-root <c>README.md</c> groups, and section landing docs consume their own groups
     /// for reader-intent next steps.
@@ -140,7 +140,7 @@ public sealed record DocMetadata
 
     /// <summary>
     /// Gets a value indicating whether authored breadcrumb labels align with the path-derived breadcrumb targets that
-    /// RazorDocs can safely reuse for rendering.
+    /// AppSurface Docs can safely reuse for rendering.
     /// </summary>
     internal bool? BreadcrumbsMatchPathTargets { get; init; }
 
@@ -515,7 +515,7 @@ public record DocNode(
     IReadOnlyList<DocSymbolSourceProvenance>? SymbolSourceProvenance = null);
 
 /// <summary>
-/// Describes the overall health of the latest RazorDocs harvest snapshot.
+/// Describes the overall health of the latest AppSurface Docs harvest snapshot.
 /// </summary>
 /// <remarks>
 /// Numeric values are a stable public compatibility contract for persisted and serialized representations. Do not
@@ -545,7 +545,7 @@ public enum DocHarvestHealthStatus
 }
 
 /// <summary>
-/// Describes one configured harvester's contribution to a RazorDocs harvest snapshot.
+/// Describes one configured harvester's contribution to an AppSurface Docs harvest snapshot.
 /// </summary>
 /// <remarks>
 /// Numeric values are a stable public compatibility contract for persisted and serialized representations. Do not
@@ -569,18 +569,18 @@ public enum DocHarvesterHealthStatus
     Failed = 2,
 
     /// <summary>
-    /// The harvester exceeded RazorDocs' per-harvester timeout budget.
+    /// The harvester exceeded AppSurface Docs' per-harvester timeout budget.
     /// </summary>
     TimedOut = 3,
 
     /// <summary>
-    /// The harvester observed cancellation that was not caused by RazorDocs' timeout budget.
+    /// The harvester observed cancellation that was not caused by AppSurface Docs' timeout budget.
     /// </summary>
     Canceled = 4
 }
 
 /// <summary>
-/// Describes the severity of a structured RazorDocs harvest diagnostic.
+/// Describes the severity of a structured AppSurface Docs harvest diagnostic.
 /// </summary>
 /// <remarks>
 /// Numeric values are a stable public compatibility contract for persisted and serialized representations. Do not
@@ -604,13 +604,13 @@ public enum DocHarvestDiagnosticSeverity
     Error = 2,
 
     /// <summary>
-    /// Aggregate failure that means RazorDocs could not harvest any configured source successfully.
+    /// Aggregate failure that means AppSurface Docs could not harvest any configured source successfully.
     /// </summary>
     Critical = 3
 }
 
 /// <summary>
-/// Captures the structured health of one RazorDocs harvest snapshot.
+/// Captures the structured health of one AppSurface Docs harvest snapshot.
 /// </summary>
 /// <param name="Status">Overall health rollup for the snapshot.</param>
 /// <param name="GeneratedUtc">UTC timestamp when the snapshot was generated.</param>
@@ -622,10 +622,10 @@ public enum DocHarvestDiagnosticSeverity
 /// <param name="SuccessfulHarvesters">Number of harvesters that completed with either docs or a valid empty result.</param>
 /// <param name="FailedHarvesters">Number of harvesters that failed, timed out, or canceled.</param>
 /// <param name="TotalDocs">Number of documentation nodes published by the final cached docs snapshot.</param>
-/// <param name="Harvesters">Per-harvester health entries. Never <see langword="null" /> in RazorDocs-created snapshots.</param>
-/// <param name="Diagnostics">Structured diagnostics for failed, degraded, or noteworthy states. Never <see langword="null" /> in RazorDocs-created snapshots.</param>
+/// <param name="Harvesters">Per-harvester health entries. Never <see langword="null" /> in AppSurface Docs-created snapshots.</param>
+/// <param name="Diagnostics">Structured diagnostics for failed, degraded, or noteworthy states. Never <see langword="null" /> in AppSurface Docs-created snapshots.</param>
 /// <remarks>
-/// RazorDocs-created snapshots retain non-null <see cref="Harvesters"/> and <see cref="Diagnostics"/> collections for
+/// AppSurface Docs-created snapshots retain non-null <see cref="Harvesters"/> and <see cref="Diagnostics"/> collections for
 /// safe server-side inspection, but callers that serialize this record into client-visible payloads must sanitize
 /// <see cref="RepositoryRoot"/> first.
 /// </remarks>
@@ -641,11 +641,11 @@ public sealed record DocHarvestHealthSnapshot(
     IReadOnlyList<DocHarvestDiagnostic> Diagnostics);
 
 /// <summary>
-/// Captures one configured harvester's status inside a RazorDocs harvest snapshot.
+/// Captures one configured harvester's status inside an AppSurface Docs harvest snapshot.
 /// </summary>
 /// <param name="HarvesterType">Concrete harvester type name used in logs and diagnostics.</param>
 /// <param name="Status">Harvester-level health status.</param>
-/// <param name="DocCount">Number of documentation nodes returned by the harvester before RazorDocs post-processing.</param>
+/// <param name="DocCount">Number of documentation nodes returned by the harvester before AppSurface Docs post-processing.</param>
 /// <param name="Diagnostic">Diagnostic explaining a failed, timed-out, or canceled harvester; usually <see langword="null" /> for non-failure outcomes.</param>
 public sealed record DocHarvesterHealth(
     string HarvesterType,
@@ -654,13 +654,13 @@ public sealed record DocHarvesterHealth(
     DocHarvestDiagnostic? Diagnostic);
 
 /// <summary>
-/// Describes one structured RazorDocs harvest health diagnostic.
+/// Describes one structured AppSurface Docs harvest health diagnostic.
 /// </summary>
 /// <param name="Code">Stable diagnostic code suitable for tests, logs, documentation, and host UI branching.</param>
 /// <param name="Severity">Diagnostic severity.</param>
 /// <param name="HarvesterType">Concrete harvester type when the diagnostic belongs to one harvester, or <see langword="null" /> for aggregate diagnostics.</param>
 /// <param name="Problem">Operator-facing summary of what went wrong.</param>
-/// <param name="Cause">Explanation of why RazorDocs could not safely treat the harvest as fully healthy.</param>
+/// <param name="Cause">Explanation of why AppSurface Docs could not safely treat the harvest as fully healthy.</param>
 /// <param name="Fix">Suggested operator or docs-author action that resolves the problem.</param>
 public sealed record DocHarvestDiagnostic(
     string Code,
@@ -671,7 +671,7 @@ public sealed record DocHarvestDiagnostic(
     string Fix);
 
 /// <summary>
-/// Defines the stable diagnostic codes emitted by RazorDocs harvest health snapshots.
+/// Defines the stable diagnostic codes emitted by AppSurface Docs harvest health snapshots.
 /// </summary>
 /// <remarks>
 /// Use these constants when testing or branching on <see cref="DocHarvestDiagnostic.Code"/> values. The string values are
@@ -680,63 +680,63 @@ public sealed record DocHarvestDiagnostic(
 public static class DocHarvestDiagnosticCodes
 {
     /// <summary>
-    /// A harvester exceeded RazorDocs' per-harvester timeout budget.
+    /// A harvester exceeded AppSurface Docs' per-harvester timeout budget.
     /// </summary>
-    public const string HarvesterTimedOut = "razordocs.harvest.harvester_timed_out";
+    public const string HarvesterTimedOut = "appsurfacedocs.harvest.harvester_timed_out";
 
     /// <summary>
-    /// A harvester observed cancellation outside RazorDocs' timeout budget.
+    /// A harvester observed cancellation outside AppSurface Docs' timeout budget.
     /// </summary>
-    public const string HarvesterCanceled = "razordocs.harvest.harvester_canceled";
+    public const string HarvesterCanceled = "appsurfacedocs.harvest.harvester_canceled";
 
     /// <summary>
     /// A harvester threw while scanning the documentation source.
     /// </summary>
-    public const string HarvesterFailed = "razordocs.harvest.harvester_failed";
+    public const string HarvesterFailed = "appsurfacedocs.harvest.harvester_failed";
 
     /// <summary>
-    /// No harvesters were registered for the RazorDocs host.
+    /// No harvesters were registered for the AppSurface Docs host.
     /// </summary>
-    public const string NoHarvesters = "razordocs.harvest.no_harvesters";
+    public const string NoHarvesters = "appsurfacedocs.harvest.no_harvesters";
 
     /// <summary>
     /// Every configured harvester failed, timed out, or canceled for the snapshot.
     /// </summary>
-    public const string AllFailed = "razordocs.harvest.all_failed";
+    public const string AllFailed = "appsurfacedocs.harvest.all_failed";
 
     /// <summary>
-    /// A documentation page resolved to a route owned by RazorDocs chrome, search, health, versions, sections, or assets.
+    /// A documentation page resolved to a route owned by AppSurface Docs chrome, search, health, versions, sections, or assets.
     /// </summary>
-    public const string DocReservedRouteCollision = "razordocs.routes.reserved_collision";
+    public const string DocReservedRouteCollision = "appsurfacedocs.routes.reserved_collision";
 
     /// <summary>
     /// Multiple documentation pages resolved to the same public route path.
     /// </summary>
-    public const string DocRouteCollision = "razordocs.routes.doc_collision";
+    public const string DocRouteCollision = "appsurfacedocs.routes.doc_collision";
 
     /// <summary>
     /// A declared redirect alias collided with another public doc route or alias.
     /// </summary>
-    public const string DocRedirectAliasCollision = "razordocs.routes.redirect_alias_collision";
+    public const string DocRedirectAliasCollision = "appsurfacedocs.routes.redirect_alias_collision";
 
     /// <summary>
     /// A declared canonical slug was invalid for public route identity.
     /// </summary>
-    public const string DocInvalidCanonicalSlug = "razordocs.routes.invalid_canonical_slug";
+    public const string DocInvalidCanonicalSlug = "appsurfacedocs.routes.invalid_canonical_slug";
 
     /// <summary>
     /// A declared redirect alias was invalid for public route identity.
     /// </summary>
-    public const string DocInvalidRedirectAlias = "razordocs.routes.invalid_redirect_alias";
+    public const string DocInvalidRedirectAlias = "appsurfacedocs.routes.invalid_redirect_alias";
 
     /// <summary>
-    /// RazorDocs had to drop or fold characters while normalizing a public route slug.
+    /// AppSurface Docs had to drop or fold characters while normalizing a public route slug.
     /// </summary>
-    public const string DocLossySlugNormalization = "razordocs.routes.lossy_slug_normalization";
+    public const string DocLossySlugNormalization = "appsurfacedocs.routes.lossy_slug_normalization";
 }
 
 /// <summary>
-/// Enumerates the built-in public documentation sections used by RazorDocs.
+/// Enumerates the built-in public documentation sections used by AppSurface Docs.
 /// </summary>
 /// <remarks>
 /// Numeric values are a stable public compatibility contract for persisted and serialized representations. Do not
@@ -826,7 +826,7 @@ public sealed record DocFeaturedPageGroupDefinition
     /// Gets the stable reader-intent identifier for the group.
     /// </summary>
     /// <remarks>
-    /// Authors may omit this value when <see cref="Label"/> is present. RazorDocs derives a normalized intent from the
+    /// Authors may omit this value when <see cref="Label"/> is present. AppSurface Docs derives a normalized intent from the
     /// label during metadata parsing so downstream resolvers can still identify the group consistently.
     /// </remarks>
     public string? Intent { get; init; }
@@ -835,7 +835,7 @@ public sealed record DocFeaturedPageGroupDefinition
     /// Gets the reader-facing group heading.
     /// </summary>
     /// <remarks>
-    /// Authors may omit this value when <see cref="Intent"/> is present. RazorDocs converts the intent into a
+    /// Authors may omit this value when <see cref="Intent"/> is present. AppSurface Docs converts the intent into a
     /// title-cased label during metadata parsing so the landing can still render a useful heading.
     /// </remarks>
     public string? Label { get; init; }
@@ -874,7 +874,7 @@ public sealed record DocFeaturedPageDefinition
     /// Gets the reader-facing evaluator question or label for the card.
     /// </summary>
     /// <remarks>
-    /// When this value is omitted on the built-in docs landing, RazorDocs falls back to the resolved destination
+    /// When this value is omitted on the built-in docs landing, AppSurface Docs falls back to the resolved destination
     /// page title so the card still renders with a sensible label.
     /// </remarks>
     public string? Question { get; init; }
@@ -883,7 +883,7 @@ public sealed record DocFeaturedPageDefinition
     /// Gets the source or canonical path of the destination page to feature.
     /// </summary>
     /// <remarks>
-    /// RazorDocs matches both source paths and canonical browser paths. Path separators are normalized during
+    /// AppSurface Docs matches both source paths and canonical browser paths. Path separators are normalized during
     /// resolution so authored forward-slash and backslash forms point to the same destination.
     /// </remarks>
     public string? Path { get; init; }
@@ -964,7 +964,7 @@ public sealed record DocLandingViewModel
 /// <see cref="DocLandingFeaturedPageViewModel"/> rows produced by the resolver after it matches authored destinations to
 /// visible docs. Empty <see cref="Pages"/> lists are treated as no featured pages and are suppressed by
 /// <see cref="DocLandingViewModel.HasFeaturedPages"/>, <see cref="DocDetailsViewModel.HasFeaturedPages"/>, and the
-/// RazorDocs views.
+/// AppSurface Docs views.
 /// Pitfalls: callers should not rely on an empty <see cref="Pages"/> list being rendered, and should expect
 /// <see cref="Intent"/>, <see cref="Label"/>, <see cref="Summary"/>, and <see cref="Pages"/> to reflect resolver output
 /// rather than raw authored front matter.
@@ -1018,7 +1018,7 @@ public sealed record DocLandingFeaturedPageViewModel
     public string? PageType { get; init; }
 
     /// <summary>
-    /// Gets the normalized badge presentation for <see cref="PageType"/> when RazorDocs can render one.
+    /// Gets the normalized badge presentation for <see cref="PageType"/> when AppSurface Docs can render one.
     /// </summary>
     public DocPageTypeBadgePresentation? PageTypeBadge { get; init; }
 
@@ -1185,7 +1185,7 @@ public sealed record DocSidebarViewModel
 }
 
 /// <summary>
-/// View model for the RazorDocs harvest health sidebar entry.
+/// View model for the AppSurface Docs harvest health sidebar entry.
 /// </summary>
 public sealed record DocSidebarHarvestHealthViewModel
 {

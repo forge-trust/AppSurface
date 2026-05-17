@@ -43,7 +43,7 @@
         .ToList();
     var hasOutline = outlineItems.Count > 0;
     var documentContent = ResolveGeneratedContentHrefs(Model.Document.Content);
-    var visibleDocumentContent = ForgeTrust.AppSurface.Docs.Services.RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(
+    var visibleDocumentContent = ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(
         documentContent,
         shellOwnsH1: !Model.IsCSharpApiDoc);
 }
