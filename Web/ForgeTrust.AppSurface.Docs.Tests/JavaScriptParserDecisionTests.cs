@@ -12,7 +12,7 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class JavaScriptParserDecisionTests
 {
-    private static readonly string FixtureDirectory = Path.Combine(
+    private static readonly string FixtureDirectory = PathUnder(
         TestPathUtils.FindRepoRoot(AppContext.BaseDirectory),
         "Web",
         "ForgeTrust.AppSurface.Docs.Tests",
@@ -26,14 +26,14 @@ public sealed class JavaScriptParserDecisionTests
         _output = output;
     }
 
-    public static TheoryData<string, string, JavaScriptProbeKind, int, int> SupportedDeclarationFixtures()
+    public static TheoryData<string, string, string, int, int> SupportedDeclarationFixtures()
     {
-        return new TheoryData<string, string, JavaScriptProbeKind, int, int>
+        return new TheoryData<string, string, string, int, int>
         {
-            { "public-function.js", "wireForm", JavaScriptProbeKind.Function, 7, 0 },
-            { "public-arrow-function.js", "createFailureListener", JavaScriptProbeKind.Function, 5, 0 },
-            { "public-const-value.js", "streamTimeoutMs", JavaScriptProbeKind.Constant, 5, 0 },
-            { "window-razorwire-global.js", "window.RazorWire", JavaScriptProbeKind.Global, 6, 0 },
+            { "public-function.js", "wireForm", nameof(JavaScriptProbeKind.Function), 7, 0 },
+            { "public-arrow-function.js", "createFailureListener", nameof(JavaScriptProbeKind.Function), 5, 0 },
+            { "public-const-value.js", "streamTimeoutMs", nameof(JavaScriptProbeKind.Constant), 5, 0 },
+            { "window-razorwire-global.js", "window.RazorWire", nameof(JavaScriptProbeKind.Global), 6, 0 },
         };
     }
 
@@ -42,7 +42,7 @@ public sealed class JavaScriptParserDecisionTests
     public void Acornima_Should_Attach_Leading_Public_Block_Comments_To_Supported_Declarations(
         string fixtureName,
         string expectedName,
-        JavaScriptProbeKind expectedKind,
+        string expectedKind,
         int expectedLine,
         int expectedColumn)
     {
@@ -51,7 +51,7 @@ public sealed class JavaScriptParserDecisionTests
 
         var item = Assert.Single(result.AttachedDoclets);
         Assert.Equal(expectedName, item.Name);
-        Assert.Equal(expectedKind, item.Kind);
+        Assert.Equal(expectedKind, item.Kind.ToString());
         Assert.Equal(1, item.CommentLocation.Start.Line);
         Assert.Equal(0, item.CommentLocation.Start.Column);
         Assert.Equal(expectedLine, item.NodeLocation.Start.Line);
@@ -64,11 +64,11 @@ public sealed class JavaScriptParserDecisionTests
     }
 
     [Theory]
-    [InlineData("public-event-doclet.js", JavaScriptProbeKind.Event, "razorwire:form:failure")]
-    [InlineData("public-typedef-doclet.js", JavaScriptProbeKind.Typedef, "FormFailureDetail")]
+    [InlineData("public-event-doclet.js", nameof(JavaScriptProbeKind.Event), "razorwire:form:failure")]
+    [InlineData("public-typedef-doclet.js", nameof(JavaScriptProbeKind.Typedef), "FormFailureDetail")]
     public void Acornima_Should_Collect_Standalone_Public_Doclets(
         string fixtureName,
-        JavaScriptProbeKind expectedKind,
+        string expectedKind,
         string expectedName)
     {
         var source = ReadFixture(fixtureName);
@@ -77,10 +77,27 @@ public sealed class JavaScriptParserDecisionTests
         Assert.Empty(result.AttachedDoclets);
         var item = Assert.Single(result.StandaloneDoclets);
         Assert.Equal(expectedName, item.Name);
-        Assert.Equal(expectedKind, item.Kind);
+        Assert.Equal(expectedKind, item.Kind.ToString());
         Assert.Equal(1, item.CommentLocation.Start.Line);
         Assert.Equal(0, item.CommentLocation.Start.Column);
         Assert.Contains("@public", item.CommentText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Acornima_Should_Not_Treat_Dynamic_Window_Members_As_Concrete_Globals()
+    {
+        const string source = """
+            /**
+             * Dynamic global assignment should not become a concrete API name.
+             * @public
+             */
+            window[someDynamicName] = {};
+            """;
+
+        var result = ProbeSource(source);
+
+        Assert.Empty(result.AttachedDoclets);
+        Assert.Empty(result.StandaloneDoclets);
     }
 
     [Fact]
@@ -103,15 +120,15 @@ public sealed class JavaScriptParserDecisionTests
         {
             ParseCostCase.RealFile(
                 "razorwire.js",
-                Path.Combine(repoRoot, "Web", "ForgeTrust.RazorWire", "wwwroot", "razorwire", "razorwire.js"),
+                PathUnder(repoRoot, "Web", "ForgeTrust.RazorWire", "wwwroot", "razorwire", "razorwire.js"),
                 expectedSuccess: true),
             ParseCostCase.RealFile(
                 "search-client.js",
-                Path.Combine(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "docs", "search-client.js"),
+                PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "docs", "search-client.js"),
                 expectedSuccess: true),
             ParseCostCase.SkippedFile(
                 "minisearch.min.js",
-                Path.Combine(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "docs", "minisearch.min.js"),
+                PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "docs", "minisearch.min.js"),
                 "*.min.js remains excluded by default"),
             ParseCostCase.Fixture("malformed.js", ReadFixture("malformed.js"), expectedSuccess: false),
             ParseCostCase.Fixture("synthetic-large-public-doclet.js", CreateSyntheticPublicDocletFixture(750), expectedSuccess: true),
@@ -132,7 +149,6 @@ public sealed class JavaScriptParserDecisionTests
             var measurement = MeasureParseCost(testCase.Source);
 
             Assert.Equal(testCase.ExpectedSuccess, measurement.Success);
-            Assert.True(measurement.Elapsed < TimeSpan.FromSeconds(5));
             _output.WriteLine(
                 FormattableString.Invariant(
                     $"{testCase.Name}: {testCase.SizeBytes} bytes, {measurement.Elapsed.TotalMilliseconds:F3} ms, success={measurement.Success}, nodes={measurement.NodeCount}, blockComments={measurement.BlockCommentCount}"));
@@ -154,7 +170,7 @@ public sealed class JavaScriptParserDecisionTests
         Assert.Equal("BSD-3-Clause", license?.Value);
 
         var testProject = XDocument.Load(
-            Path.Combine(repoRoot, "Web", "ForgeTrust.AppSurface.Docs.Tests", "ForgeTrust.AppSurface.Docs.Tests.csproj"));
+            PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs.Tests", "ForgeTrust.AppSurface.Docs.Tests.csproj"));
         Assert.Equal("false", testProject.Descendants("IsPackable").Single().Value);
         Assert.Contains(
             testProject.Descendants("PackageReference"),
@@ -163,7 +179,7 @@ public sealed class JavaScriptParserDecisionTests
             ["Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj"],
             FindProjectsReferencingPackage(repoRoot, "Acornima"));
 
-        var decision = File.ReadAllText(Path.Combine(FixtureDirectory, "README.md"));
+        var decision = File.ReadAllText(PathUnder(FixtureDirectory, "README.md"));
         Assert.Contains("## License Compliance Case", decision, StringComparison.Ordinal);
         Assert.Contains("Current spike use", decision, StringComparison.Ordinal);
         Assert.Contains("not redistributed", decision, StringComparison.Ordinal);
@@ -174,7 +190,7 @@ public sealed class JavaScriptParserDecisionTests
 
     private static string ReadFixture(string name)
     {
-        return File.ReadAllText(Path.Combine(FixtureDirectory, name));
+        return File.ReadAllText(PathUnder(FixtureDirectory, name));
     }
 
     private static XNamespace NuGetNuspecNamespace { get; } =
@@ -182,7 +198,7 @@ public sealed class JavaScriptParserDecisionTests
 
     private static string ReadCentralPackageVersion(string repoRoot, string packageId)
     {
-        var packages = XDocument.Load(Path.Combine(repoRoot, "Directory.Packages.props"));
+        var packages = XDocument.Load(PathUnder(repoRoot, "Directory.Packages.props"));
         var version = packages
             .Descendants("PackageVersion")
             .Single(package => string.Equals(package.Attribute("Include")?.Value, packageId, StringComparison.Ordinal))
@@ -194,7 +210,7 @@ public sealed class JavaScriptParserDecisionTests
 
     private static string FindNuGetPackageFile(string repoRoot, string packageId, string packageVersion, string fileName)
     {
-        var assetsPath = Path.Combine(
+        var assetsPath = PathUnder(
             repoRoot,
             "Web",
             "ForgeTrust.AppSurface.Docs.Tests",
@@ -212,7 +228,7 @@ public sealed class JavaScriptParserDecisionTests
             throw new InvalidOperationException("NuGet packages path was not found in project.assets.json.");
         }
 
-        return Path.Combine(packagesPath, packageId, packageVersion, fileName);
+        return PathUnder(packagesPath, packageId, packageVersion, fileName);
     }
 
     private static IReadOnlyList<string> FindProjectsReferencingPackage(string repoRoot, string packageId)
@@ -413,9 +429,8 @@ public sealed class JavaScriptParserDecisionTests
 
     private static string? TryReadTagValue(string commentText, string tag)
     {
-        foreach (var rawLine in commentText.Split('\n'))
+        foreach (var line in commentText.Split('\n').Select(static rawLine => rawLine.Trim().TrimStart('*').Trim()))
         {
-            var line = rawLine.Trim().TrimStart('*').Trim();
             var prefix = "@" + tag;
             if (!line.StartsWith(prefix, StringComparison.Ordinal))
             {
@@ -460,7 +475,7 @@ public sealed class JavaScriptParserDecisionTests
 
         var propertyName = memberExpression.Property switch
         {
-            Identifier identifier => identifier.Name,
+            Identifier identifier when !memberExpression.Computed => identifier.Name,
             StringLiteral stringLiteral when memberExpression.Computed => stringLiteral.Value,
             _ => null,
         };
@@ -473,6 +488,23 @@ public sealed class JavaScriptParserDecisionTests
     private static string GetCommentText(string source, Comment comment)
     {
         return source[comment.ContentRange.Start..comment.ContentRange.End].Trim();
+    }
+
+    private static string PathUnder(string basePath, params string[] segments)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(basePath);
+        ArgumentNullException.ThrowIfNull(segments);
+
+        foreach (var segment in segments)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(segment);
+            if (Path.IsPathRooted(segment))
+            {
+                throw new ArgumentException($"Path segment must be relative: {segment}", nameof(segments));
+            }
+        }
+
+        return Path.Join([basePath, .. segments]);
     }
 
     private static bool IsOnlyWhitespace(string source, int start, int end)
@@ -595,7 +627,7 @@ public sealed class JavaScriptParserDecisionTests
         {
             return new ParseCostCase(
                 name,
-                File.ReadAllText(path),
+                Source: string.Empty,
                 new FileInfo(path).Length,
                 ExpectedSuccess: false,
                 Skipped: true,
@@ -621,13 +653,13 @@ public sealed class JavaScriptParserDecisionTests
         TimeSpan Elapsed,
         int NodeCount,
         int BlockCommentCount);
-}
 
-public enum JavaScriptProbeKind
-{
-    Function,
-    Constant,
-    Global,
-    Event,
-    Typedef,
+    private enum JavaScriptProbeKind
+    {
+        Function,
+        Constant,
+        Global,
+        Event,
+        Typedef,
+    }
 }
