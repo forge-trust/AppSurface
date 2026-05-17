@@ -307,6 +307,16 @@ public sealed record DocLocalizationMetadata
     /// </summary>
     public RazorDocsLocaleFallbackMode? LocaleFallback { get; init; }
 
+    /// <summary>
+    /// Merges primary and fallback localization metadata using the same precedence rules as document metadata overlays.
+    /// </summary>
+    /// <remarks>
+    /// Primary <see cref="Locale"/>, <see cref="TranslationKey"/>, and <see cref="LocalizedTitle"/> values win only when
+    /// they are non-blank; otherwise <see cref="DocTrustMergeHelpers.PreferNonBlank"/> trims and selects the fallback
+    /// value. <see cref="LocaleFallback"/> uses nullable coalescing, so the primary enum value wins when present and the
+    /// fallback enum is used only when the primary omits a page-level policy. A blank primary string is therefore not a
+    /// deliberate override.
+    /// </remarks>
     internal static DocLocalizationMetadata? Merge(DocLocalizationMetadata? primary, DocLocalizationMetadata? fallback)
     {
         if (primary is null)
@@ -823,6 +833,11 @@ public static class DocHarvestDiagnosticCodes
     /// A document disables fallback but is missing one or more configured locale variants.
     /// </summary>
     public const string LocalizationFallbackDisabledMissingVariant = "razordocs.localization.fallback_disabled_missing_variant";
+
+    /// <summary>
+    /// Variants for the same translation identity declare conflicting fallback policies.
+    /// </summary>
+    public const string LocalizationFallbackConflict = "razordocs.localization.fallback_conflict";
 }
 
 /// <summary>

@@ -50,8 +50,8 @@ internal sealed class LocalizedDocsGraphBuilder
             .GroupBy(locale => locale.Code.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
         _localesByRoutePrefix = (options.Locales ?? [])
-            .Where(locale => locale is not null && !string.IsNullOrWhiteSpace(GetRoutePrefix(locale)))
-            .GroupBy(GetRoutePrefix, StringComparer.OrdinalIgnoreCase)
+            .Where(locale => locale is not null && !string.IsNullOrWhiteSpace(locale.ResolveRoutePrefix()))
+            .GroupBy(locale => locale.ResolveRoutePrefix(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
     }
 
@@ -63,15 +63,23 @@ internal sealed class LocalizedDocsGraphBuilder
         var docList = docs.ToList();
         if (!_options.Enabled)
         {
-            return new LocalizedDocsGraph(false, null, [], new Dictionary<string, LocalizedDocVariant>(), []);
+            return new LocalizedDocsGraph(
+                false,
+                null,
+                [],
+                new Dictionary<string, LocalizedDocVariant>(StringComparer.OrdinalIgnoreCase),
+                []);
         }
 
         var diagnostics = new List<DocHarvestDiagnostic>();
-        var normalizedSourcePaths = docList
+        var graphDocs = docList
+            .Where(doc => !IsFragmentStubSourcePath(doc.Path))
+            .ToList();
+        var normalizedSourcePaths = graphDocs
             .Select(doc => NormalizeSourcePath(doc.Path))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var variants = new List<LocalizedDocVariant>();
-        foreach (var doc in docList)
+        foreach (var doc in graphDocs)
         {
             var facts = ResolveFacts(doc, normalizedSourcePaths, diagnostics);
             if (facts is null)
@@ -124,7 +132,7 @@ internal sealed class LocalizedDocsGraphBuilder
                         $"Keep only one '{duplicateGroup.Key}' variant for translation_key '{group.Key}' or give the extra document a different translation_key."));
             }
 
-            var fallbackMode = ResolveDocSetFallbackMode(groupVariants);
+            var fallbackMode = ResolveDocSetFallbackMode(group.Key, groupVariants, diagnostics);
             var defaultSourcePath = groupVariants
                 .FirstOrDefault(variant => string.Equals(variant.Locale, _options.DefaultLocale, StringComparison.OrdinalIgnoreCase))
                 ?.SourcePath;
@@ -352,13 +360,6 @@ internal sealed class LocalizedDocsGraphBuilder
             : null;
     }
 
-    private static string GetRoutePrefix(RazorDocsLocaleOptions locale)
-    {
-        return string.IsNullOrWhiteSpace(locale.RoutePrefix)
-            ? locale.Code.Trim()
-            : locale.RoutePrefix!.Trim();
-    }
-
     private static string InferTranslationKey(string sourcePath)
     {
         var normalized = NormalizeSourcePath(sourcePath);
@@ -375,17 +376,31 @@ internal sealed class LocalizedDocsGraphBuilder
         return segments.Count == 0 ? "README" : string.Join('/', segments);
     }
 
-    private RazorDocsLocaleFallbackMode ResolveDocSetFallbackMode(IEnumerable<LocalizedDocVariant> variants)
+    private RazorDocsLocaleFallbackMode ResolveDocSetFallbackMode(
+        string translationKey,
+        IEnumerable<LocalizedDocVariant> variants,
+        List<DocHarvestDiagnostic> diagnostics)
     {
-        foreach (var variant in variants)
+        var fallbackModes = variants
+            .Where(variant => variant.LocaleFallback is not null)
+            .Select(variant => variant.LocaleFallback!.Value)
+            .ToList();
+        var distinctFallbackModes = fallbackModes
+            .Distinct()
+            .ToList();
+        if (distinctFallbackModes.Count > 1)
         {
-            if (variant.LocaleFallback is not null)
-            {
-                return variant.LocaleFallback.Value;
-            }
+            diagnostics.Add(
+                CreateDiagnostic(
+                    DocHarvestDiagnosticCodes.LocalizationFallbackConflict,
+                    $"Translation key '{translationKey}' declares conflicting locale fallback modes.",
+                    "Fallback behavior would otherwise depend on the first localized variant RazorDocs evaluates.",
+                    "Use the same locale_fallback value across variants for a translation key, or remove per-page fallback metadata to inherit the global setting."));
         }
 
-        return _options.FallbackMode;
+        return fallbackModes
+            .DefaultIfEmpty(_options.FallbackMode)
+            .First();
     }
 
     private static string ResolveTitle(DocNode doc)
@@ -409,6 +424,11 @@ internal sealed class LocalizedDocsGraphBuilder
     {
         return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
                || path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFragmentStubSourcePath(string path)
+    {
+        return path.Contains('#', StringComparison.Ordinal);
     }
 
     private static DocHarvestDiagnostic CreateDiagnostic(string code, string problem, string cause, string fix)

@@ -117,23 +117,32 @@ internal sealed class DocsSearchIndexProjectionCache
     {
         ArgumentNullException.ThrowIfNull(projection);
 
-        if (!_localizedGraph.Enabled || string.IsNullOrWhiteSpace(projection.Locale))
+        var normalizedProjection = NormalizeProjection(projection);
+        if (!_localizedGraph.Enabled || string.IsNullOrWhiteSpace(normalizedProjection.Locale))
         {
             return _defaultPayload;
         }
 
         lock (_gate)
         {
-            if (_payloads.TryGetValue(projection, out var payload))
+            if (_payloads.TryGetValue(normalizedProjection, out var payload))
             {
                 return payload;
             }
 
             // Phase 1 reserves the per-locale projection cache while preserving the existing v1 search payload contract.
-            _payloads[projection] = _defaultPayload;
+            var projectionPayload = _defaultPayload;
+            _payloads[normalizedProjection] = projectionPayload;
+            return projectionPayload;
         }
+    }
 
-        return _defaultPayload;
+    private static DocsSearchIndexProjection NormalizeProjection(DocsSearchIndexProjection projection)
+    {
+        var locale = string.IsNullOrWhiteSpace(projection.Locale)
+            ? null
+            : projection.Locale.Trim().ToLowerInvariant();
+        return projection with { Locale = locale };
     }
 }
 

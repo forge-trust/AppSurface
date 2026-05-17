@@ -103,6 +103,26 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void ExtractWithDiagnostics_ShouldReportConflictingFlatAndNestedLocalizationFields()
+    {
+        var markdown = """
+            ---
+            locale: fr
+            localization:
+              locale: en
+            ---
+            # Démarrer
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Equal("fr", result.Metadata?.Localization?.Locale);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("localization-field-conflict", diagnostic.Code);
+        Assert.Equal("locale", diagnostic.FieldPath);
+    }
+
+    [Fact]
     public void Extract_ShouldParseFeaturedPageGroups()
     {
         var markdown = """

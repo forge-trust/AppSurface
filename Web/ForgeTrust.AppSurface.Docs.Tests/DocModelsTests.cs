@@ -266,10 +266,11 @@ public class DocModelsTests
             });
 
         Assert.NotNull(merged?.Localization);
-        Assert.Equal("fr", merged!.Localization!.Locale);
-        Assert.Equal("guides/getting-started", merged.Localization.TranslationKey);
-        Assert.Equal("Getting started", merged.Localization.LocalizedTitle);
-        Assert.Equal(RazorDocsLocaleFallbackMode.Disabled, merged.Localization.LocaleFallback);
+        var localization = merged!.Localization!;
+        Assert.Equal("fr", localization.Locale);
+        Assert.Equal("guides/getting-started", localization.TranslationKey);
+        Assert.Equal("Getting started", localization.LocalizedTitle);
+        Assert.Equal(RazorDocsLocaleFallbackMode.Disabled, localization.LocaleFallback);
     }
 
     [Fact]

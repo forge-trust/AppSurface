@@ -450,34 +450,70 @@ public sealed class RazorDocsLocalizationOptions
 }
 
 /// <summary>
-/// Describes one configured RazorDocs locale.
+/// Describes one configured RazorDocs locale validated during RazorDocs startup.
 /// </summary>
+/// <remarks>
+/// Locale entries are runtime configuration, not loose display hints: <see cref="Code"/> values must be unique valid
+/// BCP-47 tags, and resolved route prefixes must be unique and avoid RazorDocs reserved route segments. Omitted
+/// <see cref="Lang"/> and <see cref="RoutePrefix"/> values fall back to <see cref="Code"/>, so duplicate codes or route
+/// aliases can fail startup validation even when those properties are not explicitly set.
+/// </remarks>
 public sealed class RazorDocsLocaleOptions
 {
     /// <summary>
-    /// Gets or sets the BCP-47 locale code, such as <c>en</c>, <c>fr</c>, or <c>pt-BR</c>.
+    /// Gets or sets the unique BCP-47 locale code, such as <c>en</c>, <c>fr</c>, or <c>pt-BR</c>.
     /// </summary>
+    /// <remarks>
+    /// The code is required, must parse as a culture name, and becomes the default <see cref="Lang"/> and
+    /// <see cref="RoutePrefix"/> when those properties are blank.
+    /// </remarks>
     public string Code { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the reader-facing locale label, such as <c>English</c> or <c>Français</c>.
     /// </summary>
+    /// <remarks>
+    /// The label is optional in Phase 1 and is not validated beyond normal configuration binding.
+    /// </remarks>
     public string? Label { get; set; }
 
     /// <summary>
     /// Gets or sets the HTML <c>lang</c> value. When omitted, <see cref="Code"/> is used.
     /// </summary>
+    /// <remarks>
+    /// Use this only when the rendered HTML language tag should differ from the configured RazorDocs locale code.
+    /// Blank values are treated as omitted and fall back to <see cref="Code"/>.
+    /// </remarks>
     public string? Lang { get; set; }
 
     /// <summary>
-    /// Gets or sets the text direction for this locale.
+    /// Gets or sets the text direction for this locale. Defaults to <see cref="RazorDocsTextDirection.Ltr"/>.
     /// </summary>
     public RazorDocsTextDirection Direction { get; set; } = RazorDocsTextDirection.Ltr;
 
     /// <summary>
     /// Gets or sets the route segment used for this locale. When omitted, <see cref="Code"/> is used.
     /// </summary>
+    /// <remarks>
+    /// The resolved route prefix must be unique across configured locales and must not collide with reserved RazorDocs
+    /// segments such as search, health, package, version, release, public-section, or asset endpoints. Collisions fail
+    /// startup validation.
+    /// </remarks>
     public string? RoutePrefix { get; set; }
+
+    /// <summary>
+    /// Resolves the locale route prefix after applying the documented fallback to <see cref="Code"/>.
+    /// </summary>
+    /// <remarks>
+    /// This helper centralizes prefix trimming so graph and route-candidate generation do not drift when
+    /// <see cref="RoutePrefix"/> is omitted.
+    /// </remarks>
+    internal string ResolveRoutePrefix()
+    {
+        return string.IsNullOrWhiteSpace(RoutePrefix)
+            ? Code.Trim()
+            : RoutePrefix!.Trim();
+    }
 }
 
 /// <summary>

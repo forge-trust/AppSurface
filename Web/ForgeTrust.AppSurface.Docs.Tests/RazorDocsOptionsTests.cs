@@ -67,6 +67,7 @@ public sealed class RazorDocsOptionsTests
         Assert.Equal("razordocs.localization.duplicate_variant", DocHarvestDiagnosticCodes.LocalizationDuplicateVariant);
         Assert.Equal("razordocs.localization.locale_folder_conflict", DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict);
         Assert.Equal("razordocs.localization.fallback_disabled_missing_variant", DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant);
+        Assert.Equal("razordocs.localization.fallback_conflict", DocHarvestDiagnosticCodes.LocalizationFallbackConflict);
     }
 
     [Fact]

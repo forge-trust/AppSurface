@@ -15,6 +15,7 @@ public sealed class LocalizedDocsGraphBuilderTests
         Assert.False(graph.Enabled);
         Assert.Empty(graph.DocSets);
         Assert.Empty(graph.Diagnostics);
+        Assert.False(graph.VariantsBySourcePath.ContainsKey("readme.md"));
     }
 
     [Fact]
@@ -235,6 +236,44 @@ public sealed class LocalizedDocsGraphBuilderTests
     }
 
     [Fact]
+    public void Build_ShouldEmitFallbackConflictDiagnostic_ForConflictingVariantFallbackModes()
+    {
+        var graph = RazorDocsLocalizationFixture.BuildGraph(
+            RazorDocsLocalizationFixture.CreateOptions(),
+            RazorDocsLocalizationFixture.MarkdownDoc(
+                "guides/configuration.md",
+                "Configuration",
+                fallback: RazorDocsLocaleFallbackMode.Disabled),
+            RazorDocsLocalizationFixture.MarkdownDoc(
+                "guides/configuration.fr.md",
+                "Configuration",
+                fallback: RazorDocsLocaleFallbackMode.DefaultLocaleWithNotice));
+
+        var docSet = Assert.Single(graph.DocSets);
+
+        Assert.Equal(RazorDocsLocaleFallbackMode.Disabled, docSet.FallbackMode);
+        Assert.Contains(
+            graph.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.LocalizationFallbackConflict);
+    }
+
+    [Fact]
+    public void Build_ShouldSkipFragmentStubSourcePaths()
+    {
+        var graph = RazorDocsLocalizationFixture.BuildGraph(
+            RazorDocsLocalizationFixture.CreateOptions(),
+            RazorDocsLocalizationFixture.MarkdownDoc("api/Foo.md", "Foo"),
+            RazorDocsLocalizationFixture.MarkdownDoc("api/Foo.md#TypeId", "Foo type"));
+
+        var variant = Assert.Single(graph.VariantsBySourcePath.Values);
+
+        Assert.Equal("api/Foo.md", variant.SourcePath);
+        Assert.DoesNotContain(
+            graph.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.LocalizationDuplicateVariant);
+    }
+
+    [Fact]
     public void RouteCatalog_ShouldBuildLocalePrefixedRouteCandidatesFromGraph()
     {
         var options = RazorDocsLocalizationFixture.CreateOptions();
@@ -323,7 +362,7 @@ public sealed class LocalizedDocsGraphBuilderTests
                     ],
                     RazorDocsLocaleFallbackMode.DefaultLocaleWithNotice)
             ],
-            VariantsBySourcePath: new Dictionary<string, LocalizedDocVariant>(),
+            VariantsBySourcePath: new Dictionary<string, LocalizedDocVariant>(StringComparer.OrdinalIgnoreCase),
             Diagnostics: []);
 
         var candidates = catalog.BuildLocalizedRouteCandidates(graph, options);

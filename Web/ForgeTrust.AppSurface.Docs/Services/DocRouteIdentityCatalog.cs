@@ -261,9 +261,7 @@ internal sealed class DocRouteIdentityCatalog
             .GroupBy(locale => locale.Code.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
-                group => string.IsNullOrWhiteSpace(group.First().RoutePrefix)
-                    ? group.First().Code.Trim()
-                    : group.First().RoutePrefix!.Trim(),
+                group => group.First().ResolveRoutePrefix(),
                 StringComparer.OrdinalIgnoreCase);
 
         var candidates = new List<LocalizedDocRouteCandidate>();

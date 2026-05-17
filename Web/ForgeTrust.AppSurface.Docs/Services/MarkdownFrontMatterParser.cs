@@ -477,10 +477,41 @@ internal static class MarkdownFrontMatterParser
         List<RazorDocsMetadataDiagnostic> diagnostics)
     {
         var nested = document.Localization;
-        var locale = Normalize(document.Locale) ?? Normalize(nested?.Locale);
-        var translationKey = Normalize(document.TranslationKey) ?? Normalize(nested?.TranslationKey);
-        var localizedTitle = Normalize(document.LocalizedTitle) ?? Normalize(nested?.LocalizedTitle);
-        var fallbackText = Normalize(document.LocaleFallback) ?? Normalize(nested?.LocaleFallback);
+        var flatLocale = Normalize(document.Locale);
+        var nestedLocale = Normalize(nested?.Locale);
+        var flatTranslationKey = Normalize(document.TranslationKey);
+        var nestedTranslationKey = Normalize(nested?.TranslationKey);
+        var flatLocalizedTitle = Normalize(document.LocalizedTitle);
+        var nestedLocalizedTitle = Normalize(nested?.LocalizedTitle);
+        var flatFallbackText = Normalize(document.LocaleFallback);
+        var nestedFallbackText = Normalize(nested?.LocaleFallback);
+        AddLocalizationConflictDiagnosticIfNeeded("locale", "locale", "localization.locale", flatLocale, nestedLocale, diagnostics);
+        AddLocalizationConflictDiagnosticIfNeeded(
+            "translation key",
+            "translation_key",
+            "localization.translation_key",
+            flatTranslationKey,
+            nestedTranslationKey,
+            diagnostics);
+        AddLocalizationConflictDiagnosticIfNeeded(
+            "localized title",
+            "localized_title",
+            "localization.localized_title",
+            flatLocalizedTitle,
+            nestedLocalizedTitle,
+            diagnostics);
+        AddLocalizationConflictDiagnosticIfNeeded(
+            "locale fallback",
+            "locale_fallback",
+            "localization.locale_fallback",
+            flatFallbackText,
+            nestedFallbackText,
+            diagnostics);
+
+        var locale = flatLocale ?? nestedLocale;
+        var translationKey = flatTranslationKey ?? nestedTranslationKey;
+        var localizedTitle = flatLocalizedTitle ?? nestedLocalizedTitle;
+        var fallbackText = flatFallbackText ?? nestedFallbackText;
         RazorDocsLocaleFallbackMode? fallback = null;
         if (fallbackText is not null)
         {
@@ -513,6 +544,30 @@ internal static class MarkdownFrontMatterParser
                 LocalizedTitle = localizedTitle,
                 LocaleFallback = fallback
             };
+    }
+
+    private static void AddLocalizationConflictDiagnosticIfNeeded(
+        string fieldName,
+        string flatFieldPath,
+        string nestedFieldPath,
+        string? flatValue,
+        string? nestedValue,
+        List<RazorDocsMetadataDiagnostic> diagnostics)
+    {
+        if (flatValue is null
+            || nestedValue is null
+            || string.Equals(flatValue, nestedValue, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        diagnostics.Add(
+            new RazorDocsMetadataDiagnostic(
+                "localization-field-conflict",
+                flatFieldPath,
+                $"The flat localization {fieldName} conflicts with {nestedFieldPath}.",
+                "RazorDocs prefers the flat front matter value and ignores the nested value for that field.",
+                $"Keep only {flatFieldPath} or {nestedFieldPath}, or make both values match."));
     }
 
     private sealed class FrontMatterDocument
