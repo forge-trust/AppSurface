@@ -119,9 +119,43 @@ Once the first pages render, improve the docs in layers:
 2. Add `summary`, `page_type`, `nav_group`, `aliases`, and `keywords` metadata to high-traffic pages.
 3. Add troubleshooting pages for the first support questions people ask.
 4. Add release notes and trust metadata when adoption depends on upgrade confidence.
-5. Add versioned published trees only after the live source-backed docs are useful.
+5. Add localization metadata when users need more than one language.
+6. Add versioned published trees only after the live source-backed docs are useful.
 
 That order matters. A beautiful archive of weak docs is still weak docs.
+
+## Prepare for multiple languages
+
+Localization is optional and disabled by default. Turn it on when the docs system needs to know which files are translations of the same page, even before you expose a language switcher or localized routes.
+
+```json
+{
+  "RazorDocs": {
+    "Localization": {
+      "Enabled": true,
+      "DefaultLocale": "en",
+      "Locales": [
+        { "Code": "en", "Label": "English", "Lang": "en-US", "RoutePrefix": "en" },
+        { "Code": "fr", "Label": "Français", "Lang": "fr-FR", "RoutePrefix": "fr" }
+      ]
+    }
+  }
+}
+```
+
+For colocated translations, files like `README.md` and `README.fr.md` are a good default. RazorDocs infers the `fr` locale from the configured suffix and groups the files under one translation key. When translated paths differ, author an explicit key:
+
+```yaml
+---
+title: Démarrer
+locale: fr
+translation_key: guides/getting-started
+---
+```
+
+Use locale folders only with explicit `translation_key` metadata. A file such as `fr/guides/demarrer.md` will not be treated as French just because it lives under `fr/`; that keeps ordinary folders from becoming language roots by accident.
+
+Phase 1 builds the locale graph, validates configuration, and reports diagnostics. Visible `/fr/...` routes, fallback pages, language switchers, localized SEO tags, and locale-filtered search are follow-up surfaces.
 
 ## Adoption checklist
 
@@ -130,6 +164,7 @@ That order matters. A beautiful archive of weak docs is still weak docs.
 - Keep `RazorDocs:Mode` set to `Source` unless a later bundle-hosting slice changes that contract.
 - Add sidecar metadata for repository and package README files.
 - Feature the first consumer paths through `featured_page_groups`.
+- Configure `RazorDocs:Localization` and `translation_key` metadata before adding translated files at scale.
 - Verify `/docs`, `/docs/search`, and `/docs/search-index.json`.
 - Run the standalone host or export pipeline in CI before publishing a public docs surface.
 

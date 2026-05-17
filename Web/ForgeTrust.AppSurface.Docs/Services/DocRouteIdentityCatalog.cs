@@ -27,6 +27,23 @@ internal sealed record DocRouteIdentity(
     IReadOnlyList<string> RedirectAliasPaths);
 
 /// <summary>
+/// Represents one locale-prefixed public route candidate derived from a localized document variant.
+/// </summary>
+/// <remarks>
+/// Candidates are produced only for variants that have a public route and a configured locale route prefix. Source paths
+/// and public route paths are normalized relative docs paths, not absolute URLs.
+/// </remarks>
+/// <param name="SourcePath">Normalized source path for the localized variant.</param>
+/// <param name="Locale">Configured locale code associated with the variant.</param>
+/// <param name="TranslationKey">Stable translation identity shared by localized variants.</param>
+/// <param name="PublicRoutePath">Locale-prefixed browser route candidate for the variant.</param>
+internal sealed record LocalizedDocRouteCandidate(
+    string SourcePath,
+    string Locale,
+    string TranslationKey,
+    string PublicRoutePath);
+
+/// <summary>
 /// Owns the route identity contract for one cached RazorDocs snapshot.
 /// </summary>
 /// <remarks>
@@ -236,6 +253,67 @@ internal sealed class DocRouteIdentityCatalog
 
         publicRoutePath = string.Empty;
         return false;
+    }
+
+    /// <summary>
+    /// Builds locale-prefixed route candidates from a localized document graph.
+    /// </summary>
+    /// <remarks>
+    /// Returns an empty list when the graph is disabled. Variants are skipped when they have no public route, or when
+    /// their locale no longer maps to a configured route prefix. The method is snapshot-local and does not mutate catalog
+    /// state.
+    /// </remarks>
+    /// <param name="graph">Localized graph built for the same docs snapshot.</param>
+    /// <param name="options">Localization options used to resolve locale route prefixes.</param>
+    /// <returns>Sorted locale-prefixed candidates suitable for later route registration slices.</returns>
+    internal IReadOnlyList<LocalizedDocRouteCandidate> BuildLocalizedRouteCandidates(
+        LocalizedDocsGraph graph,
+        RazorDocsLocalizationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (!graph.Enabled)
+        {
+            return [];
+        }
+
+        var routePrefixByLocale = (options.Locales ?? [])
+            .Where(locale => locale is not null && !string.IsNullOrWhiteSpace(locale.Code))
+            .GroupBy(locale => locale.Code.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.First().ResolveRoutePrefix(),
+                StringComparer.OrdinalIgnoreCase);
+
+        var candidates = new List<LocalizedDocRouteCandidate>();
+        foreach (var docSet in graph.DocSets)
+        {
+            foreach (var variant in docSet.Variants)
+            {
+                if (variant.PublicRoutePath is null)
+                {
+                    continue;
+                }
+
+                if (!routePrefixByLocale.TryGetValue(variant.Locale, out var routePrefix))
+                {
+                    continue;
+                }
+
+                candidates.Add(
+                    new LocalizedDocRouteCandidate(
+                        variant.SourcePath,
+                        variant.Locale,
+                        variant.TranslationKey,
+                        JoinLocalizedRoute(routePrefix, variant.PublicRoutePath)));
+            }
+        }
+
+        return candidates
+            .OrderBy(candidate => candidate.PublicRoutePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(candidate => candidate.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static DocRouteResolutionKind ResolveInternalPublicWinnerKind(DocRouteIdentity identity)
@@ -801,6 +879,15 @@ internal sealed class DocRouteIdentityCatalog
         {
             lookup[key] = identity;
         }
+    }
+
+    private static string JoinLocalizedRoute(string routePrefix, string publicRoutePath)
+    {
+        var normalizedPrefix = routePrefix.Trim().Trim('/');
+        var normalizedRoute = publicRoutePath.Trim().Trim('/');
+        return string.IsNullOrWhiteSpace(normalizedRoute)
+            ? normalizedPrefix
+            : $"{normalizedPrefix}/{normalizedRoute}";
     }
 
     private static HashSet<string> BuildReservedRoutePaths(DocsUrlBuilder docsUrlBuilder)
