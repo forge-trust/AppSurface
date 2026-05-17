@@ -214,6 +214,33 @@ public class DefaultEnvironmentProviderTests
     }
 
     [Fact]
+    public void DefaultEnvironmentProvider_UsesLastValidCommandLineEnvironment()
+    {
+        var previousDotnetEnvironment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var previousAspNetCoreEnvironment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", null);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Staging");
+
+            var provider = new DefaultEnvironmentProvider([
+                "--environment",
+                "Production",
+                "--environment=Development"
+            ]);
+
+            Assert.Equal("Development", provider.Environment);
+            Assert.True(provider.IsDevelopment);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", previousDotnetEnvironment);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousAspNetCoreEnvironment);
+        }
+    }
+
+    [Fact]
     public void DefaultEnvironmentProvider_Throws_WhenArgsIsNull()
     {
         Assert.Throws<ArgumentNullException>(() => new DefaultEnvironmentProvider(null!));

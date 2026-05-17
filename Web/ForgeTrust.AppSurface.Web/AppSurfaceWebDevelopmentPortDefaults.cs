@@ -65,6 +65,8 @@ internal static class AppSurfaceWebDevelopmentPortDefaults
 
     private static string? ResolveEnvironmentArgument(IReadOnlyList<string> args)
     {
+        string? environmentName = null;
+
         for (var index = 0; index < args.Count; index++)
         {
             var arg = args[index];
@@ -72,12 +74,12 @@ internal static class AppSurfaceWebDevelopmentPortDefaults
             if (arg.StartsWith(environmentPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 var inlineValue = arg[environmentPrefix.Length..];
-                if (string.IsNullOrWhiteSpace(inlineValue))
+                if (!string.IsNullOrWhiteSpace(inlineValue))
                 {
-                    continue;
+                    environmentName = inlineValue;
                 }
 
-                return inlineValue;
+                continue;
             }
 
             if (!string.Equals(arg, "--environment", StringComparison.OrdinalIgnoreCase))
@@ -98,10 +100,11 @@ internal static class AppSurfaceWebDevelopmentPortDefaults
                 continue;
             }
 
-            return environmentValue;
+            environmentName = environmentValue;
+            index++;
         }
 
-        return null;
+        return environmentName;
     }
 
     private static bool HasExplicitEndpointConfiguration(
