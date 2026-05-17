@@ -462,6 +462,23 @@ public sealed class AppSurfaceWebDevelopmentPortDefaultsTests
         Assert.Same(args, resolution.Args);
     }
 
+    [Fact]
+    public void Resolve_DoesNotOverrideEndpointCommandLineConfiguration_WhenEnvironmentOptionIsDangling()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var args = new[] { "--environment", "--http_ports", "5005" };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            environment.CreateApplicationBaseDirectory("workspace"),
+            ReadDevelopmentEnvironment);
+
+        Assert.Null(resolution.AppliedPort);
+        Assert.Same(args, resolution.Args);
+    }
+
     [Theory]
     [InlineData("ASPNETCORE_URLS")]
     [InlineData("URLS")]

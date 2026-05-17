@@ -126,7 +126,7 @@ internal static class AppSurfaceWebDevelopmentPortDefaults
             .SetBasePath(currentDirectory)
             .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
             .AddJsonFile($"appsettings.{environmentName}.json", optional: true, reloadOnChange: false)
-            .AddCommandLine(args.ToArray())
+            .AddCommandLine(BuildEndpointProbeArguments(args))
             .Build();
 
         return HasConfigurationValue(configuration, "urls")
@@ -136,6 +136,39 @@ internal static class AppSurfaceWebDevelopmentPortDefaults
                    .GetSection("Kestrel:Endpoints")
                    .GetChildren()
                    .Any(endpoint => HasConfigurationValue(endpoint, "Url"));
+    }
+
+    private static string[] BuildEndpointProbeArguments(IReadOnlyList<string> args)
+    {
+        var probeArgs = new List<string>(args.Count);
+        for (var index = 0; index < args.Count; index++)
+        {
+            var arg = args[index];
+            if (arg.StartsWith("--environment=", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.Equals(arg, "--environment", StringComparison.OrdinalIgnoreCase))
+            {
+                if (index + 1 >= args.Count)
+                {
+                    continue;
+                }
+
+                var candidate = args[index + 1];
+                if (!candidate.StartsWith("-", StringComparison.Ordinal))
+                {
+                    index++;
+                }
+
+                continue;
+            }
+
+            probeArgs.Add(arg);
+        }
+
+        return [.. probeArgs];
     }
 
     private static bool HasConfigurationValue(
