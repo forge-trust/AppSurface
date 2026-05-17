@@ -39,6 +39,26 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldIgnoreBlankIncludeGlobs()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:ignored
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions(""));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldHarvestSupportedPublicDocletsIntoGroupPageAndSearchStubs()
     {
         await WriteAsync(
@@ -327,6 +347,9 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         await WriteAsync(
             "src/unsupported.js",
             """
+            function undocumented() {}
+            const dynamicName = "RazorWire";
+
             /**
              * CommonJS public export.
              * @public
@@ -349,6 +372,13 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * @public
              * @event razorwire:incomplete
              */
+
+            /**
+             * Computed globals are not supported in v1.
+             * @public
+             * @global
+             */
+            window[dynamicName] = {};
             """);
         var harvester = CreateHarvester(CreateEnabledOptions("src/unsupported.js"));
 
@@ -363,6 +393,37 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             && diagnostic.Cause.Contains("standalone public JavaScript doclet", StringComparison.Ordinal));
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
         Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-incomplete", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldIncludeTaggedDocletsWhenPublicTagIsNotRequired()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Event with a host-approved non-public doclet.
+             * @event razorwire:loose
+             * @target form
+             * @firesWhen the host disables the public-tag requirement.
+             * @param
+             * @property {string}
+             * @example
+             * form.addEventListener('razorwire:loose', event => {});
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var eventStub = Assert.Single(docs, doc => doc.Path.EndsWith("#event-razorwire-loose", StringComparison.Ordinal));
+        Assert.Contains("Event with a host-approved non-public doclet.", eventStub.Content, StringComparison.Ordinal);
+        Assert.Contains(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet
+                          && diagnostic.Fix.Contains("@property detail.*", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -501,7 +562,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             throw new ArgumentException("Test fixture paths must be relative.", nameof(relativePath));
         }
 
-        var path = Path.Combine(_testRoot, normalizedRelativePath);
+        var safeRelativePath = normalizedRelativePath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var path = Path.Combine(_testRoot, safeRelativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, content);
     }
