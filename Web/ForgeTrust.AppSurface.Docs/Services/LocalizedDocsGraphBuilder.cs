@@ -293,7 +293,8 @@ internal sealed class LocalizedDocsGraphBuilder
             }
         }
 
-        var folderSourceWithoutLocalePrefix = explicitLocale is null && folderLocale is not null
+        var folderSourceWithoutLocalePrefix = folderLocale is not null
+            && (explicitLocale is null || string.Equals(explicitLocale, folderLocale, StringComparison.OrdinalIgnoreCase))
             ? StripFolderLocalePrefix(sourcePath, folderLocale)
             : null;
         var routeSourcePath = !string.IsNullOrWhiteSpace(doc.Metadata?.CanonicalSlug)

@@ -33,9 +33,13 @@ public static class RazorDocsServiceCollectionExtensions
     /// <see cref="RazorDocsRoutingOptions.DocsRootPath"/> through
     /// <see cref="DocsUrlBuilder.NormalizeRouteRootPath(string?, string, bool)"/> and
     /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/>, trims
-    /// <see cref="RazorDocsVersioningOptions.CatalogPath"/>, and removes blank or duplicate sidebar namespace
-    /// prefixes. Callers that omit <see cref="RazorDocsOptions.Routing"/> or
-    /// <see cref="RazorDocsOptions.Versioning"/> can therefore still rely on a fully populated options object after
+    /// <see cref="RazorDocsVersioningOptions.CatalogPath"/>, normalizes
+    /// <see cref="RazorDocsLocalizationOptions.DefaultLocale"/> to <c>en</c> when blank, trims locale
+    /// <see cref="RazorDocsLocaleOptions.Code"/>, <see cref="RazorDocsLocaleOptions.Label"/>,
+    /// <see cref="RazorDocsLocaleOptions.Lang"/>, and <see cref="RazorDocsLocaleOptions.RoutePrefix"/> values while
+    /// skipping null locale entries, and removes blank or duplicate sidebar namespace prefixes. Callers that omit
+    /// <see cref="RazorDocsOptions.Routing"/>, <see cref="RazorDocsOptions.Versioning"/>, or
+    /// <see cref="RazorDocsOptions.Localization"/> can therefore still rely on a fully populated options object after
     /// registration. When <see cref="RazorDocsHarvestOptions.FailOnFailure"/> is enabled, the registered startup
     /// preflight fails the host only when the aggregate harvest health is failed.
     /// </para>

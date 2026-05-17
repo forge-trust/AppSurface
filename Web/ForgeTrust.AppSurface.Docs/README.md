@@ -228,6 +228,7 @@ RazorDocs currently emits these codes:
 - `DocHarvestDiagnosticCodes.LocalizationDuplicateVariant` (`razordocs.localization.duplicate_variant`)
 - `DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict` (`razordocs.localization.locale_folder_conflict`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant` (`razordocs.localization.fallback_disabled_missing_variant`)
+- `DocHarvestDiagnosticCodes.LocalizationFallbackConflict` (`razordocs.localization.fallback_conflict`)
 
 An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
 
