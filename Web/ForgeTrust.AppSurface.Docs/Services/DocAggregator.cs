@@ -272,7 +272,8 @@ public class DocAggregator
         string HarvesterType,
         DocHarvesterHealthStatus Status,
         IReadOnlyList<DocNode> Docs,
-        DocHarvestDiagnostic? Diagnostic);
+        DocHarvestDiagnostic? Diagnostic,
+        IReadOnlyList<DocHarvestDiagnostic>? AdditionalDiagnostics = null);
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocAggregator"/> with the provided dependencies and determines the repository root.
@@ -725,7 +726,7 @@ public class DocAggregator
     private async Task<CachedDocsSnapshot> GetCachedDocsSnapshotAsync()
     {
         var generation = Interlocked.Read(ref _cacheGeneration);
-        var harvesters = _harvesters;
+        var harvesters = _harvesters.Where(IsHarvesterActive).ToArray();
         var repositoryRoot = _repositoryRoot;
         var sanitizer = _sanitizer;
         var logger = _logger;
@@ -878,6 +879,11 @@ public class DocAggregator
         return await Task.WhenAll(tasks);
     }
 
+    private static bool IsHarvesterActive(IDocHarvester harvester)
+    {
+        return harvester is not IDocHarvesterActivation activation || activation.IsEnabled;
+    }
+
     private static async Task<HarvesterRunResult> RunHarvesterAsync(
         IDocHarvester harvester,
         string repositoryRoot,
@@ -891,10 +897,13 @@ public class DocAggregator
         {
             var harvestTask = harvester.HarvestAsync(repositoryRoot, timeoutCts.Token);
             var docs = await harvestTask.WaitAsync(harvesterTimeout) ?? [];
+            var additionalDiagnostics = harvester is IDocHarvesterDiagnosticProvider diagnosticProvider
+                ? diagnosticProvider.GetHarvestDiagnostics()
+                : [];
             var status = docs.Count == 0
                 ? DocHarvesterHealthStatus.ReturnedEmpty
                 : DocHarvesterHealthStatus.Succeeded;
-            return new HarvesterRunResult(harvesterType, status, docs, Diagnostic: null);
+            return new HarvesterRunResult(harvesterType, status, docs, Diagnostic: null, additionalDiagnostics);
         }
         catch (TimeoutException ex)
         {
@@ -996,6 +1005,7 @@ public class DocAggregator
             .Select(result => result.Diagnostic)
             .OfType<DocHarvestDiagnostic>()
             .ToList();
+        diagnostics.AddRange(harvesterResults.SelectMany(result => result.AdditionalDiagnostics ?? []));
         diagnostics.AddRange(routeDiagnostics);
 
         if (harvesters.Length == 0)

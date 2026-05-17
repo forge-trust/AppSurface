@@ -111,6 +111,8 @@ jobs:
           RazorDocs__Contributor__SymbolSourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{ref}/{path}#L{line}
           RazorDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
           RazorDocs__Contributor__LastUpdatedMode: Git
+          RazorDocs__Harvest__JavaScript__Enabled: "true"
+          RazorDocs__Harvest__JavaScript__Include__0: Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js
         run: |
           printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/razordocs-seeds.txt"
           dotnet run --project Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj -c Release -- \

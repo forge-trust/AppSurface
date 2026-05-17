@@ -1,7 +1,7 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Options;
-using System.Globalization;
 
 namespace ForgeTrust.AppSurface.Docs;
 
@@ -160,6 +160,97 @@ public sealed class RazorDocsHarvestOptions
     /// Gets health-surface settings for the operator-facing RazorDocs harvest health routes and sidebar chrome.
     /// </summary>
     public RazorDocsHarvestHealthOptions Health { get; set; } = new();
+
+    /// <summary>
+    /// Gets JavaScript public API harvesting settings.
+    /// </summary>
+    /// <remarks>
+    /// JavaScript harvesting is disabled by default and only scans files matched by
+    /// <see cref="RazorDocsJavaScriptHarvestOptions.Include"/>.
+    /// This keeps browser assets, generated bundles, and internal helper code out of the public docs corpus unless a
+    /// host deliberately opts into a narrow source set. The built-in harvester also requires explicit public doclets by
+    /// default so application JavaScript is not published merely because it exists in the repository.
+    /// </remarks>
+    public RazorDocsJavaScriptHarvestOptions JavaScript { get; set; } = new();
+}
+
+/// <summary>
+/// Configuration for RazorDocs JavaScript public API harvesting.
+/// </summary>
+/// <remarks>
+/// The default shape is intentionally conservative: disabled, no include globs, generated and test paths excluded,
+/// public doclets required, and files larger than <see cref="DefaultMaxFileSizeBytes"/> skipped. Hosts should start by
+/// including one authored runtime file, then expand only after the generated docs prove useful and quiet.
+/// </remarks>
+public sealed class RazorDocsJavaScriptHarvestOptions
+{
+    /// <summary>
+    /// Gets the default maximum JavaScript source size that the harvester will parse.
+    /// </summary>
+    public const long DefaultMaxFileSizeBytes = 262_144;
+
+    /// <summary>
+    /// Gets the default JavaScript harvest exclusions.
+    /// </summary>
+    public static readonly string[] DefaultExclude =
+    [
+        "**/*.min.js",
+        "**/node_modules/**",
+        "**/bin/**",
+        "**/obj/**",
+        "**/Test/**",
+        "**/Tests/**"
+    ];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether JavaScript public API harvesting is enabled.
+    /// </summary>
+    /// <remarks>
+    /// Enabling this option without at least one include glob is invalid. RazorDocs never performs an implicit
+    /// repository-wide JavaScript crawl.
+    /// </remarks>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets repository-relative JavaScript file globs to scan when harvesting is enabled.
+    /// </summary>
+    /// <remarks>
+    /// Patterns use forward-slash path matching with <c>*</c>, <c>?</c>, and <c>**</c>. Examples include
+    /// <c>Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js</c> for a single file or
+    /// <c>src/widgets/**/*.js</c> for a bounded source tree. Include globs are evaluated before
+    /// <see cref="Exclude"/> so hosts can keep default generated-file exclusions while opting into a narrow source set.
+    /// </remarks>
+    public string[] Include { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets repository-relative JavaScript file globs to skip after include matching.
+    /// </summary>
+    /// <remarks>
+    /// Defaults skip minified bundles, package-manager output, build output, and test directories. Set this collection
+    /// deliberately when a host needs to replace those defaults; blank entries are ignored during options
+    /// normalization.
+    /// </remarks>
+    public string[] Exclude { get; set; } = [.. DefaultExclude];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether supported doclets must include <c>@public</c>.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="true"/> because RazorDocs may scan application browser assets, not only package
+    /// entrypoints. Tags such as <c>@internal</c>, <c>@private</c>, and <c>@ignore</c> always exclude a doclet even when
+    /// this option is <see langword="false"/>.
+    /// </remarks>
+    public bool RequirePublicTag { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the largest JavaScript file, in bytes, that the harvester will parse.
+    /// </summary>
+    /// <remarks>
+    /// Oversized files are skipped with a harvest diagnostic so generated bundles do not dominate snapshot time or make
+    /// parser failures noisy. The default comes from the parser decision spike and covers the current RazorWire and
+    /// RazorDocs authored browser assets with headroom.
+    /// </remarks>
+    public long MaxFileSizeBytes { get; set; } = DefaultMaxFileSizeBytes;
 }
 
 /// <summary>
@@ -644,6 +735,34 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
                 if (!Enum.IsDefined(harvest.Health.ShowChrome))
                 {
                     failures.Add($"Unsupported RazorDocs harvest health chrome exposure mode '{harvest.Health.ShowChrome}'.");
+                }
+            }
+
+            if (harvest.JavaScript is null)
+            {
+                failures.Add("RazorDocs:Harvest:JavaScript must not be null.");
+            }
+            else
+            {
+                if (harvest.JavaScript.Include is null)
+                {
+                    failures.Add("RazorDocs:Harvest:JavaScript:Include must not be null.");
+                }
+
+                if (harvest.JavaScript.Exclude is null)
+                {
+                    failures.Add("RazorDocs:Harvest:JavaScript:Exclude must not be null.");
+                }
+
+                if (harvest.JavaScript.MaxFileSizeBytes <= 0)
+                {
+                    failures.Add("RazorDocs:Harvest:JavaScript:MaxFileSizeBytes must be greater than zero.");
+                }
+
+                if (harvest.JavaScript.Enabled
+                    && (harvest.JavaScript.Include is null || harvest.JavaScript.Include.Length == 0))
+                {
+                    failures.Add("RazorDocs JavaScript harvesting requires at least one RazorDocs:Harvest:JavaScript:Include glob when enabled.");
                 }
             }
         }

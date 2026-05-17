@@ -3021,6 +3021,25 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldIgnoreDisabledOptionalHarvesters_WhenResolvingAggregateFailure()
+    {
+        var failingHarvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => failingHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new InvalidOperationException("Harvester boom"));
+        var disabledHarvester = new DisabledHarvester();
+        var aggregator = CreateHarvestHealthAggregator([failingHarvester, disabledHarvester]);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        Assert.Equal(1, health.TotalHarvesters);
+        Assert.Equal(0, health.SuccessfulHarvesters);
+        Assert.Equal(1, health.FailedHarvesters);
+        Assert.DoesNotContain(health.Harvesters, item => item.HarvesterType == nameof(DisabledHarvester));
+        Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.AllFailed);
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldReturnFailedAndLogCriticalOnce_PerFailedSnapshot()
     {
         var harvesterA = A.Fake<IDocHarvester>();
@@ -4016,6 +4035,18 @@ public class DocAggregatorTests : IDisposable
         public void Release()
         {
             _release.TrySetResult([new DocNode("Late", "late.md", "late")]);
+        }
+    }
+
+    private sealed class DisabledHarvester : IDocHarvester, IDocHarvesterActivation
+    {
+        public bool IsEnabled => false;
+
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Disabled harvesters should not participate.");
         }
     }
 

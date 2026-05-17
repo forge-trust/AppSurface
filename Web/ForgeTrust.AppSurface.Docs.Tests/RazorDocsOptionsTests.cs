@@ -56,6 +56,12 @@ public sealed class RazorDocsOptionsTests
         Assert.Equal("razordocs.harvest.harvester_failed", DocHarvestDiagnosticCodes.HarvesterFailed);
         Assert.Equal("razordocs.harvest.no_harvesters", DocHarvestDiagnosticCodes.NoHarvesters);
         Assert.Equal("razordocs.harvest.all_failed", DocHarvestDiagnosticCodes.AllFailed);
+        Assert.Equal("razordocs.javascript.file_too_large", DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
+        Assert.Equal("razordocs.javascript.parse_failed", DocHarvestDiagnosticCodes.JavaScriptParseFailed);
+        Assert.Equal("razordocs.javascript.unsupported_public_shape", DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
+        Assert.Equal("razordocs.javascript.malformed_public_doclet", DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
+        Assert.Equal("razordocs.javascript.incomplete_public_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
+        Assert.Equal("razordocs.javascript.duplicate_anchor", DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
         Assert.Equal("razordocs.routes.reserved_collision", DocHarvestDiagnosticCodes.DocReservedRouteCollision);
         Assert.Equal("razordocs.routes.doc_collision", DocHarvestDiagnosticCodes.DocRouteCollision);
         Assert.Equal("razordocs.routes.redirect_alias_collision", DocHarvestDiagnosticCodes.DocRedirectAliasCollision);
@@ -118,6 +124,20 @@ public sealed class RazorDocsOptionsTests
         Assert.NotNull(options.Harvest.Health);
         Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
+    }
+
+    [Fact]
+    public void RazorDocsOptions_ShouldDefaultJavaScriptHarvestToDisabledConservativePolicy()
+    {
+        var options = new RazorDocsOptions();
+
+        Assert.NotNull(options.Harvest.JavaScript);
+        Assert.False(options.Harvest.JavaScript.Enabled);
+        Assert.Empty(options.Harvest.JavaScript.Include);
+        Assert.Contains("**/*.min.js", options.Harvest.JavaScript.Exclude);
+        Assert.Contains("**/node_modules/**", options.Harvest.JavaScript.Exclude);
+        Assert.True(options.Harvest.JavaScript.RequirePublicTag);
+        Assert.Equal(262_144, options.Harvest.JavaScript.MaxFileSizeBytes);
     }
 
     [Fact]
@@ -416,6 +436,63 @@ public sealed class RazorDocsOptionsTests
 
         Assert.Equal(RazorDocsHarvestHealthExposure.Always, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(RazorDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldBindAndNormalizeConfiguredJavaScriptHarvestOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Harvest:JavaScript:Enabled"] = "true",
+                        ["RazorDocs:Harvest:JavaScript:Include:0"] = " Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js ",
+                        ["RazorDocs:Harvest:JavaScript:Include:1"] = "Web\\ForgeTrust.RazorWire\\wwwroot\\razorwire\\razorwire.js",
+                        ["RazorDocs:Harvest:JavaScript:Include:2"] = " ",
+                        ["RazorDocs:Harvest:JavaScript:Exclude:0"] = " **/*.generated.js ",
+                        ["RazorDocs:Harvest:JavaScript:RequirePublicTag"] = "false",
+                        ["RazorDocs:Harvest:JavaScript:MaxFileSizeBytes"] = "1024"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
+
+        Assert.True(options.Harvest.JavaScript.Enabled);
+        Assert.Equal(["Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js"], options.Harvest.JavaScript.Include);
+        Assert.Equal(["**/*.generated.js"], options.Harvest.JavaScript.Exclude);
+        Assert.False(options.Harvest.JavaScript.RequirePublicTag);
+        Assert.Equal(1024, options.Harvest.JavaScript.MaxFileSizeBytes);
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldRejectEnabledJavaScriptHarvestWithoutIncludes()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Harvest:JavaScript:Enabled"] = "true"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value);
+
+        Assert.Contains(
+            ex.Failures,
+            failure => failure.Contains("JavaScript", StringComparison.OrdinalIgnoreCase)
+                       && failure.Contains("Include", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

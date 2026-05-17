@@ -45,6 +45,16 @@ public class RazorDocsHeadingSuppressorTests
     }
 
     [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldKeepContent_WhenLeadingCommentIsNotFollowedByH1()
+    {
+        var content = "<!-- docs:snippet start -->\n<p>Intro</p>\n<h1 id=\"deep-cut\">Deep Cut</h1>";
+
+        var suppressed = RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal(content, suppressed);
+    }
+
+    [Fact]
     public void SuppressLeadingMarkdownH1_ShouldKeepEmptyContent()
     {
         var suppressed = RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(string.Empty, shellOwnsH1: true);

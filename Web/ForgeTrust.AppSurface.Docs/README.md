@@ -12,7 +12,7 @@ If you are evaluating RazorDocs for your own repository, start with [Use RazorDo
 
 - `RazorDocsWebModule` for wiring the docs UI into an AppSurface web host
 - `AddRazorDocs()` for typed options binding and core service registration
-- `DocAggregator` plus the built-in Markdown and C# harvesters, including structured harvest health diagnostics
+- `DocAggregator` plus the built-in Markdown, C# API, and opt-in JavaScript public API harvesters, including structured harvest health diagnostics
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by RazorDocs consumers
 - `DocsUrlBuilder` plus the MVC surface used by RazorDocs consumers so the live docs root, search shell, and archive routes stay in one shared contract
 - `RazorDocsVersionCatalog` plus `RazorDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
@@ -185,9 +185,9 @@ The returned `DocHarvestHealthSnapshot` includes:
 - `Status`: the aggregate `DocHarvestHealthStatus`.
 - `GeneratedUtc`: the timestamp for the cached snapshot generation.
 - `RepositoryRoot`: the resolved source root passed to harvesters. Treat this as server-only operational data; redact or omit it before forwarding harvest health to client-visible UI or public APIs.
-- `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for the configured harvesters.
+- `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for active harvesters that participated in the snapshot. Disabled optional harvesters, such as the JavaScript harvester when `RazorDocs:Harvest:JavaScript:Enabled=false`, are omitted from these totals.
 - `TotalDocs`: the number of documentation nodes in the final cached docs snapshot after RazorDocs post-processing.
-- `Harvesters`: one `DocHarvesterHealth` entry per configured harvester, including its concrete type name, `DocHarvesterHealthStatus`, raw returned doc count, and optional diagnostic.
+- `Harvesters`: one `DocHarvesterHealth` entry per active harvester, including its concrete type name, `DocHarvesterHealthStatus`, raw returned doc count, and optional diagnostic.
 - `Diagnostics`: structured `DocHarvestDiagnostic` entries for harvester-level and aggregate states. RazorDocs-created snapshots never expose raw exception messages in diagnostics; exception details stay in host logs.
 
 ### Status Contract
@@ -197,7 +197,7 @@ The returned `DocHarvestHealthSnapshot` includes:
 - `Healthy`: at least one configured harvester returned documentation and no harvester failed.
 - `Empty`: harvesting completed without failures, but the final docs corpus is empty. This can be valid for an empty repository, a disabled source set, or a host with no registered harvesters.
 - `Degraded`: at least one harvester succeeded or returned a valid empty result while another failed, timed out, or canceled. Docs remain usable, but the corpus may be incomplete.
-- `Failed`: every configured harvester failed, timed out, or canceled. RazorDocs returns an empty corpus for compatibility, but the snapshot should be treated as an operational failure.
+- `Failed`: every active harvester failed, timed out, or canceled. RazorDocs returns an empty corpus for compatibility, but the snapshot should be treated as an operational failure.
 
 `DocHarvesterHealthStatus` describes each source contribution:
 
@@ -296,6 +296,8 @@ Set `RazorDocs:Harvest:FailOnFailure` to `true` when a host should fail during s
 Strict mode is built for CI and export hosts that publish docs artifacts. It prevents an all-failed harvest from becoming an empty or untrustworthy release tree. Leave it off for general public runtime hosts unless failing the whole application is the right operational posture for that host.
 
 The startup preflight calls `DocAggregator.GetHarvestHealthAsync(CancellationToken)` and reuses the normal cached docs snapshot. It does not run a second harvester pipeline. `Healthy`, `Empty`, and `Degraded` snapshots continue startup; only aggregate `Failed` throws `RazorDocsHarvestFailedException`.
+
+Disabled optional harvesters do not count as successful empty harvesters for strict mode. For example, a disabled JavaScript harvester cannot mask Markdown and C# harvesters that both failed.
 
 `RazorDocsHarvestFailedException` exposes a redacted `DocHarvestFailureSummary` with status, counts, timestamp, and diagnostic code/severity/problem/fix fields. It omits `RepositoryRoot`, raw exception messages, stack traces, and diagnostic `Cause` text. Host logs can still contain lower-level harvester diagnostics because those logs are operator data, not public exception payload.
 
@@ -546,6 +548,22 @@ Pitfalls:
   - Controls whether the built-in sidebar shows health status chrome.
   - This is independent from `ExposeRoutes` so machine-readable checks and visible docs chrome can be configured separately.
   - If routes are hidden for the current environment, the sidebar renders status-only chrome without an `href`.
+- `RazorDocs:Harvest:JavaScript:Enabled`
+  - Defaults to `false`.
+  - Turns on the JavaScript public API harvester. Enabling it without at least one include glob is invalid because RazorDocs never crawls all repository JavaScript implicitly.
+- `RazorDocs:Harvest:JavaScript:Include`
+  - Defaults to an empty list.
+  - Repository-relative JavaScript file globs to scan, using forward-slash matching with `*`, `?`, and `**`.
+  - Start with one authored runtime file, such as `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js`, before expanding to a directory.
+- `RazorDocs:Harvest:JavaScript:Exclude`
+  - Defaults to `**/*.min.js`, `**/node_modules/**`, `**/bin/**`, `**/obj/**`, `**/Test/**`, and `**/Tests/**`.
+  - Excludes run after include matching. Set this only when replacing the default generated-file and test-path policy intentionally.
+- `RazorDocs:Harvest:JavaScript:RequirePublicTag`
+  - Defaults to `true`.
+  - Requires harvested doclets to carry `@public`. `@internal`, `@private`, and `@ignore` always exclude a doclet.
+- `RazorDocs:Harvest:JavaScript:MaxFileSizeBytes`
+  - Defaults to `262144`.
+  - Files above this limit are skipped with a structured harvest diagnostic so generated bundles do not dominate docs snapshot time.
 - `RazorDocs:Routing:RouteRootPath`
   - Controls the route-family root for stable entry, archive, and exact-version routes.
   - Defaults to `/docs` when versioning is on.
@@ -596,6 +614,68 @@ Pitfalls:
   - Required when versioning is enabled.
   - Points to the JSON catalog that describes the published exact-version trees and the recommended release alias.
   - Relative paths resolve from the app content root.
+
+### JavaScript public API harvesting
+
+JavaScript harvesting is for intentional browser runtime contracts: custom events, globals, small public helpers, constants, and typedefs that application authors need to consume. It is disabled by default because most repositories contain browser assets, generated bundles, and internal glue that should not become public documentation merely because it exists.
+
+```json
+{
+  "RazorDocs": {
+    "Harvest": {
+      "JavaScript": {
+        "Enabled": true,
+        "Include": [
+          "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js"
+        ]
+      }
+    }
+  }
+}
+```
+
+The v1 harvester parses configured `.js` files with Acornima and reads JSDoc-shaped block comments. It renders group pages such as `api/javascript/razorwire`, adds fragment-addressable search stubs for each item, and uses `@namespace` or `@module` as the group name. Without an explicit group, `window.RazorWire` groups under `RazorWire`; otherwise the source file name is used.
+
+Supported public shapes:
+
+- attached `function name(...) {}` doclets
+- attached `const name = (...) => ...` and `const name = function (...) { ... }` doclets, with one declarator per statement
+- attached `const name = value` doclets, with one declarator per statement
+- attached `window.Name = ...` or `window["Name"] = ...` doclets
+- standalone `@event event:name` doclets
+- standalone `@typedef {Type} Name` doclets
+
+Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, detail payload fields through `@property detail.name`, and an `@example`. Use `@detail none` only when the event deliberately carries no payload.
+
+```js
+/**
+ * A RazorWire-enhanced form submission failed and custom UI may handle the failure.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form:failure
+ * @target form[data-rw-form="true"]
+ * @firesWhen a RazorWire-enhanced form receives an unhandled failure response or a network error.
+ * @bubbles true
+ * @cancelable true
+ * @property {HTMLFormElement} detail.form - Submitted form.
+ * @property {number|null} detail.statusCode - HTTP status code when a response was received.
+ * @example
+ * form.addEventListener('razorwire:form:failure', event => {
+ *   event.preventDefault();
+ * });
+ */
+```
+
+Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially.
+
+Pitfalls:
+
+- Do not enable JavaScript harvesting with a broad `**/*.js` include on a production repo. Start with the narrow runtime file whose public events or globals you want to publish.
+- Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The defaults exclude those paths for a reason.
+- Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
+- Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
+- Do not put `@public` on classes, default exports, or CommonJS exports until a later harvester slice supports those shapes.
+- Do not treat Acornima as a runtime JavaScript execution engine. RazorDocs uses it only to parse configured source for documentation, and `ForgeTrust.AppSurface.Docs` carries `THIRD-PARTY-NOTICES.md` for the redistributed package.
 
 ### Published version catalog
 

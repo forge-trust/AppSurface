@@ -60,6 +60,12 @@ public static class DocMetadataPresentation
             "troubleshooting" => ("Troubleshooting", "troubleshooting", normalizedValue),
             "glossary" => ("Glossary", "glossary", normalizedValue),
             "faq" => ("FAQ", "faq", normalizedValue),
+            "javascript-api" => ("JavaScript API", "api-reference", normalizedValue),
+            "javascript-event" => ("JavaScript Event", "api-reference", normalizedValue),
+            "javascript-function" => ("JavaScript Function", "api-reference", normalizedValue),
+            "javascript-constant" => ("JavaScript Constant", "api-reference", normalizedValue),
+            "javascript-global" => ("JavaScript Global", "api-reference", normalizedValue),
+            "javascript-typedef" => ("JavaScript Typedef", "api-reference", normalizedValue),
             "release" or "release-note" or "release-notes" => ("Release", "release", "release"),
             _ => (BuildFallbackLabel(normalizedValue), "neutral", normalizedValue)
         };

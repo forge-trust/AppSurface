@@ -436,6 +436,7 @@
       "forgetrust.appsurface.docs": {
         "type": "Project",
         "dependencies": {
+          "Acornima": "[1.6.1, )",
           "ForgeTrust.AppSurface.Caching": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )",

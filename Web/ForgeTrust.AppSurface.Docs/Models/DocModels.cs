@@ -693,11 +693,11 @@ public enum DocHarvestDiagnosticSeverity
 /// Repository root passed to configured harvesters. Treat this as server-only operational data because it can contain
 /// sensitive or environment-specific filesystem paths; redact or omit it before sending snapshots to clients.
 /// </param>
-/// <param name="TotalHarvesters">Number of harvesters configured for the snapshot.</param>
+/// <param name="TotalHarvesters">Number of active harvesters that participated in the snapshot.</param>
 /// <param name="SuccessfulHarvesters">Number of harvesters that completed with either docs or a valid empty result.</param>
 /// <param name="FailedHarvesters">Number of harvesters that failed, timed out, or canceled.</param>
 /// <param name="TotalDocs">Number of documentation nodes published by the final cached docs snapshot.</param>
-/// <param name="Harvesters">Per-harvester health entries. Never <see langword="null" /> in RazorDocs-created snapshots.</param>
+/// <param name="Harvesters">Per-active-harvester health entries. Never <see langword="null" /> in RazorDocs-created snapshots.</param>
 /// <param name="Diagnostics">Structured diagnostics for failed, degraded, or noteworthy states. Never <see langword="null" /> in RazorDocs-created snapshots.</param>
 /// <remarks>
 /// RazorDocs-created snapshots retain non-null <see cref="Harvesters"/> and <see cref="Diagnostics"/> collections for
@@ -778,6 +778,36 @@ public static class DocHarvestDiagnosticCodes
     /// Every configured harvester failed, timed out, or canceled for the snapshot.
     /// </summary>
     public const string AllFailed = "razordocs.harvest.all_failed";
+
+    /// <summary>
+    /// A JavaScript source file matched the configured include set but exceeded the configured parse size limit.
+    /// </summary>
+    public const string JavaScriptFileTooLarge = "razordocs.javascript.file_too_large";
+
+    /// <summary>
+    /// A JavaScript source file could not be parsed and was skipped while other files continued harvesting.
+    /// </summary>
+    public const string JavaScriptParseFailed = "razordocs.javascript.parse_failed";
+
+    /// <summary>
+    /// A public JavaScript doclet used a shape outside the v1 harvester contract and was skipped.
+    /// </summary>
+    public const string JavaScriptUnsupportedPublicShape = "razordocs.javascript.unsupported_public_shape";
+
+    /// <summary>
+    /// A public JavaScript doclet was malformed or incomplete and could not be safely rendered.
+    /// </summary>
+    public const string JavaScriptMalformedPublicDoclet = "razordocs.javascript.malformed_public_doclet";
+
+    /// <summary>
+    /// A rendered JavaScript API item is missing recommended documentation fields.
+    /// </summary>
+    public const string JavaScriptIncompletePublicDoclet = "razordocs.javascript.incomplete_public_doclet";
+
+    /// <summary>
+    /// Multiple JavaScript API items normalized to the same anchor and required deterministic suffixes.
+    /// </summary>
+    public const string JavaScriptDuplicateAnchor = "razordocs.javascript.duplicate_anchor";
 
     /// <summary>
     /// A documentation page resolved to a route owned by RazorDocs chrome, search, health, versions, sections, or assets.

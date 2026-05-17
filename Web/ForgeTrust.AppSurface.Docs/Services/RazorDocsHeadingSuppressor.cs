@@ -30,9 +30,41 @@ internal static partial class RazorDocsHeadingSuppressor
             return content;
         }
 
-        return LeadingH1Regex().Replace(content, string.Empty, count: 1);
+        return StartsWithMarkdownH1Candidate(content)
+            ? LeadingH1Regex().Replace(content, string.Empty, count: 1)
+            : content;
     }
 
     [GeneratedRegex(@"\A(?:[\uFEFF\s]|<!--.*?-->)*<h1\b[^>]*>.*?</h1>\s*", RegexOptions.IgnoreCase | RegexOptions.Singleline, matchTimeoutMilliseconds: 100)]
     private static partial Regex LeadingH1Regex();
+
+    private static bool StartsWithMarkdownH1Candidate(string content)
+    {
+        var index = 0;
+        while (index < content.Length)
+        {
+            var current = content[index];
+            if (current == '\uFEFF' || char.IsWhiteSpace(current))
+            {
+                index++;
+                continue;
+            }
+
+            if (content.AsSpan(index).StartsWith("<!--", StringComparison.Ordinal))
+            {
+                var commentEnd = content.IndexOf("-->", index + 4, StringComparison.Ordinal);
+                if (commentEnd < 0)
+                {
+                    return false;
+                }
+
+                index = commentEnd + 3;
+                continue;
+            }
+
+            return content.AsSpan(index).StartsWith("<h1", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
 }

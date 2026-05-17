@@ -75,7 +75,7 @@ public sealed class RazorDocsHarvestFailedException : InvalidOperationException
 /// </summary>
 /// <param name="Status">The aggregate harvest-health status that triggered strict failure.</param>
 /// <param name="GeneratedUtc">The timestamp for the cached harvest snapshot generation.</param>
-/// <param name="TotalHarvesters">Number of configured harvesters in the failed snapshot.</param>
+/// <param name="TotalHarvesters">Number of active harvesters that participated in the failed snapshot.</param>
 /// <param name="SuccessfulHarvesters">Number of harvesters that completed with docs or an intentional empty result.</param>
 /// <param name="FailedHarvesters">Number of harvesters that failed, timed out, or canceled.</param>
 /// <param name="TotalDocs">Number of final docs in the failed snapshot.</param>

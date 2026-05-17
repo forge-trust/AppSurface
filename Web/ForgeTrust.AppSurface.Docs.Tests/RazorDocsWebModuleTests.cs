@@ -84,6 +84,9 @@ public class RazorDocsWebModuleTests
         Assert.Contains(
             services,
             s => s.ServiceType == typeof(IDocHarvester) && s.ImplementationType == typeof(CSharpDocHarvester));
+        Assert.Contains(
+            services,
+            s => s.ServiceType == typeof(IDocHarvester) && s.ImplementationType == typeof(JavaScriptDocHarvester));
         Assert.Contains(services, s => s.ServiceType == typeof(DocAggregator));
         Assert.Contains(
             services,
@@ -109,6 +112,7 @@ public class RazorDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetRequiredService<IMemo>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
         Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is MarkdownHarvester);
+        Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is JavaScriptDocHarvester);
         Assert.Equal(RazorDocsAssetPathResolver.PackagedStylesheetPath, assetPathResolver.StylesheetPath);
         Assert.Contains("section", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("article", sanitizer.InnerSanitizer.AllowedTags);

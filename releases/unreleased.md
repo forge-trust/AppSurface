@@ -147,7 +147,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorDocs wayfinding coverage now waits for docs content replacement before asserting sequence-link destinations, keeping the details-page proof path deterministic in CI.
 - RazorDocs Playwright integration coverage now hosts the standalone docs app in-process through the standalone host builder, avoiding fixture-time `dotnet run` rebuilds and stale standalone `bin` output during focused test runs.
 - First localization foundation slice for RazorDocs: disabled-by-default locale configuration, localized front matter metadata, inferred `README.fr.md`-style variant grouping, diagnostics for unsupported or ambiguous locale signals, and an internal route/search graph seam for later visible localized pages.
-- RazorDocs now has a test-backed JavaScript parser decision probe for future public API harvesting, covering Acornima span behavior, malformed syntax handling, BSD-3-Clause compliance expectations, and the first max-file-size recommendation before that parser moves into product code.
+- RazorDocs now has an opt-in JavaScript public API harvester backed by Acornima, with narrow include globs, conservative default exclusions, `@public` doclets, source-provenance links, structured diagnostics, and RazorWire form-event dogfood coverage in the primary docs export.
 
 ### RazorWire form UX
 

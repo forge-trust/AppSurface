@@ -169,22 +169,33 @@ public sealed class JavaScriptParserDecisionTests
         Assert.Equal("expression", license?.Attribute("type")?.Value);
         Assert.Equal("BSD-3-Clause", license?.Value);
 
+        var docsProject = XDocument.Load(
+            PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "ForgeTrust.AppSurface.Docs.csproj"));
+        Assert.Contains(
+            docsProject.Descendants("PackageReference"),
+            reference => string.Equals(reference.Attribute("Include")?.Value, "Acornima", StringComparison.Ordinal));
+
         var testProject = XDocument.Load(
             PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs.Tests", "ForgeTrust.AppSurface.Docs.Tests.csproj"));
         Assert.Equal("false", testProject.Descendants("IsPackable").Single().Value);
         Assert.Contains(
             testProject.Descendants("PackageReference"),
             reference => string.Equals(reference.Attribute("Include")?.Value, "Acornima", StringComparison.Ordinal));
-        Assert.Equal(
-            ["Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj"],
-            FindProjectsReferencingPackage(repoRoot, "Acornima"));
+        var referencingProjects = FindProjectsReferencingPackage(repoRoot, "Acornima");
+        Assert.Contains("Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj", referencingProjects);
+        Assert.Contains("Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj", referencingProjects);
+        Assert.Equal(2, referencingProjects.Count);
+
+        var notices = File.ReadAllText(PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "THIRD-PARTY-NOTICES.md"));
+        Assert.Contains("Acornima", notices, StringComparison.Ordinal);
+        Assert.Contains("BSD-3-Clause", notices, StringComparison.Ordinal);
+        Assert.Contains("endorse", notices, StringComparison.OrdinalIgnoreCase);
 
         var decision = File.ReadAllText(PathUnder(FixtureDirectory, "README.md"));
         Assert.Contains("## License Compliance Case", decision, StringComparison.Ordinal);
-        Assert.Contains("Current spike use", decision, StringComparison.Ordinal);
-        Assert.Contains("not redistributed", decision, StringComparison.Ordinal);
-        Assert.Contains("Future product use", decision, StringComparison.Ordinal);
-        Assert.Contains("third-party notice", decision, StringComparison.Ordinal);
+        Assert.Contains("Current product use", decision, StringComparison.Ordinal);
+        Assert.Contains("redistributed", decision, StringComparison.Ordinal);
+        Assert.Contains("THIRD-PARTY-NOTICES.md", decision, StringComparison.Ordinal);
         Assert.Contains("No endorsement", decision, StringComparison.Ordinal);
     }
 

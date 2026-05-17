@@ -32,14 +32,14 @@ public static class RazorDocsServiceCollectionExtensions
     /// <see cref="RazorDocsRoutingOptions.RouteRootPath"/> and
     /// <see cref="RazorDocsRoutingOptions.DocsRootPath"/> through
     /// <see cref="DocsUrlBuilder.NormalizeRouteRootPath(string?, string, bool)"/> and
-    /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/>, trims
     /// <see cref="RazorDocsVersioningOptions.CatalogPath"/>, normalizes
     /// <see cref="RazorDocsLocalizationOptions.DefaultLocale"/> to <c>en</c> when blank, trims locale
     /// <see cref="RazorDocsLocaleOptions.Code"/>, <see cref="RazorDocsLocaleOptions.Label"/>,
     /// <see cref="RazorDocsLocaleOptions.Lang"/>, and <see cref="RazorDocsLocaleOptions.RoutePrefix"/> values while
-    /// skipping null locale entries, and removes blank or duplicate sidebar namespace prefixes. Callers that omit
-    /// <see cref="RazorDocsOptions.Routing"/>, <see cref="RazorDocsOptions.Versioning"/>, or
-    /// <see cref="RazorDocsOptions.Localization"/> can therefore still rely on a fully populated options object after
+    /// skipping null locale entries, normalizes JavaScript harvest include and exclude globs, and removes blank or
+    /// duplicate sidebar namespace prefixes. Callers that omit <see cref="RazorDocsOptions.Routing"/>,
+    /// <see cref="RazorDocsOptions.Versioning"/>, or <see cref="RazorDocsOptions.Localization"/> can therefore still
+    /// rely on a fully populated options object after
     /// registration. When <see cref="RazorDocsHarvestOptions.FailOnFailure"/> is enabled, the registered startup
     /// preflight fails the host only when the aggregate harvest health is failed.
     /// </para>
@@ -74,6 +74,7 @@ public static class RazorDocsServiceCollectionExtensions
                     options.Source ??= new RazorDocsSourceOptions();
                     options.Harvest ??= new RazorDocsHarvestOptions();
                     options.Harvest.Health ??= new RazorDocsHarvestHealthOptions();
+                    options.Harvest.JavaScript ??= new RazorDocsJavaScriptHarvestOptions();
                     options.Bundle ??= new RazorDocsBundleOptions();
                     options.Sidebar ??= new RazorDocsSidebarOptions();
                     options.Contributor ??= new RazorDocsContributorOptions();
@@ -82,6 +83,19 @@ public static class RazorDocsServiceCollectionExtensions
                     options.Localization ??= new RazorDocsLocalizationOptions();
                     options.Sidebar.NamespacePrefixes ??= [];
                     options.Localization.Locales ??= [];
+
+                    var javaScriptSection = configuration.GetSection($"{RazorDocsOptions.SectionName}:Harvest:JavaScript");
+                    var configuredJavaScriptInclude = javaScriptSection.GetSection(nameof(RazorDocsJavaScriptHarvestOptions.Include)).Get<string[]>();
+                    var configuredJavaScriptExclude = javaScriptSection.GetSection(nameof(RazorDocsJavaScriptHarvestOptions.Exclude)).Get<string[]>();
+                    if (configuredJavaScriptInclude is not null)
+                    {
+                        options.Harvest.JavaScript.Include = configuredJavaScriptInclude;
+                    }
+
+                    if (configuredJavaScriptExclude is not null)
+                    {
+                        options.Harvest.JavaScript.Exclude = configuredJavaScriptExclude;
+                    }
 
                     if (options.Source.RepositoryRoot is null)
                     {
@@ -124,6 +138,8 @@ public static class RazorDocsServiceCollectionExtensions
                         locale.RoutePrefix = NormalizeOrNull(locale.RoutePrefix);
                     }
 
+                    options.Harvest.JavaScript.Include = NormalizePatterns(options.Harvest.JavaScript.Include);
+                    options.Harvest.JavaScript.Exclude = NormalizePatterns(options.Harvest.JavaScript.Exclude);
                     options.Sidebar.NamespacePrefixes = options.Sidebar.NamespacePrefixes
                         .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
                         .Select(prefix => prefix.Trim())
@@ -144,6 +160,7 @@ public static class RazorDocsServiceCollectionExtensions
         services.TryAddSingleton<IRazorDocsHtmlSanitizer, RazorDocsHtmlSanitizer>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IDocHarvester, MarkdownHarvester>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IDocHarvester, CSharpDocHarvester>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IDocHarvester, JavaScriptDocHarvester>());
         services.TryAddSingleton<DocFeaturedPageResolver>();
         services.TryAddSingleton<DocAggregator>();
         services.TryAddEnumerable(
@@ -160,6 +177,15 @@ public static class RazorDocsServiceCollectionExtensions
         }
 
         return value.Trim();
+    }
+
+    private static string[] NormalizePatterns(string[]? patterns)
+    {
+        return patterns?
+            .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
+            .Select(pattern => pattern.Trim().Replace('\\', '/'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
     }
 
 }

@@ -33,6 +33,7 @@ The result is a docs surface with:
 
 - section-first navigation such as Start Here, Examples, Releases, Troubleshooting, and API Reference
 - source-derived C# API pages
+- opt-in source-derived JavaScript public API pages for browser events and globals
 - a search index that includes titles, summaries, headings, aliases, keywords, and page types
 - optional trust bars for release notes, policies, and provenance-heavy pages
 - optional `Source of truth` links back to the exact files readers should inspect or edit
@@ -116,11 +117,12 @@ The important part is that curation stays authored content. If the product story
 Once the first pages render, improve the docs in layers:
 
 1. Add XML docs to public C# APIs so generated reference pages are useful.
-2. Add `summary`, `page_type`, `nav_group`, `aliases`, and `keywords` metadata to high-traffic pages.
-3. Add troubleshooting pages for the first support questions people ask.
-4. Add release notes and trust metadata when adoption depends on upgrade confidence.
-5. Add localization metadata when users need more than one language.
-6. Add versioned published trees only after the live source-backed docs are useful.
+2. Add narrow JavaScript harvesting for intentional browser contracts such as public custom events or globals.
+3. Add `summary`, `page_type`, `nav_group`, `aliases`, and `keywords` metadata to high-traffic pages.
+4. Add troubleshooting pages for the first support questions people ask.
+5. Add release notes and trust metadata when adoption depends on upgrade confidence.
+6. Add localization metadata when users need more than one language.
+7. Add versioned published trees only after the live source-backed docs are useful.
 
 That order matters. A beautiful archive of weak docs is still weak docs.
 
@@ -162,6 +164,7 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Pick a host: embedded AppSurface web module or standalone RazorDocs app.
 - Configure `RazorDocs:Source:RepositoryRoot` for the repository to harvest.
 - Keep `RazorDocs:Mode` set to `Source` unless a later bundle-hosting slice changes that contract.
+- If browser runtime contracts matter, enable `RazorDocs:Harvest:JavaScript` with one or more narrow `Include` globs and explicit `@public` doclets.
 - Add sidecar metadata for repository and package README files.
 - Feature the first consumer paths through `featured_page_groups`.
 - Configure `RazorDocs:Localization` and `translation_key` metadata before adding translated files at scale.

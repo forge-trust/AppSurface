@@ -4,9 +4,9 @@ Issue: https://github.com/forge-trust/AppSurface/issues/299
 
 ## Decision
 
-Use `Acornima` as the first parser dependency for the future RazorDocs JavaScript public API harvester.
+Use `Acornima` as the first parser dependency for the RazorDocs JavaScript public API harvester.
 
-The spike keeps the dependency in `ForgeTrust.AppSurface.Docs.Tests` only. The product harvester should add the package to `ForgeTrust.AppSurface.Docs` in the later implementation PR after the public JavaScript harvest options and diagnostics are built.
+The original spike kept the dependency in `ForgeTrust.AppSurface.Docs.Tests` only while the parser decision was still being proven. The product harvester now references Acornima from `ForgeTrust.AppSurface.Docs`, keeps this probe as regression coverage, and ships third-party notice material with the package.
 
 ## Why Acornima
 
@@ -50,17 +50,18 @@ Revisit ANTLR, Tree-sitter, and language-specific parsers after RazorDocs has at
 
 ## License Compliance Case
 
-Current spike use:
+Historical spike use:
 
-- Acornima is referenced only by `ForgeTrust.AppSurface.Docs.Tests`, and that project has `IsPackable=false`.
-- The spike does not add Acornima to `ForgeTrust.AppSurface.Docs`, `ForgeTrust.AppSurface.Cli`, or any other shipped package.
-- Because the current use is test-only, Acornima is not redistributed in an AppSurface package or CLI artifact by this spike.
+- During the parser-decision spike, Acornima was referenced only by `ForgeTrust.AppSurface.Docs.Tests`, and that project had `IsPackable=false`.
+- The spike did not add Acornima to `ForgeTrust.AppSurface.Docs`, `ForgeTrust.AppSurface.Cli`, or any other shipped package.
+- Because that spike use was test-only, Acornima was not redistributed in an AppSurface package or CLI artifact by the spike.
 
-Future product use:
+Current product use:
 
-- If the JavaScript harvester adds Acornima to a shipped package, package, tool, or self-contained CLI artifact, that artifact must carry Acornima's BSD-3-Clause copyright notice, license conditions, and disclaimer in third-party notice materials.
+- `ForgeTrust.AppSurface.Docs` now references Acornima for JavaScript public API harvesting, so the package redistributes Acornima transitively when hosts install RazorDocs.
+- `Web/ForgeTrust.AppSurface.Docs/THIRD-PARTY-NOTICES.md` carries the Acornima package identity, version, BSD-3-Clause license, project URL, and redistribution requirements.
 - No endorsement: release and marketing copy must not imply Acornima, Adam Simon, or Acornima contributors endorse AppSurface or RazorDocs without specific written permission.
-- The product implementation PR should add or update the repository's third-party notice flow before moving Acornima from the test project into product code.
+- Keep the notice file in the package when Acornima remains in product code, and update it when the package version or parser dependency changes.
 
 ## Parser Probe
 
