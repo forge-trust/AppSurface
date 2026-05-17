@@ -157,6 +157,26 @@ public sealed class AppSurfaceWebDevelopmentPortDefaultsTests
     }
 
     [Fact]
+    public void Resolve_AppendsDeterministicPort_WhenBlankThenValidCommandLineEnvironmentIsDevelopment()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { "--environment", " ", "--environment", Environments.Development };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            ReadDevelopmentEnvironment);
+
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal(
+            ["--environment", " ", "--environment", Environments.Development, "--urls", $"http://localhost:{appliedPort}"],
+            resolution.Args);
+    }
+
+    [Fact]
     public void Resolve_AppendsDeterministicPort_WhenDotnetEnvironmentIsDevelopment()
     {
         using var environment = new TemporaryEnvironment();

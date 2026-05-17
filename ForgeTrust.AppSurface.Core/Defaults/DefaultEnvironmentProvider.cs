@@ -87,7 +87,12 @@ public class DefaultEnvironmentProvider : IEnvironmentProvider
             if (arg.StartsWith(environmentPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 var inlineValue = arg[environmentPrefix.Length..];
-                return string.IsNullOrWhiteSpace(inlineValue) ? null : inlineValue;
+                if (string.IsNullOrWhiteSpace(inlineValue))
+                {
+                    continue;
+                }
+
+                return inlineValue;
             }
 
             if (!string.Equals(arg, "--environment", StringComparison.OrdinalIgnoreCase))
@@ -97,7 +102,7 @@ public class DefaultEnvironmentProvider : IEnvironmentProvider
 
             if (index + 1 >= args.Count || string.IsNullOrWhiteSpace(args[index + 1]))
             {
-                return null;
+                continue;
             }
 
             return args[index + 1];
