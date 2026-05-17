@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 
 namespace ForgeTrust.AppSurface.Docs;
 
@@ -90,6 +91,16 @@ public sealed class RazorDocsOptions
     /// Gets versioning settings used to mount exact release trees and the archive surface.
     /// </summary>
     public RazorDocsVersioningOptions Versioning { get; set; } = new();
+
+    /// <summary>
+    /// Gets localization settings for locale-aware live docs routes, metadata, search projections, and fallback policy.
+    /// </summary>
+    /// <remarks>
+    /// Localization is disabled by default so existing RazorDocs hosts keep their current routes, search payload shape,
+    /// and view behavior until they opt in. When enabled, this object defines the supported locales, the default locale,
+    /// route-prefix behavior, fallback policy, and search scoping defaults used by the locale-aware document graph.
+    /// </remarks>
+    public RazorDocsLocalizationOptions Localization { get; set; } = new();
 }
 
 /// <summary>
@@ -397,6 +408,145 @@ public sealed class RazorDocsVersioningOptions
 }
 
 /// <summary>
+/// Localization settings for the live RazorDocs source-backed documentation surface.
+/// </summary>
+/// <remarks>
+/// V1 localization applies only to the live source-backed docs surface. Published exact-version release trees keep the
+/// existing unlocalized route contract until localized release trees are designed as a separate feature. The built-in
+/// defaults keep localization off, use <c>en</c> as the default locale when enabled, prefix localized routes with the
+/// locale route segment, and default search to the active locale.
+/// </remarks>
+public sealed class RazorDocsLocalizationOptions
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether RazorDocs builds locale-aware document graph data.
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the default locale code. Defaults to <c>en</c>.
+    /// </summary>
+    public string DefaultLocale { get; set; } = "en";
+
+    /// <summary>
+    /// Gets or sets the locales supported by the live docs surface.
+    /// </summary>
+    public RazorDocsLocaleOptions[] Locales { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets how locale prefixes are represented in public live docs routes.
+    /// </summary>
+    public RazorDocsLocaleRouteMode RouteMode { get; set; } = RazorDocsLocaleRouteMode.LocalePrefix;
+
+    /// <summary>
+    /// Gets or sets the global missing-translation fallback behavior.
+    /// </summary>
+    public RazorDocsLocaleFallbackMode FallbackMode { get; set; } = RazorDocsLocaleFallbackMode.DefaultLocaleWithNotice;
+
+    /// <summary>
+    /// Gets or sets the default localized search scope.
+    /// </summary>
+    public RazorDocsLocaleSearchMode SearchMode { get; set; } = RazorDocsLocaleSearchMode.ActiveLocale;
+}
+
+/// <summary>
+/// Describes one configured RazorDocs locale.
+/// </summary>
+public sealed class RazorDocsLocaleOptions
+{
+    /// <summary>
+    /// Gets or sets the BCP-47 locale code, such as <c>en</c>, <c>fr</c>, or <c>pt-BR</c>.
+    /// </summary>
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the reader-facing locale label, such as <c>English</c> or <c>Français</c>.
+    /// </summary>
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// Gets or sets the HTML <c>lang</c> value. When omitted, <see cref="Code"/> is used.
+    /// </summary>
+    public string? Lang { get; set; }
+
+    /// <summary>
+    /// Gets or sets the text direction for this locale.
+    /// </summary>
+    public RazorDocsTextDirection Direction { get; set; } = RazorDocsTextDirection.Ltr;
+
+    /// <summary>
+    /// Gets or sets the route segment used for this locale. When omitted, <see cref="Code"/> is used.
+    /// </summary>
+    public string? RoutePrefix { get; set; }
+}
+
+/// <summary>
+/// Enumerates supported locale route modes.
+/// </summary>
+/// <remarks>
+/// Numeric values are part of the public configuration contract. Append new modes with new explicit values.
+/// </remarks>
+public enum RazorDocsLocaleRouteMode
+{
+    /// <summary>
+    /// Prefix live docs routes with a configured locale route segment.
+    /// </summary>
+    LocalePrefix = 0
+}
+
+/// <summary>
+/// Enumerates supported global localization fallback modes.
+/// </summary>
+/// <remarks>
+/// Numeric values are part of the public configuration contract. Append new modes with new explicit values.
+/// </remarks>
+public enum RazorDocsLocaleFallbackMode
+{
+    /// <summary>
+    /// Render default-locale content on the target-locale route with visible fallback context.
+    /// </summary>
+    DefaultLocaleWithNotice = 0,
+
+    /// <summary>
+    /// Do not create fallback pages for missing localized variants.
+    /// </summary>
+    Disabled = 1
+}
+
+/// <summary>
+/// Enumerates supported localized search defaults.
+/// </summary>
+/// <remarks>
+/// Numeric values are part of the public configuration contract. Append new modes with new explicit values.
+/// </remarks>
+public enum RazorDocsLocaleSearchMode
+{
+    /// <summary>
+    /// Search the active locale by default.
+    /// </summary>
+    ActiveLocale = 0
+}
+
+/// <summary>
+/// Enumerates supported text directions for localized docs pages.
+/// </summary>
+/// <remarks>
+/// Numeric values are part of the public configuration contract. Append new directions with new explicit values.
+/// </remarks>
+public enum RazorDocsTextDirection
+{
+    /// <summary>
+    /// Left-to-right text direction.
+    /// </summary>
+    Ltr = 0,
+
+    /// <summary>
+    /// Right-to-left text direction.
+    /// </summary>
+    Rtl = 1
+}
+
+/// <summary>
 /// Validates <see cref="RazorDocsOptions"/> and rejects unsupported or ambiguous startup configurations.
 /// </summary>
 public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOptions>
@@ -418,6 +568,7 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         var contributor = options.Contributor;
         var routing = options.Routing;
         var versioning = options.Versioning;
+        var localization = options.Localization;
         string? normalizedRouteRootPath = null;
         string? normalizedDocsRootPath = null;
 
@@ -532,6 +683,8 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         {
             failures.Add("RazorDocs:Versioning must not be null.");
         }
+
+        ValidateLocalization(localization, failures);
 
         if (options.Mode == RazorDocsMode.Bundle)
         {
@@ -705,5 +858,165 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         return string.Equals(docsRootPath, versionsRoot, StringComparison.OrdinalIgnoreCase)
                || string.Equals(docsRootPath, versionPrefix, StringComparison.OrdinalIgnoreCase)
                || docsRootPath.StartsWith(versionPrefix + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void ValidateLocalization(
+        RazorDocsLocalizationOptions? localization,
+        List<string> failures)
+    {
+        if (localization is null)
+        {
+            failures.Add("RazorDocs:Localization must not be null.");
+            return;
+        }
+
+        if (!Enum.IsDefined(localization.RouteMode))
+        {
+            failures.Add($"Unsupported RazorDocs localization route mode '{localization.RouteMode}'.");
+        }
+
+        if (!Enum.IsDefined(localization.FallbackMode))
+        {
+            failures.Add($"Unsupported RazorDocs localization fallback mode '{localization.FallbackMode}'.");
+        }
+
+        if (!Enum.IsDefined(localization.SearchMode))
+        {
+            failures.Add($"Unsupported RazorDocs localization search mode '{localization.SearchMode}'.");
+        }
+
+        if (localization.Locales is null)
+        {
+            failures.Add("RazorDocs:Localization:Locales must not be null.");
+            return;
+        }
+
+        if (!localization.Enabled)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(localization.DefaultLocale))
+        {
+            failures.Add("RazorDocs:Localization:DefaultLocale is required when localization is enabled.");
+        }
+
+        if (localization.Locales.Length == 0)
+        {
+            failures.Add("RazorDocs localization requires at least one configured locale when enabled.");
+            return;
+        }
+
+        var localeCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var routePrefixes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var defaultLocaleMatched = false;
+        for (var i = 0; i < localization.Locales.Length; i++)
+        {
+            var locale = localization.Locales[i];
+            var path = $"RazorDocs:Localization:Locales:{i}";
+            if (locale is null)
+            {
+                failures.Add($"{path} must not be null.");
+                continue;
+            }
+
+            var code = locale.Code;
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                failures.Add($"{path}:Code is required.");
+            }
+            else
+            {
+                if (!IsValidCultureTag(code))
+                {
+                    failures.Add($"{path}:Code must be a valid BCP-47 culture tag.");
+                }
+
+                if (!localeCodes.Add(code))
+                {
+                    failures.Add($"RazorDocs localization locale code '{code}' is configured more than once.");
+                }
+
+                if (string.Equals(code, localization.DefaultLocale, StringComparison.OrdinalIgnoreCase))
+                {
+                    defaultLocaleMatched = true;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(locale.Lang) && !IsValidCultureTag(locale.Lang))
+            {
+                failures.Add($"{path}:Lang must be a valid BCP-47 culture tag.");
+            }
+
+            if (!Enum.IsDefined(locale.Direction))
+            {
+                failures.Add($"{path}:Direction must be Ltr or Rtl.");
+            }
+
+            var routePrefix = string.IsNullOrWhiteSpace(locale.RoutePrefix) ? code : locale.RoutePrefix;
+            if (string.IsNullOrWhiteSpace(routePrefix))
+            {
+                failures.Add($"{path}:RoutePrefix is required when Code is blank.");
+            }
+            else if (!IsValidLocaleRoutePrefix(routePrefix))
+            {
+                failures.Add($"{path}:RoutePrefix must be a single safe route segment and must not contain '/', '?', '#', '.', or '..'.");
+            }
+            else if (IsReservedLocalizationRoutePrefix(routePrefix))
+            {
+                failures.Add($"{path}:RoutePrefix '{routePrefix}' collides with a reserved RazorDocs route segment.");
+            }
+            else if (!routePrefixes.Add(routePrefix))
+            {
+                failures.Add($"RazorDocs localization route prefix '{routePrefix}' is configured more than once.");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(localization.DefaultLocale)
+            && !defaultLocaleMatched)
+        {
+            failures.Add("RazorDocs:Localization:DefaultLocale must match one configured locale code.");
+        }
+    }
+
+    private static bool IsValidCultureTag(string value)
+    {
+        try
+        {
+            _ = System.Globalization.CultureInfo.GetCultureInfo(value.Trim());
+            return true;
+        }
+        catch (CultureNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsValidLocaleRoutePrefix(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.Length > 0
+               && !trimmed.Contains('/', StringComparison.Ordinal)
+               && !trimmed.Contains('\\', StringComparison.Ordinal)
+               && !trimmed.Contains('?', StringComparison.Ordinal)
+               && !trimmed.Contains('#', StringComparison.Ordinal)
+               && !trimmed.Contains('.', StringComparison.Ordinal)
+               && !string.Equals(trimmed, "..", StringComparison.Ordinal);
+    }
+
+    private static bool IsReservedLocalizationRoutePrefix(string value)
+    {
+        return value.Trim() is { } trimmed
+               && (trimmed.Equals("search", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("search-index.json", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("_health", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("_health.json", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("sections", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("versions", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("v", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("search.css", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("search-client.js", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("outline-client.js", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("minisearch.min.js", StringComparison.OrdinalIgnoreCase));
     }
 }

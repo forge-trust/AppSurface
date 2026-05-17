@@ -90,6 +90,53 @@ internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("breadcrumbs")] IReadOnlyList<string> Breadcrumbs,
     [property: JsonPropertyName("sourcePath")] string SourcePath = "");
 
+internal sealed record DocsSearchIndexProjection(
+    string? Locale = null,
+    bool IncludeAllLocales = false);
+
+internal sealed class DocsSearchIndexProjectionCache
+{
+    private readonly DocsSearchIndexPayload _defaultPayload;
+    private readonly LocalizedDocsGraph _localizedGraph;
+    private readonly Dictionary<DocsSearchIndexProjection, DocsSearchIndexPayload> _payloads = [];
+    private readonly object _gate = new();
+
+    internal DocsSearchIndexProjectionCache(
+        DocsSearchIndexPayload defaultPayload,
+        LocalizedDocsGraph localizedGraph)
+    {
+        ArgumentNullException.ThrowIfNull(defaultPayload);
+        ArgumentNullException.ThrowIfNull(localizedGraph);
+
+        _defaultPayload = defaultPayload;
+        _localizedGraph = localizedGraph;
+        _payloads[new DocsSearchIndexProjection()] = defaultPayload;
+    }
+
+    internal DocsSearchIndexPayload GetPayload(DocsSearchIndexProjection projection)
+    {
+        ArgumentNullException.ThrowIfNull(projection);
+
+        if (!_localizedGraph.Enabled || string.IsNullOrWhiteSpace(projection.Locale))
+        {
+            return _defaultPayload;
+        }
+
+        lock (_gate)
+        {
+            if (_payloads.TryGetValue(projection, out var payload))
+            {
+                return payload;
+            }
+
+            // Phase 1 reserves the per-locale projection cache while preserving the existing v1 search payload contract.
+            _payloads[projection] = _defaultPayload;
+        }
+
+        return _defaultPayload;
+    }
+}
+
 /// <summary>
 /// Service responsible for aggregating documentation from multiple harvesters and caching the results.
 /// </summary>
@@ -108,6 +155,7 @@ public class DocAggregator
     private readonly DocsUrlBuilder _docsUrlBuilder;
     private readonly ILogger<DocAggregator> _logger;
     private readonly RazorDocsContributorOptions _contributorOptions;
+    private readonly RazorDocsLocalizationOptions _localizationOptions;
     private readonly Func<string, CancellationToken, Task<DateTimeOffset?>> _resolveGitLastUpdatedUtcAsync;
     private readonly TimeSpan _harvesterTimeout;
     private readonly TimeSpan _contributorFreshnessTimeout;
@@ -145,8 +193,9 @@ public class DocAggregator
         Dictionary<string, DocNode> DocsByPath,
         DocPathResolver PathResolver,
         DocRouteIdentityCatalog RouteIdentityCatalog,
+        LocalizedDocsGraph LocalizedGraph,
         IReadOnlyList<DocSectionSnapshot> PublicSections,
-        DocsSearchIndexPayload SearchIndexPayload,
+        DocsSearchIndexProjectionCache SearchIndexProjections,
         Dictionary<string, DocContributorProvenanceViewModel> ContributorProvenanceByPath,
         DocHarvestHealthSnapshot HarvestHealth);
 
@@ -324,6 +373,7 @@ public class DocAggregator
         _docsUrlBuilder = docsUrlBuilder;
         _logger = logger;
         _contributorOptions = options.Contributor ?? throw new ArgumentNullException(nameof(options.Contributor));
+        _localizationOptions = options.Localization ?? throw new ArgumentNullException(nameof(options.Localization));
         SnapshotCacheDuration = ResolveSnapshotCacheDuration(options);
         _docsCachePolicy = CachePolicy.Absolute(SnapshotCacheDuration);
         _harvesterTimeout = ResolveHarvesterTimeout(harvesterTimeout);
@@ -533,7 +583,26 @@ public class DocAggregator
     internal async Task<DocsSearchIndexPayload> GetSearchIndexPayloadAsync(CancellationToken cancellationToken = default)
     {
         var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
-        return snapshot.SearchIndexPayload;
+        return snapshot.SearchIndexProjections.GetPayload(new DocsSearchIndexProjection());
+    }
+
+    /// <summary>
+    /// Returns a cached search-index projection for future locale-aware search consumers.
+    /// </summary>
+    /// <param name="projection">The requested search projection key.</param>
+    /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
+    /// <returns>
+    /// The matching search payload. Phase 1 preserves the existing payload schema for every projection while reserving
+    /// the snapshot-owned cache seam that localized search will fill in Phase 3.
+    /// </returns>
+    internal async Task<DocsSearchIndexPayload> GetSearchIndexPayloadAsync(
+        DocsSearchIndexProjection projection,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(projection);
+
+        var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
+        return snapshot.SearchIndexProjections.GetPayload(projection);
     }
 
     /// <summary>
@@ -595,6 +664,7 @@ public class DocAggregator
         var snapshotCacheDuration = SnapshotCacheDuration;
         var docsCachePolicy = _docsCachePolicy;
         var utcNow = _utcNow;
+        var localizationOptions = _localizationOptions;
 
         return await _memo.GetAsync(
                    _cacheScope,
@@ -680,6 +750,9 @@ public class DocAggregator
                            .ToDictionary(n => n.Path, n => n);
                        var finalRouteIdentityCatalog = DocRouteIdentityCatalog.Create(docsByPath.Values, _docsUrlBuilder);
                        var pathResolver = DocPathResolver.Create(docsByPath.Values);
+                       var localizedGraph = new LocalizedDocsGraphBuilder(localizationOptions).Build(
+                           docsByPath.Values,
+                           finalRouteIdentityCatalog);
 
                        var publicSections = BuildPublicSections(docsByPath.Values, logger);
                        var contributorProvenanceByPath = await BuildContributorProvenanceByPathAsync(
@@ -689,9 +762,10 @@ public class DocAggregator
                            docsByPath.Values,
                            publicSections,
                            finalRouteIdentityCatalog);
+                       var searchIndexProjections = new DocsSearchIndexProjectionCache(searchIndexPayload, localizedGraph);
                        var harvestHealth = BuildHarvestHealthSnapshot(
                            harvesterResults,
-                           finalRouteIdentityCatalog.Diagnostics,
+                           finalRouteIdentityCatalog.Diagnostics.Concat(localizedGraph.Diagnostics).ToArray(),
                            docsByPath.Count,
                            repositoryRoot,
                            utcNow(),
@@ -709,8 +783,9 @@ public class DocAggregator
                            docsByPath,
                            pathResolver,
                            finalRouteIdentityCatalog,
+                           localizedGraph,
                            publicSections,
-                           searchIndexPayload,
+                           searchIndexProjections,
                            contributorProvenanceByPath,
                            harvestHealth);
                    },

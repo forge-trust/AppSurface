@@ -150,6 +150,7 @@ internal static class MarkdownFrontMatterParser
                 diagnostics),
             Trust = NormalizeTrust(document.Trust),
             Contributor = NormalizeContributor(document.Contributor),
+            Localization = NormalizeLocalization(document, diagnostics),
             PageTypeIsDerived = document.PageType is not null ? false : null,
             AudienceIsDerived = document.Audience is not null ? false : null,
             ComponentIsDerived = document.Component is not null ? false : null,
@@ -471,6 +472,49 @@ internal static class MarkdownFrontMatterParser
             : contributor;
     }
 
+    private static DocLocalizationMetadata? NormalizeLocalization(
+        FrontMatterDocument document,
+        List<RazorDocsMetadataDiagnostic> diagnostics)
+    {
+        var nested = document.Localization;
+        var locale = Normalize(document.Locale) ?? Normalize(nested?.Locale);
+        var translationKey = Normalize(document.TranslationKey) ?? Normalize(nested?.TranslationKey);
+        var localizedTitle = Normalize(document.LocalizedTitle) ?? Normalize(nested?.LocalizedTitle);
+        var fallbackText = Normalize(document.LocaleFallback) ?? Normalize(nested?.LocaleFallback);
+        RazorDocsLocaleFallbackMode? fallback = null;
+        if (fallbackText is not null)
+        {
+            if (Enum.TryParse<RazorDocsLocaleFallbackMode>(fallbackText, ignoreCase: true, out var parsedFallback)
+                && Enum.IsDefined(parsedFallback))
+            {
+                fallback = parsedFallback;
+            }
+            else
+            {
+                diagnostics.Add(
+                    new RazorDocsMetadataDiagnostic(
+                        "invalid-locale-fallback",
+                        "locale_fallback",
+                        "The locale fallback value is not supported.",
+                        "RazorDocs only supports DefaultLocaleWithNotice or Disabled for page-level localization fallback.",
+                        "Use locale_fallback: Disabled or remove the field to inherit the global fallback mode."));
+            }
+        }
+
+        return locale is null
+               && translationKey is null
+               && localizedTitle is null
+               && fallback is null
+            ? null
+            : new DocLocalizationMetadata
+            {
+                Locale = locale,
+                TranslationKey = translationKey,
+                LocalizedTitle = localizedTitle,
+                LocaleFallback = fallback
+            };
+    }
+
     private sealed class FrontMatterDocument
     {
         public string? Title { get; init; }
@@ -518,6 +562,16 @@ internal static class MarkdownFrontMatterParser
         public FrontMatterTrustDocument? Trust { get; init; }
 
         public FrontMatterContributorDocument? Contributor { get; init; }
+
+        public FrontMatterLocalizationDocument? Localization { get; init; }
+
+        public string? Locale { get; init; }
+
+        public string? TranslationKey { get; init; }
+
+        public string? LocalizedTitle { get; init; }
+
+        public string? LocaleFallback { get; init; }
     }
 
     private sealed class FrontMatterFeaturedPageDefinition
@@ -585,6 +639,17 @@ internal static class MarkdownFrontMatterParser
         public string? EditUrlOverride { get; init; }
 
         public DateTimeOffset? LastUpdatedOverride { get; init; }
+    }
+
+    private sealed class FrontMatterLocalizationDocument
+    {
+        public string? Locale { get; init; }
+
+        public string? TranslationKey { get; init; }
+
+        public string? LocalizedTitle { get; init; }
+
+        public string? LocaleFallback { get; init; }
     }
 
     private sealed class FrontMatterTrustLinkDocument

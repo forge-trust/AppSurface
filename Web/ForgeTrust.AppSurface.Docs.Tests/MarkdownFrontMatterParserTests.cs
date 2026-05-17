@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Docs.Services;
 using YamlDotNet.Core;
 
@@ -38,6 +39,67 @@ public sealed class MarkdownFrontMatterParserTests
         Assert.Equal("Build forms, streams, and handlers together.", metadata?.Summary);
         Assert.Equal(["forms, anti-forgery", "quickstart"], metadata?.Aliases);
         Assert.Equal(["forms", "agent docs"], metadata?.Keywords);
+    }
+
+    [Fact]
+    public void Extract_ShouldParseFriendlyLocalizationMetadata()
+    {
+        var markdown = """
+            ---
+            locale: fr
+            translation_key: guides/getting-started
+            localized_title: Démarrer
+            locale_fallback: Disabled
+            ---
+            # Démarrer
+            """;
+
+        var (_, metadata) = MarkdownFrontMatterParser.Extract(markdown);
+
+        Assert.Equal("fr", metadata?.Localization?.Locale);
+        Assert.Equal("guides/getting-started", metadata?.Localization?.TranslationKey);
+        Assert.Equal("Démarrer", metadata?.Localization?.LocalizedTitle);
+        Assert.Equal(RazorDocsLocaleFallbackMode.Disabled, metadata?.Localization?.LocaleFallback);
+    }
+
+    [Fact]
+    public void Extract_ShouldParseNestedLocalizationMetadata()
+    {
+        var markdown = """
+            ---
+            localization:
+              locale: fr
+              translation_key: guides/getting-started
+              localized_title: Démarrer
+            ---
+            # Démarrer
+            """;
+
+        var (_, metadata) = MarkdownFrontMatterParser.Extract(markdown);
+
+        Assert.Equal("fr", metadata?.Localization?.Locale);
+        Assert.Equal("guides/getting-started", metadata?.Localization?.TranslationKey);
+        Assert.Equal("Démarrer", metadata?.Localization?.LocalizedTitle);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldReportInvalidLocaleFallback()
+    {
+        var markdown = """
+            ---
+            locale: fr
+            locale_fallback: Sometimes
+            ---
+            # Démarrer
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Equal("fr", result.Metadata?.Localization?.Locale);
+        Assert.Null(result.Metadata?.Localization?.LocaleFallback);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("invalid-locale-fallback", diagnostic.Code);
+        Assert.Equal("locale_fallback", diagnostic.FieldPath);
     }
 
     [Fact]

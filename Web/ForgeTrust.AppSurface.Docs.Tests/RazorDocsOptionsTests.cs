@@ -31,6 +31,12 @@ public sealed class RazorDocsOptionsTests
         Assert.Equal(1, (int)DocHarvestHealthStatus.Empty);
         Assert.Equal(2, (int)DocHarvestHealthStatus.Degraded);
         Assert.Equal(3, (int)DocHarvestHealthStatus.Failed);
+        Assert.Equal(0, (int)RazorDocsLocaleRouteMode.LocalePrefix);
+        Assert.Equal(0, (int)RazorDocsLocaleFallbackMode.DefaultLocaleWithNotice);
+        Assert.Equal(1, (int)RazorDocsLocaleFallbackMode.Disabled);
+        Assert.Equal(0, (int)RazorDocsLocaleSearchMode.ActiveLocale);
+        Assert.Equal(0, (int)RazorDocsTextDirection.Ltr);
+        Assert.Equal(1, (int)RazorDocsTextDirection.Rtl);
         Assert.Equal(0, (int)DocHarvesterHealthStatus.Succeeded);
         Assert.Equal(1, (int)DocHarvesterHealthStatus.ReturnedEmpty);
         Assert.Equal(2, (int)DocHarvesterHealthStatus.Failed);
@@ -56,6 +62,11 @@ public sealed class RazorDocsOptionsTests
         Assert.Equal("razordocs.routes.invalid_canonical_slug", DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug);
         Assert.Equal("razordocs.routes.invalid_redirect_alias", DocHarvestDiagnosticCodes.DocInvalidRedirectAlias);
         Assert.Equal("razordocs.routes.lossy_slug_normalization", DocHarvestDiagnosticCodes.DocLossySlugNormalization);
+        Assert.Equal("razordocs.localization.unsupported_locale", DocHarvestDiagnosticCodes.LocalizationUnsupportedLocale);
+        Assert.Equal("razordocs.localization.missing_base", DocHarvestDiagnosticCodes.LocalizationMissingBase);
+        Assert.Equal("razordocs.localization.duplicate_variant", DocHarvestDiagnosticCodes.LocalizationDuplicateVariant);
+        Assert.Equal("razordocs.localization.locale_folder_conflict", DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict);
+        Assert.Equal("razordocs.localization.fallback_disabled_missing_variant", DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant);
     }
 
     [Fact]
@@ -106,6 +117,123 @@ public sealed class RazorDocsOptionsTests
         Assert.NotNull(options.Harvest.Health);
         Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
+    }
+
+    [Fact]
+    public void RazorDocsOptions_ShouldDefaultLocalizationToDisabledEnglish()
+    {
+        var options = new RazorDocsOptions();
+
+        Assert.NotNull(options.Localization);
+        Assert.False(options.Localization.Enabled);
+        Assert.Equal("en", options.Localization.DefaultLocale);
+        Assert.Empty(options.Localization.Locales);
+        Assert.Equal(RazorDocsLocaleRouteMode.LocalePrefix, options.Localization.RouteMode);
+        Assert.Equal(RazorDocsLocaleFallbackMode.DefaultLocaleWithNotice, options.Localization.FallbackMode);
+        Assert.Equal(RazorDocsLocaleSearchMode.ActiveLocale, options.Localization.SearchMode);
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldBindAndNormalizeConfiguredLocalizationOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Localization:Enabled"] = "true",
+                        ["RazorDocs:Localization:DefaultLocale"] = " en ",
+                        ["RazorDocs:Localization:Locales:0:Code"] = " en ",
+                        ["RazorDocs:Localization:Locales:0:Label"] = " English ",
+                        ["RazorDocs:Localization:Locales:0:Lang"] = " en-US ",
+                        ["RazorDocs:Localization:Locales:0:Direction"] = "Ltr",
+                        ["RazorDocs:Localization:Locales:0:RoutePrefix"] = " en ",
+                        ["RazorDocs:Localization:Locales:1:Code"] = " fr ",
+                        ["RazorDocs:Localization:Locales:1:Label"] = " Français ",
+                        ["RazorDocs:Localization:Locales:1:Direction"] = "Rtl"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
+
+        Assert.True(options.Localization.Enabled);
+        Assert.Equal("en", options.Localization.DefaultLocale);
+        Assert.Collection(
+            options.Localization.Locales,
+            en =>
+            {
+                Assert.Equal("en", en.Code);
+                Assert.Equal("English", en.Label);
+                Assert.Equal("en-US", en.Lang);
+                Assert.Equal(RazorDocsTextDirection.Ltr, en.Direction);
+                Assert.Equal("en", en.RoutePrefix);
+            },
+            fr =>
+            {
+                Assert.Equal("fr", fr.Code);
+                Assert.Equal("Français", fr.Label);
+                Assert.Equal(RazorDocsTextDirection.Rtl, fr.Direction);
+            });
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldRejectEnabledLocalizationWithoutLocales()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Localization:Enabled"] = "true"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value);
+
+        Assert.Contains(
+            ex.Failures,
+            failure => failure.Contains("at least one configured locale", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("search")]
+    [InlineData("versions")]
+    [InlineData("v")]
+    [InlineData("fr/docs")]
+    [InlineData("..")]
+    public void AddRazorDocs_ShouldRejectInvalidLocalizationRoutePrefixes(string routePrefix)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Localization:Enabled"] = "true",
+                        ["RazorDocs:Localization:DefaultLocale"] = "en",
+                        ["RazorDocs:Localization:Locales:0:Code"] = "en",
+                        ["RazorDocs:Localization:Locales:0:RoutePrefix"] = routePrefix
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value);
+
+        Assert.NotEmpty(ex.Failures);
     }
 
     [Fact]
@@ -470,7 +598,8 @@ public sealed class RazorDocsOptionsTests
                     "Harvest": null,
                     "Bundle": null,
                     "Sidebar": null,
-                    "Contributor": null
+                    "Contributor": null,
+                    "Localization": null
                   }
                 }
                 """));
@@ -490,11 +619,16 @@ public sealed class RazorDocsOptionsTests
         Assert.NotNull(options.Bundle);
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Contributor);
+        Assert.NotNull(options.Localization);
         Assert.False(options.Harvest.FailOnFailure);
         Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
+        Assert.False(options.Localization.Enabled);
+        Assert.Equal("en", options.Localization.DefaultLocale);
+        Assert.NotNull(options.Localization.Locales);
+        Assert.Empty(options.Localization.Locales);
     }
 
     [Fact]
@@ -526,6 +660,20 @@ public sealed class RazorDocsOptionsTests
             SymbolSourceUrlTemplate = " https://example.com/blob/{ref}/{path}#L{line} ",
             SourceRef = " abc123 "
         };
+        var localization = new RazorDocsLocalizationOptions
+        {
+            DefaultLocale = " en ",
+            Locales =
+            [
+                new RazorDocsLocaleOptions
+                {
+                    Code = " en ",
+                    Label = " English ",
+                    Lang = " en-US ",
+                    RoutePrefix = " en "
+                }
+            ]
+        };
 
         services.Configure<RazorDocsOptions>(
             options =>
@@ -535,6 +683,7 @@ public sealed class RazorDocsOptionsTests
                 options.Bundle = bundle;
                 options.Sidebar = sidebar;
                 options.Contributor = contributor;
+                options.Localization = localization;
             });
 
         services.AddRazorDocs();
@@ -547,6 +696,7 @@ public sealed class RazorDocsOptionsTests
         Assert.Same(bundle, options.Bundle);
         Assert.Same(sidebar, options.Sidebar);
         Assert.Same(contributor, options.Contributor);
+        Assert.Same(localization, options.Localization);
         Assert.Equal("/tmp/configured-root", options.Source.RepositoryRoot);
         Assert.True(options.Harvest.FailOnFailure);
         Assert.Equal(RazorDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
@@ -557,6 +707,12 @@ public sealed class RazorDocsOptionsTests
         Assert.Equal("https://example.com/edit/{branch}/{path}", options.Contributor.EditUrlTemplate);
         Assert.Equal("https://example.com/blob/{ref}/{path}#L{line}", options.Contributor.SymbolSourceUrlTemplate);
         Assert.Equal("abc123", options.Contributor.SourceRef);
+        Assert.Equal("en", options.Localization.DefaultLocale);
+        var locale = Assert.Single(options.Localization.Locales);
+        Assert.Equal("en", locale.Code);
+        Assert.Equal("English", locale.Label);
+        Assert.Equal("en-US", locale.Lang);
+        Assert.Equal("en", locale.RoutePrefix);
     }
 
     [Fact]
@@ -574,6 +730,7 @@ public sealed class RazorDocsOptionsTests
                 options.Bundle = null!;
                 options.Sidebar = null!;
                 options.Contributor = null!;
+                options.Localization = null!;
             });
 
         using var provider = services.BuildServiceProvider();
@@ -585,11 +742,16 @@ public sealed class RazorDocsOptionsTests
         Assert.NotNull(options.Bundle);
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Contributor);
+        Assert.NotNull(options.Localization);
         Assert.False(options.Harvest.FailOnFailure);
         Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(RazorDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
+        Assert.False(options.Localization.Enabled);
+        Assert.Equal("en", options.Localization.DefaultLocale);
+        Assert.NotNull(options.Localization.Locales);
+        Assert.Empty(options.Localization.Locales);
     }
 
     [Fact]
@@ -814,7 +976,8 @@ public sealed class RazorDocsOptionsTests
             Sidebar = null!,
             Contributor = null!,
             Routing = null!,
-            Versioning = null!
+            Versioning = null!,
+            Localization = null!
         };
 
         var result = validator.Validate(Options.DefaultName, options);
@@ -826,6 +989,7 @@ public sealed class RazorDocsOptionsTests
         Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Contributor must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Routing must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Versioning must not be null.", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Localization must not be null.", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
