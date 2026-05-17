@@ -55,10 +55,30 @@ public class RazorDocsHeadingSuppressorTests
     }
 
     [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldKeepContent_WhenLeadingCommentIsUnterminated()
+    {
+        var content = "<!-- docs:snippet start\n<h1 id=\"quickstart\">Quickstart</h1>";
+
+        var suppressed = RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal(content, suppressed);
+    }
+
+    [Fact]
     public void SuppressLeadingMarkdownH1_ShouldKeepEmptyContent()
     {
         var suppressed = RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(string.Empty, shellOwnsH1: true);
 
         Assert.Equal(string.Empty, suppressed);
+    }
+
+    [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldKeepWhitespaceOnlyContent()
+    {
+        var content = " \n\t";
+
+        var suppressed = RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal(content, suppressed);
     }
 }

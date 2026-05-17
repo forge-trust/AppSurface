@@ -496,6 +496,43 @@ public sealed class RazorDocsOptionsTests
     }
 
     [Fact]
+    public void AddRazorDocs_ShouldRejectInvalidJavaScriptHarvestShape()
+    {
+        var result = new RazorDocsOptionsValidator().Validate(
+            null,
+            new RazorDocsOptions
+            {
+                Harvest = new RazorDocsHarvestOptions
+                {
+                    JavaScript = new RazorDocsJavaScriptHarvestOptions
+                    {
+                        Include = null!,
+                        Exclude = null!,
+                        MaxFileSizeBytes = 0
+                    }
+                }
+            });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("JavaScript:Include", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("JavaScript:Exclude", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("MaxFileSizeBytes", StringComparison.OrdinalIgnoreCase));
+
+        result = new RazorDocsOptionsValidator().Validate(
+            null,
+            new RazorDocsOptions
+            {
+                Harvest = new RazorDocsHarvestOptions
+                {
+                    JavaScript = null!
+                }
+            });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("Harvest:JavaScript", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void AddRazorDocs_ShouldBindConfiguredCacheExpirationMinutes()
     {
         var services = new ServiceCollection();

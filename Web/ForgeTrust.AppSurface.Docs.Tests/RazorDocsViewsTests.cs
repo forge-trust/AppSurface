@@ -1298,6 +1298,42 @@ public class RazorDocsViewsTests
     }
 
     [Fact]
+    public void BuildGroups_ShouldGroupNonNamespaceApiPagesByBreadcrumbFamily()
+    {
+        var snapshot = new DocSectionSnapshot
+        {
+            Section = DocPublicSection.ApiReference,
+            Label = "API Reference",
+            Slug = "api-reference",
+            VisiblePages =
+            [
+                new(
+                    "Health Endpoint",
+                    "api/health",
+                    "<p>Health endpoint.</p>",
+                    Metadata: new DocMetadata
+                    {
+                        PageType = "endpoint",
+                        Breadcrumbs =
+                        [
+                            "API Reference",
+                            "Operations",
+                            "Health Endpoint"
+                        ],
+                        Order = 10
+                    })
+            ]
+        };
+
+        var group = Assert.Single(DocSectionDisplayBuilder.BuildGroups(snapshot));
+        var link = Assert.Single(group.Links);
+
+        Assert.Equal("Operations", group.Title);
+        Assert.Equal("Health Endpoint", link.Title);
+        Assert.Equal("/docs/api/health", link.Href);
+    }
+
+    [Fact]
     public void BuildGroups_ShouldNormalizeSourcePaths_ForHrefFallbackAndEditorialChildren()
     {
         var snapshot = new DocSectionSnapshot

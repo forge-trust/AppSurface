@@ -526,80 +526,86 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return [];
         }
 
-        var nodes = new List<DocNode>();
-        foreach (var group in items.GroupBy(item => item.Group, StringComparer.OrdinalIgnoreCase).OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            var orderedItems = group
-                .OrderBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(item => item.StartLine)
-                .ThenBy(item => item.Name, StringComparer.Ordinal)
-                .ToArray();
-            var groupSlug = Slugify(group.Key);
-            var groupPath = $"api/javascript/{groupSlug}";
-            var groupTitle = $"{group.Key} JavaScript API";
-            var content = new StringBuilder();
-            var outline = new List<DocOutlineItem>();
-            var provenance = new List<DocSymbolSourceProvenance>();
+        return items
+            .GroupBy(item => item.Group, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .SelectMany(CreateGroupDocNodes)
+            .ToArray();
+    }
 
-            content.Append($@"<section class=""doc-type doc-javascript-api"">
+    private static IReadOnlyList<DocNode> CreateGroupDocNodes(IGrouping<string, JavaScriptApiItem> group)
+    {
+        var orderedItems = group
+            .OrderBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.StartLine)
+            .ThenBy(item => item.Name, StringComparer.Ordinal)
+            .ToArray();
+        var groupSlug = Slugify(group.Key);
+        var groupPath = $"api/javascript/{groupSlug}";
+        var groupTitle = $"{group.Key} JavaScript API";
+        var content = new StringBuilder();
+        var outline = new List<DocOutlineItem>();
+        var provenance = new List<DocSymbolSourceProvenance>();
+
+        content.Append($@"<section class=""doc-type doc-javascript-api"">
 <header class=""doc-type-header"">
 <span class=""doc-kind"">JavaScript API</span>
 <h2>{WebUtility.HtmlEncode(groupTitle)}</h2>
 </header>
 <div class=""doc-body""><p>Public JavaScript contracts harvested from documented source comments.</p></div>");
 
-            foreach (var item in orderedItems)
-            {
-                outline.Add(
-                    new DocOutlineItem
-                    {
-                        Id = item.AnchorId,
-                        Title = item.Name,
-                        Level = 2
-                    });
-                provenance.Add(
-                    new DocSymbolSourceProvenance
-                    {
-                        AnchorId = item.AnchorId,
-                        SourcePath = item.SourcePath,
-                        StartLine = item.StartLine
-                    });
-                content.Append(RenderItem(item, includeSourcePlaceholder: true));
-            }
+        foreach (var item in orderedItems)
+        {
+            outline.Add(
+                new DocOutlineItem
+                {
+                    Id = item.AnchorId,
+                    Title = item.Name,
+                    Level = 2
+                });
+            provenance.Add(
+                new DocSymbolSourceProvenance
+                {
+                    AnchorId = item.AnchorId,
+                    SourcePath = item.SourcePath,
+                    StartLine = item.StartLine
+                });
+            content.Append(RenderItem(item, includeSourcePlaceholder: true));
+        }
 
-            content.Append("</section>");
+        content.Append("</section>");
 
-            var groupMetadata = CreateJavaScriptMetadata(
+        var nodes = new List<DocNode>();
+        var groupMetadata = CreateJavaScriptMetadata(
+            groupTitle,
+            "javascript-api",
+            group.Key,
+            groupSlug,
+            order: 250);
+        nodes.Add(
+            new DocNode(
                 groupTitle,
-                "javascript-api",
-                group.Key,
-                groupSlug,
-                order: 250);
+                groupPath,
+                content.ToString(),
+                Metadata: groupMetadata,
+                Outline: outline,
+                SymbolSourceProvenance: provenance));
+
+        foreach (var item in orderedItems)
+        {
+            var itemPath = $"{groupPath}#{item.AnchorId}";
             nodes.Add(
                 new DocNode(
-                    groupTitle,
+                    item.Name,
+                    itemPath,
+                    RenderItem(item, includeSourcePlaceholder: false),
                     groupPath,
-                    content.ToString(),
-                    Metadata: groupMetadata,
-                    Outline: outline,
-                    SymbolSourceProvenance: provenance));
-
-            foreach (var item in orderedItems)
-            {
-                var itemPath = $"{groupPath}#{item.AnchorId}";
-                nodes.Add(
-                    new DocNode(
+                    Metadata: CreateJavaScriptMetadata(
                         item.Name,
-                        itemPath,
-                        RenderItem(item, includeSourcePlaceholder: false),
-                        groupPath,
-                        Metadata: CreateJavaScriptMetadata(
-                            item.Name,
-                            GetPageType(item.Kind),
-                            group.Key,
-                            groupSlug,
-                            order: 251)));
-            }
+                        GetPageType(item.Kind),
+                        group.Key,
+                        groupSlug,
+                        order: 251)));
         }
 
         return nodes;
@@ -859,9 +865,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         var tags = new List<JavaScriptDocletTag>();
         JavaScriptDocletTagBuilder? currentTag = null;
 
-        foreach (var rawLine in commentText.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        foreach (var line in commentText
+                     .Replace("\r\n", "\n", StringComparison.Ordinal)
+                     .Split('\n')
+                     .Select(static rawLine => rawLine.Trim().TrimStart('*').Trim()))
         {
-            var line = rawLine.Trim().TrimStart('*').Trim();
             if (line.StartsWith("@", StringComparison.Ordinal))
             {
                 if (currentTag is not null)

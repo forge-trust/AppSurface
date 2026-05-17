@@ -24,6 +24,21 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldWarn_WhenEnabledWithoutIncludeGlobs()
+    {
+        await WriteAsync("src/public-api.js", "const ignored = true;");
+        var harvester = CreateHarvester(CreateEnabledOptions());
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+        Assert.Empty(docs);
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet, diagnostic.Code);
+        Assert.Contains("include globs", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Include", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldHarvestSupportedPublicDocletsIntoGroupPageAndSearchStubs()
     {
         await WriteAsync(
@@ -116,6 +131,28 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains(docs, doc => doc.Path.EndsWith("#typedef-formfailuredetail", StringComparison.Ordinal));
         Assert.Contains(docs, doc => doc.Path.EndsWith("#global-window-razorwire", StringComparison.Ordinal));
         Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldInferWindowGlobalGroupWhenNamespaceIsOmitted()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Browser global used for RazorWire runtime state.
+             * @public
+             * @global
+             */
+            window.RazorWire = {};
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Path, "api/javascript/razorwire", StringComparison.Ordinal));
+        Assert.Equal("RazorWire JavaScript API", page.Title);
+        Assert.Contains("global-window-razorwire", page.Content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -285,6 +322,79 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldEmitDiagnostics_ForMalformedStandaloneDocletsAndCommonJsExports()
+    {
+        await WriteAsync(
+            "src/unsupported.js",
+            """
+            /**
+             * CommonJS public export.
+             * @public
+             */
+            module.exports = {};
+
+            /**
+             * Missing typedef name.
+             * @public
+             * @typedef
+             */
+
+            /**
+             * Standalone public note.
+             * @public
+             */
+
+            /**
+             * Event without recommended contract fields.
+             * @public
+             * @event razorwire:incomplete
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/unsupported.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostics = GetDiagnostics(harvester);
+
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape
+            && diagnostic.Cause.Contains("CommonJS", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
+            && diagnostic.Cause.Contains("typedef name", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
+            && diagnostic.Cause.Contains("standalone public JavaScript doclet", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-incomplete", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRenderOptionalEventMetadataAndMatchQuestionMarkGlobs()
+    {
+        await WriteAsync(
+            "src/public1.js",
+            """
+            /**
+             * Runtime failure event.
+             * Extra context for custom failure UI.
+             * @public
+             * @event razorwire:failure
+             * @target form
+             * @firesWhen a request fails.
+             * @detail none
+             * @deprecated Use razorwire:error instead.
+             * @example
+             * form.addEventListener('razorwire:failure', event => event.preventDefault());
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public?.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var eventStub = Assert.Single(docs, doc => doc.Path.EndsWith("#event-razorwire-failure", StringComparison.Ordinal));
+        Assert.Contains("Extra context for custom failure UI.", eventStub.Content, StringComparison.Ordinal);
+        Assert.Contains("Deprecated. Use razorwire:error instead.", eventStub.Content, StringComparison.Ordinal);
+        Assert.Contains("<strong>Detail:</strong> none", eventStub.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldIndexJavaScriptEventStubsWithKindLabelsAndDetailFields()
     {
         await WriteAsync(
@@ -383,7 +493,15 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
     private async Task WriteAsync(string relativePath, string content)
     {
-        var path = Path.Combine(_testRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+
+        var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedRelativePath))
+        {
+            throw new ArgumentException("Test fixture paths must be relative.", nameof(relativePath));
+        }
+
+        var path = Path.Combine(_testRoot, normalizedRelativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, content);
     }
