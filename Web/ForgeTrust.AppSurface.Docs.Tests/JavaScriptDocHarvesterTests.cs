@@ -59,6 +59,15 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldRejectFixturePathsOutsideTestRoot()
+    {
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => WriteAsync("../escaped.js", "export const escaped = true;"));
+
+        Assert.Contains("Test fixture paths must stay under the test root.", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldHarvestSupportedPublicDocletsIntoGroupPageAndSearchStubs()
     {
         await WriteAsync(
@@ -563,9 +572,22 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         }
 
         var safeRelativePath = normalizedRelativePath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var path = Path.Combine(_testRoot, safeRelativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await File.WriteAllTextAsync(path, content);
+        var fullRoot = Path.GetFullPath(_testRoot);
+        var fullPath = Path.GetFullPath(Path.Combine(fullRoot, safeRelativePath));
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var rootPrefix = fullRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? fullRoot
+            : fullRoot + Path.DirectorySeparatorChar;
+        if (!fullPath.Equals(fullRoot, comparison)
+            && !fullPath.StartsWith(rootPrefix, comparison))
+        {
+            throw new ArgumentException("Test fixture paths must stay under the test root.", nameof(relativePath));
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        await File.WriteAllTextAsync(fullPath, content);
     }
 
     private sealed class TestWebHostEnvironment : IWebHostEnvironment
