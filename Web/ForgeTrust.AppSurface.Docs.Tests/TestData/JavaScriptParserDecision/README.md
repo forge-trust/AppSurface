@@ -64,7 +64,7 @@ Future product use:
 
 ## Parser Probe
 
-Runnable command:
+Probe command:
 
 ```bash
 dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj --filter JavaScriptParserDecisionTests
