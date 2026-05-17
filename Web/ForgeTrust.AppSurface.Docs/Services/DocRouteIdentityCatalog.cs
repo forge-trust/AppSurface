@@ -26,6 +26,17 @@ internal sealed record DocRouteIdentity(
     bool SourcePathIsMarkdown,
     IReadOnlyList<string> RedirectAliasPaths);
 
+/// <summary>
+/// Represents one locale-prefixed public route candidate derived from a localized document variant.
+/// </summary>
+/// <remarks>
+/// Candidates are produced only for variants that have a public route and a configured locale route prefix. Source paths
+/// and public route paths are normalized relative docs paths, not absolute URLs.
+/// </remarks>
+/// <param name="SourcePath">Normalized source path for the localized variant.</param>
+/// <param name="Locale">Configured locale code associated with the variant.</param>
+/// <param name="TranslationKey">Stable translation identity shared by localized variants.</param>
+/// <param name="PublicRoutePath">Locale-prefixed browser route candidate for the variant.</param>
 internal sealed record LocalizedDocRouteCandidate(
     string SourcePath,
     string Locale,
@@ -244,6 +255,17 @@ internal sealed class DocRouteIdentityCatalog
         return false;
     }
 
+    /// <summary>
+    /// Builds locale-prefixed route candidates from a localized document graph.
+    /// </summary>
+    /// <remarks>
+    /// Returns an empty list when the graph is disabled. Variants are skipped when they have no public route, or when
+    /// their locale no longer maps to a configured route prefix. The method is snapshot-local and does not mutate catalog
+    /// state.
+    /// </remarks>
+    /// <param name="graph">Localized graph built for the same docs snapshot.</param>
+    /// <param name="options">Localization options used to resolve locale route prefixes.</param>
+    /// <returns>Sorted locale-prefixed candidates suitable for later route registration slices.</returns>
     internal IReadOnlyList<LocalizedDocRouteCandidate> BuildLocalizedRouteCandidates(
         LocalizedDocsGraph graph,
         RazorDocsLocalizationOptions options)

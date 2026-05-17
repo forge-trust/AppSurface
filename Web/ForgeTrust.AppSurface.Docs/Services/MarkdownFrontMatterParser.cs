@@ -515,6 +515,9 @@ internal static class MarkdownFrontMatterParser
         RazorDocsLocaleFallbackMode? fallback = null;
         if (fallbackText is not null)
         {
+            var fallbackFieldPath = flatFallbackText is not null
+                ? "locale_fallback"
+                : "localization.locale_fallback";
             if (Enum.TryParse<RazorDocsLocaleFallbackMode>(fallbackText, ignoreCase: true, out var parsedFallback)
                 && Enum.IsDefined(parsedFallback))
             {
@@ -525,7 +528,7 @@ internal static class MarkdownFrontMatterParser
                 diagnostics.Add(
                     new RazorDocsMetadataDiagnostic(
                         "invalid-locale-fallback",
-                        "locale_fallback",
+                        fallbackFieldPath,
                         "The locale fallback value is not supported.",
                         "RazorDocs only supports DefaultLocaleWithNotice or Disabled for page-level localization fallback.",
                         "Use locale_fallback: Disabled or remove the field to inherit the global fallback mode."));

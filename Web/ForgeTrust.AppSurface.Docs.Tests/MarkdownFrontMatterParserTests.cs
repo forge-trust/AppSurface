@@ -103,6 +103,25 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void ExtractWithDiagnostics_ShouldReportNestedInvalidLocaleFallbackPath()
+    {
+        var markdown = """
+            ---
+            locale: fr
+            localization:
+              locale_fallback: Sometimes
+            ---
+            # Démarrer
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("invalid-locale-fallback", diagnostic.Code);
+        Assert.Equal("localization.locale_fallback", diagnostic.FieldPath);
+    }
+
+    [Fact]
     public void ExtractWithDiagnostics_ShouldReportConflictingFlatAndNestedLocalizationFields()
     {
         var markdown = """

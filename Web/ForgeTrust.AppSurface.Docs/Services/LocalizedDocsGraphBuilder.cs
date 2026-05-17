@@ -3,6 +3,18 @@ using ForgeTrust.AppSurface.Docs.Models;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
+/// <summary>
+/// Captures locale identity, grouping, and diagnostics for one docs snapshot.
+/// </summary>
+/// <remarks>
+/// The graph is the Phase 1 localization handoff between harvesters, route identity, navigation, fallback, and search
+/// projection code. Consumers should use this graph instead of re-inferring locale state from source paths.
+/// </remarks>
+/// <param name="Enabled">Whether localization graph behavior was enabled when the snapshot was built.</param>
+/// <param name="DefaultLocale">Configured default locale, or <c>null</c> when disabled or unavailable.</param>
+/// <param name="DocSets">Translation-key groups ordered for deterministic consumption.</param>
+/// <param name="VariantsBySourcePath">Case-insensitive lookup from normalized source path to the first resolved variant.</param>
+/// <param name="Diagnostics">Non-fatal authoring diagnostics emitted while resolving localization facts.</param>
 internal sealed record LocalizedDocsGraph(
     bool Enabled,
     string? DefaultLocale,
@@ -10,12 +22,35 @@ internal sealed record LocalizedDocsGraph(
     IReadOnlyDictionary<string, LocalizedDocVariant> VariantsBySourcePath,
     IReadOnlyList<DocHarvestDiagnostic> Diagnostics);
 
+/// <summary>
+/// Groups localized variants that represent the same conceptual documentation page.
+/// </summary>
+/// <param name="TranslationKey">Stable page identity shared across locale variants.</param>
+/// <param name="DefaultLocaleSourcePath">Source path for the default-locale variant, or <c>null</c> when missing.</param>
+/// <param name="Variants">Resolved variants for this translation key, ordered by locale and source path.</param>
+/// <param name="FallbackMode">Effective missing-translation fallback behavior for the group.</param>
 internal sealed record LocalizedDocSet(
     string TranslationKey,
     string? DefaultLocaleSourcePath,
     IReadOnlyList<LocalizedDocVariant> Variants,
     RazorDocsLocaleFallbackMode FallbackMode);
 
+/// <summary>
+/// Describes one resolved localized document variant.
+/// </summary>
+/// <remarks>
+/// Locale and translation key may be authored in metadata, inferred from a configured filename suffix, inferred from a
+/// locale folder when a translation key is authored, or defaulted to the configured default locale. Public route paths are
+/// null when route identity rejected the source path.
+/// </remarks>
+/// <param name="SourcePath">Normalized source path for the variant.</param>
+/// <param name="Locale">Configured locale code selected for the variant.</param>
+/// <param name="TranslationKey">Stable translation identity used to group variants.</param>
+/// <param name="Title">Localized title, metadata title, or harvested title in precedence order.</param>
+/// <param name="PublicRoutePath">Existing public route path for the base document identity, or <c>null</c> when unavailable.</param>
+/// <param name="LocaleFallback">Optional page-level fallback override authored by the variant.</param>
+/// <param name="LocaleWasInferred">Whether locale came from inference/defaulting rather than explicit metadata.</param>
+/// <param name="TranslationKeyWasInferred">Whether translation key came from source path inference.</param>
 internal sealed record LocalizedDocVariant(
     string SourcePath,
     string Locale,
@@ -40,6 +75,10 @@ internal sealed class LocalizedDocsGraphBuilder
     private readonly IReadOnlyDictionary<string, RazorDocsLocaleOptions> _localesByCode;
     private readonly IReadOnlyDictionary<string, RazorDocsLocaleOptions> _localesByRoutePrefix;
 
+    /// <summary>
+    /// Initializes the graph builder with normalized locale lookups from the configured localization options.
+    /// </summary>
+    /// <param name="options">Localization options for the current RazorDocs host.</param>
     internal LocalizedDocsGraphBuilder(RazorDocsLocalizationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -55,6 +94,17 @@ internal sealed class LocalizedDocsGraphBuilder
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Builds the localized graph for a docs snapshot.
+    /// </summary>
+    /// <remarks>
+    /// The builder skips fragment stub source paths, reports unsupported locale signals, duplicate variants, missing bases,
+    /// folder conflicts, disabled fallback gaps, and conflicting fallback overrides as diagnostics, then returns whatever
+    /// safe graph data it can derive.
+    /// </remarks>
+    /// <param name="docs">Harvested docs from the snapshot.</param>
+    /// <param name="routeIdentityCatalog">Route catalog for resolving public route candidates.</param>
+    /// <returns>A disabled empty graph when localization is off, otherwise the resolved localization graph.</returns>
     internal LocalizedDocsGraph Build(IEnumerable<DocNode> docs, DocRouteIdentityCatalog routeIdentityCatalog)
     {
         ArgumentNullException.ThrowIfNull(docs);
