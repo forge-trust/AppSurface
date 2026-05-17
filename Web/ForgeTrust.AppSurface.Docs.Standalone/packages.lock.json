@@ -36,24 +36,21 @@
       "forgetrust.appsurface.caching": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Core": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.core": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Core": "[1.0.0, )"
+          "CliWrap": "[3.10.1, )"
         }
       },
       "forgetrust.appsurface.docs": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Caching": "[1.0.0, )",
-          "ForgeTrust.RazorWire": "[1.0.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Caching": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind": "[0.1.0, )",
+          "ForgeTrust.RazorWire": "[0.1.0, )",
           "HtmlSanitizer": "[9.0.892, )",
           "Markdig": "[0.44.0, )",
           "Microsoft.CodeAnalysis.CSharp": "[5.0.0, )",
@@ -62,22 +59,21 @@
           "YamlDotNet": "[17.0.1, )"
         }
       },
-      "forgetrust.razorwire": {
+      "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Web": "[1.0.0, )",
-          "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.web.tailwind": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Core": "[1.0.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64": "[1.0.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64": "[1.0.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64": "[1.0.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64": "[1.0.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.web.tailwind.runtime.linux-arm64": {
@@ -94,6 +90,19 @@
       },
       "forgetrust.appsurface.web.tailwind.runtime.win-x64": {
         "type": "Project"
+      },
+      "forgetrust.razorwire": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )",
+          "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
+        }
+      },
+      "CliWrap": {
+        "type": "CentralTransitive",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
       "HtmlSanitizer": {
         "type": "CentralTransitive",

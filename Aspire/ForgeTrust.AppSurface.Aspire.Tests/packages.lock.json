@@ -577,19 +577,20 @@
         "type": "Project",
         "dependencies": {
           "Aspire.Hosting": "[9.4.2, )",
-          "ForgeTrust.AppSurface.Console": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Console": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.console": {
         "type": "Project",
         "dependencies": {
           "CliFx": "[2.3.6, )",
-          "ForgeTrust.AppSurface.Core": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
+          "CliWrap": "[3.10.1, )",
           "Microsoft.Extensions.Hosting": "[9.0.6, )",
           "Microsoft.Extensions.Logging.Console": "[9.0.6, )"
         }
@@ -630,6 +631,12 @@
         "requested": "[2.3.6, )",
         "resolved": "2.3.6",
         "contentHash": "7Q6rbhCxpEoAtPrcBm4sJ4QlDeY+0Dp4in0oXAxrJJ/4L1LV/YkDQSqfUMwK56GbnpUo4fIrpOxoxM+ta44B1g=="
+      },
+      "CliWrap": {
+        "type": "CentralTransitive",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
       "KubernetesClient": {
         "type": "CentralTransitive",

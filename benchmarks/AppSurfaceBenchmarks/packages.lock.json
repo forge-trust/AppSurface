@@ -770,32 +770,35 @@
         "type": "Project"
       },
       "forgetrust.appsurface.core": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "CliWrap": "[3.10.1, )"
+        }
       },
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Core": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.web.openapi": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Web": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "Microsoft.AspNetCore.OpenApi": "[9.0.8, )"
         }
       },
       "forgetrust.appsurface.web.scalar": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Web.OpenApi": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web.OpenApi": "[0.1.0, )",
           "Scalar.AspNetCore": "[2.6.8, )"
         }
       },
       "manydependencyinjectioncontrollers": {
         "type": "Project",
         "dependencies": {
-          "DependencyInjectionControllers": "[1.0.0, )"
+          "DependencyInjectionControllers": "[0.1.0, )"
         }
       },
       "simpleapicontroller": {
@@ -804,8 +807,14 @@
       "webappexample": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Web.Scalar": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Web.Scalar": "[0.1.0, )"
         }
+      },
+      "CliWrap": {
+        "type": "CentralTransitive",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
       "Microsoft.AspNetCore.Mvc.Razor.Extensions": {
         "type": "CentralTransitive",
