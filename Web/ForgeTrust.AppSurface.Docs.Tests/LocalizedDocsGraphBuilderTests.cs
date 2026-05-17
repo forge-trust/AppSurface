@@ -106,6 +106,20 @@ public sealed class LocalizedDocsGraphBuilderTests
     }
 
     [Fact]
+    public void Build_ShouldTreatUnknownCultureLikeSuffixAsOrdinaryDefaultLocaleDoc()
+    {
+        var graph = RazorDocsLocalizationFixture.BuildGraph(
+            RazorDocsLocalizationFixture.CreateOptions(),
+            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.not_a_culture.md", "Configuration"));
+
+        var variant = Assert.Single(graph.VariantsBySourcePath.Values);
+
+        Assert.Equal("en", variant.Locale);
+        Assert.Equal("guides/configuration.not_a_culture", variant.TranslationKey);
+        Assert.Empty(graph.Diagnostics);
+    }
+
+    [Fact]
     public void Build_ShouldInferMarkdownExtensionLocaleSuffixes()
     {
         var graph = RazorDocsLocalizationFixture.BuildGraph(
@@ -237,6 +251,7 @@ public sealed class LocalizedDocsGraphBuilderTests
         Assert.Contains(
             candidates,
             candidate => candidate.Locale == "en"
+                         && candidate.TranslationKey == "guides/getting-started"
                          && candidate.PublicRoutePath == "en/guides/getting-started");
         Assert.Contains(
             candidates,

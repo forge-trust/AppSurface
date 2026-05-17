@@ -181,6 +181,40 @@ public sealed class RazorDocsOptionsTests
     }
 
     [Fact]
+    public void AddRazorDocs_ShouldSkipNullLocaleEntriesWhileNormalizingLocalizationOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.Configure<RazorDocsOptions>(
+            options =>
+            {
+                options.Localization.Locales =
+                [
+                    null!,
+                    new RazorDocsLocaleOptions
+                    {
+                        Code = " fr ",
+                        Label = " Français ",
+                        Lang = " fr-FR ",
+                        RoutePrefix = " français "
+                    }
+                ];
+            });
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value;
+
+        Assert.Null(options.Localization.Locales[0]);
+        var locale = options.Localization.Locales[1];
+        Assert.Equal("fr", locale.Code);
+        Assert.Equal("Français", locale.Label);
+        Assert.Equal("fr-FR", locale.Lang);
+        Assert.Equal("français", locale.RoutePrefix);
+    }
+
+    [Fact]
     public void AddRazorDocs_ShouldRejectEnabledLocalizationWithoutLocales()
     {
         var services = new ServiceCollection();
