@@ -27,7 +27,7 @@ The spike keeps the dependency in `ForgeTrust.AppSurface.Docs.Tests` only. The p
 | Block comment spans | Available through `ParserOptions.OnComment`; `Comment.Range` gives zero-based start/end and `Comment.ContentRange` gives the comment body. |
 | AST node spans | Available on every `Node` through `Start`, `End`, `Range`, and `Location`. |
 | Source line/column behavior | Lines are one-based. Columns are zero-based. This matches parser error columns and node/comment locations. |
-| Parser failure behavior | Malformed JavaScript throws a catchable `ParseErrorException` subclass. The probe catches `SyntaxErrorException` for `malformed.js`, with line and column populated. |
+| Parser failure behavior | Malformed JavaScript throws a catchable `ParseErrorException` subclass. The probe catches `ParseErrorException` for `malformed.js`, with line and column populated. |
 | Package size | `.nupkg`: 632,439 bytes. `lib/net8.0/Acornima.dll`: 363,520 bytes. |
 | License compatibility | BSD-3-Clause. Acceptable for AppSurface package and CLI distribution. |
 | Maintenance status | Current NuGet package, current README, and current ECMAScript coverage claim. This is healthier than depending on an abandoned grammar fork. |
