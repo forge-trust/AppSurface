@@ -85,12 +85,20 @@ internal static class AppSurfaceWebDevelopmentPortDefaults
                 continue;
             }
 
-            if (index + 1 >= args.Count || string.IsNullOrWhiteSpace(args[index + 1]))
+            if (index + 1 >= args.Count)
             {
                 continue;
             }
 
-            return args[index + 1];
+            var environmentValue = args[index + 1];
+            if (string.IsNullOrWhiteSpace(environmentValue)
+                || environmentValue.StartsWith("-", StringComparison.Ordinal)
+                || environmentValue.Contains('='))
+            {
+                continue;
+            }
+
+            return environmentValue;
         }
 
         return null;
