@@ -96,6 +96,8 @@ The search workspace renders semantic classes such as `docs-search-page`, `docs-
 
 That does not mean every heading, paragraph, or fallback-link wrapper inside `Search.cshtml` needs its own semantic class. Keep the stateful container and interactive hook semantic, then use local utilities for one-off typography and spacing inside that single view.
 
+JavaScript-rendered search result rows are a special case because the interactive surface is both styling hook and navigation contract. The row should contain one block-level `.docs-search-result-link` anchor that wraps the visible result content, so touch users can tap anywhere on the result while keyboard and assistive-technology users still get one normal link target. Because that anchor wraps rich row content, it should own a concise `aria-label` instead of letting breadcrumbs, paths, badges, and snippets become one long accessible name.
+
 #### Required `id` values
 
 Some search controls still need unique `id` values such as `docs-search-page-input` and `docs-search-page-filters-panel`. Those support uniqueness, accessibility relationships, and DOM targeting. They do not replace semantic classes as the reusable styling contract.
@@ -109,6 +111,7 @@ Avoid these by default:
 - pushing utility classes into harvested nested HTML that RazorDocs does not fully own
 - treating shared CSS and JavaScript hook classes as a failure of Tailwind instead of a legitimate integration seam
 - moving styles across the boundary without a concrete user-facing benefit
+- simulating whole-result search navigation with row click handlers when one semantic link can own the interaction
 
 ### Review Questions
 

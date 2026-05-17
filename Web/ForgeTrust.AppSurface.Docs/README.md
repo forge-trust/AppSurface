@@ -45,6 +45,7 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 - New one-off page header spacing or typography in owned Razor markup: use Tailwind utilities in the view.
 - New reusable badge, metadata chip, page metadata row, trust/provenance surface, or page-local outline state: add or extend a semantic component class in `wwwroot/css/app.css`, then use utilities around it only when they are purely local.
 - For `Views/Docs/Search.cshtml`, keep the stateful search container or interactive hook semantic, but use local utilities for one-off header copy, helper layout, and fallback-link chrome inside that view.
+- JavaScript-rendered search result rows should expose one block-level anchor for the whole result, not a JavaScript-only click handler or nested links. Give that anchor a concise `aria-label` such as `Open RazorDocs Roadmap in How-to Guides` so screen reader link lists do not read every breadcrumb, badge, path, and snippet. This keeps mobile taps, keyboard focus, copy-link, and open-in-new-tab behavior aligned with normal browser expectations.
 - Restyling paragraphs, headings, or code blocks inside `.docs-content`: update wrapper-scoped CSS instead of pushing utility classes into harvested HTML.
 - Markdown pages with long-form prose use `.docs-content--markdown` for prose measure, paragraph rhythm, list spacing, links, blockquotes, and inline code. Generated non-Markdown docs and docs marked with `page_type: api` or `page_type: api-reference` use `.docs-content--api` so signatures and reference tables keep the wider base content measure.
 - New search filter pill, active-filter surface, or other stateful search UI: use a semantic hook class because CSS and JavaScript both need to recognize it.
@@ -90,6 +91,8 @@ Do not add broad fallbacks such as `var(--docs-color-text-default, #e2e8f0)` unl
 - Do not place non-search primitives in `wwwroot/docs/search.css` just because the layout loads search assets globally today. Use `wwwroot/css/app.css` for shared components so future theming can target one stable package layer.
 - Do not introduce new hardcoded slate/cyan literals inside shared selector groups. Add or reuse a `--docs-*` token instead.
 - Do not move syntax-highlight colors into the shared token layer until RazorDocs has a public code-theme story. Code block chrome can use shared tokens; syntax spans stay local.
+- Do not make search result rows feel tappable by adding a row-level `click` listener while the real anchor stays only on the title. That makes touch behavior work while breaking native link affordances.
+- Do not rely on the full wrapped row text as the accessible name for a full-row search result link. The row can be visually rich while the link name stays short.
 
 ## Details Page Heading Ownership
 
