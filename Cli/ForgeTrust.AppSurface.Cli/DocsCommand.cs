@@ -150,7 +150,7 @@ internal abstract class RazorDocsPreviewCommand : ICommand
     /// </summary>
     /// <remarks>
     /// Defaults to <c>Development</c> so local previews receive AppSurface Web's deterministic per-workspace endpoint
-    /// fallback when no URL or port is supplied. Set this explicitly when testing production or staging behavior.
+    /// fallback when no endpoint is configured. Set this explicitly when testing production or staging behavior.
     /// </remarks>
     [CommandOption("environment", 'e', Description = "Host environment forwarded to the RazorDocs host (default: Development).")]
     public string? EnvironmentName { get; init; }
