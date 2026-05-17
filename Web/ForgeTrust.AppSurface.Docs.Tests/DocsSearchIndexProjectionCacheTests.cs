@@ -21,4 +21,38 @@ public sealed class DocsSearchIndexProjectionCacheTests
         Assert.Same(payload, projected);
         Assert.Equal("1", projected.Metadata.Version);
     }
+
+    [Fact]
+    public void GetPayload_ShouldReturnCachedProjection_ForRepeatedLocaleProjection()
+    {
+        var payload = new DocsSearchIndexPayload(
+            new DocsSearchIndexMetadata("2026-05-16T00:00:00.0000000Z", "1", "minisearch"),
+            []);
+        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var graph = RazorDocsLocalizationFixture.BuildGraph(
+            options,
+            RazorDocsLocalizationFixture.MarkdownDoc("README.md", "Home"));
+        var cache = new DocsSearchIndexProjectionCache(payload, graph);
+        var projection = new DocsSearchIndexProjection(Locale: "fr");
+
+        _ = cache.GetPayload(projection);
+        var projected = cache.GetPayload(projection);
+
+        Assert.Same(payload, projected);
+    }
+
+    [Fact]
+    public void GetPayload_ShouldPreserveDefaultPayload_WhenLocalizationIsDisabled()
+    {
+        var payload = new DocsSearchIndexPayload(
+            new DocsSearchIndexMetadata("2026-05-16T00:00:00.0000000Z", "1", "minisearch"),
+            []);
+        var cache = new DocsSearchIndexProjectionCache(
+            payload,
+            new LocalizedDocsGraph(false, null, [], new Dictionary<string, LocalizedDocVariant>(), []));
+
+        var projected = cache.GetPayload(new DocsSearchIndexProjection(Locale: "fr"));
+
+        Assert.Same(payload, projected);
+    }
 }

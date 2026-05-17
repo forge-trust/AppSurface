@@ -205,12 +205,115 @@ public sealed class RazorDocsOptionsTests
             failure => failure.Contains("at least one configured locale", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void AddRazorDocs_ShouldRejectUnsupportedLocalizationEnumsAndNullLocales()
+    {
+        var result = new RazorDocsOptionsValidator().Validate(
+            null,
+            new RazorDocsOptions
+            {
+                Localization = new RazorDocsLocalizationOptions
+                {
+                    RouteMode = (RazorDocsLocaleRouteMode)42,
+                    FallbackMode = (RazorDocsLocaleFallbackMode)42,
+                    SearchMode = (RazorDocsLocaleSearchMode)42,
+                    Locales = null!
+                }
+            });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("route mode", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("fallback mode", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("search mode", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("Localization:Locales", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldRejectInvalidLocalizationLocaleDefinitions()
+    {
+        var result = new RazorDocsOptionsValidator().Validate(
+            null,
+            new RazorDocsOptions
+            {
+                Localization = new RazorDocsLocalizationOptions
+                {
+                    Enabled = true,
+                    DefaultLocale = "de",
+                    Locales =
+                    [
+                        null!,
+                        new RazorDocsLocaleOptions(),
+                        new RazorDocsLocaleOptions
+                        {
+                            Code = "not_a_culture",
+                            Lang = "also_not_a_culture",
+                            Direction = (RazorDocsTextDirection)42,
+                            RoutePrefix = "shared"
+                        },
+                        new RazorDocsLocaleOptions
+                        {
+                            Code = "fr",
+                            RoutePrefix = "shared"
+                        },
+                        new RazorDocsLocaleOptions
+                        {
+                            Code = "fr",
+                            RoutePrefix = "fr-alt"
+                        }
+                    ]
+                }
+            });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("Locales:0", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("Code is required", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("valid BCP-47 culture tag", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("Direction", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("configured more than once", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("route prefix 'shared'", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("DefaultLocale must match", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldRejectBlankLocalizationDefaultLocale()
+    {
+        var result = new RazorDocsOptionsValidator().Validate(
+            null,
+            new RazorDocsOptions
+            {
+                Localization = new RazorDocsLocalizationOptions
+                {
+                    Enabled = true,
+                    DefaultLocale = " ",
+                    Locales =
+                    [
+                        new RazorDocsLocaleOptions { Code = "en" }
+                    ]
+                }
+            });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("DefaultLocale is required", StringComparison.OrdinalIgnoreCase));
+    }
+
     [Theory]
     [InlineData("search")]
+    [InlineData("search-index.json")]
+    [InlineData("_health")]
+    [InlineData("_health.json")]
+    [InlineData("sections")]
     [InlineData("versions")]
     [InlineData("v")]
+    [InlineData("search.css")]
+    [InlineData("search-client.js")]
+    [InlineData("outline-client.js")]
+    [InlineData("minisearch.min.js")]
     [InlineData("fr/docs")]
     [InlineData("..")]
+    [InlineData("fr\\docs")]
+    [InlineData("fr?docs")]
+    [InlineData("fr#docs")]
+    [InlineData("fr.docs")]
     public void AddRazorDocs_ShouldRejectInvalidLocalizationRoutePrefixes(string routePrefix)
     {
         var services = new ServiceCollection();

@@ -32,6 +32,7 @@ internal static class RazorDocsLocalizationFixture
         string title,
         string? locale = null,
         string? translationKey = null,
+        string? localizedTitle = null,
         RazorDocsLocaleFallbackMode? fallback = null,
         string? canonicalSlug = null)
     {
@@ -43,12 +44,13 @@ internal static class RazorDocsLocalizationFixture
             {
                 Title = title,
                 CanonicalSlug = canonicalSlug,
-                Localization = locale is null && translationKey is null && fallback is null
+                Localization = locale is null && translationKey is null && localizedTitle is null && fallback is null
                     ? null
                     : new DocLocalizationMetadata
                     {
                         Locale = locale,
                         TranslationKey = translationKey,
+                        LocalizedTitle = localizedTitle,
                         LocaleFallback = fallback
                     }
             });

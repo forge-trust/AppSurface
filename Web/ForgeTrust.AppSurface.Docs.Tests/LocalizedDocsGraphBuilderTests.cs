@@ -79,6 +79,84 @@ public sealed class LocalizedDocsGraphBuilderTests
     }
 
     [Fact]
+    public void Build_ShouldEmitUnsupportedLocaleDiagnostic_ForExplicitUnsupportedLocale()
+    {
+        var graph = RazorDocsLocalizationFixture.BuildGraph(
+            RazorDocsLocalizationFixture.CreateOptions(),
+            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.md", "Configuration", locale: "es"));
+
+        Assert.Contains(
+            graph.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.LocalizationUnsupportedLocale);
+        Assert.Empty(graph.DocSets);
+    }
+
+    [Fact]
+    public void Build_ShouldIgnoreNonMarkdownLocaleSuffixInference()
+    {
+        var graph = RazorDocsLocalizationFixture.BuildGraph(
+            RazorDocsLocalizationFixture.CreateOptions(),
+            RazorDocsLocalizationFixture.MarkdownDoc("api/configuration.fr", "Configuration"));
+
+        var variant = Assert.Single(graph.VariantsBySourcePath.Values);
+
+        Assert.Equal("en", variant.Locale);
+        Assert.Equal("api/configuration", variant.TranslationKey);
+        Assert.Empty(graph.Diagnostics);
+    }
+
+    [Fact]
+    public void Build_ShouldInferMarkdownExtensionLocaleSuffixes()
+    {
+        var graph = RazorDocsLocalizationFixture.BuildGraph(
+            RazorDocsLocalizationFixture.CreateOptions(),
+            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.markdown", "Configuration"),
+            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.fr.markdown", "Configuration"));
+
+        var docSet = Assert.Single(graph.DocSets);
+
+        Assert.Equal("guides/configuration", docSet.TranslationKey);
+        Assert.Contains(docSet.Variants, variant => variant.Locale == "fr" && variant.SourcePath == "guides/configuration.fr.markdown");
+    }
+
+    [Fact]
+    public void Build_ShouldKeepGraphEmpty_WhenDefaultLocaleCannotBeResolved()
+    {
+        var options = new RazorDocsLocalizationOptions
+        {
+            Enabled = true,
+            DefaultLocale = null!,
+            Locales =
+            [
+                new RazorDocsLocaleOptions { Code = "en" }
+            ]
+        };
+
+        var graph = RazorDocsLocalizationFixture.BuildGraph(
+            options,
+            RazorDocsLocalizationFixture.MarkdownDoc("README.md", "Home"));
+
+        Assert.Empty(graph.DocSets);
+        Assert.Empty(graph.VariantsBySourcePath);
+        Assert.Empty(graph.Diagnostics);
+    }
+
+    [Fact]
+    public void Build_ShouldResolveLocalizedTitleBeforeMetadataTitle()
+    {
+        var graph = RazorDocsLocalizationFixture.BuildGraph(
+            RazorDocsLocalizationFixture.CreateOptions(),
+            RazorDocsLocalizationFixture.MarkdownDoc(
+                "guides/configuration.md",
+                "Configuration",
+                localizedTitle: "Localized configuration"));
+
+        var variant = Assert.Single(graph.VariantsBySourcePath.Values);
+
+        Assert.Equal("Localized configuration", variant.Title);
+    }
+
+    [Fact]
     public void Build_ShouldInferFolderLocaleOnlyWhenTranslationKeyIsAuthored()
     {
         var graph = RazorDocsLocalizationFixture.BuildGraph(
@@ -165,6 +243,77 @@ public sealed class LocalizedDocsGraphBuilderTests
             candidate => candidate.Locale == "fr"
                          && candidate.SourcePath == "guides/getting-started.fr.md"
                          && candidate.PublicRoutePath == "fr/guides/getting-started");
+    }
+
+    [Fact]
+    public void RouteCatalog_ShouldBuildHomeLocaleRouteCandidateWithoutTrailingSlash()
+    {
+        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var docs = new[]
+        {
+            RazorDocsLocalizationFixture.MarkdownDoc("README.md", "Home")
+        };
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        var graph = new LocalizedDocsGraphBuilder(options).Build(docs, catalog);
+
+        var candidate = Assert.Single(catalog.BuildLocalizedRouteCandidates(graph, options));
+
+        Assert.Equal("en", candidate.Locale);
+        Assert.Equal("en", candidate.PublicRoutePath);
+    }
+
+    [Fact]
+    public void RouteCatalog_ShouldReturnNoLocalizedRouteCandidates_WhenGraphIsDisabled()
+    {
+        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var docs = new[]
+        {
+            RazorDocsLocalizationFixture.MarkdownDoc("README.md", "Home")
+        };
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        var graph = RazorDocsLocalizationFixture.BuildGraph(new RazorDocsLocalizationOptions(), docs);
+
+        var candidates = catalog.BuildLocalizedRouteCandidates(graph, options);
+
+        Assert.Empty(candidates);
+    }
+
+    [Fact]
+    public void RouteCatalog_ShouldSkipLocalizedRouteCandidatesForUnconfiguredLocale()
+    {
+        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var docs = new[]
+        {
+            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.md", "Configuration")
+        };
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        var graph = new LocalizedDocsGraph(
+            Enabled: true,
+            DefaultLocale: "en",
+            DocSets:
+            [
+                new LocalizedDocSet(
+                    "guides/configuration",
+                    "guides/configuration.md",
+                    [
+                        new LocalizedDocVariant(
+                            "guides/configuration.md",
+                            "de",
+                            "guides/configuration",
+                            "Configuration",
+                            "guides/configuration",
+                            LocaleFallback: null,
+                            LocaleWasInferred: false,
+                            TranslationKeyWasInferred: false)
+                    ],
+                    RazorDocsLocaleFallbackMode.DefaultLocaleWithNotice)
+            ],
+            VariantsBySourcePath: new Dictionary<string, LocalizedDocVariant>(),
+            Diagnostics: []);
+
+        var candidates = catalog.BuildLocalizedRouteCandidates(graph, options);
+
+        Assert.Empty(candidates);
     }
 
     [Fact]
