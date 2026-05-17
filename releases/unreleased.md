@@ -54,6 +54,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 ### Core diagnostics
 
 - Core static utilities now use explicit `ILogger` overloads and source-generated `[LoggerMessage]` definitions for host-owned diagnostics. `PathUtils.FindRepositoryRoot` can warn when discovery falls back from a missing path, and parallel enumerable cleanup paths now log suppressed cleanup failures at `Debug` when a caller supplies a logger.
+- `ProcessUtils` now runs through CliWrap while keeping the existing AppSurface process contract for captured output, streaming logs, cancellation, and non-throwing non-zero exit codes.
 
 ### Dependency maintenance
 

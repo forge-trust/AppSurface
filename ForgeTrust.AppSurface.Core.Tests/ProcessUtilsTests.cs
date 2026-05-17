@@ -314,9 +314,10 @@ public class ProcessUtilsTests
     public async Task ExecuteProcessAsync_UsesConfiguredWorkingDirectory()
     {
         var logger = new ListLogger();
+        var tempDirectoryName = $"appsurface-process-utils-{Guid.NewGuid():N}";
         var tempDirectory = Path.Combine(
             Directory.GetCurrentDirectory(),
-            $"appsurface-process-utils-{Guid.NewGuid():N}");
+            Path.GetFileName(tempDirectoryName));
         Directory.CreateDirectory(tempDirectory);
         var (fileName, args) = CreateShellCommand("cd", "pwd");
 

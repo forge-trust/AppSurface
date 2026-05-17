@@ -119,12 +119,7 @@ public static class ProcessUtils
         {
             throw;
         }
-        catch (CliWrapException ex)
-        {
-            logger.LogError(ex, "Failed to start process {FileName}", fileName);
-            throw new InvalidOperationException($"Failed to start process: {fileName}", ex);
-        }
-        catch (Win32Exception ex)
+        catch (Exception ex) when (ex is CliWrapException or Win32Exception)
         {
             logger.LogError(ex, "Failed to start process {FileName}", fileName);
             throw new InvalidOperationException($"Failed to start process: {fileName}", ex);
