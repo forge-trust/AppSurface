@@ -397,6 +397,52 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
     }
 
     [Fact]
+    public async Task SearchPage_MobileResultRows_OpenWhenSnippetIsTapped()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 390,
+                Height = 844
+            }
+        });
+        var page = await context.NewPageAsync();
+        await RouteSearchPayloadAsync(
+            page,
+            BuildControlledSearchPayload(
+                SearchDoc(
+                    "docs-index",
+                    "Use AppSurface Docs",
+                    "guide",
+                    "Guide",
+                    "guide",
+                    "Adopt AppSurface Docs in your repository.",
+                    path: "/docs",
+                    breadcrumbs: ["Guides", "Adoption"])));
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search?q=appsurface%20docs");
+        await WaitForSearchPageSettledAsync(page);
+
+        var result = page.Locator("#docs-search-page-results .docs-search-result").First;
+        await Assertions.Expect(result).ToContainTextAsync("Use AppSurface Docs", new LocatorAssertionsToContainTextOptions
+        {
+            Timeout = 30_000
+        });
+        Assert.Equal(1, await result.Locator("a").CountAsync());
+        Assert.Equal("Open Use AppSurface Docs in Guides", await result.Locator(".docs-search-result-link").GetAttributeAsync("aria-label"));
+        await Assertions.Expect(result.Locator(".docs-search-result-link")).ToContainTextAsync(
+            "Adopt AppSurface Docs in your repository.",
+            new LocatorAssertionsToContainTextOptions
+            {
+                Timeout = 30_000
+            });
+
+        await result.Locator(".docs-search-result-snippet").ClickAsync();
+        await WaitForPathAsync(page, "/docs");
+    }
+
+    [Fact]
     public async Task SearchPage_NoResultsRecovery_ShowsSummaryAndClearsFilters()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
@@ -737,16 +783,17 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
         string audience = "",
         string status = "",
         string bodyText = "",
+        string? path = null,
         string[]? breadcrumbs = null)
     {
-        var path = id.StartsWith("/docs/", StringComparison.Ordinal)
+        var resolvedPath = path ?? (id.StartsWith("/docs/", StringComparison.Ordinal)
             ? id
-            : $"/docs/{id}";
+            : $"/docs/{id}");
 
         return new
         {
             id,
-            path,
+            path = resolvedPath,
             title,
             summary,
             headings = Array.Empty<string>(),

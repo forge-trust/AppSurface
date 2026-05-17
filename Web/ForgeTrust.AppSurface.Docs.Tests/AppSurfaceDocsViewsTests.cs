@@ -36,15 +36,15 @@ public class AppSurfaceDocsViewsTests
         var layout = ReadLayoutMarkup();
         Assert.Contains("id=\"docs-search-input\"", layout);
         Assert.Contains("id=\"docs-search-results\"", layout);
-        Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"search.css\"))", layout);
+        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search.css\")", layout);
         Assert.Contains("docsSearchIndexUrl", layout);
         Assert.Contains("var isSearchPage = string.Equals(", layout);
         Assert.Contains("crossorigin=\"use-credentials\"", layout);
         Assert.Contains("data-rw-search-runtime=\"minisearch\"", layout);
         Assert.DoesNotContain("src=\"~/docs/outline-client.js\"", layout);
         Assert.Contains("window.__appSurfaceDocsConfig", layout);
-        Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"search-client.js\"))", layout);
-        Assert.Contains("Url.PathBaseAware(DocsUrlBuilder.BuildAssetUrl(\"minisearch.min.js\"))", layout);
+        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search-client.js\")", layout);
+        Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"minisearch.min.js\")", layout);
     }
 
     [Fact]
@@ -80,12 +80,13 @@ public class AppSurfaceDocsViewsTests
             c => c.Search(),
             pathBase: "/some-base");
 
-        Assert.Contains("href=\"/some-base/docs/search.css\"", html);
-        Assert.Contains("src=\"/some-base/docs/minisearch.min.js\"", html);
-        Assert.Contains("src=\"/some-base/docs/search-client.js\"", html);
+        Assert.Matches("href=\"/some-base/docs/search\\.css\\?v=[^\"]+\"", html);
+        Assert.Matches("src=\"/some-base/docs/minisearch\\.min\\.js\\?v=[^\"]+\"", html);
+        Assert.Matches("src=\"/some-base/docs/search-client\\.js\\?v=[^\"]+\"", html);
         Assert.Contains("\"docsRootPath\":\"/some-base/docs\"", html);
         Assert.Contains("\"docsSearchUrl\":\"/some-base/docs/search\"", html);
         Assert.Contains("\"docsSearchIndexUrl\":\"/some-base/docs/search-index.json\"", html);
+        Assert.Matches("\"miniSearchUrl\":\"/some-base/docs/minisearch\\.min\\.js\\?v=[^\"]+\"", html);
     }
 
     [Fact]
@@ -150,12 +151,18 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("function isPageTypeInGroup(doc, group)", searchClient);
         Assert.Contains("function getPageTypeDisplayLabel(doc)", searchClient);
         Assert.Contains("function createSearchResultArticle(doc, queryTokens, options = {})", searchClient);
+        Assert.Contains("const link = createElement('a', 'docs-search-result-link');", searchClient);
+        Assert.Contains("function createSearchResultLinkLabel(doc)", searchClient);
+        Assert.Contains("link.setAttribute('aria-label', createSearchResultLinkLabel(doc));", searchClient);
+        Assert.Contains("link.append(title);", searchClient);
+        Assert.Contains("article.append(link);", searchClient);
         Assert.Contains("docs-search-result-badges", searchClient);
         Assert.Contains("function createSearchResultPageTypeBadge(doc)", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.component))", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
         Assert.Contains("docs-search-result-meta-line", searchClient);
         Assert.Contains("docs-search-page-starter-docs", searchClient);
+        Assert.DoesNotContain("title.append(link);", searchClient);
     }
 
     [Fact]
@@ -255,21 +262,33 @@ public class AppSurfaceDocsViewsTests
         var searchStylesheet = ReadSearchStylesheetMarkup();
 
         Assert.Contains(":root {", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-surface-canvas: #020617;", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-border-default: #334155;", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-text-default: #e2e8f0;", tailwindEntryStylesheet);
-        Assert.Contains("--docs-color-accent-strong: #22d3ee;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-navy: #0d182a;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-blue: #2563eb;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-wordmark-blue: #3b82f6;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-teal: #14b8a6;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-brand-violet: #8b5cf6;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-surface-canvas: #050b17;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-border-default: #314461;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-text-default: #e5e7eb;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-accent-strong: #2563eb;", tailwindEntryStylesheet);
+        Assert.Contains("--docs-color-wordmark-edge-shadow: rgba(0, 0, 0, 0.45);", tailwindEntryStylesheet);
         Assert.Contains("--docs-focus-ring-inset:", tailwindEntryStylesheet);
 
         Assert.Contains("border: 1px solid var(--docs-color-border-default);", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-accent);", tailwindEntryStylesheet);
+        Assert.Contains("color: var(--docs-brand-wordmark-blue);", tailwindEntryStylesheet);
+        Assert.Contains("text-shadow: 0 1px 2px var(--docs-color-wordmark-edge-shadow);", tailwindEntryStylesheet);
         Assert.Contains("outline: var(--docs-focus-outline);", tailwindEntryStylesheet);
 
-        Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #020617);", searchStylesheet);
+        Assert.Contains("--docs-search-color-surface-canvas: var(--docs-color-surface-canvas, #050b17);", searchStylesheet);
         Assert.Contains("--docs-search-focus-ring-inset: var(--docs-focus-ring-inset,", searchStylesheet);
         Assert.Contains("background: var(--docs-search-color-surface-canvas);", searchStylesheet);
         Assert.Contains("border: 1px solid var(--docs-search-color-border-default);", searchStylesheet);
         Assert.Contains("box-shadow: var(--docs-search-focus-ring-inset);", searchStylesheet);
+        Assert.Contains(".docs-search-result-link:focus-visible", searchStylesheet);
+        Assert.Contains(".docs-search-result-link:active", searchStylesheet);
+        Assert.Contains("background: var(--docs-search-color-state-active-fill);", searchStylesheet);
+        Assert.Contains("color: var(--docs-search-color-accent);", searchStylesheet);
         Assert.Contains(
             "background: linear-gradient(90deg, var(--docs-search-color-skeleton-edge), var(--docs-search-color-skeleton-mid), var(--docs-search-color-skeleton-edge));",
             searchStylesheet);
@@ -366,7 +385,7 @@ public class AppSurfaceDocsViewsTests
         var layout = ReadLayoutMarkup();
 
         Assert.Contains("<div class=\"flex h-full min-h-0 overflow-hidden\">", layout);
-        Assert.Contains("id=\"main-content\" role=\"main\" class=\"h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-slate-900\"", layout);
+        Assert.Contains("id=\"main-content\" role=\"main\" tabindex=\"-1\" class=\"h-full min-h-0 flex-grow min-w-0 overflow-y-auto bg-transparent\"", layout);
     }
 
     [Fact]
@@ -443,7 +462,8 @@ public class AppSurfaceDocsViewsTests
 
         var html = await RenderDocsViewAsync(services, "Index", c => c.Index());
 
-        Assert.Contains(">AppSurface</h1>", html);
+        Assert.Contains("<h1 class=\"docs-wordmark mt-3 text-3xl sm:text-4xl\">", html);
+        Assert.Contains("App<span class=\"docs-wordmark-highlight\">Surface</span></h1>", html);
         Assert.Contains("Proof before promises.", html);
         Assert.Contains(">Test</h3>", html);
         Assert.Contains("How does composition work?", html);
@@ -2478,7 +2498,9 @@ public class AppSurfaceDocsViewsTests
         Assert.True(
             document.QuerySelector(".docs-detail-primary")!.CompareDocumentPosition(document.QuerySelector("#docs-page-outline")!)
                 .HasFlag(DocumentPositions.Following));
-        Assert.NotNull(document.QuerySelector("script[src='/docs/outline-client.js?v=rolling-context'][data-doc-outline-client='true']"));
+        var outlineScript = document.QuerySelector("script[data-doc-outline-client='true']");
+        Assert.NotNull(outlineScript);
+        Assert.Matches("^/docs/outline-client\\.js\\?v=.+", outlineScript!.GetAttribute("src") ?? string.Empty);
         Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", html);
         Assert.DoesNotContain("rounded-2xl border border-slate-800 bg-slate-900/60", html);
 
@@ -2489,7 +2511,9 @@ public class AppSurfaceDocsViewsTests
             pathBase: "/tenant");
         var tenantDocument = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(tenantHtml);
 
-        Assert.NotNull(tenantDocument.QuerySelector("script[src='/tenant/docs/outline-client.js?v=rolling-context'][data-doc-outline-client='true']"));
+        var tenantOutlineScript = tenantDocument.QuerySelector("script[data-doc-outline-client='true']");
+        Assert.NotNull(tenantOutlineScript);
+        Assert.Matches("^/tenant/docs/outline-client\\.js\\?v=.+", tenantOutlineScript!.GetAttribute("src") ?? string.Empty);
         Assert.DoesNotContain("data-doc-outline-client-loader=\"true\"", tenantHtml);
     }
 
@@ -3451,7 +3475,7 @@ public class AppSurfaceDocsViewsTests
 
         Assert.DoesNotContain("href=\"/docs/search-index.json\"", html);
         Assert.DoesNotContain("data-rw-search-runtime=\"minisearch\"", html);
-        Assert.Contains("src=\"/docs/search-client.js\"", html);
+        Assert.Matches("src=\"/docs/search-client\\.js\\?v=[^\"]+\"", html);
         Assert.DoesNotContain("src=\"/docs/outline-client.js\"", html);
         Assert.Contains("id=\"docs-search-input\"", html);
     }
@@ -3698,9 +3722,8 @@ public class AppSurfaceDocsViewsTests
 
         var services = new ServiceCollection();
         services.AddLogging();
-        var diagnosticListener = new DiagnosticListener("AppSurfaceDocsViewsTests");
-        services.AddSingleton<DiagnosticSource>(diagnosticListener);
-        services.AddSingleton(diagnosticListener);
+        services.AddSingleton<DiagnosticListener>(_ => new DiagnosticListener("AppSurfaceDocsViewsTests"));
+        services.AddSingleton<DiagnosticSource>(sp => sp.GetRequiredService<DiagnosticListener>());
         services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment(webRoot));
         services.AddSingleton<IConfiguration>(_ => configuration);
         services.AddMemoryCache();

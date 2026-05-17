@@ -32,6 +32,12 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(1, (int)DocHarvestHealthStatus.Empty);
         Assert.Equal(2, (int)DocHarvestHealthStatus.Degraded);
         Assert.Equal(3, (int)DocHarvestHealthStatus.Failed);
+        Assert.Equal(0, (int)AppSurfaceDocsLocaleRouteMode.LocalePrefix);
+        Assert.Equal(0, (int)AppSurfaceDocsLocaleFallbackMode.DefaultLocaleWithNotice);
+        Assert.Equal(1, (int)AppSurfaceDocsLocaleFallbackMode.Disabled);
+        Assert.Equal(0, (int)AppSurfaceDocsLocaleSearchMode.ActiveLocale);
+        Assert.Equal(0, (int)AppSurfaceDocsTextDirection.Ltr);
+        Assert.Equal(1, (int)AppSurfaceDocsTextDirection.Rtl);
         Assert.Equal(0, (int)DocHarvesterHealthStatus.Succeeded);
         Assert.Equal(1, (int)DocHarvesterHealthStatus.ReturnedEmpty);
         Assert.Equal(2, (int)DocHarvesterHealthStatus.Failed);
@@ -57,6 +63,12 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.routes.invalid_canonical_slug", DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug);
         Assert.Equal("appsurfacedocs.routes.invalid_redirect_alias", DocHarvestDiagnosticCodes.DocInvalidRedirectAlias);
         Assert.Equal("appsurfacedocs.routes.lossy_slug_normalization", DocHarvestDiagnosticCodes.DocLossySlugNormalization);
+        Assert.Equal("appsurfacedocs.localization.unsupported_locale", DocHarvestDiagnosticCodes.LocalizationUnsupportedLocale);
+        Assert.Equal("appsurfacedocs.localization.missing_base", DocHarvestDiagnosticCodes.LocalizationMissingBase);
+        Assert.Equal("appsurfacedocs.localization.duplicate_variant", DocHarvestDiagnosticCodes.LocalizationDuplicateVariant);
+        Assert.Equal("appsurfacedocs.localization.locale_folder_conflict", DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict);
+        Assert.Equal("appsurfacedocs.localization.fallback_disabled_missing_variant", DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant);
+        Assert.Equal("appsurfacedocs.localization.fallback_conflict", DocHarvestDiagnosticCodes.LocalizationFallbackConflict);
     }
 
     [Fact]
@@ -210,6 +222,260 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Harvest.Health);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsOptions_ShouldDefaultLocalizationToDisabledEnglish()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.NotNull(options.Localization);
+        Assert.False(options.Localization.Enabled);
+        Assert.Equal("en", options.Localization.DefaultLocale);
+        Assert.Empty(options.Localization.Locales);
+        Assert.Equal(AppSurfaceDocsLocaleRouteMode.LocalePrefix, options.Localization.RouteMode);
+        Assert.Equal(AppSurfaceDocsLocaleFallbackMode.DefaultLocaleWithNotice, options.Localization.FallbackMode);
+        Assert.Equal(AppSurfaceDocsLocaleSearchMode.ActiveLocale, options.Localization.SearchMode);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindAndNormalizeConfiguredLocalizationOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Localization:Enabled"] = "true",
+                        ["AppSurfaceDocs:Localization:DefaultLocale"] = " en ",
+                        ["AppSurfaceDocs:Localization:Locales:0:Code"] = " en ",
+                        ["AppSurfaceDocs:Localization:Locales:0:Label"] = " English ",
+                        ["AppSurfaceDocs:Localization:Locales:0:Lang"] = " en-US ",
+                        ["AppSurfaceDocs:Localization:Locales:0:Direction"] = "Ltr",
+                        ["AppSurfaceDocs:Localization:Locales:0:RoutePrefix"] = " en ",
+                        ["AppSurfaceDocs:Localization:Locales:1:Code"] = " fr ",
+                        ["AppSurfaceDocs:Localization:Locales:1:Label"] = " Français ",
+                        ["AppSurfaceDocs:Localization:Locales:1:Direction"] = "Rtl"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.True(options.Localization.Enabled);
+        Assert.Equal("en", options.Localization.DefaultLocale);
+        Assert.Collection(
+            options.Localization.Locales,
+            en =>
+            {
+                Assert.Equal("en", en.Code);
+                Assert.Equal("English", en.Label);
+                Assert.Equal("en-US", en.Lang);
+                Assert.Equal(AppSurfaceDocsTextDirection.Ltr, en.Direction);
+                Assert.Equal("en", en.RoutePrefix);
+            },
+            fr =>
+            {
+                Assert.Equal("fr", fr.Code);
+                Assert.Equal("Français", fr.Label);
+                Assert.Equal(AppSurfaceDocsTextDirection.Rtl, fr.Direction);
+            });
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldSkipNullLocaleEntriesWhileNormalizingLocalizationOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.Configure<AppSurfaceDocsOptions>(
+            options =>
+            {
+                options.Localization.Locales =
+                [
+                    null!,
+                    new AppSurfaceDocsLocaleOptions
+                    {
+                        Code = " fr ",
+                        Label = " Français ",
+                        Lang = " fr-FR ",
+                        RoutePrefix = " français "
+                    }
+                ];
+            });
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Null(options.Localization.Locales[0]);
+        var locale = options.Localization.Locales[1];
+        Assert.Equal("fr", locale.Code);
+        Assert.Equal("Français", locale.Label);
+        Assert.Equal("fr-FR", locale.Lang);
+        Assert.Equal("français", locale.RoutePrefix);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldRejectEnabledLocalizationWithoutLocales()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Localization:Enabled"] = "true"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.Contains(
+            ex.Failures,
+            failure => failure.Contains("at least one configured locale", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldRejectUnsupportedLocalizationEnumsAndNullLocales()
+    {
+        var result = new AppSurfaceDocsOptionsValidator().Validate(
+            null,
+            new AppSurfaceDocsOptions
+            {
+                Localization = new AppSurfaceDocsLocalizationOptions
+                {
+                    RouteMode = (AppSurfaceDocsLocaleRouteMode)42,
+                    FallbackMode = (AppSurfaceDocsLocaleFallbackMode)42,
+                    SearchMode = (AppSurfaceDocsLocaleSearchMode)42,
+                    Locales = null!
+                }
+            });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("route mode", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("fallback mode", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("search mode", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("Localization:Locales", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldRejectInvalidLocalizationLocaleDefinitions()
+    {
+        var result = new AppSurfaceDocsOptionsValidator().Validate(
+            null,
+            new AppSurfaceDocsOptions
+            {
+                Localization = new AppSurfaceDocsLocalizationOptions
+                {
+                    Enabled = true,
+                    DefaultLocale = "de",
+                    Locales =
+                    [
+                        null!,
+                        new AppSurfaceDocsLocaleOptions(),
+                        new AppSurfaceDocsLocaleOptions
+                        {
+                            Code = "not_a_culture",
+                            Lang = "also_not_a_culture",
+                            Direction = (AppSurfaceDocsTextDirection)42,
+                            RoutePrefix = "shared"
+                        },
+                        new AppSurfaceDocsLocaleOptions
+                        {
+                            Code = "fr",
+                            RoutePrefix = "shared"
+                        },
+                        new AppSurfaceDocsLocaleOptions
+                        {
+                            Code = "fr",
+                            RoutePrefix = "fr-alt"
+                        }
+                    ]
+                }
+            });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("Locales:0", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("Code is required", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("valid BCP-47 culture tag", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("Direction", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("configured more than once", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("route prefix 'shared'", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("DefaultLocale must match", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldRejectBlankLocalizationDefaultLocale()
+    {
+        var result = new AppSurfaceDocsOptionsValidator().Validate(
+            null,
+            new AppSurfaceDocsOptions
+            {
+                Localization = new AppSurfaceDocsLocalizationOptions
+                {
+                    Enabled = true,
+                    DefaultLocale = " ",
+                    Locales =
+                    [
+                        new AppSurfaceDocsLocaleOptions { Code = "en" }
+                    ]
+                }
+            });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("DefaultLocale is required", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("search")]
+    [InlineData("search-index.json")]
+    [InlineData("_health")]
+    [InlineData("_health.json")]
+    [InlineData("sections")]
+    [InlineData("versions")]
+    [InlineData("v")]
+    [InlineData("search.css")]
+    [InlineData("search-client.js")]
+    [InlineData("outline-client.js")]
+    [InlineData("minisearch.min.js")]
+    [InlineData("fr/docs")]
+    [InlineData("..")]
+    [InlineData("fr\\docs")]
+    [InlineData("fr?docs")]
+    [InlineData("fr#docs")]
+    [InlineData("fr.docs")]
+    public void AddAppSurfaceDocs_ShouldRejectInvalidLocalizationRoutePrefixes(string routePrefix)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Localization:Enabled"] = "true",
+                        ["AppSurfaceDocs:Localization:DefaultLocale"] = "en",
+                        ["AppSurfaceDocs:Localization:Locales:0:Code"] = "en",
+                        ["AppSurfaceDocs:Localization:Locales:0:RoutePrefix"] = routePrefix
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.NotEmpty(ex.Failures);
     }
 
     [Fact]
@@ -574,7 +840,8 @@ public sealed class AppSurfaceDocsOptionsTests
                     "Harvest": null,
                     "Bundle": null,
                     "Sidebar": null,
-                    "Contributor": null
+                    "Contributor": null,
+                    "Localization": null
                   }
                 }
                 """));
@@ -594,11 +861,16 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Bundle);
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Contributor);
+        Assert.NotNull(options.Localization);
         Assert.False(options.Harvest.FailOnFailure);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
+        Assert.False(options.Localization.Enabled);
+        Assert.Equal("en", options.Localization.DefaultLocale);
+        Assert.NotNull(options.Localization.Locales);
+        Assert.Empty(options.Localization.Locales);
     }
 
     [Fact]
@@ -630,6 +902,20 @@ public sealed class AppSurfaceDocsOptionsTests
             SymbolSourceUrlTemplate = " https://example.com/blob/{ref}/{path}#L{line} ",
             SourceRef = " abc123 "
         };
+        var localization = new AppSurfaceDocsLocalizationOptions
+        {
+            DefaultLocale = " en ",
+            Locales =
+            [
+                new AppSurfaceDocsLocaleOptions
+                {
+                    Code = " en ",
+                    Label = " English ",
+                    Lang = " en-US ",
+                    RoutePrefix = " en "
+                }
+            ]
+        };
 
         services.Configure<AppSurfaceDocsOptions>(
             options =>
@@ -639,6 +925,7 @@ public sealed class AppSurfaceDocsOptionsTests
                 options.Bundle = bundle;
                 options.Sidebar = sidebar;
                 options.Contributor = contributor;
+                options.Localization = localization;
             });
 
         services.AddAppSurfaceDocs();
@@ -651,6 +938,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Same(bundle, options.Bundle);
         Assert.Same(sidebar, options.Sidebar);
         Assert.Same(contributor, options.Contributor);
+        Assert.Same(localization, options.Localization);
         Assert.Equal("/tmp/configured-root", options.Source.RepositoryRoot);
         Assert.True(options.Harvest.FailOnFailure);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
@@ -661,6 +949,12 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("https://example.com/edit/{branch}/{path}", options.Contributor.EditUrlTemplate);
         Assert.Equal("https://example.com/blob/{ref}/{path}#L{line}", options.Contributor.SymbolSourceUrlTemplate);
         Assert.Equal("abc123", options.Contributor.SourceRef);
+        Assert.Equal("en", options.Localization.DefaultLocale);
+        var locale = Assert.Single(options.Localization.Locales);
+        Assert.Equal("en", locale.Code);
+        Assert.Equal("English", locale.Label);
+        Assert.Equal("en-US", locale.Lang);
+        Assert.Equal("en", locale.RoutePrefix);
     }
 
     [Fact]
@@ -678,6 +972,7 @@ public sealed class AppSurfaceDocsOptionsTests
                 options.Bundle = null!;
                 options.Sidebar = null!;
                 options.Contributor = null!;
+                options.Localization = null!;
             });
 
         using var provider = services.BuildServiceProvider();
@@ -689,11 +984,16 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Bundle);
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Contributor);
+        Assert.NotNull(options.Localization);
         Assert.False(options.Harvest.FailOnFailure);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
+        Assert.False(options.Localization.Enabled);
+        Assert.Equal("en", options.Localization.DefaultLocale);
+        Assert.NotNull(options.Localization.Locales);
+        Assert.Empty(options.Localization.Locales);
     }
 
     [Fact]
@@ -918,7 +1218,8 @@ public sealed class AppSurfaceDocsOptionsTests
             Sidebar = null!,
             Contributor = null!,
             Routing = null!,
-            Versioning = null!
+            Versioning = null!,
+            Localization = null!
         };
 
         var result = validator.Validate(Options.DefaultName, options);
@@ -930,6 +1231,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Contributor must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Routing must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Versioning must not be null.", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Localization must not be null.", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

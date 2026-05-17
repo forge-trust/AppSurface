@@ -7,6 +7,7 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 {
+    private readonly List<IDisposable> _disposables = [];
     private readonly string _tempDirectory;
 
     public AppSurfaceDocsPublishedTreeHandlerTests()
@@ -393,11 +394,13 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         var versionedTree = CreatePublishedTree("versioned");
         File.WriteAllText(Path.Combine(stableTree, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Combine(versionedTree, "search.css"), "body { color: #0ea5e9; }");
+        using var stableProvider = new PhysicalFileProvider(stableTree);
+        using var versionedProvider = new PhysicalFileProvider(versionedTree);
 
         var handler = new AppSurfaceDocsPublishedTreeHandler(
             [
-                new AppSurfaceDocsPublishedTreeMount("/docs", new PhysicalFileProvider(stableTree)),
-                new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", new PhysicalFileProvider(versionedTree))
+                new AppSurfaceDocsPublishedTreeMount("/docs", stableProvider),
+                new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", versionedProvider)
             ],
             "/docs/next");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
@@ -482,11 +485,13 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         var versionedTree = CreatePublishedTree("versioned-overlap");
         File.WriteAllText(Path.Combine(stableTree, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Combine(versionedTree, "search.css"), "body { color: #0ea5e9; }");
+        using var stableProvider = new PhysicalFileProvider(stableTree);
+        using var versionedProvider = new PhysicalFileProvider(versionedTree);
 
         var handler = CreateHandler(
             [
-                new AppSurfaceDocsPublishedTreeMount("/docs", new PhysicalFileProvider(stableTree)),
-                new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", new PhysicalFileProvider(versionedTree))
+                new AppSurfaceDocsPublishedTreeMount("/docs", stableProvider),
+                new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", versionedProvider)
             ]);
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
 
@@ -498,6 +503,11 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
     public void Dispose()
     {
+        foreach (var disposable in _disposables)
+        {
+            disposable.Dispose();
+        }
+
         if (Directory.Exists(_tempDirectory))
         {
             Directory.Delete(_tempDirectory, recursive: true);
@@ -510,8 +520,11 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         string previewRootPath = "/docs/next",
         string routeRootPath = DocsUrlBuilder.DocsEntryPath)
     {
+        var provider = new PhysicalFileProvider(treePath);
+        _disposables.Add(provider);
+
         return CreateHandler(
-            [new AppSurfaceDocsPublishedTreeMount(mountRootPath, new PhysicalFileProvider(treePath))],
+            [new AppSurfaceDocsPublishedTreeMount(mountRootPath, provider)],
             previewRootPath,
             routeRootPath);
     }

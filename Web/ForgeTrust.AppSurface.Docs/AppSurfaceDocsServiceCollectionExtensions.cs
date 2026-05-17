@@ -34,11 +34,15 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// <see cref="AppSurfaceDocsRoutingOptions.DocsRootPath"/> through
     /// <see cref="DocsUrlBuilder.NormalizeRouteRootPath(string?, string, bool)"/> and
     /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/>, trims
-    /// <see cref="AppSurfaceDocsVersioningOptions.CatalogPath"/>, and removes blank or duplicate sidebar namespace
-    /// prefixes. Callers that omit <see cref="AppSurfaceDocsOptions.Routing"/> or
-    /// <see cref="AppSurfaceDocsOptions.Versioning"/> can therefore still rely on a fully populated options object after
-    /// registration. When <see cref="AppSurfaceDocsHarvestOptions.FailOnFailure"/> is enabled, the registered startup
-    /// preflight fails the host only when the aggregate harvest health is failed.
+    /// <see cref="AppSurfaceDocsVersioningOptions.CatalogPath"/>, normalizes
+    /// <see cref="AppSurfaceDocsLocalizationOptions.DefaultLocale"/> to <c>en</c> when blank, trims locale
+    /// <see cref="AppSurfaceDocsLocaleOptions.Code"/>, <see cref="AppSurfaceDocsLocaleOptions.Label"/>,
+    /// <see cref="AppSurfaceDocsLocaleOptions.Lang"/>, and <see cref="AppSurfaceDocsLocaleOptions.RoutePrefix"/> values
+    /// while skipping null locale entries, and removes blank or duplicate sidebar namespace prefixes. Callers that omit
+    /// <see cref="AppSurfaceDocsOptions.Routing"/>, <see cref="AppSurfaceDocsOptions.Versioning"/>, or
+    /// <see cref="AppSurfaceDocsOptions.Localization"/> can therefore still rely on a fully populated options object
+    /// after registration. When <see cref="AppSurfaceDocsHarvestOptions.FailOnFailure"/> is enabled, the registered
+    /// startup preflight fails the host only when the aggregate harvest health is failed.
     /// </para>
     /// <para>
     /// When <see cref="AppSurfaceDocsRoutingOptions.DocsRootPath"/> is omitted or whitespace, the live docs root is derived
@@ -52,8 +56,10 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/> run.
     /// </para>
     /// <para>
-    /// The method also registers <see cref="DocsUrlBuilder"/> and <see cref="AppSurfaceDocsVersionCatalogService"/> as
-    /// singleton downstream services alongside the standard harvesters, memo cache, and <see cref="DocAggregator"/>.
+    /// The method also registers <see cref="DocsUrlBuilder"/>, <see cref="AppSurfaceDocsAssetVersioner"/>, and
+    /// <see cref="AppSurfaceDocsVersionCatalogService"/> as singleton downstream services alongside the standard
+    /// harvesters, memo cache, and <see cref="DocAggregator"/>. <see cref="AppSurfaceDocsAssetVersioner"/> supplies
+    /// content-derived cache keys for AppSurface Docs-owned CSS and JavaScript assets rendered by the package views.
     /// Consumers that resolve <see cref="AppSurfaceDocsOptions"/> directly should expect the normalized values rather than
     /// raw configuration text, and applications that need custom routing or catalog paths should provide those values
     /// before this method runs so the normalized singleton graph stays consistent.
@@ -77,7 +83,9 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Contributor ??= new AppSurfaceDocsContributorOptions();
                     options.Routing ??= new AppSurfaceDocsRoutingOptions();
                     options.Versioning ??= new AppSurfaceDocsVersioningOptions();
+                    options.Localization ??= new AppSurfaceDocsLocalizationOptions();
                     options.Sidebar.NamespacePrefixes ??= [];
+                    options.Localization.Locales ??= [];
 
                     options.Identity.DisplayName = NormalizeOrNull(options.Identity.DisplayName);
                     options.Identity.HomeHref = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.HomeHref);
@@ -105,6 +113,20 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Versioning.CatalogPath = NormalizeOrNull(options.Versioning.CatalogPath);
                     options.Contributor.SymbolSourceUrlTemplate = NormalizeOrNull(options.Contributor.SymbolSourceUrlTemplate);
                     options.Contributor.SourceRef = NormalizeOrNull(options.Contributor.SourceRef);
+                    options.Localization.DefaultLocale = NormalizeOrNull(options.Localization.DefaultLocale) ?? "en";
+                    foreach (var locale in options.Localization.Locales)
+                    {
+                        if (locale is null)
+                        {
+                            continue;
+                        }
+
+                        locale.Code = NormalizeOrNull(locale.Code) ?? string.Empty;
+                        locale.Label = NormalizeOrNull(locale.Label);
+                        locale.Lang = NormalizeOrNull(locale.Lang);
+                        locale.RoutePrefix = NormalizeOrNull(locale.RoutePrefix);
+                    }
+
                     options.Sidebar.NamespacePrefixes = options.Sidebar.NamespacePrefixes
                         .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
                         .Select(prefix => prefix.Trim())
@@ -119,6 +141,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.AddConfigAuditKey<AppSurfaceDocsOptions>(AppSurfaceDocsOptions.SectionName);
         services.AddConfigAuditKey<AppSurfaceDocsIdentityOptions>($"{AppSurfaceDocsOptions.SectionName}.Identity");
         services.TryAddSingleton(AppSurfaceDocsAssetPathResolver.CreateDefault());
+        services.TryAddSingleton<AppSurfaceDocsAssetVersioner>();
         services.TryAddSingleton<DocsUrlBuilder>();
         services.TryAddSingleton<AppSurfaceDocsIdentityResolver>();
         services.TryAddSingleton<AppSurfaceDocsVersionCatalogService>();

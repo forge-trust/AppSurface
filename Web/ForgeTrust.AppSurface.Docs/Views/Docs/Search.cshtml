@@ -1,12 +1,12 @@
 @model ForgeTrust.AppSurface.Docs.Models.SearchPageViewModel
 @{
-    const string FailureLinkClass = "grid gap-1 rounded-[0.85rem] border border-slate-800 bg-slate-900/55 px-[0.95rem] py-[0.85rem] no-underline transition-colors hover:border-cyan-400/35 hover:bg-cyan-950/20";
+    const string FailureLinkClass = "grid gap-1 rounded-lg border border-[#1b2a43] bg-[#0d182a]/55 px-[0.95rem] py-[0.85rem] no-underline transition-colors hover:border-[#14b8a6]/45 hover:bg-[#0d182a]/80";
 }
 
 <div id="docs-search-page" class="docs-search-page">
     <header class="grid gap-[0.55rem]">
-        <p class="m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-cyan-300">Docs Search</p>
-        <h1 class="m-0 text-[clamp(2rem,4vw,3rem)] font-bold leading-[1.02] text-slate-50">@Model.Title</h1>
+        <p class="m-0 text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-[#14b8a6]">AppSurface Search</p>
+        <h1 class="docs-gradient-title m-0 text-[clamp(2rem,4vw,3rem)] font-bold leading-[1.02]">@Model.Title</h1>
         <p class="m-0 max-w-[52rem] text-base leading-[1.6] text-slate-400">@Model.Orientation</p>
     </header>
 
@@ -91,7 +91,7 @@
                        href="@resolvedHref"
                        data-turbo-frame="doc-content"
                        data-turbo-action="advance">
-                        <span class="text-[0.95rem] font-semibold text-cyan-300">@link.Title</span>
+                        <span class="text-[0.95rem] font-semibold text-[#14b8a6]">@link.Title</span>
                         <span class="text-[0.82rem] leading-[1.45] text-slate-400">@link.Description</span>
                     </a>
                 }
@@ -100,7 +100,7 @@
                     <a class="@FailureLinkClass"
                        href="@resolvedHref"
                        data-turbo-frame="_top">
-                        <span class="text-[0.95rem] font-semibold text-cyan-300">@link.Title</span>
+                        <span class="text-[0.95rem] font-semibold text-[#14b8a6]">@link.Title</span>
                         <span class="text-[0.82rem] leading-[1.45] text-slate-400">@link.Description</span>
                     </a>
                 }

@@ -17,6 +17,7 @@ If you are evaluating AppSurface Docs for your own repository, start with [Use A
 - `DocsUrlBuilder` plus the MVC surface used by AppSurface Docs consumers so the live docs root, search shell, and archive routes stay in one shared contract
 - `AppSurfaceDocsVersionCatalog` plus `AppSurfaceDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
 - Structured trust metadata plus a built-in trust bar for release notes, upgrade guides, and other pages that need status and provenance near the top
+- A source-backed localization foundation with typed locale options, locale metadata, translation-set inference, and diagnostics for serious multi-language docs systems
 - Contributor provenance rendering with a `Source of truth` strip for source links, edit links, and relative `Last updated` timestamps on details pages
 - Precompiled Tailwind-powered styling with layout-time path resolution for root-module and embedded hosts
 
@@ -44,6 +45,7 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 - New one-off page header spacing or typography in owned Razor markup: use Tailwind utilities in the view.
 - New reusable badge, metadata chip, page metadata row, trust/provenance surface, or page-local outline state: add or extend a semantic component class in `wwwroot/css/app.css`, then use utilities around it only when they are purely local.
 - For `Views/Docs/Search.cshtml`, keep the stateful search container or interactive hook semantic, but use local utilities for one-off header copy, helper layout, and fallback-link chrome inside that view.
+- JavaScript-rendered search result rows should expose one block-level anchor for the whole result, not a JavaScript-only click handler or nested links. Give that anchor a concise `aria-label` such as `Open AppSurface Docs Roadmap in How-to Guides` so screen reader link lists do not read every breadcrumb, badge, path, and snippet. This keeps mobile taps, keyboard focus, copy-link, and open-in-new-tab behavior aligned with normal browser expectations.
 - Restyling paragraphs, headings, or code blocks inside `.docs-content`: update wrapper-scoped CSS instead of pushing utility classes into harvested HTML.
 - Markdown pages with long-form prose use `.docs-content--markdown` for prose measure, paragraph rhythm, list spacing, links, blockquotes, and inline code. Generated non-Markdown docs and docs marked with `page_type: api` or `page_type: api-reference` use `.docs-content--api` so signatures and reference tables keep the wider base content measure.
 - New search filter pill, active-filter surface, or other stateful search UI: use a semantic hook class because CSS and JavaScript both need to recognize it.
@@ -89,6 +91,8 @@ Do not add broad fallbacks such as `var(--docs-color-text-default, #e2e8f0)` unl
 - Do not place non-search primitives in `wwwroot/docs/search.css` just because the layout loads search assets globally today. Use `wwwroot/css/app.css` for shared components so future theming can target one stable package layer.
 - Do not introduce new hardcoded slate/cyan literals inside shared selector groups. Add or reuse a `--docs-*` token instead.
 - Do not move syntax-highlight colors into the shared token layer until AppSurface Docs has a public code-theme story. Code block chrome can use shared tokens; syntax spans stay local.
+- Do not make search result rows feel tappable by adding a row-level `click` listener while the real anchor stays only on the title. That makes touch behavior work while breaking native link affordances.
+- Do not rely on the full wrapped row text as the accessible name for a full-row search result link. The row can be visually rich while the link name stays short.
 
 ## Details Page Heading Ownership
 
@@ -222,6 +226,12 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug` (`appsurfacedocs.routes.invalid_canonical_slug`)
 - `DocHarvestDiagnosticCodes.DocInvalidRedirectAlias` (`appsurfacedocs.routes.invalid_redirect_alias`)
 - `DocHarvestDiagnosticCodes.DocLossySlugNormalization` (`appsurfacedocs.routes.lossy_slug_normalization`)
+- `DocHarvestDiagnosticCodes.LocalizationUnsupportedLocale` (`appsurfacedocs.localization.unsupported_locale`)
+- `DocHarvestDiagnosticCodes.LocalizationMissingBase` (`appsurfacedocs.localization.missing_base`)
+- `DocHarvestDiagnosticCodes.LocalizationDuplicateVariant` (`appsurfacedocs.localization.duplicate_variant`)
+- `DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict` (`appsurfacedocs.localization.locale_folder_conflict`)
+- `DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant` (`appsurfacedocs.localization.fallback_disabled_missing_variant`)
+- `DocHarvestDiagnosticCodes.LocalizationFallbackConflict` (`appsurfacedocs.localization.fallback_conflict`)
 
 An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
 
@@ -421,6 +431,96 @@ redirect_aliases:
 
 `canonical_slug` and `redirect_aliases` are docs-root-relative route paths. Do not include a query string, fragment, leading docs root, or host name. Canonical slugs use the same deterministic segment normalization as source-derived Markdown routes. Redirect aliases preserve their literal authored route text after separator cleanup, so legacy URLs such as `Old_Path/Guide.md.html` keep their existing shape instead of being slugified. Aliases redirect permanently to the public canonical route and preserve the request query string. Public Markdown source paths such as `/docs/foo.md` and `/docs/foo.md.html` also redirect to the clean route so GitHub-style copy-pasted links recover automatically. Use `redirect_aliases` for non-source legacy URLs, renamed pages, and old route shapes that are not already implied by the source path. Declared aliases that try to shadow another public Markdown source path are ignored with a `DocRedirectAliasCollision` diagnostic so copy-pasted source URLs keep pointing at their owning page.
 
+### Localization foundation
+
+AppSurface Docs has a source-backed localization foundation for hosts that need multilingual docs without changing the current browser-visible contract yet. Localization is disabled by default. When enabled, AppSurface Docs validates configured locales, reads locale metadata from Markdown front matter and sidecars, infers translation sets for colocated files such as `README.fr.md`, builds an internal locale graph, emits stable diagnostics, and reserves a search projection seam. Phase 1 does not add visible language switchers, fallback pages, localized route matching, localized SEO tags, or locale-filtered search results.
+
+Enable it under `AppSurfaceDocs:Localization`:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Localization": {
+      "Enabled": true,
+      "DefaultLocale": "en",
+      "Locales": [
+        {
+          "Code": "en",
+          "Label": "English",
+          "Lang": "en-US",
+          "Direction": "Ltr",
+          "RoutePrefix": "en"
+        },
+        {
+          "Code": "fr",
+          "Label": "Français",
+          "Lang": "fr-FR",
+          "Direction": "Ltr",
+          "RoutePrefix": "fr"
+        }
+      ],
+      "RouteMode": "LocalePrefix",
+      "FallbackMode": "DefaultLocaleWithNotice",
+      "SearchMode": "ActiveLocale"
+    }
+  }
+}
+```
+
+Author localization metadata either as friendly top-level keys or as a nested `localization:` block:
+
+```yaml
+---
+title: Getting started
+locale: fr
+translation_key: guides/getting-started
+localized_title: Démarrer
+locale_fallback: Disabled
+---
+```
+
+```yaml
+---
+title: Getting started
+localization:
+  locale: fr
+  translation_key: guides/getting-started
+  localized_title: Démarrer
+  locale_fallback: Disabled
+---
+```
+
+The supported metadata shape is:
+
+- `locale`: optional BCP-47 locale code. It must match a configured `Locales[].Code` when localization is enabled.
+- `translation_key`: optional stable identity shared by all translations of the same page. Use a route-like value such as `guides/getting-started`.
+- `localized_title`: optional title for locale-aware UI surfaces. The current page title still follows the existing `title`, H1, and fallback resolution.
+- `locale_fallback`: optional per-page fallback mode. Supported values are `DefaultLocaleWithNotice` and `Disabled`.
+
+Inference behavior:
+
+- A configured suffix such as `README.fr.md` infers locale `fr` and groups with `README.md`.
+- A suffix that looks like a culture tag but is not configured emits `LocalizationUnsupportedLocale` and is excluded from the locale graph so it cannot masquerade as default-locale content.
+- A locale-prefixed folder such as `fr/guides/start.md` infers locale only when the page also authors `translation_key`; this avoids treating ordinary folders as language roots by accident.
+- A locale-prefixed folder that disagrees with authored `locale` emits `LocalizationLocaleFolderConflict`, and authored metadata wins.
+- A localized suffix variant without its base/default-locale document emits `LocalizationMissingBase`.
+- Two documents with the same `translation_key` and locale emit `LocalizationDuplicateVariant`.
+- A translation set with `locale_fallback: Disabled` or global `FallbackMode: Disabled` emits `LocalizationFallbackDisabledMissingVariant` when a configured locale has no variant.
+
+Decision guidance:
+
+- Prefer colocated files such as `README.md` and `README.fr.md` when translations should stay next to the source page and remain readable in GitHub.
+- Prefer explicit `translation_key` when translated source paths differ substantially, when locale folders are used, or when the source file name is not stable enough to identify the concept.
+- Keep `RoutePrefix` to one safe segment such as `fr` or `pt-br`. AppSurface Docs rejects prefixes that collide with reserved docs routes such as `search`, `versions`, and `v`.
+- Keep exact published-version localization out of this contract for now. Localized release exports need their own immutable artifact design.
+
+Pitfalls:
+
+- Do not expect enabling localization to create visible `/fr/...` pages yet. The internal graph can produce route candidates, but request routing and fallback rendering are follow-up work.
+- Do not use locale folder inference without `translation_key`. AppSurface Docs deliberately fails closed so a folder named `fr` can still be ordinary content.
+- Do not reuse a `translation_key` for unrelated pages. It is the identity that future switchers, fallback routes, and search grouping will depend on.
+- Do not parse diagnostic messages. Branch on `DocHarvestDiagnosticCodes.Localization*` constants.
+
 ### Option reference
 
 - `AppSurfaceDocs:Mode`
@@ -492,6 +592,29 @@ redirect_aliases:
   - `/` is supported for single-purpose unversioned docs hosts.
   - The path must be app-relative, must not end with `/` except for `/`, and cannot contain query or fragment segments.
   - When versioning is on, it cannot equal the route root and cannot use the route root's reserved archive or exact-version children, such as `/foo/bar/versions`, `/foo/bar/v`, or `/foo/bar/v/1.2.3`.
+- `AppSurfaceDocs:Versioning:Enabled`
+- `AppSurfaceDocs:Localization:Enabled`
+  - Defaults to `false`.
+  - When `false`, AppSurface Docs keeps existing routes, visible UI, and search payload behavior.
+  - When `true`, `DefaultLocale` and at least one configured locale are required.
+- `AppSurfaceDocs:Localization:DefaultLocale`
+  - Defaults to `en`.
+  - Must match one configured locale code when localization is enabled.
+- `AppSurfaceDocs:Localization:Locales`
+  - Defaults to an empty array.
+  - Each entry requires `Code` when localization is enabled. `Code` and optional `Lang` must be valid BCP-47 culture tags.
+  - `Label` is optional reader-facing text for future language UI.
+  - `Direction` supports `Ltr` and `Rtl`.
+  - `RoutePrefix` defaults to `Code`; it must be one safe segment and cannot collide with reserved docs routes.
+- `AppSurfaceDocs:Localization:RouteMode`
+  - Defaults to `LocalePrefix`.
+  - The enum is public and versioned for future route strategies, but `LocalePrefix` is the only supported value today.
+- `AppSurfaceDocs:Localization:FallbackMode`
+  - Defaults to `DefaultLocaleWithNotice`.
+  - `Disabled` means missing variants should not receive fallback pages once localized route rendering exists.
+- `AppSurfaceDocs:Localization:SearchMode`
+  - Defaults to `ActiveLocale`.
+  - Phase 1 preserves the existing v1 search payload for every projection; locale-filtered search is deferred.
 - `AppSurfaceDocs:Versioning:Enabled`
   - Turns on the published-version route contract and archive surface.
   - Does not switch the runtime into bundle mode.
@@ -941,10 +1064,10 @@ dotnet run --project Web/ForgeTrust.AppSurface.Docs.Standalone -- --urls http://
 Or use the AppSurface CLI shape, which keeps AppSurface Docs workflows under the `appsurface` command family:
 
 ```bash
-dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo . --urls http://localhost:5189
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo .
 ```
 
-Then open the configured docs home, `http://localhost:5189/docs` by default. The standalone host remains the reusable runtime seam; `appsurface docs` is the public CLI entry point for the same preview workflow rather than a separate `appsurfacedocs` tool.
+Then open the docs home printed in the startup log. The AppSurface CLI defaults the host environment to `Development`, so when no endpoint is configured it uses AppSurface Web's deterministic per-workspace localhost URL. The standalone host remains the reusable runtime seam; `appsurface docs` is the public CLI entry point for the same preview workflow rather than a separate legacy docs tool.
 
 ### Fallback and visibility rules
 
@@ -1118,6 +1241,6 @@ trust:
 ## Notes
 
 - This package is the reusable documentation surface; `ForgeTrust.AppSurface.Docs.Standalone` is the thin executable wrapper used for local hosting and export scenarios.
-- The bundled AppSurface Docs UI includes its generated stylesheet and docs runtime files as static web assets and assembly-embedded fallback resources. The layout resolves the correct stylesheet path automatically from the host's root module shape for standalone/root-module hosts versus embedded application-part consumers, while endpoint fallbacks keep packaged hosts working when static web asset manifests are unavailable.
+- The bundled AppSurface Docs UI includes its generated stylesheet and docs runtime files as static web assets and assembly-embedded fallback resources. The layout resolves the correct stylesheet path automatically from the host's root module shape for standalone/root-module hosts versus embedded application-part consumers, and it renders AppSurface Docs-owned CSS and JavaScript URLs with content-derived `v` query strings. Those version keys are computed from the embedded package assets so route-local aliases such as `/docs/search.css` and `/docs/search-client.js` are cache-busted even when ASP.NET Core cannot resolve them as direct static-web-asset paths. Keep new AppSurface Docs-owned chrome assets on the `AppSurfaceDocsAssetVersioner` path; plain `asp-append-version` is not enough for endpoint aliases or legacy redirects.
 - Consumers do not need to call `services.AddTailwind()` unless they also want Tailwind build/watch integration for their own host application's CSS.
 - It depends on the Tailwind package family for AppSurface Docs package build-time styling generation and on the caching package for docs aggregation performance.

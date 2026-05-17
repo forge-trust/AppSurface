@@ -49,6 +49,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorWire CLI validation errors now include a concrete source-selection example and `razorwire export --help` hint, so a failed export tells developers the next useful command instead of only naming the bad input.
 - RazorWire CLI users who still want extensionless, server-routed export output should pass `--mode hybrid`. The default `cdn` mode is for plain static hosts and CDNs, not S3-specific infrastructure.
 - PackageIndex now has a real `--help`/`-h` surface that exits successfully, describes its commands and options, and reports unknown commands before printing usage.
+- AppSurface docs preview now defaults to the Development host environment when no `--environment` is supplied, so local `appsurface docs` runs with no configured endpoint use the deterministic per-workspace localhost port instead of falling through to Kestrel's port `5000` default.
 
 ### Core diagnostics
 
@@ -73,9 +74,12 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 ### Web host development defaults
 
 - AppSurface web hosts now choose a deterministic localhost-only development URL when no endpoint is configured, while production, staging, container, and appsettings-based endpoint choices remain untouched.
-- AppSurface web hosts now fail fast when startup does not complete before `WebOptions.StartupTimeout`, which defaults to 30 seconds and catches pre-bind stalls from sandbox restrictions, package layout issues, static asset discovery, or hosted services that block startup.
+- AppSurface startup environment resolution now treats command-line `--environment` as the highest-priority source before `ASPNETCORE_ENVIRONMENT` and `DOTNET_ENVIRONMENT`, keeping module startup context aligned with Generic Host configuration.
+- AppSurface web hosts now fail fast when startup does not complete before `WebOptions.StartupTimeout`, which defaults to 10 seconds and catches pre-bind stalls from sandbox restrictions, package layout issues, static asset discovery, or hosted services that block startup.
+- Startup watchdog failures now surface Codex sandbox markers, the observed startup phase, safe path context, static web asset mode, endpoint startup arguments, and a sandbox-first rerun recommendation when applicable.
 - OpenAPI's optional web package now has dedicated test coverage for service registration, endpoint mapping, generated document titles, and transformer behavior that removes `ForgeTrust.AppSurface.Web` tags at the document and operation levels while preserving unrelated tags, so the public module contract is guarded independently of Scalar.
 - Scalar's optional web package now has dedicated test coverage for OpenAPI dependency wiring, Scalar endpoint mapping, no-op lifecycle hooks, and minimal AppSurface web host composition.
+- AppSurface Web CORS options can now restrict allowed request headers and HTTP methods, with production defaults that require explicit preflight headers and methods instead of silently allowing any.
 - Tailwind development watch mode now treats a missing standalone CLI as a recoverable local-tooling gap: the app keeps serving existing CSS and logs a warning that points to the runtime package or `TailwindCliPath` override.
 - AppSurface's conventional browser 404 page now prioritizes user recovery paths, including documentation search for missing `/docs/...` routes and a home link for other misses, while still documenting how app owners can override the default page.
 - AppSurface Web now ships conventional browser status pages for empty HTML `401`, `403`, and `404` responses. The public surface is now `BrowserStatusPageMode`, `BrowserStatusPageModel`, `UseConventionalBrowserStatusPages()`, and `DisableBrowserStatusPages()`, with preview routes at `/_appsurface/errors/401`, `/_appsurface/errors/403`, and `/_appsurface/errors/404`.
@@ -113,6 +117,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs page lookup now uses one shared path resolver for details pages, landing curation, related-page links, and search recovery links, keeping source paths, canonical `.html` paths, fragments, backslash normalization, and configured docs-root prefixes behaviorally aligned.
 - AppSurface Docs authored Markdown pages now publish clean canonical routes that follow their public section hierarchy, so teams can link to URLs such as `/docs/packages` instead of repository-shaped `README.md.html` paths while source-path lookups and declared aliases continue to work.
 - AppSurface Docs now permanently redirects public Markdown source-shaped requests such as `/docs/packages/README.md` to the clean canonical route, so links copied from GitHub or editor paths recover instead of falling into the generic 404 page.
+- AppSurface Docs now renders content-derived cache keys on package-owned CSS and JavaScript assets, including search, MiniSearch, outline, and generated stylesheet URLs, so browsers and CDNs fetch matching chrome after static asset deployments instead of reusing stale cached files.
 - The release contract is designed so future tooling can generate both a changelog entry and a blog-style tagged release note from the same underlying signals.
 - AppSurface Docs now rewrites authored doc links from a harvested target manifest instead of broad suffix heuristics, so normal site links such as `../privacy.html` stay untouched and missing doc targets do not become broken `/docs/...` routes.
 - AppSurface Docs details pages can now render a `Source of truth` strip with `View source`, `Edit this page`, and relative `Last updated` evidence driven by contributor metadata, configured URL templates, and git freshness when available.
@@ -138,6 +143,10 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs now treats `Releases` as a first-class public section and suppresses breadcrumb links to generated parent routes that do not correspond to published docs pages, keeping static export warnings focused on actionable broken links.
 - AppSurface Docs wayfinding coverage now waits for docs content replacement before asserting sequence-link destinations, keeping the details-page proof path deterministic in CI.
 - AppSurface Docs Playwright integration coverage now hosts the standalone docs app in-process through the standalone host builder, avoiding fixture-time `dotnet run` rebuilds and stale standalone `bin` output during focused test runs.
+- AppSurface Docs now uses the new AppSurface brand system across the docs shell, landing page, search workspace, iconography, and responsive article outline, while keeping the UI focused on developer wayfinding instead of marketing chrome.
+- AppSurface Docs search result rows now use one semantic full-row link, so touch users can tap anywhere in a visible result while keyboard focus, copied links, and open-in-new-tab behavior stay native.
+- First localization foundation slice for AppSurface Docs: disabled-by-default locale configuration, localized front matter metadata, inferred `README.fr.md`-style variant grouping, diagnostics for unsupported or ambiguous locale signals, and an internal route/search graph seam for later visible localized pages.
+- AppSurface Docs now has a test-backed JavaScript parser decision probe for future public API harvesting, covering Acornima span behavior, malformed syntax handling, BSD-3-Clause compliance expectations, and the first max-file-size recommendation before that parser moves into product code.
 
 ### RazorWire form UX
 

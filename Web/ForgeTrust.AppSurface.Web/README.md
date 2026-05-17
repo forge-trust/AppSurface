@@ -44,8 +44,26 @@ Support for MVC approaches can be configured via `WebOptions`:
 ### CORS
 Built-in support for CORS configuration:
 *   **Enforced Origin Safety**: When `EnableCors` is true, you MUST specify at least one origin in `AllowedOrigins`, unless running in Development with `EnableAllOriginsInDevelopment` enabled (the default). If `AllowedOrigins` is empty in production or when `EnableAllOriginsInDevelopment` is disabled, the application will throw a startup exception to prevent unintended security openness (verified by tests `EmptyOrigins_WithEnableCors_ThrowsException` and `EnableAllOriginsInDevelopment_AllowsAnyOrigin`).
-*   **Development Convenience**: `EnableAllOriginsInDevelopment` (enabled by default) automatically allows any origin when the environment is `Development`, simplifying local testing without compromising production security.
+*   **Development Convenience**: `EnableAllOriginsInDevelopment` (enabled by default) automatically allows any origin when the environment is `Development`. When `AllowedHeaders` and `AllowedMethods` are empty or omitted, the `DefaultCorsPolicy` also allows any header and method for local convenience; configured values keep those header and method restrictions enforced even in Development.
+*   **Header and Method Control**: `AllowedHeaders` and `AllowedMethods` default to empty arrays in production, so AppSurface does not silently allow every preflight header and method once CORS is enabled. Set each collection to the browser contract the app actually supports, for example `["Content-Type", "X-Request-Id"]` and `[HttpMethods.Get, HttpMethods.Post]`. Use `["*"]` only when a production app intentionally wants `AllowAnyHeader()` or `AllowAnyMethod()`.
 *   **Default Policy**: Configures a policy named "DefaultCorsPolicy" (configurable) and automatically registers the CORS middleware.
+
+```csharp
+await WebApp<MyRootModule>.RunAsync(
+    args,
+    options =>
+    {
+        options.Cors.EnableCors = true;
+        options.Cors.AllowedOrigins = ["https://app.example.com"];
+        options.Cors.AllowedHeaders = ["Content-Type", "X-Request-Id"];
+        options.Cors.AllowedMethods = [HttpMethods.Get, HttpMethods.Post];
+    });
+```
+
+The production default is deliberately stricter than older AppSurface previews: `AllowedOrigins` decides which browser
+frontends may read cross-origin responses, while `AllowedHeaders` and `AllowedMethods` decide which preflighted browser
+requests are accepted from those origins. Keep them explicit for production APIs, especially when credentials are
+allowed.
 
 ### Endpoint Routing
 
@@ -145,6 +163,7 @@ The web application supports standard ASP.NET Core configuration sources (comman
 When an AppSurface web application starts in `Development` without explicit endpoint configuration, AppSurface Web chooses a deterministic localhost-only fallback URL based on the current workspace path. That gives each local worktree a stable URL instead of every development environment fighting for the same hard-coded dev port.
 
 - Use this default for local `dotnet run` convenience when you do not care about a specific port ahead of time.
+- AppSurface treats `--environment Development`, `ASPNETCORE_ENVIRONMENT=Development`, and `DOTNET_ENVIRONMENT=Development` as development for both the deterministic port resolver and module-level `StartupContext.IsDevelopment` decisions. Command-line environment parsing is shared with `DefaultEnvironmentProvider`, so duplicate `--environment` keys use the last valid value.
 - Override it any time with `--port`, `--urls`, `ASPNETCORE_URLS`/`URLS`, `ASPNETCORE_HTTP_PORTS`/`DOTNET_HTTP_PORTS`/`HTTP_PORTS`, `ASPNETCORE_HTTPS_PORTS`/`DOTNET_HTTPS_PORTS`/`HTTPS_PORTS`, `urls`/`http_ports`/`https_ports` in appsettings, or `Kestrel:Endpoints` in appsettings/environment variables.
 - Treat the startup log as the source of truth for the selected local URL.
 - The automatic fallback binds only `http://localhost:{port}`. Use `--port` or an explicit wildcard URL when you intentionally need LAN/container access.
@@ -191,7 +210,9 @@ You can override the application's listening port using several methods:
 
 ### Startup Watchdog
 
-AppSurface Web fails fast when a host does not complete startup within `WebOptions.StartupTimeout`. The default is 30 seconds. This catches pre-bind stalls where the process is alive but Kestrel has not started listening, including sandbox restrictions, package layout issues, static web asset discovery hangs, and hosted services that block startup.
+AppSurface Web fails fast when a host does not complete startup within `WebOptions.StartupTimeout`. The default is 10 seconds. This catches pre-bind stalls where the process is alive but Kestrel has not started listening, including sandbox restrictions, package layout issues, static web asset discovery hangs, and hosted services that block startup.
+
+When the watchdog fires, AppSurface logs the observed startup phase, current directory, application base directory, static web asset mode, endpoint-related startup arguments, and any known Codex sandbox markers such as `CODEX_SANDBOX`. If a Codex sandbox is detected, try the same command outside the sandbox or with the runner's approved unsandboxed/escalated permission before debugging package layout or hosted-service startup.
 
 Configure or disable the watchdog through `WebOptions`:
 

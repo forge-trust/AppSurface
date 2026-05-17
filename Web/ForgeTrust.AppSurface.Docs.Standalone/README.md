@@ -13,7 +13,7 @@ This project is the thin executable wrapper around the reusable [ForgeTrust.AppS
 For public command-line workflows, use the AppSurface CLI as the public command surface:
 
 ```bash
-dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo . --urls http://127.0.0.1:5189
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo .
 ```
 
 The CLI delegates to this standalone host, so the host remains the source of truth for AppSurface Docs startup, static web assets, routes, and configuration binding.
@@ -33,7 +33,7 @@ Do not duplicate standalone setup in test fixtures. If a scenario needs differen
 `CreateBuilder` is lower level than `RunAsync`: callers that build and start the host themselves should pass `--urls`, `--port`, or configure the web host before `Build()` instead of relying on the executable startup path's development-port fallback.
 The builder pins this standalone assembly as the host entry point identity so in-process callers, including xUnit, resolve the same static web asset manifest as the executable.
 
-The optional `configureOptions` callback is for host-shape seams that must stay on the normal AppSurface Web path. `appsurface docs` uses it to disable static web asset manifest loading for packaged tool runs because AppSurface Docs and RazorWire runtime assets are embedded in their assemblies. The shared AppSurface Web startup watchdog still applies through `WebOptions.StartupTimeout`, which defaults to 30 seconds and fails fast when the process stalls before Kestrel starts listening.
+The optional `configureOptions` callback is for host-shape seams that must stay on the normal AppSurface Web path. `appsurface docs` uses it to disable static web asset manifest loading for packaged tool runs because AppSurface Docs and RazorWire runtime assets are embedded in their assemblies. The shared AppSurface Web startup watchdog still applies through `WebOptions.StartupTimeout`, which defaults to 10 seconds and fails fast when the process stalls before Kestrel starts listening.
 
 ## Strict Harvest Failure
 
@@ -51,6 +51,7 @@ Strict mode fails only when every configured harvester fails, times out, or canc
 When you run this host in `Development` without explicit endpoint configuration, AppSurface Web assigns a deterministic localhost-only development URL from the current workspace path. That keeps sibling worktrees from colliding on the same default localhost URL.
 
 - The standalone host redirects `/` to the configured AppSurface Docs home, `/docs` by default. The reusable AppSurface Docs package keeps embedded apps isolated to their configured docs routes; this root redirect exists only because this executable is a docs-only host and CI export target.
+- The public `appsurface docs` and `appsurface docs preview` commands default the forwarded host environment to `Development`, so when no endpoint is configured they use this deterministic local URL behavior.
 - Use the startup log as the source of truth for the selected local URL.
 - Pass `--port 5189`, `--urls http://127.0.0.1:5189`, `ASPNETCORE_HTTP_PORTS=5189`, or a `Kestrel:Endpoints` appsettings/environment entry when you intentionally want a fixed address.
 - The checked-in launch profile no longer pins a single shared localhost port, because that was the source of cross-worktree QA confusion.

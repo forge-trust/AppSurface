@@ -69,7 +69,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("/reference/next", runner.Args);
         Assert.Contains("--environment", runner.Args);
         Assert.Contains("Development", runner.Args);
-        Assert.Equal(TimeSpan.FromSeconds(30), runner.StartupTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), runner.StartupTimeout);
     }
 
     [Fact]
@@ -88,7 +88,73 @@ public sealed class ProgramEntryPointTests
         Assert.Contains(repository.Path, runner.Args);
         Assert.Contains("--port", runner.Args);
         Assert.Contains("5189", runner.Args);
-        Assert.Equal(TimeSpan.FromSeconds(30), runner.StartupTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), runner.StartupTimeout);
+    }
+
+    [Fact]
+    public async Task DocsCommand_Should_Default_ToDevelopmentEnvironment_ForLocalPreview()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingAppSurfaceDocsHostRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(runner.Args);
+        var environmentIndex = Array.IndexOf(runner.Args, "--environment");
+        Assert.InRange(environmentIndex, 0, runner.Args.Length - 2);
+        Assert.Equal("Development", runner.Args[environmentIndex + 1]);
+        Assert.DoesNotContain("--urls", runner.Args);
+        Assert.DoesNotContain("--port", runner.Args);
+    }
+
+    [Fact]
+    public async Task DocsCommand_Should_Preserve_Explicit_Environment()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingAppSurfaceDocsHostRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "--repo", repository.Path, "--environment", "Production"],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(runner.Args);
+        var environmentIndex = Array.IndexOf(runner.Args, "--environment");
+        Assert.InRange(environmentIndex, 0, runner.Args.Length - 2);
+        Assert.Equal("Production", runner.Args[environmentIndex + 1]);
+    }
+
+    [Fact]
+    public async Task DocsCommand_Should_RunHost_FromRepositoryRoot()
+    {
+        using var callerDirectory = TempDirectory.Create("appsurface-docs-caller-");
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var previousDirectory = Directory.GetCurrentDirectory();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
+
+        try
+        {
+            Directory.SetCurrentDirectory(callerDirectory.Path);
+
+            var result = await InvokeProgramEntryPointAsync(
+                ["docs", "--repo", repository.Path],
+                options => RegisterRunner(options, runner));
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Equal(
+                NormalizeDirectoryForComparison(repository.Path),
+                NormalizeDirectoryForComparison(runner.WorkingDirectoryDuringRun));
+            Assert.Equal(
+                NormalizeDirectoryForComparison(callerDirectory.Path),
+                NormalizeDirectoryForComparison(Directory.GetCurrentDirectory()));
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previousDirectory);
+        }
     }
 
     [Fact]
@@ -324,6 +390,18 @@ public sealed class ProgramEntryPointTests
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsHostRunner>(runner));
     }
 
+    private static string NormalizeDirectoryForComparison(string? path)
+    {
+        Assert.NotNull(path);
+
+        var normalized = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return OperatingSystem.IsMacOS() && normalized.StartsWith("/private/var/", StringComparison.Ordinal)
+            ? normalized["/private".Length..]
+            : normalized;
+    }
+
     private sealed record CapturedCliRun(
         string RawStdout,
         string RawStderr,
@@ -351,10 +429,13 @@ public sealed class ProgramEntryPointTests
 
         public TimeSpan? StartupTimeout { get; private set; }
 
+        public string? WorkingDirectoryDuringRun { get; private set; }
+
         public Task RunAsync(string[] args, TimeSpan? startupTimeout, CancellationToken cancellationToken)
         {
             Args = args;
             StartupTimeout = startupTimeout;
+            WorkingDirectoryDuringRun = Directory.GetCurrentDirectory();
             return Task.CompletedTask;
         }
     }

@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class AppSurfaceDocsPublicRebrandTests
@@ -39,7 +41,7 @@ public sealed class AppSurfaceDocsPublicRebrandTests
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var offenders = PublicSurfaceRoots
-            .Select(root => Path.Combine(repoRoot, root))
+            .Select(root => CombineUnderRepoRoot(repoRoot, root))
             .SelectMany(EnumerateTextFiles)
             .SelectMany(file => FindLegacyMentions(repoRoot, file))
             .Order(StringComparer.Ordinal)
@@ -56,7 +58,7 @@ public sealed class AppSurfaceDocsPublicRebrandTests
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var offenders = PublicSurfaceRoots
-            .Select(root => Path.Combine(repoRoot, root))
+            .Select(root => CombineUnderRepoRoot(repoRoot, root))
             .SelectMany(EnumerateProseFiles)
             .SelectMany(file => FindUnspacedAppSurfaceDocsProseMentions(repoRoot, file))
             .Order(StringComparer.Ordinal)
@@ -83,6 +85,16 @@ public sealed class AppSurfaceDocsPublicRebrandTests
 
         return Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
             .Where(ShouldScanFile);
+    }
+
+    private static string CombineUnderRepoRoot(string repoRoot, string relativePath)
+    {
+        if (Path.IsPathRooted(relativePath))
+        {
+            throw new InvalidOperationException($"Public surface root must be relative: {relativePath}");
+        }
+
+        return Path.Combine(repoRoot, relativePath);
     }
 
     private static IEnumerable<string> EnumerateProseFiles(string path)
@@ -197,22 +209,28 @@ public sealed class AppSurfaceDocsPublicRebrandTests
 
     private static string RemoveXmlCodeSpans(string line)
     {
-        var result = line;
-        while (true)
+        var start = line.IndexOf("<c>", StringComparison.Ordinal);
+        if (start < 0)
         {
-            var start = result.IndexOf("<c>", StringComparison.Ordinal);
-            if (start < 0)
-            {
-                return result;
-            }
+            return line;
+        }
 
-            var end = result.IndexOf("</c>", start, StringComparison.Ordinal);
+        var builder = new StringBuilder(line.Length);
+        var cursor = 0;
+        while (start >= 0)
+        {
+            builder.Append(line, cursor, start - cursor);
+            var end = line.IndexOf("</c>", start, StringComparison.Ordinal);
             if (end < 0)
             {
-                return result[..start];
+                return builder.ToString();
             }
 
-            result = result[..start] + result[(end + "</c>".Length)..];
+            cursor = end + "</c>".Length;
+            start = line.IndexOf("<c>", cursor, StringComparison.Ordinal);
         }
+
+        builder.Append(line, cursor, line.Length - cursor);
+        return builder.ToString();
     }
 }

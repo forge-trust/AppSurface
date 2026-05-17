@@ -150,6 +150,7 @@ internal static class MarkdownFrontMatterParser
                 diagnostics),
             Trust = NormalizeTrust(document.Trust),
             Contributor = NormalizeContributor(document.Contributor),
+            Localization = NormalizeLocalization(document, diagnostics),
             PageTypeIsDerived = document.PageType is not null ? false : null,
             AudienceIsDerived = document.Audience is not null ? false : null,
             ComponentIsDerived = document.Component is not null ? false : null,
@@ -471,6 +472,115 @@ internal static class MarkdownFrontMatterParser
             : contributor;
     }
 
+    private static DocLocalizationMetadata? NormalizeLocalization(
+        FrontMatterDocument document,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        var nested = document.Localization;
+        var flatLocale = Normalize(document.Locale);
+        var nestedLocale = Normalize(nested?.Locale);
+        var flatTranslationKey = Normalize(document.TranslationKey);
+        var nestedTranslationKey = Normalize(nested?.TranslationKey);
+        var flatLocalizedTitle = Normalize(document.LocalizedTitle);
+        var nestedLocalizedTitle = Normalize(nested?.LocalizedTitle);
+        var flatFallbackText = Normalize(document.LocaleFallback);
+        var nestedFallbackText = Normalize(nested?.LocaleFallback);
+        AddLocalizationConflictDiagnosticIfNeeded("locale", "locale", "localization.locale", flatLocale, nestedLocale, diagnostics);
+        AddLocalizationConflictDiagnosticIfNeeded(
+            "translation key",
+            "translation_key",
+            "localization.translation_key",
+            flatTranslationKey,
+            nestedTranslationKey,
+            diagnostics);
+        AddLocalizationConflictDiagnosticIfNeeded(
+            "localized title",
+            "localized_title",
+            "localization.localized_title",
+            flatLocalizedTitle,
+            nestedLocalizedTitle,
+            diagnostics);
+        AddLocalizationConflictDiagnosticIfNeeded(
+            "locale fallback",
+            "locale_fallback",
+            "localization.locale_fallback",
+            flatFallbackText,
+            nestedFallbackText,
+            diagnostics);
+
+        var locale = flatLocale ?? nestedLocale;
+        var translationKey = flatTranslationKey ?? nestedTranslationKey;
+        var localizedTitle = flatLocalizedTitle ?? nestedLocalizedTitle;
+        var fallbackText = flatFallbackText ?? nestedFallbackText;
+        AppSurfaceDocsLocaleFallbackMode? fallback = null;
+        if (fallbackText is not null)
+        {
+            var fallbackFieldPath = flatFallbackText is not null
+                ? "locale_fallback"
+                : "localization.locale_fallback";
+            if (Enum.TryParse<AppSurfaceDocsLocaleFallbackMode>(fallbackText, ignoreCase: true, out var parsedFallback)
+                && Enum.IsDefined(parsedFallback))
+            {
+                fallback = parsedFallback;
+            }
+            else
+            {
+                diagnostics.Add(
+                    new AppSurfaceDocsMetadataDiagnostic(
+                        "invalid-locale-fallback",
+                        fallbackFieldPath,
+                        "The locale fallback value is not supported.",
+                        "AppSurface Docs only supports DefaultLocaleWithNotice or Disabled for page-level localization fallback.",
+                        "Use locale_fallback: Disabled or remove the field to inherit the global fallback mode."));
+            }
+        }
+
+        return locale is null
+               && translationKey is null
+               && localizedTitle is null
+               && fallback is null
+            ? null
+            : new DocLocalizationMetadata
+            {
+                Locale = locale,
+                TranslationKey = translationKey,
+                LocalizedTitle = localizedTitle,
+                LocaleFallback = fallback
+            };
+    }
+
+    private static void AddLocalizationConflictDiagnosticIfNeeded(
+        string fieldName,
+        string flatFieldPath,
+        string nestedFieldPath,
+        string? flatValue,
+        string? nestedValue,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        var comparison = GetLocalizationConflictComparison(flatFieldPath);
+        if (flatValue is null
+            || nestedValue is null
+            || string.Equals(flatValue, nestedValue, comparison))
+        {
+            return;
+        }
+
+        diagnostics.Add(
+            new AppSurfaceDocsMetadataDiagnostic(
+                "localization-field-conflict",
+                flatFieldPath,
+                $"The flat localization {fieldName} conflicts with {nestedFieldPath}.",
+                "AppSurface Docs prefers the flat front matter value and ignores the nested value for that field.",
+                $"Keep only {flatFieldPath} or {nestedFieldPath}, or make both values match."));
+    }
+
+    private static StringComparison GetLocalizationConflictComparison(string flatFieldPath)
+    {
+        return flatFieldPath is "locale" or "translation_key" or "locale_fallback"
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+    }
+
     private sealed class FrontMatterDocument
     {
         public string? Title { get; init; }
@@ -518,6 +628,16 @@ internal static class MarkdownFrontMatterParser
         public FrontMatterTrustDocument? Trust { get; init; }
 
         public FrontMatterContributorDocument? Contributor { get; init; }
+
+        public FrontMatterLocalizationDocument? Localization { get; init; }
+
+        public string? Locale { get; init; }
+
+        public string? TranslationKey { get; init; }
+
+        public string? LocalizedTitle { get; init; }
+
+        public string? LocaleFallback { get; init; }
     }
 
     private sealed class FrontMatterFeaturedPageDefinition
@@ -585,6 +705,17 @@ internal static class MarkdownFrontMatterParser
         public string? EditUrlOverride { get; init; }
 
         public DateTimeOffset? LastUpdatedOverride { get; init; }
+    }
+
+    private sealed class FrontMatterLocalizationDocument
+    {
+        public string? Locale { get; init; }
+
+        public string? TranslationKey { get; init; }
+
+        public string? LocalizedTitle { get; init; }
+
+        public string? LocaleFallback { get; init; }
     }
 
     private sealed class FrontMatterTrustLinkDocument

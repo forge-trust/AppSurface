@@ -9,7 +9,7 @@
     @if (!string.IsNullOrWhiteSpace(Model.HarvestHealth.Href))
     {
         <a href="@Url.PathBaseAware(Model.HarvestHealth.Href)"
-           class="mb-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs font-semibold no-underline transition-colors hover:border-cyan-400/45 @statusClass">
+           class="mb-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs font-semibold no-underline transition-colors hover:border-[#14b8a6]/45 @statusClass">
             <span class="inline-flex min-w-0 items-center gap-2">
                 <span class="h-2 w-2 flex-none rounded-full @dotClass" aria-hidden="true"></span>
                 <span class="truncate">Harvest @Model.HarvestHealth.Status</span>
@@ -31,11 +31,11 @@
 }
 @foreach (var sidebarSection in Model.Sections)
 {
-    <details class="group border-b border-slate-900/80 py-2 last:border-b-0" @(sidebarSection.IsExpanded ? "open" : null)>
+    <details class="group border-b border-[#0d182a]/80 py-2 last:border-b-0" @(sidebarSection.IsExpanded ? "open" : null)>
         <summary class="list-none cursor-pointer">
-            <div class="flex items-center justify-between gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-slate-900/70">
+            <div class="flex items-center justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-[#0d182a]/70">
                 <a href="@Url.PathBaseAware(sidebarSection.Href)"
-                   class="text-xs font-semibold uppercase tracking-[0.18em] @(sidebarSection.IsActive ? "text-cyan-300" : "text-slate-400 hover:text-cyan-300")"
+                   class="text-xs font-semibold uppercase tracking-[0.16em] @(sidebarSection.IsActive ? "text-[#14b8a6]" : "text-slate-400 hover:text-[#14b8a6]")"
                    aria-current="@(sidebarSection.IsActive ? "location" : null)">
                     @sidebarSection.Label
                 </a>
@@ -59,7 +59,7 @@
                                 <a href="@Url.PathBaseAware(link.Href)"
                                    data-turbo-frame="doc-content"
                                    data-turbo-action="advance"
-                                   class="block rounded-lg px-2 py-1.5 text-sm font-medium transition-colors @(link.IsCurrent ? "bg-slate-900 text-cyan-200" : "text-slate-400 hover:bg-slate-900 hover:text-cyan-300")"
+                                   class="block rounded-md px-2 py-1.5 text-sm font-medium transition-colors @(link.IsCurrent ? "bg-[#0d182a] text-[#bfdbfe]" : "text-slate-400 hover:bg-[#0d182a] hover:text-[#14b8a6]")"
                                    aria-current="@(link.IsCurrent ? "page" : null)">
                                     @link.Title
                                 </a>

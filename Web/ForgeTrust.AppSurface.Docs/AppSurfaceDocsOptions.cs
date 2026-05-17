@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Options;
@@ -95,6 +96,16 @@ public sealed class AppSurfaceDocsOptions
     /// Gets versioning settings used to mount exact release trees and the archive surface.
     /// </summary>
     public AppSurfaceDocsVersioningOptions Versioning { get; set; } = new();
+
+    /// <summary>
+    /// Gets localization settings for locale-aware live docs routes, metadata, search projections, and fallback policy.
+    /// </summary>
+    /// <remarks>
+    /// Localization is disabled by default so existing AppSurface Docs hosts keep their current routes, search payload shape,
+    /// and view behavior until they opt in. When enabled, this object defines the supported locales, the default locale,
+    /// route-prefix behavior, fallback policy, and search scoping defaults used by the locale-aware document graph.
+    /// </remarks>
+    public AppSurfaceDocsLocalizationOptions Localization { get; set; } = new();
 }
 
 /// <summary>
@@ -493,6 +504,182 @@ public sealed class AppSurfaceDocsVersioningOptions
 
 /// <summary>
 /// Validates <see cref="AppSurfaceDocsOptions"/> and rejects unsupported or ambiguous startup configurations.
+/// Localization settings for the live AppSurface Docs source-backed documentation surface.
+/// </summary>
+/// <remarks>
+/// V1 localization applies only to the live source-backed docs surface. Published exact-version release trees keep the
+/// existing unlocalized route contract until localized release trees are designed as a separate feature. The built-in
+/// defaults keep localization off, use <c>en</c> as the default locale when enabled, prefix localized routes with the
+/// locale route segment, and default search to the active locale.
+/// </remarks>
+public sealed class AppSurfaceDocsLocalizationOptions
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether AppSurface Docs builds locale-aware document graph data.
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the default locale code. Defaults to <c>en</c>.
+    /// </summary>
+    public string DefaultLocale { get; set; } = "en";
+
+    /// <summary>
+    /// Gets or sets the locales supported by the live docs surface.
+    /// </summary>
+    public AppSurfaceDocsLocaleOptions[] Locales { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets how locale prefixes are represented in public live docs routes.
+    /// </summary>
+    public AppSurfaceDocsLocaleRouteMode RouteMode { get; set; } = AppSurfaceDocsLocaleRouteMode.LocalePrefix;
+
+    /// <summary>
+    /// Gets or sets the global missing-translation fallback behavior.
+    /// </summary>
+    public AppSurfaceDocsLocaleFallbackMode FallbackMode { get; set; } = AppSurfaceDocsLocaleFallbackMode.DefaultLocaleWithNotice;
+
+    /// <summary>
+    /// Gets or sets the default localized search scope.
+    /// </summary>
+    public AppSurfaceDocsLocaleSearchMode SearchMode { get; set; } = AppSurfaceDocsLocaleSearchMode.ActiveLocale;
+}
+
+/// <summary>
+/// Describes one configured AppSurface Docs locale validated during AppSurface Docs startup.
+/// </summary>
+/// <remarks>
+/// Locale entries are runtime configuration, not loose display hints: <see cref="Code"/> values must be unique valid
+/// BCP-47 tags, and resolved route prefixes must be unique and avoid AppSurface Docs reserved route segments. Omitted
+/// <see cref="Lang"/> and <see cref="RoutePrefix"/> values fall back to <see cref="Code"/>, so duplicate codes or route
+/// aliases can fail startup validation even when those properties are not explicitly set.
+/// </remarks>
+public sealed class AppSurfaceDocsLocaleOptions
+{
+    /// <summary>
+    /// Gets or sets the unique BCP-47 locale code, such as <c>en</c>, <c>fr</c>, or <c>pt-BR</c>.
+    /// </summary>
+    /// <remarks>
+    /// The code is required, must parse as a culture name, and becomes the default <see cref="Lang"/> and
+    /// <see cref="RoutePrefix"/> when those properties are blank.
+    /// </remarks>
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the reader-facing locale label, such as <c>English</c> or <c>Français</c>.
+    /// </summary>
+    /// <remarks>
+    /// The label is optional in Phase 1 and is not validated beyond normal configuration binding.
+    /// </remarks>
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// Gets or sets the HTML <c>lang</c> value. When omitted, <see cref="Code"/> is used.
+    /// </summary>
+    /// <remarks>
+    /// Use this only when the rendered HTML language tag should differ from the configured AppSurface Docs locale code.
+    /// Blank values are treated as omitted and fall back to <see cref="Code"/>.
+    /// </remarks>
+    public string? Lang { get; set; }
+
+    /// <summary>
+    /// Gets or sets the text direction for this locale. Defaults to <see cref="AppSurfaceDocsTextDirection.Ltr"/>.
+    /// </summary>
+    public AppSurfaceDocsTextDirection Direction { get; set; } = AppSurfaceDocsTextDirection.Ltr;
+
+    /// <summary>
+    /// Gets or sets the route segment used for this locale. When omitted, <see cref="Code"/> is used.
+    /// </summary>
+    /// <remarks>
+    /// The resolved route prefix must be unique across configured locales and must not collide with reserved AppSurface Docs
+    /// segments such as search, health, package, version, release, public-section, or asset endpoints. Collisions fail
+    /// startup validation.
+    /// </remarks>
+    public string? RoutePrefix { get; set; }
+
+    /// <summary>
+    /// Resolves the locale route prefix after applying the documented fallback to <see cref="Code"/>.
+    /// </summary>
+    /// <remarks>
+    /// This helper centralizes prefix trimming so graph and route-candidate generation do not drift when
+    /// <see cref="RoutePrefix"/> is omitted.
+    /// </remarks>
+    internal string ResolveRoutePrefix()
+    {
+        return string.IsNullOrWhiteSpace(RoutePrefix)
+            ? Code.Trim()
+            : RoutePrefix!.Trim();
+    }
+}
+
+/// <summary>
+/// Enumerates supported locale route modes.
+/// </summary>
+/// <remarks>
+/// Numeric values are part of the public configuration contract. Append new modes with new explicit values.
+/// </remarks>
+public enum AppSurfaceDocsLocaleRouteMode
+{
+    /// <summary>
+    /// Prefix live docs routes with a configured locale route segment.
+    /// </summary>
+    LocalePrefix = 0
+}
+
+/// <summary>
+/// Enumerates supported global localization fallback modes.
+/// </summary>
+/// <remarks>
+/// Numeric values are part of the public configuration contract. Append new modes with new explicit values.
+/// </remarks>
+public enum AppSurfaceDocsLocaleFallbackMode
+{
+    /// <summary>
+    /// Render default-locale content on the target-locale route with visible fallback context.
+    /// </summary>
+    DefaultLocaleWithNotice = 0,
+
+    /// <summary>
+    /// Do not create fallback pages for missing localized variants.
+    /// </summary>
+    Disabled = 1
+}
+
+/// <summary>
+/// Enumerates supported localized search defaults.
+/// </summary>
+/// <remarks>
+/// Numeric values are part of the public configuration contract. Append new modes with new explicit values.
+/// </remarks>
+public enum AppSurfaceDocsLocaleSearchMode
+{
+    /// <summary>
+    /// Search the active locale by default.
+    /// </summary>
+    ActiveLocale = 0
+}
+
+/// <summary>
+/// Enumerates supported text directions for localized docs pages.
+/// </summary>
+/// <remarks>
+/// Numeric values are part of the public configuration contract. Append new directions with new explicit values.
+/// </remarks>
+public enum AppSurfaceDocsTextDirection
+{
+    /// <summary>
+    /// Left-to-right text direction.
+    /// </summary>
+    Ltr = 0,
+
+    /// <summary>
+    /// Right-to-left text direction.
+    /// </summary>
+    Rtl = 1
+}
+
+/// <summary>
+/// Validates <see cref="AppSurfaceDocsOptions"/> and rejects unsupported or ambiguous startup configurations.
 /// </summary>
 public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurfaceDocsOptions>
 {
@@ -514,6 +701,7 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         var contributor = options.Contributor;
         var routing = options.Routing;
         var versioning = options.Versioning;
+        var localization = options.Localization;
         string? normalizedRouteRootPath = null;
         string? normalizedDocsRootPath = null;
 
@@ -677,6 +865,8 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         {
             failures.Add("AppSurfaceDocs:Versioning must not be null.");
         }
+
+        ValidateLocalization(localization, failures);
 
         if (options.Mode == AppSurfaceDocsMode.Bundle)
         {
@@ -872,5 +1062,165 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         return string.Equals(docsRootPath, versionsRoot, StringComparison.OrdinalIgnoreCase)
                || string.Equals(docsRootPath, versionPrefix, StringComparison.OrdinalIgnoreCase)
                || docsRootPath.StartsWith(versionPrefix + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void ValidateLocalization(
+        AppSurfaceDocsLocalizationOptions? localization,
+        List<string> failures)
+    {
+        if (localization is null)
+        {
+            failures.Add("AppSurfaceDocs:Localization must not be null.");
+            return;
+        }
+
+        if (!Enum.IsDefined(localization.RouteMode))
+        {
+            failures.Add($"Unsupported AppSurface Docs localization route mode '{localization.RouteMode}'.");
+        }
+
+        if (!Enum.IsDefined(localization.FallbackMode))
+        {
+            failures.Add($"Unsupported AppSurface Docs localization fallback mode '{localization.FallbackMode}'.");
+        }
+
+        if (!Enum.IsDefined(localization.SearchMode))
+        {
+            failures.Add($"Unsupported AppSurface Docs localization search mode '{localization.SearchMode}'.");
+        }
+
+        if (localization.Locales is null)
+        {
+            failures.Add("AppSurfaceDocs:Localization:Locales must not be null.");
+            return;
+        }
+
+        if (!localization.Enabled)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(localization.DefaultLocale))
+        {
+            failures.Add("AppSurfaceDocs:Localization:DefaultLocale is required when localization is enabled.");
+        }
+
+        if (localization.Locales.Length == 0)
+        {
+            failures.Add("AppSurface Docs localization requires at least one configured locale when enabled.");
+            return;
+        }
+
+        var localeCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var routePrefixes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var defaultLocaleMatched = false;
+        for (var i = 0; i < localization.Locales.Length; i++)
+        {
+            var locale = localization.Locales[i];
+            var path = $"AppSurfaceDocs:Localization:Locales:{i}";
+            if (locale is null)
+            {
+                failures.Add($"{path} must not be null.");
+                continue;
+            }
+
+            var code = locale.Code;
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                failures.Add($"{path}:Code is required.");
+            }
+            else
+            {
+                if (!IsValidCultureTag(code))
+                {
+                    failures.Add($"{path}:Code must be a valid BCP-47 culture tag.");
+                }
+
+                if (!localeCodes.Add(code))
+                {
+                    failures.Add($"AppSurface Docs localization locale code '{code}' is configured more than once.");
+                }
+
+                if (string.Equals(code, localization.DefaultLocale, StringComparison.OrdinalIgnoreCase))
+                {
+                    defaultLocaleMatched = true;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(locale.Lang) && !IsValidCultureTag(locale.Lang))
+            {
+                failures.Add($"{path}:Lang must be a valid BCP-47 culture tag.");
+            }
+
+            if (!Enum.IsDefined(locale.Direction))
+            {
+                failures.Add($"{path}:Direction must be Ltr or Rtl.");
+            }
+
+            var routePrefix = string.IsNullOrWhiteSpace(locale.RoutePrefix) ? code : locale.RoutePrefix;
+            if (string.IsNullOrWhiteSpace(routePrefix))
+            {
+                failures.Add($"{path}:RoutePrefix is required when Code is blank.");
+            }
+            else if (!IsValidLocaleRoutePrefix(routePrefix))
+            {
+                failures.Add($"{path}:RoutePrefix must be a single safe route segment and must not contain '/', '?', '#', '.', or '..'.");
+            }
+            else if (IsReservedLocalizationRoutePrefix(routePrefix))
+            {
+                failures.Add($"{path}:RoutePrefix '{routePrefix}' collides with a reserved AppSurface Docs route segment.");
+            }
+            else if (!routePrefixes.Add(routePrefix))
+            {
+                failures.Add($"AppSurface Docs localization route prefix '{routePrefix}' is configured more than once.");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(localization.DefaultLocale)
+            && !defaultLocaleMatched)
+        {
+            failures.Add("AppSurfaceDocs:Localization:DefaultLocale must match one configured locale code.");
+        }
+    }
+
+    private static bool IsValidCultureTag(string value)
+    {
+        try
+        {
+            _ = System.Globalization.CultureInfo.GetCultureInfo(value.Trim());
+            return true;
+        }
+        catch (CultureNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsValidLocaleRoutePrefix(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.Length > 0
+               && !trimmed.Contains('/', StringComparison.Ordinal)
+               && !trimmed.Contains('\\', StringComparison.Ordinal)
+               && !trimmed.Contains('?', StringComparison.Ordinal)
+               && !trimmed.Contains('#', StringComparison.Ordinal)
+               && !trimmed.Contains('.', StringComparison.Ordinal)
+               && !string.Equals(trimmed, "..", StringComparison.Ordinal);
+    }
+
+    private static bool IsReservedLocalizationRoutePrefix(string value)
+    {
+        return value.Trim() is { } trimmed
+               && (trimmed.Equals("search", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("search-index.json", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("_health", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("_health.json", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("sections", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("versions", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("v", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("search.css", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("search-client.js", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("outline-client.js", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("minisearch.min.js", StringComparison.OrdinalIgnoreCase));
     }
 }

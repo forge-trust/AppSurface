@@ -8,6 +8,8 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Aspire.Hosting" Version="9.4.2" />
+    <!-- Acornima 1.6.1 is an intentional SemVer-stable NuGet pin for this test-only parser spike. -->
+    <PackageVersion Include="Acornima" Version="1.6.1" />
     <PackageVersion Include="Autofac" Version="8.0.0" />
     <PackageVersion Include="Autofac.Extensions.DependencyInjection" Version="9.0.0" />
     <PackageVersion Include="CliFx" Version="2.3.6" />

@@ -6,6 +6,7 @@ using CliFx.Exceptions;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.AppSurface.Cli;
@@ -61,6 +62,8 @@ internal sealed class DocsPreviewCommand : AppSurfaceDocsPreviewCommand
 /// </remarks>
 internal abstract class AppSurfaceDocsPreviewCommand : ICommand
 {
+    private static readonly string DefaultPreviewEnvironmentName = Environments.Development;
+
     private readonly ILogger _logger;
     private readonly IAppSurfaceDocsHostRunner _hostRunner;
 
@@ -146,21 +149,21 @@ internal abstract class AppSurfaceDocsPreviewCommand : ICommand
     /// Gets the host environment forwarded to the AppSurface Docs standalone host.
     /// </summary>
     /// <remarks>
-    /// Use <c>Development</c> for local preview diagnostics and development defaults. Leave unset to let the host choose
-    /// its normal environment from command-line and process configuration.
+    /// Defaults to <c>Development</c> so local previews receive AppSurface Web's deterministic per-workspace endpoint
+    /// fallback when no endpoint is configured. Set this explicitly when testing production or staging behavior.
     /// </remarks>
-    [CommandOption("environment", 'e', Description = "Host environment forwarded to the AppSurface Docs host.")]
+    [CommandOption("environment", 'e', Description = "Host environment forwarded to the AppSurface Docs host (default: Development).")]
     public string? EnvironmentName { get; init; }
 
     /// <summary>
     /// Gets the number of seconds to wait for the web host to start before failing fast.
     /// </summary>
     /// <remarks>
-    /// Defaults to 30 seconds. Set to <c>0</c> to disable the startup watchdog. Negative, infinite, and NaN values are
+    /// Defaults to 10 seconds. Set to <c>0</c> to disable the startup watchdog. Negative, infinite, and NaN values are
     /// rejected before the host starts.
     /// </remarks>
     [CommandOption("startup-timeout-seconds", Description = "Seconds to wait for the AppSurface Docs web host to start before failing fast. Use 0 to disable.")]
-    public double StartupTimeoutSeconds { get; init; } = 30;
+    public double StartupTimeoutSeconds { get; init; } = 10;
 
     /// <summary>
     /// Executes the command through the CliFx console integration.
@@ -186,6 +189,7 @@ internal abstract class AppSurfaceDocsPreviewCommand : ICommand
     {
         var hostArgs = BuildHostArgs();
         _logger.LogInformation("Starting AppSurface Docs preview for {RepositoryRoot}.", hostArgs.RepositoryRoot);
+        using var currentDirectory = CurrentDirectoryScope.ChangeTo(hostArgs.RepositoryRoot);
         await _hostRunner.RunAsync(hostArgs.Args, hostArgs.StartupTimeout, cancellationToken);
     }
 
@@ -236,9 +240,16 @@ internal abstract class AppSurfaceDocsPreviewCommand : ICommand
 
         AddOptional(args, "--AppSurfaceDocs:Routing:RouteRootPath", RouteRootPath);
         AddOptional(args, "--AppSurfaceDocs:Routing:DocsRootPath", DocsRootPath);
-        AddOptional(args, "--environment", EnvironmentName);
+        AddOptional(args, "--environment", ResolveEnvironmentName());
 
         return new AppSurfaceDocsHostArgs(repositoryRoot, args.ToArray(), ResolveStartupTimeout());
+    }
+
+    private string ResolveEnvironmentName()
+    {
+        return string.IsNullOrWhiteSpace(EnvironmentName)
+            ? DefaultPreviewEnvironmentName
+            : EnvironmentName;
     }
 
     private static void AddOptional(List<string> args, string name, string? value)
@@ -268,6 +279,28 @@ internal abstract class AppSurfaceDocsPreviewCommand : ICommand
         return StartupTimeoutSeconds == 0
             ? null
             : TimeSpan.FromSeconds(StartupTimeoutSeconds);
+    }
+
+    private sealed class CurrentDirectoryScope : IDisposable
+    {
+        private readonly string _previousDirectory;
+
+        private CurrentDirectoryScope(string previousDirectory)
+        {
+            _previousDirectory = previousDirectory;
+        }
+
+        public static CurrentDirectoryScope ChangeTo(string directory)
+        {
+            var previousDirectory = Directory.GetCurrentDirectory();
+            Directory.SetCurrentDirectory(directory);
+            return new CurrentDirectoryScope(previousDirectory);
+        }
+
+        public void Dispose()
+        {
+            Directory.SetCurrentDirectory(_previousDirectory);
+        }
     }
 }
 

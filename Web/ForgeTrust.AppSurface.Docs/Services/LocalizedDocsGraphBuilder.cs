@@ -1,0 +1,516 @@
+using System.Globalization;
+using ForgeTrust.AppSurface.Docs.Models;
+
+namespace ForgeTrust.AppSurface.Docs.Services;
+
+/// <summary>
+/// Captures locale identity, grouping, and diagnostics for one docs snapshot.
+/// </summary>
+/// <remarks>
+/// The graph is the Phase 1 localization handoff between harvesters, route identity, navigation, fallback, and search
+/// projection code. Consumers should use this graph instead of re-inferring locale state from source paths.
+/// </remarks>
+/// <param name="Enabled">Whether localization graph behavior was enabled when the snapshot was built.</param>
+/// <param name="DefaultLocale">Configured default locale, or <c>null</c> when disabled or unavailable.</param>
+/// <param name="DocSets">Translation-key groups ordered for deterministic consumption.</param>
+/// <param name="VariantsBySourcePath">Case-insensitive lookup from normalized source path to the first resolved variant.</param>
+/// <param name="Diagnostics">Non-fatal authoring diagnostics emitted while resolving localization facts.</param>
+internal sealed record LocalizedDocsGraph(
+    bool Enabled,
+    string? DefaultLocale,
+    IReadOnlyList<LocalizedDocSet> DocSets,
+    IReadOnlyDictionary<string, LocalizedDocVariant> VariantsBySourcePath,
+    IReadOnlyList<DocHarvestDiagnostic> Diagnostics);
+
+/// <summary>
+/// Groups localized variants that represent the same conceptual documentation page.
+/// </summary>
+/// <param name="TranslationKey">Stable page identity shared across locale variants.</param>
+/// <param name="DefaultLocaleSourcePath">Source path for the default-locale variant, or <c>null</c> when missing.</param>
+/// <param name="Variants">Resolved variants for this translation key, ordered by locale and source path.</param>
+/// <param name="FallbackMode">Effective missing-translation fallback behavior for the group.</param>
+internal sealed record LocalizedDocSet(
+    string TranslationKey,
+    string? DefaultLocaleSourcePath,
+    IReadOnlyList<LocalizedDocVariant> Variants,
+    AppSurfaceDocsLocaleFallbackMode FallbackMode);
+
+/// <summary>
+/// Describes one resolved localized document variant.
+/// </summary>
+/// <remarks>
+/// Locale and translation key may be authored in metadata, inferred from a configured filename suffix, inferred from a
+/// locale folder when a translation key is authored, or defaulted to the configured default locale. Public route paths are
+/// null when route identity rejected the source path.
+/// </remarks>
+/// <param name="SourcePath">Normalized source path for the variant.</param>
+/// <param name="Locale">Configured locale code selected for the variant.</param>
+/// <param name="TranslationKey">Stable translation identity used to group variants.</param>
+/// <param name="Title">Localized title, metadata title, or harvested title in precedence order.</param>
+/// <param name="PublicRoutePath">Existing public route path for the base document identity, or <c>null</c> when unavailable.</param>
+/// <param name="LocaleFallback">Optional page-level fallback override authored by the variant.</param>
+/// <param name="LocaleWasInferred">Whether locale came from inference/defaulting rather than explicit metadata.</param>
+/// <param name="TranslationKeyWasInferred">Whether translation key came from source path inference.</param>
+internal sealed record LocalizedDocVariant(
+    string SourcePath,
+    string Locale,
+    string TranslationKey,
+    string Title,
+    string? PublicRoutePath,
+    AppSurfaceDocsLocaleFallbackMode? LocaleFallback,
+    bool LocaleWasInferred,
+    bool TranslationKeyWasInferred);
+
+/// <summary>
+/// Builds the locale-aware document graph used by later route, navigation, fallback, and search projections.
+/// </summary>
+/// <remarks>
+/// This Phase 1 builder is intentionally internal. It records document identity and locale facts without changing the
+/// existing visible route or search behavior. Later slices should consume this graph instead of re-inferring locale state
+/// in controllers, views, or JavaScript.
+/// </remarks>
+internal sealed class LocalizedDocsGraphBuilder
+{
+    private readonly AppSurfaceDocsLocalizationOptions _options;
+    private readonly IReadOnlyDictionary<string, AppSurfaceDocsLocaleOptions> _localesByCode;
+    private readonly IReadOnlyDictionary<string, AppSurfaceDocsLocaleOptions> _localesByRoutePrefix;
+
+    /// <summary>
+    /// Initializes the graph builder with normalized locale lookups from the configured localization options.
+    /// </summary>
+    /// <param name="options">Localization options for the current AppSurface Docs host.</param>
+    internal LocalizedDocsGraphBuilder(AppSurfaceDocsLocalizationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        _options = options;
+        _localesByCode = (options.Locales ?? [])
+            .Where(locale => locale is not null && !string.IsNullOrWhiteSpace(locale.Code))
+            .GroupBy(locale => locale.Code.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        _localesByRoutePrefix = (options.Locales ?? [])
+            .Where(locale => locale is not null && !string.IsNullOrWhiteSpace(locale.ResolveRoutePrefix()))
+            .GroupBy(locale => locale.ResolveRoutePrefix(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Builds the localized graph for a docs snapshot.
+    /// </summary>
+    /// <remarks>
+    /// The builder skips fragment stub source paths, reports unsupported locale signals, duplicate variants, missing bases,
+    /// folder conflicts, disabled fallback gaps, and conflicting fallback overrides as diagnostics, then returns whatever
+    /// safe graph data it can derive.
+    /// </remarks>
+    /// <param name="docs">Harvested docs from the snapshot.</param>
+    /// <param name="routeIdentityCatalog">Route catalog for resolving public route candidates.</param>
+    /// <returns>A disabled empty graph when localization is off, otherwise the resolved localization graph.</returns>
+    internal LocalizedDocsGraph Build(IEnumerable<DocNode> docs, DocRouteIdentityCatalog routeIdentityCatalog)
+    {
+        ArgumentNullException.ThrowIfNull(docs);
+        ArgumentNullException.ThrowIfNull(routeIdentityCatalog);
+
+        var docList = docs.ToList();
+        if (!_options.Enabled)
+        {
+            return new LocalizedDocsGraph(
+                false,
+                null,
+                [],
+                new Dictionary<string, LocalizedDocVariant>(StringComparer.OrdinalIgnoreCase),
+                []);
+        }
+
+        var diagnostics = new List<DocHarvestDiagnostic>();
+        var graphDocs = docList
+            .Where(doc => !IsFragmentStubSourcePath(doc.Path))
+            .ToList();
+        var normalizedSourcePaths = graphDocs
+            .Select(doc => NormalizeSourcePath(doc.Path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var variants = new List<LocalizedDocVariant>();
+        foreach (var doc in graphDocs)
+        {
+            var facts = ResolveFacts(doc, normalizedSourcePaths, diagnostics);
+            if (facts is null)
+            {
+                continue;
+            }
+
+            string? publicRoutePath = null;
+            if (routeIdentityCatalog.TryGetPublicRoutePath(facts.RouteSourcePath, out var resolvedRoutePath))
+            {
+                publicRoutePath = resolvedRoutePath;
+            }
+            else if (routeIdentityCatalog.TryGetPublicRoutePath(doc.Path, out resolvedRoutePath))
+            {
+                publicRoutePath = resolvedRoutePath;
+            }
+
+            variants.Add(
+                new LocalizedDocVariant(
+                    NormalizeSourcePath(doc.Path),
+                    facts.Locale,
+                    facts.TranslationKey,
+                    ResolveTitle(doc),
+                    publicRoutePath,
+                    doc.Metadata?.Localization?.LocaleFallback,
+                    facts.LocaleWasInferred,
+                    facts.TranslationKeyWasInferred));
+        }
+
+        var docSets = new List<LocalizedDocSet>();
+        foreach (var group in variants.GroupBy(variant => variant.TranslationKey, StringComparer.OrdinalIgnoreCase))
+        {
+            var groupVariants = group
+                .OrderBy(variant => variant.Locale, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(variant => variant.SourcePath, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            foreach (var duplicateGroup in groupVariants.GroupBy(variant => variant.Locale, StringComparer.OrdinalIgnoreCase))
+            {
+                var duplicates = duplicateGroup.ToList();
+                if (duplicates.Count <= 1)
+                {
+                    continue;
+                }
+
+                diagnostics.Add(
+                    CreateDiagnostic(
+                        DocHarvestDiagnosticCodes.LocalizationDuplicateVariant,
+                        $"Multiple docs use translation key '{group.Key}' for locale '{duplicateGroup.Key}'.",
+                        "A language switch target must resolve to one document per locale.",
+                        $"Keep only one '{duplicateGroup.Key}' variant for translation_key '{group.Key}' or give the extra document a different translation_key."));
+            }
+
+            var fallbackMode = ResolveDocSetFallbackMode(group.Key, groupVariants, diagnostics);
+            var defaultSourcePath = groupVariants
+                .FirstOrDefault(variant => string.Equals(variant.Locale, _options.DefaultLocale, StringComparison.OrdinalIgnoreCase))
+                ?.SourcePath;
+            if (fallbackMode == AppSurfaceDocsLocaleFallbackMode.Disabled)
+            {
+                foreach (var missingLocale in _localesByCode.Keys.Where(
+                             locale => groupVariants.All(variant => !string.Equals(variant.Locale, locale, StringComparison.OrdinalIgnoreCase))))
+                {
+                    diagnostics.Add(
+                        CreateDiagnostic(
+                            DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant,
+                            $"Translation key '{group.Key}' disables fallback but has no '{missingLocale}' variant.",
+                            "Readers switching to that locale would otherwise see a false page or a silent 404.",
+                            $"Add a '{missingLocale}' variant for translation_key '{group.Key}' or allow fallback."));
+                }
+            }
+
+            docSets.Add(
+                new LocalizedDocSet(
+                    group.Key,
+                    defaultSourcePath,
+                    groupVariants,
+                    fallbackMode));
+        }
+
+        return new LocalizedDocsGraph(
+            true,
+            _options.DefaultLocale,
+            docSets.OrderBy(set => set.TranslationKey, StringComparer.OrdinalIgnoreCase).ToArray(),
+            variants
+                .GroupBy(variant => variant.SourcePath, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase),
+            diagnostics);
+    }
+
+    private ResolvedLocalizationFacts? ResolveFacts(
+        DocNode doc,
+        HashSet<string> normalizedSourcePaths,
+        List<DocHarvestDiagnostic> diagnostics)
+    {
+        var sourcePath = NormalizeSourcePath(doc.Path);
+        var explicitLocale = Normalize(doc.Metadata?.Localization?.Locale);
+        var explicitTranslationKey = Normalize(doc.Metadata?.Localization?.TranslationKey);
+        var suffixLocale = TryGetConfiguredLocaleSuffix(sourcePath, out var sourceWithoutSuffix, out var suffix)
+            ? NormalizeConfiguredLocale(suffix)
+            : null;
+        if (ReportUnsupportedLocaleSuffix(sourcePath, sourceWithoutSuffix, suffixLocale, diagnostics))
+        {
+            return null;
+        }
+
+        var folderLocale = TryGetFolderLocale(sourcePath, explicitTranslationKey, out var inferredFolderLocale)
+            ? inferredFolderLocale
+            : null;
+
+        if (explicitLocale is not null
+            && folderLocale is not null
+            && !string.Equals(explicitLocale, folderLocale, StringComparison.OrdinalIgnoreCase))
+        {
+            diagnostics.Add(
+                CreateDiagnostic(
+                    DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict,
+                    $"Doc '{sourcePath}' declares locale '{explicitLocale}' but its folder implies '{folderLocale}'.",
+                    "Conflicting locale signals make language switching and fallback routing ambiguous.",
+                    "Make the locale metadata match the configured locale folder or move the file out of that locale folder."));
+        }
+
+        var locale = explicitLocale ?? suffixLocale ?? folderLocale ?? _options.DefaultLocale;
+        if (locale is null)
+        {
+            return null;
+        }
+
+        var normalizedLocale = NormalizeConfiguredLocale(locale);
+        if (normalizedLocale is null)
+        {
+            diagnostics.Add(
+                CreateDiagnostic(
+                    DocHarvestDiagnosticCodes.LocalizationUnsupportedLocale,
+                    $"Doc '{sourcePath}' uses unsupported locale '{locale}'.",
+                    "The locale is not configured for this AppSurface Docs host.",
+                    "Add the locale under AppSurfaceDocs:Localization:Locales or update the document metadata."));
+            return null;
+        }
+
+        var translationKey = explicitTranslationKey;
+        var translationKeyWasInferred = false;
+        if (translationKey is null)
+        {
+            translationKeyWasInferred = true;
+            if (suffixLocale is not null && sourceWithoutSuffix is not null)
+            {
+                if (!normalizedSourcePaths.Contains(sourceWithoutSuffix))
+                {
+                    diagnostics.Add(
+                        CreateDiagnostic(
+                            DocHarvestDiagnosticCodes.LocalizationMissingBase,
+                            $"Localized source '{sourcePath}' has no colocated base document '{sourceWithoutSuffix}'.",
+                            "AppSurface Docs can still infer an identity, but language switching may be incomplete.",
+                            $"Add '{sourceWithoutSuffix}' or author translation_key explicitly."));
+                }
+
+                translationKey = InferTranslationKey(sourceWithoutSuffix);
+            }
+            else
+            {
+                translationKey = InferTranslationKey(sourcePath);
+            }
+        }
+
+        var folderSourceWithoutLocalePrefix = folderLocale is not null
+            && (explicitLocale is null || string.Equals(explicitLocale, folderLocale, StringComparison.OrdinalIgnoreCase))
+            ? StripFolderLocalePrefix(sourcePath, folderLocale)
+            : null;
+        var routeSourcePath = !string.IsNullOrWhiteSpace(doc.Metadata?.CanonicalSlug)
+            ? sourcePath
+            : sourceWithoutSuffix ?? folderSourceWithoutLocalePrefix ?? sourcePath;
+
+        return new ResolvedLocalizationFacts(
+            normalizedLocale,
+            translationKey,
+            routeSourcePath,
+            LocaleWasInferred: explicitLocale is null,
+            TranslationKeyWasInferred: translationKeyWasInferred);
+    }
+
+    private bool ReportUnsupportedLocaleSuffix(
+        string sourcePath,
+        string? sourceWithoutSuffix,
+        string? configuredSuffixLocale,
+        List<DocHarvestDiagnostic> diagnostics)
+    {
+        if (configuredSuffixLocale is not null || sourceWithoutSuffix is not null)
+        {
+            return false;
+        }
+
+        if (!TryGetPotentialLocaleSuffix(sourcePath, out var suffix))
+        {
+            return false;
+        }
+
+        diagnostics.Add(
+            CreateDiagnostic(
+                DocHarvestDiagnosticCodes.LocalizationUnsupportedLocale,
+                $"Doc '{sourcePath}' uses unsupported locale suffix '{suffix}'.",
+                "The filename looks like a localized Markdown source, but the suffix is not one of the configured locales.",
+                "Add the locale under AppSurfaceDocs:Localization:Locales or rename the file if the suffix is not a locale."));
+        return true;
+    }
+
+    private bool TryGetConfiguredLocaleSuffix(string sourcePath, out string? sourceWithoutSuffix, out string suffix)
+    {
+        sourceWithoutSuffix = null;
+        suffix = string.Empty;
+        if (!IsMarkdownPath(sourcePath))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(sourcePath);
+        var withoutExtension = sourcePath[..^extension.Length];
+        var lastDot = withoutExtension.LastIndexOf('.');
+        if (lastDot < 0 || lastDot == withoutExtension.Length - 1)
+        {
+            return false;
+        }
+
+        suffix = withoutExtension[(lastDot + 1)..];
+        if (NormalizeConfiguredLocale(suffix) is null)
+        {
+            return false;
+        }
+
+        sourceWithoutSuffix = withoutExtension[..lastDot] + extension;
+        return true;
+    }
+
+    private static bool TryGetPotentialLocaleSuffix(string sourcePath, out string suffix)
+    {
+        suffix = string.Empty;
+        if (!IsMarkdownPath(sourcePath))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(sourcePath);
+        var withoutExtension = sourcePath[..^extension.Length];
+        var lastDot = withoutExtension.LastIndexOf('.');
+        if (lastDot < 0 || lastDot == withoutExtension.Length - 1)
+        {
+            return false;
+        }
+
+        suffix = withoutExtension[(lastDot + 1)..];
+        try
+        {
+            _ = CultureInfo.GetCultureInfo(suffix);
+            return true;
+        }
+        catch (CultureNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private bool TryGetFolderLocale(string sourcePath, string? explicitTranslationKey, out string locale)
+    {
+        locale = string.Empty;
+        if (explicitTranslationKey is null)
+        {
+            return false;
+        }
+
+        var firstSegment = sourcePath.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        if (firstSegment is null || !_localesByRoutePrefix.TryGetValue(firstSegment, out var configuredLocale))
+        {
+            return false;
+        }
+
+        locale = configuredLocale.Code;
+        return true;
+    }
+
+    private string? StripFolderLocalePrefix(string sourcePath, string folderLocale)
+    {
+        if (!_localesByCode.TryGetValue(folderLocale, out var configuredLocale))
+        {
+            return null;
+        }
+
+        var routePrefix = configuredLocale.ResolveRoutePrefix().Trim('/');
+        if (routePrefix.Length == 0
+            || !sourcePath.StartsWith(routePrefix + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return sourcePath[(routePrefix.Length + 1)..];
+    }
+
+    private string? NormalizeConfiguredLocale(string value)
+    {
+        return _localesByCode.TryGetValue(value.Trim(), out var locale)
+            ? locale.Code
+            : null;
+    }
+
+    private static string InferTranslationKey(string sourcePath)
+    {
+        var normalized = NormalizeSourcePath(sourcePath);
+        var extension = Path.GetExtension(normalized);
+        var withoutExtension = extension.Length == 0 ? normalized : normalized[..^extension.Length];
+        var segments = withoutExtension.Split('/', StringSplitOptions.RemoveEmptyEntries).ToList();
+        if (segments.Count > 0
+            && (segments[^1].Equals("README", StringComparison.OrdinalIgnoreCase)
+                || segments[^1].Equals("index", StringComparison.OrdinalIgnoreCase)))
+        {
+            segments.RemoveAt(segments.Count - 1);
+        }
+
+        return segments.Count == 0 ? "README" : string.Join('/', segments);
+    }
+
+    private AppSurfaceDocsLocaleFallbackMode ResolveDocSetFallbackMode(
+        string translationKey,
+        IEnumerable<LocalizedDocVariant> variants,
+        List<DocHarvestDiagnostic> diagnostics)
+    {
+        var fallbackModes = variants
+            .Where(variant => variant.LocaleFallback is not null)
+            .Select(variant => variant.LocaleFallback!.Value)
+            .ToList();
+        var distinctFallbackModes = fallbackModes
+            .Distinct()
+            .ToList();
+        if (distinctFallbackModes.Count > 1)
+        {
+            diagnostics.Add(
+                CreateDiagnostic(
+                    DocHarvestDiagnosticCodes.LocalizationFallbackConflict,
+                    $"Translation key '{translationKey}' declares conflicting locale fallback modes.",
+                    "Fallback behavior would otherwise depend on the first localized variant AppSurface Docs evaluates.",
+                    "Use the same locale_fallback value across variants for a translation key, or remove per-page fallback metadata to inherit the global setting."));
+        }
+
+        return fallbackModes
+            .DefaultIfEmpty(_options.FallbackMode)
+            .First();
+    }
+
+    private static string ResolveTitle(DocNode doc)
+    {
+        return Normalize(doc.Metadata?.Localization?.LocalizedTitle)
+               ?? Normalize(doc.Metadata?.Title)
+               ?? doc.Title;
+    }
+
+    private static string NormalizeSourcePath(string path)
+    {
+        return path.Trim().Replace('\\', '/').Trim('/');
+    }
+
+    private static string? Normalize(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static bool IsMarkdownPath(string path)
+    {
+        return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFragmentStubSourcePath(string path)
+    {
+        return path.Contains('#', StringComparison.Ordinal);
+    }
+
+    private static DocHarvestDiagnostic CreateDiagnostic(string code, string problem, string cause, string fix)
+    {
+        return new DocHarvestDiagnostic(code, DocHarvestDiagnosticSeverity.Warning, HarvesterType: null, problem, cause, fix);
+    }
+
+    private sealed record ResolvedLocalizationFacts(
+        string Locale,
+        string TranslationKey,
+        string RouteSourcePath,
+        bool LocaleWasInferred,
+        bool TranslationKeyWasInferred);
+}

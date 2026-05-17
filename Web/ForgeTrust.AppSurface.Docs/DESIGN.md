@@ -17,7 +17,7 @@ If a new surface starts to feel like a feature grid, a landing page, or an AI-ge
 
 ### Typography
 
-- Primary typeface: `Outfit`
+- Primary typeface: `Inter`, with the platform sans-serif stack as fallback
 - Body copy should stay clean and readable with generous line-height
 - Authored Markdown prose should use a shorter measure and stronger paragraph/list rhythm than generated API reference pages. Release notes and long guides must scan as editorial documents, not as one uninterrupted text column.
 - Headings should feel compact and intentional, not oversized hero copy
@@ -25,16 +25,24 @@ If a new surface starts to feel like a feature grid, a landing page, or an AI-ge
 
 ### Color
 
-- Base surfaces: dark slate family
-- Accent: cyan for focus, active state, and high-value calls to action
+- Base surfaces: deep navy, anchored by `#0D182A`
+- Accent system: cobalt blue for primary controls, teal for active/focus states, and violet for occasional brand depth
 - Borders and separators should do most of the structure work
 - Avoid adding extra accent colors unless the feature truly needs semantic differentiation
+
+### Brand
+
+The AppSurface wordmark is a two-tone text treatment: `App` uses ice white (`--docs-color-text-strong`, `#F8FAFC`) and `Surface` uses readable brand blue (`--docs-brand-wordmark-blue`, `#3B82F6`). Use the shared `.docs-wordmark` and `.docs-wordmark-highlight` classes anywhere the AppSurface wordmark is rendered in text.
+
+Do not use page-title gradients, teal, violet, or ad hoc Tailwind color utilities for the wordmark. `--docs-brand-blue` (`#2563EB`) remains the cobalt product/control accent, but it is too low-contrast for normal-size wordmark text on raised navy surfaces such as `#0D182A`. The wordmark blue `#3B82F6` clears WCAG AA for normal text on the docs navy surfaces, including `#0D182A`.
+
+The layered AppSurface mark uses the same brand family: navy base (`#0D182A`), cobalt (`#2563EB`), teal (`#14B8A6`), violet (`#8B5CF6`), and ice (`#E5E7EB`). Keep the mark glow on the icon, not the text; the text wordmark may use a subtle dark edge shadow for crispness over dark or glowing backgrounds.
 
 ### Style Tokens
 
 AppSurface Docs expresses the flagship dark-slate system through internal `--docs-*` CSS custom properties in `wwwroot/css/app.css`.
 
-The token layer exists so contributors can preserve the same visual language without rediscovering which hardcoded slate, cyan, or translucent fill belongs to each shared primitive. Token names should describe the design job: surface, border, text, accent, focus, active state, code chrome, table chrome, or skeleton. Do not name tokens after Tailwind hues unless the hue itself is the contract, which it usually is not.
+The token layer exists so contributors can preserve the same visual language without rediscovering which hardcoded navy, cobalt, teal, violet, or translucent fill belongs to each shared primitive. Token names should describe the design job: surface, border, text, accent, focus, active state, code chrome, table chrome, or skeleton. Do not name tokens after Tailwind hues unless the hue itself is the contract, which it usually is not.
 
 Default rule:
 
@@ -88,6 +96,8 @@ The search workspace renders semantic classes such as `docs-search-page`, `docs-
 
 That does not mean every heading, paragraph, or fallback-link wrapper inside `Search.cshtml` needs its own semantic class. Keep the stateful container and interactive hook semantic, then use local utilities for one-off typography and spacing inside that single view.
 
+JavaScript-rendered search result rows are a special case because the interactive surface is both styling hook and navigation contract. The row should contain one block-level `.docs-search-result-link` anchor that wraps the visible result content, so touch users can tap anywhere on the result while keyboard and assistive-technology users still get one normal link target. Because that anchor wraps rich row content, it should own a concise `aria-label` instead of letting breadcrumbs, paths, badges, and snippets become one long accessible name.
+
 #### Required `id` values
 
 Some search controls still need unique `id` values such as `docs-search-page-input` and `docs-search-page-filters-panel`. Those support uniqueness, accessibility relationships, and DOM targeting. They do not replace semantic classes as the reusable styling contract.
@@ -101,6 +111,7 @@ Avoid these by default:
 - pushing utility classes into harvested nested HTML that AppSurface Docs does not fully own
 - treating shared CSS and JavaScript hook classes as a failure of Tailwind instead of a legitimate integration seam
 - moving styles across the boundary without a concrete user-facing benefit
+- simulating whole-result search navigation with row click handlers when one semantic link can own the interaction
 
 ### Review Questions
 
@@ -175,8 +186,8 @@ The persistent rail appears only on wide desktop (`>=1280px`) so the article col
 Visual rules:
 
 - Keep the rail editorial and quiet: border/separator structure beats boxed cards.
-- Use cyan for active and focus states only.
-- Borrow the active-row treatment from the approved mockup direction: subtle row fill plus a cyan marker.
+- Use teal for active and focus states only.
+- Borrow the active-row treatment from the approved mockup direction: subtle row fill plus a teal marker.
 - Keep H2 links stronger and H3 links quieter/indented.
 - Use small row radii only. Do not wrap the whole rail in a large rounded card.
 - Preserve the existing AppSurface Docs global sidebar; do not replace it with icon-only chrome for this pattern.
@@ -220,4 +231,4 @@ Avoid these by default:
 - decorative gradients inside core reading surfaces
 - multiple competing result columns
 - hiding the corpus shape behind over-minimal filter UI
-- introducing visual styles that do not already fit the dark-slate plus cyan system
+- introducing visual styles that do not already fit the navy, cobalt, teal, and violet AppSurface system

@@ -20,6 +20,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface now has a planned `appsurface` .NET tool surface. Its first verb is `appsurface docs`, which runs AppSurface Docs preview workflows through the existing standalone docs host instead of minting a separate `appsurfacedocs` CLI.
 - AppSurface Web now has a startup watchdog that fails fast when a web host stalls before Kestrel starts listening; `appsurface docs` exposes the same guard through `--startup-timeout-seconds`.
 - AppSurface Docs and RazorWire runtime assets are now embedded into their assemblies and served through endpoint fallbacks, so packaged CLI hosts can serve docs UI assets without relying on static web asset manifests.
+- AppSurface Web startup watchdog failures now include sandbox markers and startup phase context so Codex-hosted local web runs point operators toward an unsandboxed retry first.
 - AppSurface now has a repo-level release contract: a public release hub, an unreleased proof artifact, a pre-1.0 upgrade policy, and a tagged-release template for future versioned notes.
 - RazorWire now has a package-level generated UI design contract that defines ownership scope, data-attribute and CSS custom-property styling surfaces, accessibility expectations, override levels, and anti-patterns for package-owned UI.
 - AppSurface Docs pages can now render a top-of-page trust bar from structured metadata so release notes and upgrade guidance can show status, safety context, and provenance without custom page code.
@@ -30,12 +31,14 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - The root README now includes a single hello-world web quickstart with an explicit local port and a concrete expected response.
 - AppSurface now ships GitHub issue templates for bug reports and documentation feedback.
 - AppSurface Config now supports first-class scalar value validation on `Config<T>` and `ConfigStruct<T>` wrappers with `ConfigValueNotEmpty`, `ConfigValueRange`, `ConfigValueMinLength`, and a `ValidateValue` override for custom rules.
+- AppSurface Web CORS options now expose `AllowedHeaders` and `AllowedMethods` so applications can define explicit production preflight contracts without replacing the framework-managed policy.
 
 ### Changed
 
 - AppSurface now treats the whole monorepo as one coordinated release surface. Packages, CLI tools, examples, and docs-facing behavior all roll into the same upcoming version.
 - Pull requests are expected to use Conventional Commits titles and to update `releases/unreleased.md` unless maintainers explicitly opt out.
 - Markdown-only changes on `main` now trigger the build-and-export workflow so release-note and policy updates publish with the docs surface.
+- AppSurface Docs search result rows now expose the whole visible result as one semantic link, making mobile taps easier while preserving keyboard focus, copied links, and open-in-new-tab browser behavior.
 - RazorWire CLI validation errors now include a concrete next command and `razorwire export --help` hint so failed exports are easier to recover from.
 - RazorWire CLI export now defaults to CDN-safe output: managed internal links, frames, scripts, stylesheets, images, `<img>` and `<source>` `srcset`, conventional `404.html`, and CSS `url(...)` references rewrite to emitted static artifacts, with `--mode hybrid` available for extensionless server-routed deployments.
 - Tailwind development watch mode now logs a warning, not a startup error, when the standalone CLI is unavailable and the app can continue serving existing CSS.
