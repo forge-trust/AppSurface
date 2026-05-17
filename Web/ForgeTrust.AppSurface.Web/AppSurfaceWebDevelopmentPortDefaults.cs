@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using ForgeTrust.AppSurface.Core.Defaults;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 
@@ -57,54 +58,10 @@ internal static class AppSurfaceWebDevelopmentPortDefaults
         IReadOnlyList<string> args,
         Func<string, string?> environmentReader)
     {
-        return ResolveEnvironmentArgument(args)
+        return DefaultEnvironmentProvider.ResolveEnvironmentArgument(args)
                ?? environmentReader("ASPNETCORE_ENVIRONMENT")
                ?? environmentReader("DOTNET_ENVIRONMENT")
                ?? Environments.Production;
-    }
-
-    private static string? ResolveEnvironmentArgument(IReadOnlyList<string> args)
-    {
-        string? environmentName = null;
-
-        for (var index = 0; index < args.Count; index++)
-        {
-            var arg = args[index];
-            const string environmentPrefix = "--environment=";
-            if (arg.StartsWith(environmentPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                var inlineValue = arg[environmentPrefix.Length..];
-                if (!string.IsNullOrWhiteSpace(inlineValue))
-                {
-                    environmentName = inlineValue;
-                }
-
-                continue;
-            }
-
-            if (!string.Equals(arg, "--environment", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (index + 1 >= args.Count)
-            {
-                continue;
-            }
-
-            var environmentValue = args[index + 1];
-            if (string.IsNullOrWhiteSpace(environmentValue)
-                || environmentValue.StartsWith("-", StringComparison.Ordinal)
-                || environmentValue.Contains('='))
-            {
-                continue;
-            }
-
-            environmentName = environmentValue;
-            index++;
-        }
-
-        return environmentName;
     }
 
     private static bool HasExplicitEndpointConfiguration(

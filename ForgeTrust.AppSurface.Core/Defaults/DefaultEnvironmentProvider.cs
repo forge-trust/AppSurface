@@ -78,8 +78,21 @@ public class DefaultEnvironmentProvider : IEnvironmentProvider
         return value ?? defaultValue;
     }
 
-    private static string? ResolveEnvironmentArgument(IReadOnlyList<string> args)
+    /// <summary>
+    /// Resolves the effective command-line environment value from host arguments.
+    /// </summary>
+    /// <remarks>
+    /// Recognizes split and inline forms such as <c>--environment Development</c> and
+    /// <c>--environment=Development</c>. Blank, switch-like, or assignment-shaped split values are ignored, and the
+    /// last valid command-line value wins to match Microsoft configuration duplicate-key behavior. Returns
+    /// <see langword="null"/> when the arguments do not contain a valid command-line environment value.
+    /// </remarks>
+    /// <param name="args">Command-line arguments supplied to the host startup pipeline.</param>
+    /// <returns>The last valid command-line environment value, or <see langword="null"/> when none is supplied.</returns>
+    public static string? ResolveEnvironmentArgument(IReadOnlyList<string> args)
     {
+        ArgumentNullException.ThrowIfNull(args);
+
         string? environmentName = null;
 
         for (var index = 0; index < args.Count; index++)

@@ -31,7 +31,7 @@ Keep these values separate. ASP.NET static web assets use the host application n
 
 `StartupContext.EnvironmentProvider` defaults to `DefaultEnvironmentProvider`, which keeps AppSurface module decisions aligned with the Generic Host arguments. When startup receives `--environment Development` or `--environment=Development`, `StartupContext.IsDevelopment` reports `true` before module hooks run.
 
-If no command-line environment is supplied, AppSurface falls back to `ASPNETCORE_ENVIRONMENT`, then `DOTNET_ENVIRONMENT`, then `Production`. Pass a custom `IEnvironmentProvider` to `StartupContext` when a test, embedded host, or specialized runner needs a different source of truth. Blank `--environment` values are ignored so normal process environment fallback still works.
+If no command-line environment is supplied, AppSurface falls back to `ASPNETCORE_ENVIRONMENT`, then `DOTNET_ENVIRONMENT`, then `Production`. Pass a custom `IEnvironmentProvider` to `StartupContext` when a test, embedded host, or specialized runner needs a different source of truth. `DefaultEnvironmentProvider.ResolveEnvironmentArgument` is the shared parser for AppSurface hosts: blank, switch-like, and assignment-shaped split values are ignored, while duplicate `--environment` keys use the last valid value to match Microsoft configuration behavior.
 
 Pitfalls:
 
