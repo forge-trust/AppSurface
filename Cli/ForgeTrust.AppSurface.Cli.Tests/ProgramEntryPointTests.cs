@@ -96,6 +96,72 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsCommand_Should_Default_ToDevelopmentEnvironment_ForLocalPreview()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingRazorDocsHostRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(runner.Args);
+        var environmentIndex = Array.IndexOf(runner.Args, "--environment");
+        Assert.InRange(environmentIndex, 0, runner.Args.Length - 2);
+        Assert.Equal("Development", runner.Args[environmentIndex + 1]);
+        Assert.DoesNotContain("--urls", runner.Args);
+        Assert.DoesNotContain("--port", runner.Args);
+    }
+
+    [Fact]
+    public async Task DocsCommand_Should_Preserve_Explicit_Environment()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingRazorDocsHostRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "--repo", repository.Path, "--environment", "Production"],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(runner.Args);
+        var environmentIndex = Array.IndexOf(runner.Args, "--environment");
+        Assert.InRange(environmentIndex, 0, runner.Args.Length - 2);
+        Assert.Equal("Production", runner.Args[environmentIndex + 1]);
+    }
+
+    [Fact]
+    public async Task DocsCommand_Should_RunHost_FromRepositoryRoot()
+    {
+        using var callerDirectory = TempDirectory.Create("appsurface-docs-caller-");
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var previousDirectory = Directory.GetCurrentDirectory();
+        var runner = new CapturingRazorDocsHostRunner();
+
+        try
+        {
+            Directory.SetCurrentDirectory(callerDirectory.Path);
+
+            var result = await InvokeProgramEntryPointAsync(
+                ["docs", "--repo", repository.Path],
+                options => RegisterRunner(options, runner));
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Equal(
+                NormalizeDirectoryForComparison(repository.Path),
+                NormalizeDirectoryForComparison(runner.WorkingDirectoryDuringRun));
+            Assert.Equal(
+                NormalizeDirectoryForComparison(callerDirectory.Path),
+                NormalizeDirectoryForComparison(Directory.GetCurrentDirectory()));
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previousDirectory);
+        }
+    }
+
+    [Fact]
     public async Task DocsCommand_Should_Allow_Disabling_Startup_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
@@ -184,7 +250,7 @@ public sealed class ProgramEntryPointTests
     [Fact]
     public async Task DocsCommand_Should_Reject_Missing_RepositoryRoot()
     {
-        var missingRepository = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var missingRepository = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         var runner = new CapturingRazorDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
@@ -227,17 +293,18 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotNull(runner.Args);
-        Assert.Equal(Path.GetFullPath("dist/docs"), runner.Args.Value.OutputPath);
-        Assert.Equal(ExportMode.Cdn, runner.Args.Value.Mode);
-        Assert.Null(runner.Args.Value.SeedRoutesPath);
-        Assert.Equal(["/", "/docs"], runner.Args.Value.InitialSeedRoutes);
-        Assert.Equal("http://127.0.0.1:0", runner.Args.Value.RequestedBaseUrl);
-        Assert.Equal("Production", runner.Args.Value.HostArgs.EnvironmentName);
-        Assert.Contains("--environment", runner.Args.Value.HostArgs.Args);
-        Assert.Contains("Production", runner.Args.Value.HostArgs.Args);
-        Assert.DoesNotContain("--urls", runner.Args.Value.HostArgs.Args);
-        Assert.DoesNotContain("--port", runner.Args.Value.HostArgs.Args);
-        Assert.Equal(TimeSpan.FromSeconds(10), runner.Args.Value.HostArgs.StartupTimeout);
+        var args = runner.Args.GetValueOrDefault();
+        Assert.Equal(Path.GetFullPath("dist/docs"), args.OutputPath);
+        Assert.Equal(ExportMode.Cdn, args.Mode);
+        Assert.Null(args.SeedRoutesPath);
+        Assert.Equal(["/", "/docs"], args.InitialSeedRoutes);
+        Assert.Equal("http://127.0.0.1:0", args.RequestedBaseUrl);
+        Assert.Equal("Production", args.HostArgs.EnvironmentName);
+        Assert.Contains("--environment", args.HostArgs.Args);
+        Assert.Contains("Production", args.HostArgs.Args);
+        Assert.DoesNotContain("--urls", args.HostArgs.Args);
+        Assert.DoesNotContain("--port", args.HostArgs.Args);
+        Assert.Equal(TimeSpan.FromSeconds(10), args.HostArgs.StartupTimeout);
     }
 
     [Fact]
@@ -266,21 +333,22 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotNull(runner.Args);
-        Assert.Equal(output.Path, runner.Args.Value.OutputPath);
-        Assert.Equal(ExportMode.Hybrid, runner.Args.Value.Mode);
-        Assert.Equal(seedFile, runner.Args.Value.SeedRoutesPath);
-        Assert.Null(runner.Args.Value.InitialSeedRoutes);
-        Assert.Equal("http://127.0.0.1:0", runner.Args.Value.RequestedBaseUrl);
-        Assert.Equal("Development", runner.Args.Value.HostArgs.EnvironmentName);
-        Assert.Contains("--RazorDocs:Source:RepositoryRoot", runner.Args.Value.HostArgs.Args);
-        Assert.Contains(repository.Path, runner.Args.Value.HostArgs.Args);
-        Assert.Contains("--RazorDocs:Harvest:FailOnFailure", runner.Args.Value.HostArgs.Args);
-        Assert.Contains("true", runner.Args.Value.HostArgs.Args);
-        Assert.Contains("--RazorDocs:Routing:RouteRootPath", runner.Args.Value.HostArgs.Args);
-        Assert.Contains("/reference", runner.Args.Value.HostArgs.Args);
-        Assert.Contains("--RazorDocs:Routing:DocsRootPath", runner.Args.Value.HostArgs.Args);
-        Assert.Contains("/reference/next", runner.Args.Value.HostArgs.Args);
-        Assert.Equal(TimeSpan.FromSeconds(2), runner.Args.Value.HostArgs.StartupTimeout);
+        var args = runner.Args.GetValueOrDefault();
+        Assert.Equal(output.Path, args.OutputPath);
+        Assert.Equal(ExportMode.Hybrid, args.Mode);
+        Assert.Equal(seedFile, args.SeedRoutesPath);
+        Assert.Null(args.InitialSeedRoutes);
+        Assert.Equal("http://127.0.0.1:0", args.RequestedBaseUrl);
+        Assert.Equal("Development", args.HostArgs.EnvironmentName);
+        Assert.Contains("--RazorDocs:Source:RepositoryRoot", args.HostArgs.Args);
+        Assert.Contains(repository.Path, args.HostArgs.Args);
+        Assert.Contains("--RazorDocs:Harvest:FailOnFailure", args.HostArgs.Args);
+        Assert.Contains("true", args.HostArgs.Args);
+        Assert.Contains("--RazorDocs:Routing:RouteRootPath", args.HostArgs.Args);
+        Assert.Contains("/reference", args.HostArgs.Args);
+        Assert.Contains("--RazorDocs:Routing:DocsRootPath", args.HostArgs.Args);
+        Assert.Contains("/reference/next", args.HostArgs.Args);
+        Assert.Equal(TimeSpan.FromSeconds(2), args.HostArgs.StartupTimeout);
     }
 
     [Fact]
@@ -295,7 +363,8 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotNull(runner.Args);
-        Assert.Equal(["/", "/foo/bar/next"], runner.Args.Value.InitialSeedRoutes);
+        var args = runner.Args.GetValueOrDefault();
+        Assert.Equal(["/", "/foo/bar/next"], args.InitialSeedRoutes);
     }
 
     [Fact]
@@ -545,6 +614,18 @@ public sealed class ProgramEntryPointTests
         options.CustomRegistrations.Add(services => services.AddSingleton<IRazorDocsExportRunner>(runner));
     }
 
+    private static string NormalizeDirectoryForComparison(string? path)
+    {
+        Assert.NotNull(path);
+
+        var normalized = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return OperatingSystem.IsMacOS() && normalized.StartsWith("/private/var/", StringComparison.Ordinal)
+            ? normalized["/private".Length..]
+            : normalized;
+    }
+
     private sealed record CapturedCliRun(
         string RawStdout,
         string RawStderr,
@@ -572,10 +653,13 @@ public sealed class ProgramEntryPointTests
 
         public TimeSpan? StartupTimeout { get; private set; }
 
+        public string? WorkingDirectoryDuringRun { get; private set; }
+
         public Task RunAsync(string[] args, TimeSpan? startupTimeout, CancellationToken cancellationToken)
         {
             Args = args;
             StartupTimeout = startupTimeout;
+            WorkingDirectoryDuringRun = Directory.GetCurrentDirectory();
             return Task.CompletedTask;
         }
     }

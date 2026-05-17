@@ -281,8 +281,9 @@ internal abstract class RazorDocsPreviewCommand : RazorDocsRepositoryCommand, IC
     /// </remarks>
     internal async ValueTask ExecuteAsync(CancellationToken cancellationToken)
     {
-        var hostArgs = BuildHostArgs(Urls, Port, defaultEnvironmentName: null);
+        var hostArgs = BuildHostArgs(Urls, Port, defaultEnvironmentName: Environments.Development);
         _logger.LogInformation("Starting RazorDocs preview for {RepositoryRoot}.", hostArgs.RepositoryRoot);
+        using var currentDirectory = CurrentDirectoryScope.ChangeTo(hostArgs.RepositoryRoot);
         await _hostRunner.RunAsync(hostArgs.Args, hostArgs.StartupTimeout, cancellationToken);
     }
 }
@@ -341,8 +342,8 @@ internal abstract class RazorDocsRepositoryCommand
     /// Gets the host environment forwarded to the RazorDocs standalone host.
     /// </summary>
     /// <remarks>
-    /// Preview leaves this unset by default so the host can choose its normal environment. Export defaults it to
-    /// Production before starting the in-process host.
+    /// Preview defaults to <c>Development</c> so the host can use deterministic per-workspace local endpoints. Export
+    /// defaults to <c>Production</c> before starting the in-process host.
     /// </remarks>
     [CommandOption("environment", 'e', Description = "Host environment forwarded to the RazorDocs host.")]
     public string? EnvironmentName { get; init; }
@@ -458,6 +459,28 @@ internal abstract class RazorDocsRepositoryCommand
         return StartupTimeoutSeconds == 0
             ? null
             : TimeSpan.FromSeconds(StartupTimeoutSeconds);
+    }
+
+    protected sealed class CurrentDirectoryScope : IDisposable
+    {
+        private readonly string _previousDirectory;
+
+        private CurrentDirectoryScope(string previousDirectory)
+        {
+            _previousDirectory = previousDirectory;
+        }
+
+        public static CurrentDirectoryScope ChangeTo(string directory)
+        {
+            var previousDirectory = Directory.GetCurrentDirectory();
+            Directory.SetCurrentDirectory(directory);
+            return new CurrentDirectoryScope(previousDirectory);
+        }
+
+        public void Dispose()
+        {
+            Directory.SetCurrentDirectory(_previousDirectory);
+        }
     }
 }
 
@@ -725,17 +748,22 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
 
     private async Task StopAndDisposeHostAsync(IHost host)
     {
+        using var disposableHost = host;
+
         try
         {
             await host.StopAsync(CancellationToken.None);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException
+            and not BadImageFormatException
+            and not CannotUnloadAppDomainException
+            and not InvalidProgramException
+            and not ThreadAbortException)
         {
             _logger.LogWarning(ex, "RazorDocs export host failed during shutdown.");
-        }
-        finally
-        {
-            host.Dispose();
         }
     }
 

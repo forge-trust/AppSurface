@@ -2554,6 +2554,25 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldReturnProjectionPayload_ForLocaleProjectionInPhaseOne()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Guide",
+                "guides/guide.md",
+                "<p>Guide body</p>")
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync(new DocsSearchIndexProjection(Locale: "fr"));
+
+        var indexedDocument = Assert.Single(payload.Documents);
+        Assert.Equal("/docs/guides/guide", indexedDocument.Path);
+        Assert.Equal("guides/guide.md", indexedDocument.SourcePath);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldSkipReservedRouteCollisions()
     {
         var harvestedDocs = new List<DocNode>

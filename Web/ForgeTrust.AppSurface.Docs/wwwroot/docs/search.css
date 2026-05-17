@@ -312,30 +312,47 @@
 }
 
 .docs-search-result {
-    display: grid;
-    gap: 0.55rem;
-    padding: 0.05rem 0 1rem;
     border-bottom: 1px solid var(--docs-search-color-border-muted);
 }
 
 .docs-search-result:last-child {
     border-bottom: 0;
+}
+
+.docs-search-result:last-child .docs-search-result-link {
     padding-bottom: 0;
+}
+
+.docs-search-result-link {
+    display: grid;
+    gap: 0.55rem;
+    border-radius: 0.75rem;
+    margin-inline: -0.35rem;
+    padding: 0.05rem 0.35rem 1rem;
+    color: var(--docs-search-color-text-default);
+    text-decoration: none;
+}
+
+.docs-search-result-link:hover,
+.docs-search-result-link:focus-visible {
+    background: var(--docs-search-color-surface-overlay-soft);
+    color: var(--docs-search-color-accent);
+}
+
+.docs-search-result-link:active {
+    background: var(--docs-search-color-state-active-fill);
+}
+
+.docs-search-result-link:focus-visible {
+    outline: 0;
+    box-shadow: var(--docs-search-focus-ring-inset);
 }
 
 .docs-search-result-title {
     margin: 0;
     font-size: 1.1rem;
     line-height: 1.3;
-}
-
-.docs-search-result-title a {
-    color: var(--docs-search-color-text-default);
-    text-decoration: none;
-}
-
-.docs-search-result-title a:hover {
-    color: var(--docs-search-color-accent);
+    color: inherit;
 }
 
 .docs-search-result-breadcrumbs {
@@ -526,8 +543,8 @@
         padding: 0.9rem;
     }
 
-    .docs-search-result {
-        padding-bottom: 0.85rem;
+    .docs-search-result-link {
+        padding: 0.35rem 0.35rem 0.85rem;
     }
 
     .docs-search-result-title,

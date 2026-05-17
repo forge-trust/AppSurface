@@ -33,9 +33,13 @@ public static class RazorDocsServiceCollectionExtensions
     /// <see cref="RazorDocsRoutingOptions.DocsRootPath"/> through
     /// <see cref="DocsUrlBuilder.NormalizeRouteRootPath(string?, string, bool)"/> and
     /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/>, trims
-    /// <see cref="RazorDocsVersioningOptions.CatalogPath"/>, and removes blank or duplicate sidebar namespace
-    /// prefixes. Callers that omit <see cref="RazorDocsOptions.Routing"/> or
-    /// <see cref="RazorDocsOptions.Versioning"/> can therefore still rely on a fully populated options object after
+    /// <see cref="RazorDocsVersioningOptions.CatalogPath"/>, normalizes
+    /// <see cref="RazorDocsLocalizationOptions.DefaultLocale"/> to <c>en</c> when blank, trims locale
+    /// <see cref="RazorDocsLocaleOptions.Code"/>, <see cref="RazorDocsLocaleOptions.Label"/>,
+    /// <see cref="RazorDocsLocaleOptions.Lang"/>, and <see cref="RazorDocsLocaleOptions.RoutePrefix"/> values while
+    /// skipping null locale entries, and removes blank or duplicate sidebar namespace prefixes. Callers that omit
+    /// <see cref="RazorDocsOptions.Routing"/>, <see cref="RazorDocsOptions.Versioning"/>, or
+    /// <see cref="RazorDocsOptions.Localization"/> can therefore still rely on a fully populated options object after
     /// registration. When <see cref="RazorDocsHarvestOptions.FailOnFailure"/> is enabled, the registered startup
     /// preflight fails the host only when the aggregate harvest health is failed.
     /// </para>
@@ -75,7 +79,9 @@ public static class RazorDocsServiceCollectionExtensions
                     options.Contributor ??= new RazorDocsContributorOptions();
                     options.Routing ??= new RazorDocsRoutingOptions();
                     options.Versioning ??= new RazorDocsVersioningOptions();
+                    options.Localization ??= new RazorDocsLocalizationOptions();
                     options.Sidebar.NamespacePrefixes ??= [];
+                    options.Localization.Locales ??= [];
 
                     if (options.Source.RepositoryRoot is null)
                     {
@@ -104,6 +110,20 @@ public static class RazorDocsServiceCollectionExtensions
                     options.Versioning.CatalogPath = NormalizeOrNull(options.Versioning.CatalogPath);
                     options.Contributor.SymbolSourceUrlTemplate = NormalizeOrNull(options.Contributor.SymbolSourceUrlTemplate);
                     options.Contributor.SourceRef = NormalizeOrNull(options.Contributor.SourceRef);
+                    options.Localization.DefaultLocale = NormalizeOrNull(options.Localization.DefaultLocale) ?? "en";
+                    foreach (var locale in options.Localization.Locales)
+                    {
+                        if (locale is null)
+                        {
+                            continue;
+                        }
+
+                        locale.Code = NormalizeOrNull(locale.Code) ?? string.Empty;
+                        locale.Label = NormalizeOrNull(locale.Label);
+                        locale.Lang = NormalizeOrNull(locale.Lang);
+                        locale.RoutePrefix = NormalizeOrNull(locale.RoutePrefix);
+                    }
+
                     options.Sidebar.NamespacePrefixes = options.Sidebar.NamespacePrefixes
                         .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
                         .Select(prefix => prefix.Trim())

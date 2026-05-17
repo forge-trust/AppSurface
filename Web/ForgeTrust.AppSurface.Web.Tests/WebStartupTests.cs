@@ -398,6 +398,35 @@ public class WebStartupTests
     }
 
     [Fact]
+    public void ConfigureServices_Cors_EnableAllOriginsInDevelopment_WorksWithCommandLineEnvironment()
+    {
+        var previousDotnetEnvironment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        var previousAspNetCoreEnvironment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", null);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", null);
+
+            var root = new TestWebModule();
+            var startup = new TestWebStartup(root);
+            startup.WithOptions(o => o.Cors.EnableAllOriginsInDevelopment = true);
+
+            var context = new StartupContext(["--environment", Environments.Development], root);
+            var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+            using var host = builder.Build();
+
+            Assert.True(context.IsDevelopment);
+            Assert.NotNull(host.Services.GetService<ICorsService>());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", previousDotnetEnvironment);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousAspNetCoreEnvironment);
+        }
+    }
+
+    [Fact]
     public async Task ConfigureServices_Cors_SpecificOrigins_Works()
     {
         var previous = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");

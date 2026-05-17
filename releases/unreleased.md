@@ -49,6 +49,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorWire CLI validation errors now include a concrete source-selection example and `razorwire export --help` hint, so a failed export tells developers the next useful command instead of only naming the bad input.
 - RazorWire CLI users who still want extensionless, server-routed export output should pass `--mode hybrid`. The default `cdn` mode is for plain static hosts and CDNs, not S3-specific infrastructure.
 - PackageIndex now has a real `--help`/`-h` surface that exits successfully, describes its commands and options, and reports unknown commands before printing usage.
+- AppSurface docs preview now defaults to the Development host environment when no `--environment` is supplied, so local `appsurface docs` runs with no configured endpoint use the deterministic per-workspace localhost port instead of falling through to Kestrel's port `5000` default.
 
 ### Core diagnostics
 
@@ -73,6 +74,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 ### Web host development defaults
 
 - AppSurface web hosts now choose a deterministic localhost-only development URL when no endpoint is configured, while production, staging, container, and appsettings-based endpoint choices remain untouched.
+- AppSurface startup environment resolution now treats command-line `--environment` as the highest-priority source before `ASPNETCORE_ENVIRONMENT` and `DOTNET_ENVIRONMENT`, keeping module startup context aligned with Generic Host configuration.
 - AppSurface web hosts now fail fast when startup does not complete before `WebOptions.StartupTimeout`, which defaults to 10 seconds and catches pre-bind stalls from sandbox restrictions, package layout issues, static asset discovery, or hosted services that block startup.
 - Startup watchdog failures now surface Codex sandbox markers, the observed startup phase, safe path context, static web asset mode, endpoint startup arguments, and a sandbox-first rerun recommendation when applicable.
 - OpenAPI's optional web package now has dedicated test coverage for service registration, endpoint mapping, generated document titles, and transformer behavior that removes `ForgeTrust.AppSurface.Web` tags at the document and operation levels while preserving unrelated tags, so the public module contract is guarded independently of Scalar.
@@ -135,6 +137,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorDocs fenced Markdown code blocks now render server-side syntax highlighting through TextMateSharp with RazorDocs-owned token classes, language badges, and escaped plaintext fallback when a language is unknown, unsupported, oversized, or cannot be tokenized safely.
 - RazorDocs search now keeps failure recovery markup out of the active search shell until the index actually fails to load, so successful searches no longer expose hidden failure copy to text extraction tools.
 - RazorDocs search now opens as a richer workspace with representative starter rows, filter-first browsing, stronger no-results recovery, and normalized release badge aliases.
+- RazorDocs search result rows now use one semantic full-row link, so touch users can tap anywhere in a visible result while keyboard focus, copied links, and open-in-new-tab behavior stay native.
 - RazorDocs harvesting now excludes test-project docs and generated example-app API reference from the docs surface while keeping authored example README walkthroughs public.
 - RazorDocs now includes a repository root `LICENSE` file as a docs artifact when present, so repo-relative license links remain revision-correct and still pass CDN static export validation.
 - RazorDocs now documents the namespace README merge contract with positive and negative examples, while detail-page titles wrap on narrow screens so long package names do not clip on mobile.
@@ -143,6 +146,8 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorDocs now treats `Releases` as a first-class public section and suppresses breadcrumb links to generated parent routes that do not correspond to published docs pages, keeping static export warnings focused on actionable broken links.
 - RazorDocs wayfinding coverage now waits for docs content replacement before asserting sequence-link destinations, keeping the details-page proof path deterministic in CI.
 - RazorDocs Playwright integration coverage now hosts the standalone docs app in-process through the standalone host builder, avoiding fixture-time `dotnet run` rebuilds and stale standalone `bin` output during focused test runs.
+- First localization foundation slice for RazorDocs: disabled-by-default locale configuration, localized front matter metadata, inferred `README.fr.md`-style variant grouping, diagnostics for unsupported or ambiguous locale signals, and an internal route/search graph seam for later visible localized pages.
+- RazorDocs now has a test-backed JavaScript parser decision probe for future public API harvesting, covering Acornima span behavior, malformed syntax handling, BSD-3-Clause compliance expectations, and the first max-file-size recommendation before that parser moves into product code.
 
 ### RazorWire form UX
 

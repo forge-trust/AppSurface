@@ -36,6 +36,15 @@ public class StartupContextTests
         Assert.Equal(ConsoleOutputMode.CommandFirst, context.ConsoleOutputMode);
     }
 
+    [Fact]
+    public void EnvironmentProvider_DefaultsToCommandLineAwareProvider()
+    {
+        var context = new StartupContext(["--environment", Environments.Development], new DummyModule());
+
+        Assert.True(context.IsDevelopment);
+        Assert.Equal(Environments.Development, context.EnvironmentProvider.Environment);
+    }
+
     [Theory]
     [InlineData(ConsoleOutputMode.Default, 0)]
     [InlineData(ConsoleOutputMode.CommandFirst, 1)]

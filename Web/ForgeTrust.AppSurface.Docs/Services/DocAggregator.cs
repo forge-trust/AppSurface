@@ -91,6 +91,122 @@ internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("sourcePath")] string SourcePath = "");
 
 /// <summary>
+/// Describes a requested search-index projection for the cached docs snapshot.
+/// </summary>
+/// <param name="Locale">
+/// Optional active locale code. Blank values are treated as the default projection; non-blank values are trimmed and
+/// lower-cased before cache lookup so request casing does not create duplicate entries.
+/// </param>
+/// <param name="IncludeAllLocales">
+/// Reserved switch for a future all-locales search payload. Phase 1 preserves the existing default payload contract.
+/// </param>
+internal sealed record DocsSearchIndexProjection(
+    string? Locale = null,
+    bool IncludeAllLocales = false);
+
+/// <summary>
+/// Caches search-index payloads projected from one immutable docs snapshot.
+/// </summary>
+/// <remarks>
+/// Phase 1 always returns the default payload, but the cache reserves normalized per-locale keys so later slices can
+/// compute locale-specific payloads without changing <see cref="DocAggregator"/> callers. Access to the mutable
+/// projection dictionary is guarded by a private lock, and cache growth is capped because projection values can come
+/// from requests.
+/// </remarks>
+internal sealed class DocsSearchIndexProjectionCache
+{
+    private const int MaxProjectionCacheEntries = 64;
+
+    private readonly DocsSearchIndexPayload _defaultPayload;
+    private readonly LocalizedDocsGraph _localizedGraph;
+    private readonly Dictionary<DocsSearchIndexProjection, DocsSearchIndexPayload> _payloads = [];
+    private readonly object _gate = new();
+
+    /// <summary>
+    /// Initializes a projection cache for a single docs snapshot and seeds the default projection.
+    /// </summary>
+    /// <param name="defaultPayload">Non-null v1 search-index payload returned for the default projection.</param>
+    /// <param name="localizedGraph">Non-null locale graph that determines whether localized projections are active.</param>
+    internal DocsSearchIndexProjectionCache(
+        DocsSearchIndexPayload defaultPayload,
+        LocalizedDocsGraph localizedGraph)
+    {
+        ArgumentNullException.ThrowIfNull(defaultPayload);
+        ArgumentNullException.ThrowIfNull(localizedGraph);
+
+        _defaultPayload = defaultPayload;
+        _localizedGraph = localizedGraph;
+        _payloads[new DocsSearchIndexProjection()] = defaultPayload;
+    }
+
+    /// <summary>
+    /// Gets the cached payload for a normalized projection.
+    /// </summary>
+    /// <remarks>
+    /// When localization is disabled, or when the projection has no locale, the default payload is returned without
+    /// growing the projection cache. During Phase 1, locale projections also return the default payload; the cache entry
+    /// is a bounded placeholder for later locale-specific payload generation.
+    /// </remarks>
+    /// <param name="projection">Projection request to normalize and resolve.</param>
+    /// <returns>The default payload in Phase 1, or a cached projection payload in later localization slices.</returns>
+    internal DocsSearchIndexPayload GetPayload(DocsSearchIndexProjection projection)
+    {
+        ArgumentNullException.ThrowIfNull(projection);
+
+        var normalizedProjection = NormalizeProjection(projection);
+        if (!_localizedGraph.Enabled || string.IsNullOrWhiteSpace(normalizedProjection.Locale))
+        {
+            return _defaultPayload;
+        }
+
+        lock (_gate)
+        {
+            if (_payloads.TryGetValue(normalizedProjection, out var payload))
+            {
+                return payload;
+            }
+
+            // Phase 1 reserves the per-locale projection cache while preserving the existing v1 search payload contract.
+            if (_payloads.Count >= MaxProjectionCacheEntries)
+            {
+                return _defaultPayload;
+            }
+
+            var projectionPayload = _defaultPayload;
+            _payloads[normalizedProjection] = projectionPayload;
+            return projectionPayload;
+        }
+    }
+
+    /// <summary>
+    /// Gets the number of seeded projection entries, exposed so tests can verify the cache bound without reflection.
+    /// </summary>
+    internal int CachedProjectionCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _payloads.Count;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Normalizes a projection key before cache lookup.
+    /// </summary>
+    /// <param name="projection">Projection request supplied by the caller.</param>
+    /// <returns>A projection whose locale is null for blank input, or trimmed and lower-case invariant otherwise.</returns>
+    private static DocsSearchIndexProjection NormalizeProjection(DocsSearchIndexProjection projection)
+    {
+        var locale = string.IsNullOrWhiteSpace(projection.Locale)
+            ? null
+            : projection.Locale.Trim().ToLowerInvariant();
+        return projection with { Locale = locale };
+    }
+}
+
+/// <summary>
 /// Service responsible for aggregating documentation from multiple harvesters and caching the results.
 /// </summary>
 public class DocAggregator
@@ -108,6 +224,7 @@ public class DocAggregator
     private readonly DocsUrlBuilder _docsUrlBuilder;
     private readonly ILogger<DocAggregator> _logger;
     private readonly RazorDocsContributorOptions _contributorOptions;
+    private readonly RazorDocsLocalizationOptions _localizationOptions;
     private readonly Func<string, CancellationToken, Task<DateTimeOffset?>> _resolveGitLastUpdatedUtcAsync;
     private readonly TimeSpan _harvesterTimeout;
     private readonly TimeSpan _contributorFreshnessTimeout;
@@ -145,8 +262,9 @@ public class DocAggregator
         Dictionary<string, DocNode> DocsByPath,
         DocPathResolver PathResolver,
         DocRouteIdentityCatalog RouteIdentityCatalog,
+        LocalizedDocsGraph LocalizedGraph,
         IReadOnlyList<DocSectionSnapshot> PublicSections,
-        DocsSearchIndexPayload SearchIndexPayload,
+        DocsSearchIndexProjectionCache SearchIndexProjections,
         Dictionary<string, DocContributorProvenanceViewModel> ContributorProvenanceByPath,
         DocHarvestHealthSnapshot HarvestHealth);
 
@@ -324,6 +442,7 @@ public class DocAggregator
         _docsUrlBuilder = docsUrlBuilder;
         _logger = logger;
         _contributorOptions = options.Contributor ?? throw new ArgumentNullException(nameof(options.Contributor));
+        _localizationOptions = options.Localization ?? throw new ArgumentNullException(nameof(options.Localization));
         SnapshotCacheDuration = ResolveSnapshotCacheDuration(options);
         _docsCachePolicy = CachePolicy.Absolute(SnapshotCacheDuration);
         _harvesterTimeout = ResolveHarvesterTimeout(harvesterTimeout);
@@ -533,7 +652,26 @@ public class DocAggregator
     internal async Task<DocsSearchIndexPayload> GetSearchIndexPayloadAsync(CancellationToken cancellationToken = default)
     {
         var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
-        return snapshot.SearchIndexPayload;
+        return snapshot.SearchIndexProjections.GetPayload(new DocsSearchIndexProjection());
+    }
+
+    /// <summary>
+    /// Returns a cached search-index projection for future locale-aware search consumers.
+    /// </summary>
+    /// <param name="projection">The requested search projection key.</param>
+    /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
+    /// <returns>
+    /// The matching search payload. Phase 1 preserves the existing payload schema for every projection while reserving
+    /// the snapshot-owned cache seam that localized search will fill in Phase 3.
+    /// </returns>
+    internal async Task<DocsSearchIndexPayload> GetSearchIndexPayloadAsync(
+        DocsSearchIndexProjection projection,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(projection);
+
+        var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
+        return snapshot.SearchIndexProjections.GetPayload(projection);
     }
 
     /// <summary>
@@ -595,6 +733,7 @@ public class DocAggregator
         var snapshotCacheDuration = SnapshotCacheDuration;
         var docsCachePolicy = _docsCachePolicy;
         var utcNow = _utcNow;
+        var localizationOptions = _localizationOptions;
 
         return await _memo.GetAsync(
                    _cacheScope,
@@ -680,6 +819,9 @@ public class DocAggregator
                            .ToDictionary(n => n.Path, n => n);
                        var finalRouteIdentityCatalog = DocRouteIdentityCatalog.Create(docsByPath.Values, _docsUrlBuilder);
                        var pathResolver = DocPathResolver.Create(docsByPath.Values);
+                       var localizedGraph = new LocalizedDocsGraphBuilder(localizationOptions).Build(
+                           docsByPath.Values,
+                           finalRouteIdentityCatalog);
 
                        var publicSections = BuildPublicSections(docsByPath.Values, logger);
                        var contributorProvenanceByPath = await BuildContributorProvenanceByPathAsync(
@@ -689,9 +831,10 @@ public class DocAggregator
                            docsByPath.Values,
                            publicSections,
                            finalRouteIdentityCatalog);
+                       var searchIndexProjections = new DocsSearchIndexProjectionCache(searchIndexPayload, localizedGraph);
                        var harvestHealth = BuildHarvestHealthSnapshot(
                            harvesterResults,
-                           finalRouteIdentityCatalog.Diagnostics,
+                           finalRouteIdentityCatalog.Diagnostics.Concat(localizedGraph.Diagnostics).ToArray(),
                            docsByPath.Count,
                            repositoryRoot,
                            utcNow(),
@@ -709,8 +852,9 @@ public class DocAggregator
                            docsByPath,
                            pathResolver,
                            finalRouteIdentityCatalog,
+                           localizedGraph,
                            publicSections,
-                           searchIndexPayload,
+                           searchIndexProjections,
                            contributorProvenanceByPath,
                            harvestHealth);
                    },

@@ -104,12 +104,18 @@ public class RazorDocsViewsTests
         Assert.Contains("function isPageTypeInGroup(doc, group)", searchClient);
         Assert.Contains("function getPageTypeDisplayLabel(doc)", searchClient);
         Assert.Contains("function createSearchResultArticle(doc, queryTokens, options = {})", searchClient);
+        Assert.Contains("const link = createElement('a', 'docs-search-result-link');", searchClient);
+        Assert.Contains("function createSearchResultLinkLabel(doc)", searchClient);
+        Assert.Contains("link.setAttribute('aria-label', createSearchResultLinkLabel(doc));", searchClient);
+        Assert.Contains("link.append(title);", searchClient);
+        Assert.Contains("article.append(link);", searchClient);
         Assert.Contains("docs-search-result-badges", searchClient);
         Assert.Contains("function createSearchResultPageTypeBadge(doc)", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.component))", searchClient);
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
         Assert.Contains("docs-search-result-meta-line", searchClient);
         Assert.Contains("docs-search-page-starter-docs", searchClient);
+        Assert.DoesNotContain("title.append(link);", searchClient);
     }
 
     [Fact]
@@ -232,6 +238,10 @@ public class RazorDocsViewsTests
         Assert.Contains("background: var(--docs-search-color-surface-canvas);", searchStylesheet);
         Assert.Contains("border: 1px solid var(--docs-search-color-border-default);", searchStylesheet);
         Assert.Contains("box-shadow: var(--docs-search-focus-ring-inset);", searchStylesheet);
+        Assert.Contains(".docs-search-result-link:focus-visible", searchStylesheet);
+        Assert.Contains(".docs-search-result-link:active", searchStylesheet);
+        Assert.Contains("background: var(--docs-search-color-state-active-fill);", searchStylesheet);
+        Assert.Contains("color: var(--docs-search-color-accent);", searchStylesheet);
         Assert.Contains(
             "background: linear-gradient(90deg, var(--docs-search-color-skeleton-edge), var(--docs-search-color-skeleton-mid), var(--docs-search-color-skeleton-edge));",
             searchStylesheet);

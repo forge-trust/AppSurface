@@ -276,8 +276,8 @@ public class ExportEngineTests
 
         try
         {
-            var handler = new TestHttpMessageHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
@@ -302,8 +302,8 @@ public class ExportEngineTests
 
         try
         {
-            var handler = new DocsSeedHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var handler = new DocsSeedHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -334,8 +334,8 @@ public class ExportEngineTests
 
         try
         {
-            var handler = new TestHttpMessageHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -1562,7 +1562,7 @@ public class ExportEngineTests
         }
     }
 
-    private sealed class DocsSeedHandler : HttpMessageHandler
+    private sealed class DocsSeedHandler : TestHttpMessageHandler
     {
         public List<string> RequestPaths { get; } = [];
 
@@ -1573,7 +1573,7 @@ public class ExportEngineTests
 
             return path == "/docs"
                 ? Html("<html><body><h1>Docs</h1></body></html>")
-                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+                : base.SendAsync(request, cancellationToken);
         }
     }
 
