@@ -27,6 +27,17 @@ The Core library is designed to be lightweight and implementation-agnostic. It p
 
 Keep these values separate. ASP.NET static web assets use the host application name to find runtime manifests. Passing a custom display label such as `CustomDocsHost` into the host environment can make static asset requests resolve against a manifest that does not exist. When a test or custom host needs a different manifest identity, set `StartupContext.OverrideEntryPointAssembly` instead of overloading `ApplicationName`.
 
+## Environment resolution
+
+`StartupContext.EnvironmentProvider` defaults to `DefaultEnvironmentProvider`, which keeps AppSurface module decisions aligned with the Generic Host arguments. When startup receives `--environment Development` or `--environment=Development`, `StartupContext.IsDevelopment` reports `true` before module hooks run.
+
+If no command-line environment is supplied, AppSurface falls back to `ASPNETCORE_ENVIRONMENT`, then `DOTNET_ENVIRONMENT`, then `Production`. Pass a custom `IEnvironmentProvider` to `StartupContext` when a test, embedded host, or specialized runner needs a different source of truth. `DefaultEnvironmentProvider.ResolveEnvironmentArgument` is the shared parser for AppSurface hosts: blank, switch-like, and assignment-shaped split values are ignored, while duplicate `--environment` keys use the last valid value to match Microsoft configuration behavior.
+
+Pitfalls:
+
+- Do not read only `IHostEnvironment` when writing module startup decisions. Module hooks receive `StartupContext` before the built host exists.
+- Do not pass `--environment` only to the Generic Host if an AppSurface module also needs the same value. Put it in `StartupContext.Args`, or pass a matching custom `IEnvironmentProvider`.
+
 ## Startup dependency graph
 
 `AppSurfaceStartup` registers framework dependencies and root-module dependencies exactly once per `StartupContext`. Standard hosts do not need to call anything directly: the registration happens during host-builder creation before module hooks and service registration run.

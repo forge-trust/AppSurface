@@ -5,7 +5,7 @@ The **AppSurface CLI** is the command-line home for repository-level AppSurface 
 The first public verb is `docs`, which replaces the earlier standalone `razordocs preview --repo .` idea with an AppSurface-owned command:
 
 ```bash
-appsurface docs --repo . --urls http://127.0.0.1:5189
+appsurface docs --repo .
 ```
 
 `appsurface docs` runs the same RazorDocs standalone host used by CI and integration tests. It forwards RazorDocs configuration into that host instead of duplicating harvesting, routing, static web asset, or MVC setup in the CLI.
@@ -17,7 +17,7 @@ appsurface docs --repo . --urls http://127.0.0.1:5189
 Preview RazorDocs for a repository checkout.
 
 ```bash
-appsurface docs --repo . --port 5189
+appsurface docs --repo .
 ```
 
 Options:
@@ -28,17 +28,19 @@ Options:
 - `--strict`: Enables `RazorDocs:Harvest:FailOnFailure=true`, which fails startup when every configured harvester fails.
 - `--route-root`: Route-family root for version and archive routes.
 - `--docs-root`: Live docs preview root.
-- `--environment`, `-e`: Host environment forwarded to the RazorDocs host.
+- `--environment`, `-e`: Host environment forwarded to the RazorDocs host. Defaults to `Development` so the AppSurface Web deterministic per-workspace localhost URL is used when no endpoint is configured.
 - `--startup-timeout-seconds`: Seconds to wait for the web host to start before failing fast. Defaults to `10`; use `0` to disable while investigating intentional pre-bind delays.
 
 `appsurface docs preview` is an alias for the same behavior, kept so the old deferred shape maps cleanly to the new AppSurface command family.
+
+When no endpoint is configured, the command runs the host in `Development` from the selected repository root and lets AppSurface Web choose the stable localhost port for that repository or worktree. Use the startup log as the source of truth for the selected URL. Pass `--port`, `--urls`, `--environment Production`, or endpoint settings such as `ASPNETCORE_URLS`, HTTP/HTTPS ports, or Kestrel endpoints when you intentionally want to bypass that local preview default.
 
 ## Development
 
 Run the tool from source while developing:
 
 ```bash
-dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo . --urls http://127.0.0.1:5189
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo .
 ```
 
 Use `--strict` for CI-like validation when an all-failed harvest should stop the preview before the host begins serving.

@@ -6,6 +6,7 @@ using CliFx.Exceptions;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.AppSurface.Cli;
@@ -61,6 +62,8 @@ internal sealed class DocsPreviewCommand : RazorDocsPreviewCommand
 /// </remarks>
 internal abstract class RazorDocsPreviewCommand : ICommand
 {
+    private static readonly string DefaultPreviewEnvironmentName = Environments.Development;
+
     private readonly ILogger _logger;
     private readonly IRazorDocsHostRunner _hostRunner;
 
@@ -146,10 +149,10 @@ internal abstract class RazorDocsPreviewCommand : ICommand
     /// Gets the host environment forwarded to the RazorDocs standalone host.
     /// </summary>
     /// <remarks>
-    /// Use <c>Development</c> for local preview diagnostics and development defaults. Leave unset to let the host choose
-    /// its normal environment from command-line and process configuration.
+    /// Defaults to <c>Development</c> so local previews receive AppSurface Web's deterministic per-workspace endpoint
+    /// fallback when no endpoint is configured. Set this explicitly when testing production or staging behavior.
     /// </remarks>
-    [CommandOption("environment", 'e', Description = "Host environment forwarded to the RazorDocs host.")]
+    [CommandOption("environment", 'e', Description = "Host environment forwarded to the RazorDocs host (default: Development).")]
     public string? EnvironmentName { get; init; }
 
     /// <summary>
@@ -186,6 +189,7 @@ internal abstract class RazorDocsPreviewCommand : ICommand
     {
         var hostArgs = BuildHostArgs();
         _logger.LogInformation("Starting RazorDocs preview for {RepositoryRoot}.", hostArgs.RepositoryRoot);
+        using var currentDirectory = CurrentDirectoryScope.ChangeTo(hostArgs.RepositoryRoot);
         await _hostRunner.RunAsync(hostArgs.Args, hostArgs.StartupTimeout, cancellationToken);
     }
 
@@ -236,9 +240,16 @@ internal abstract class RazorDocsPreviewCommand : ICommand
 
         AddOptional(args, "--RazorDocs:Routing:RouteRootPath", RouteRootPath);
         AddOptional(args, "--RazorDocs:Routing:DocsRootPath", DocsRootPath);
-        AddOptional(args, "--environment", EnvironmentName);
+        AddOptional(args, "--environment", ResolveEnvironmentName());
 
         return new RazorDocsHostArgs(repositoryRoot, args.ToArray(), ResolveStartupTimeout());
+    }
+
+    private string ResolveEnvironmentName()
+    {
+        return string.IsNullOrWhiteSpace(EnvironmentName)
+            ? DefaultPreviewEnvironmentName
+            : EnvironmentName;
     }
 
     private static void AddOptional(List<string> args, string name, string? value)
@@ -268,6 +279,28 @@ internal abstract class RazorDocsPreviewCommand : ICommand
         return StartupTimeoutSeconds == 0
             ? null
             : TimeSpan.FromSeconds(StartupTimeoutSeconds);
+    }
+
+    private sealed class CurrentDirectoryScope : IDisposable
+    {
+        private readonly string _previousDirectory;
+
+        private CurrentDirectoryScope(string previousDirectory)
+        {
+            _previousDirectory = previousDirectory;
+        }
+
+        public static CurrentDirectoryScope ChangeTo(string directory)
+        {
+            var previousDirectory = Directory.GetCurrentDirectory();
+            Directory.SetCurrentDirectory(directory);
+            return new CurrentDirectoryScope(previousDirectory);
+        }
+
+        public void Dispose()
+        {
+            Directory.SetCurrentDirectory(_previousDirectory);
+        }
     }
 }
 

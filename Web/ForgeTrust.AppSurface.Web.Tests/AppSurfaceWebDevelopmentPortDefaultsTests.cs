@@ -61,6 +61,182 @@ public sealed class AppSurfaceWebDevelopmentPortDefaultsTests
     }
 
     [Fact]
+    public void Resolve_AppendsDeterministicPort_WhenCommandLineEnvironmentIsDevelopment()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { "--environment", Environments.Development };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            _ => null);
+
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal(
+            ["--environment", Environments.Development, "--urls", $"http://localhost:{appliedPort}"],
+            resolution.Args);
+    }
+
+    [Fact]
+    public void Resolve_AppendsDeterministicPort_WhenCommandLineEnvironmentIsDevelopmentInline()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { $"--environment={Environments.Development}" };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            _ => null);
+
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal(
+            [$"--environment={Environments.Development}", "--urls", $"http://localhost:{appliedPort}"],
+            resolution.Args);
+    }
+
+    [Fact]
+    public void Resolve_DoesNotAppendDeterministicPort_WhenCommandLineEnvironmentIsProduction()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { "--environment", Environments.Production };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            ReadDevelopmentEnvironment);
+
+        Assert.Null(resolution.AppliedPort);
+        Assert.Same(args, resolution.Args);
+        Assert.Null(resolution.SeedPath);
+    }
+
+    [Theory]
+    [InlineData("--environment")]
+    [InlineData("--environment=")]
+    public void Resolve_FallsBackToEnvironmentVariables_WhenCommandLineEnvironmentIsBlank(string environmentOption)
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            [environmentOption],
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            ReadDevelopmentEnvironment);
+
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal([environmentOption, "--urls", $"http://localhost:{appliedPort}"], resolution.Args);
+    }
+
+    [Fact]
+    public void Resolve_FallsBackToEnvironmentVariables_WhenSplitCommandLineEnvironmentIsBlank()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { "--environment", " " };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            ReadDevelopmentEnvironment);
+
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal(["--environment", " ", "--urls", $"http://localhost:{appliedPort}"], resolution.Args);
+    }
+
+    [Fact]
+    public void Resolve_AppendsDeterministicPort_WhenBlankThenValidCommandLineEnvironmentIsDevelopment()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { "--environment", " ", "--environment", Environments.Development };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            ReadDevelopmentEnvironment);
+
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal(
+            ["--environment", " ", "--environment", Environments.Development, "--urls", $"http://localhost:{appliedPort}"],
+            resolution.Args);
+    }
+
+    [Fact]
+    public void Resolve_AppendsDeterministicPort_WhenEnvironmentValueIsAnotherOption()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { "--environment", "--docs-root", "/docs", "--environment", Environments.Development };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            ReadDevelopmentEnvironment);
+
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal(
+            ["--environment", "--docs-root", "/docs", "--environment", Environments.Development, "--urls", $"http://localhost:{appliedPort}"],
+            resolution.Args);
+    }
+
+    [Fact]
+    public void Resolve_UsesLastValidCommandLineEnvironment()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { "--environment", Environments.Production, $"--environment={Environments.Development}" };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            ReadDevelopmentEnvironment);
+
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal(
+            ["--environment", Environments.Production, $"--environment={Environments.Development}", "--urls", $"http://localhost:{appliedPort}"],
+            resolution.Args);
+    }
+
+    [Fact]
+    public void Resolve_IgnoresSplitEnvWithEquals_UsesLaterValidEnvironment()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var appBaseDirectory = environment.CreateApplicationBaseDirectory("workspace");
+        var args = new[] { "--environment", "Dev=1", "--environment", Environments.Development };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            appBaseDirectory,
+            ReadDevelopmentEnvironment);
+
+        var appliedPort = Assert.IsType<int>(resolution.AppliedPort);
+        Assert.Equal(
+            ["--environment", "Dev=1", "--environment", Environments.Development, "--urls", $"http://localhost:{appliedPort}"],
+            resolution.Args);
+    }
+
+    [Fact]
     public void Resolve_AppendsDeterministicPort_WhenDotnetEnvironmentIsDevelopment()
     {
         using var environment = new TemporaryEnvironment();
@@ -275,6 +451,23 @@ public sealed class AppSurfaceWebDevelopmentPortDefaultsTests
         using var environment = new TemporaryEnvironment();
         environment.CreateGitRepo("workspace");
         var args = new[] { $"--{key}=5005" };
+
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            args,
+            environment.WorkspaceRoot,
+            environment.CreateApplicationBaseDirectory("workspace"),
+            ReadDevelopmentEnvironment);
+
+        Assert.Null(resolution.AppliedPort);
+        Assert.Same(args, resolution.Args);
+    }
+
+    [Fact]
+    public void Resolve_DoesNotOverrideEndpointCommandLineConfiguration_WhenEnvironmentOptionIsDangling()
+    {
+        using var environment = new TemporaryEnvironment();
+        environment.CreateGitRepo("workspace");
+        var args = new[] { "--environment", "--http_ports", "5005" };
 
         var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
             args,
