@@ -29,6 +29,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 
 - Pull request titles are now expected to follow Conventional Commits so the merge history is machine-readable for future automation.
 - Pull requests are expected to update this page unless maintainers explicitly mark the change as outside the public release story.
+- Test and integration process helpers now use CliWrap for child-process execution, keeping stdout and stderr diagnostics available while aligning test infrastructure with the preferred process-launch abstraction.
 - The primary build workflow now declares explicit read-only `GITHUB_TOKEN` contents permissions, keeping CI aligned with least-privilege GitHub Actions defaults.
 - Markdown-only changes on `main` now republish the docs surface, so release-note and policy edits are treated as first-class product updates.
 - AppSurface now exposes focused GitHub issue forms for bug reports, feature requests, and docs/developer-experience feedback, with the root README and contribution guide pointing developers to that feedback path.
@@ -137,6 +138,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorDocs fenced Markdown code blocks now render server-side syntax highlighting through TextMateSharp with RazorDocs-owned token classes, language badges, and escaped plaintext fallback when a language is unknown, unsupported, oversized, or cannot be tokenized safely.
 - RazorDocs search now keeps failure recovery markup out of the active search shell until the index actually fails to load, so successful searches no longer expose hidden failure copy to text extraction tools.
 - RazorDocs search now opens as a richer workspace with representative starter rows, filter-first browsing, stronger no-results recovery, and normalized release badge aliases.
+- RazorDocs search result rows now use one semantic full-row link, so touch users can tap anywhere in a visible result while keyboard focus, copied links, and open-in-new-tab behavior stay native.
 - RazorDocs harvesting now excludes test-project docs and generated example-app API reference from the docs surface while keeping authored example README walkthroughs public.
 - RazorDocs now includes a repository root `LICENSE` file as a docs artifact when present, so repo-relative license links remain revision-correct and still pass CDN static export validation.
 - RazorDocs now documents the namespace README merge contract with positive and negative examples, while detail-page titles wrap on narrow screens so long package names do not clip on mobile.

@@ -3,6 +3,7 @@ using System.Diagnostics;
 
 namespace ForgeTrust.RazorWire.Cli.Tests;
 
+// Raw Process instances are intentional here because TargetAppProcess is the production process wrapper under test.
 public class TargetAppProcessTests
 {
     [Fact]

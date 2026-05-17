@@ -994,6 +994,19 @@
     );
   }
 
+  function createSearchResultLinkLabel(doc) {
+    const title = String(doc.title ?? '').trim() || 'Documentation result';
+    const titleKey = title.toLowerCase();
+    const context = [
+      doc.navGroup,
+      getPageTypeDisplayLabel(doc)
+    ]
+      .map((part) => String(part ?? '').trim())
+      .find((part) => part && part.toLowerCase() !== titleKey);
+
+    return context ? `Open ${title} in ${context}` : `Open ${title}`;
+  }
+
   function createSearchResultArticle(doc, queryTokens, options = {}) {
     const article = createElement(
       'article',
@@ -1001,6 +1014,10 @@
         ? 'docs-search-result docs-search-result-starter'
         : 'docs-search-result'
     );
+    const link = createElement('a', 'docs-search-result-link');
+    link.href = doc.path;
+    link.setAttribute('aria-label', createSearchResultLinkLabel(doc));
+    applyDocsNavigationTarget(link, doc.path);
 
     const breadcrumbs = buildBreadcrumbLabels(doc);
     if (breadcrumbs.length > 0) {
@@ -1012,16 +1029,12 @@
 
         breadcrumbRow.append(createElement('span', null, label));
       });
-      article.append(breadcrumbRow);
+      link.append(breadcrumbRow);
     }
 
     const title = createElement('h2', 'docs-search-result-title');
-    const link = createElement('a');
-    link.href = doc.path;
-    applyDocsNavigationTarget(link, doc.path);
-    link.append(createHighlightedFragment(doc.title, queryTokens));
-    title.append(link);
-    article.append(title);
+    title.append(createHighlightedFragment(doc.title, queryTokens));
+    link.append(title);
 
     const metaParts = [
       doc.navGroup,
@@ -1029,7 +1042,7 @@
       doc.path
     ].map((part) => String(part ?? '').trim()).filter(Boolean);
     if (metaParts.length > 0) {
-      article.append(createElement('p', 'docs-search-result-meta-line', [...new Set(metaParts)].join(' • ')));
+      link.append(createElement('p', 'docs-search-result-meta-line', [...new Set(metaParts)].join(' • ')));
     }
 
     const badgeRow = createElement('div', 'docs-search-result-badges');
@@ -1051,16 +1064,17 @@
     }
 
     if (badgeRow.childNodes.length > 0) {
-      article.append(badgeRow);
+      link.append(badgeRow);
     }
 
     const snippetText = doc.summary || doc.snippet || '';
     if (snippetText) {
       const snippet = createElement('p', 'docs-search-result-snippet');
       snippet.append(createHighlightedFragment(snippetText, queryTokens));
-      article.append(snippet);
+      link.append(snippet);
     }
 
+    article.append(link);
     return article;
   }
 

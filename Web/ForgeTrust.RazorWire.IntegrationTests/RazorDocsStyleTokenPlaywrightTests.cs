@@ -55,7 +55,7 @@ public sealed class RazorDocsStyleTokenPlaywrightTests
               return [
                 style('#docs-search-page-input').borderTopColor,
                 style('#docs-search-page-input').boxShadow,
-                style('.docs-search-result-title a').color,
+                style('.docs-search-result-link').color,
                 style('.docs-search-page-active-filter').backgroundColor,
                 style('.docs-search-page-active-filter').color,
                 style('.docs-search-result mark').backgroundColor
