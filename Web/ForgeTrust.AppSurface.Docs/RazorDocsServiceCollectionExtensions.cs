@@ -75,7 +75,9 @@ public static class RazorDocsServiceCollectionExtensions
                     options.Contributor ??= new RazorDocsContributorOptions();
                     options.Routing ??= new RazorDocsRoutingOptions();
                     options.Versioning ??= new RazorDocsVersioningOptions();
+                    options.Localization ??= new RazorDocsLocalizationOptions();
                     options.Sidebar.NamespacePrefixes ??= [];
+                    options.Localization.Locales ??= [];
 
                     if (options.Source.RepositoryRoot is null)
                     {
@@ -104,6 +106,20 @@ public static class RazorDocsServiceCollectionExtensions
                     options.Versioning.CatalogPath = NormalizeOrNull(options.Versioning.CatalogPath);
                     options.Contributor.SymbolSourceUrlTemplate = NormalizeOrNull(options.Contributor.SymbolSourceUrlTemplate);
                     options.Contributor.SourceRef = NormalizeOrNull(options.Contributor.SourceRef);
+                    options.Localization.DefaultLocale = NormalizeOrNull(options.Localization.DefaultLocale) ?? "en";
+                    foreach (var locale in options.Localization.Locales)
+                    {
+                        if (locale is null)
+                        {
+                            continue;
+                        }
+
+                        locale.Code = NormalizeOrNull(locale.Code) ?? string.Empty;
+                        locale.Label = NormalizeOrNull(locale.Label);
+                        locale.Lang = NormalizeOrNull(locale.Lang);
+                        locale.RoutePrefix = NormalizeOrNull(locale.RoutePrefix);
+                    }
+
                     options.Sidebar.NamespacePrefixes = options.Sidebar.NamespacePrefixes
                         .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
                         .Select(prefix => prefix.Trim())

@@ -17,6 +17,7 @@ If you are evaluating RazorDocs for your own repository, start with [Use RazorDo
 - `DocsUrlBuilder` plus the MVC surface used by RazorDocs consumers so the live docs root, search shell, and archive routes stay in one shared contract
 - `RazorDocsVersionCatalog` plus `RazorDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
 - Structured trust metadata plus a built-in trust bar for release notes, upgrade guides, and other pages that need status and provenance near the top
+- A source-backed localization foundation with typed locale options, locale metadata, translation-set inference, and diagnostics for serious multi-language docs systems
 - Contributor provenance rendering with a `Source of truth` strip for source links, edit links, and relative `Last updated` timestamps on details pages
 - Precompiled Tailwind-powered styling with layout-time path resolution for root-module and embedded hosts
 
@@ -222,6 +223,11 @@ RazorDocs currently emits these codes:
 - `DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug` (`razordocs.routes.invalid_canonical_slug`)
 - `DocHarvestDiagnosticCodes.DocInvalidRedirectAlias` (`razordocs.routes.invalid_redirect_alias`)
 - `DocHarvestDiagnosticCodes.DocLossySlugNormalization` (`razordocs.routes.lossy_slug_normalization`)
+- `DocHarvestDiagnosticCodes.LocalizationUnsupportedLocale` (`razordocs.localization.unsupported_locale`)
+- `DocHarvestDiagnosticCodes.LocalizationMissingBase` (`razordocs.localization.missing_base`)
+- `DocHarvestDiagnosticCodes.LocalizationDuplicateVariant` (`razordocs.localization.duplicate_variant`)
+- `DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict` (`razordocs.localization.locale_folder_conflict`)
+- `DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant` (`razordocs.localization.fallback_disabled_missing_variant`)
 
 An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
 
@@ -421,6 +427,96 @@ redirect_aliases:
 
 `canonical_slug` and `redirect_aliases` are docs-root-relative route paths. Do not include a query string, fragment, leading docs root, or host name. Canonical slugs use the same deterministic segment normalization as source-derived Markdown routes. Redirect aliases preserve their literal authored route text after separator cleanup, so legacy URLs such as `Old_Path/Guide.md.html` keep their existing shape instead of being slugified. Aliases redirect permanently to the public canonical route and preserve the request query string. Public Markdown source paths such as `/docs/foo.md` and `/docs/foo.md.html` also redirect to the clean route so GitHub-style copy-pasted links recover automatically. Use `redirect_aliases` for non-source legacy URLs, renamed pages, and old route shapes that are not already implied by the source path. Declared aliases that try to shadow another public Markdown source path are ignored with a `DocRedirectAliasCollision` diagnostic so copy-pasted source URLs keep pointing at their owning page.
 
+### Localization foundation
+
+RazorDocs has a source-backed localization foundation for hosts that need multilingual docs without changing the current browser-visible contract yet. Localization is disabled by default. When enabled, RazorDocs validates configured locales, reads locale metadata from Markdown front matter and sidecars, infers translation sets for colocated files such as `README.fr.md`, builds an internal locale graph, emits stable diagnostics, and reserves a search projection seam. Phase 1 does not add visible language switchers, fallback pages, localized route matching, localized SEO tags, or locale-filtered search results.
+
+Enable it under `RazorDocs:Localization`:
+
+```json
+{
+  "RazorDocs": {
+    "Localization": {
+      "Enabled": true,
+      "DefaultLocale": "en",
+      "Locales": [
+        {
+          "Code": "en",
+          "Label": "English",
+          "Lang": "en-US",
+          "Direction": "Ltr",
+          "RoutePrefix": "en"
+        },
+        {
+          "Code": "fr",
+          "Label": "Français",
+          "Lang": "fr-FR",
+          "Direction": "Ltr",
+          "RoutePrefix": "fr"
+        }
+      ],
+      "RouteMode": "LocalePrefix",
+      "FallbackMode": "DefaultLocaleWithNotice",
+      "SearchMode": "ActiveLocale"
+    }
+  }
+}
+```
+
+Author localization metadata either as friendly top-level keys or as a nested `localization:` block:
+
+```yaml
+---
+title: Getting started
+locale: fr
+translation_key: guides/getting-started
+localized_title: Démarrer
+locale_fallback: Disabled
+---
+```
+
+```yaml
+---
+title: Getting started
+localization:
+  locale: fr
+  translation_key: guides/getting-started
+  localized_title: Démarrer
+  locale_fallback: Disabled
+---
+```
+
+The supported metadata shape is:
+
+- `locale`: optional BCP-47 locale code. It must match a configured `Locales[].Code` when localization is enabled.
+- `translation_key`: optional stable identity shared by all translations of the same page. Use a route-like value such as `guides/getting-started`.
+- `localized_title`: optional title for locale-aware UI surfaces. The current page title still follows the existing `title`, H1, and fallback resolution.
+- `locale_fallback`: optional per-page fallback mode. Supported values are `DefaultLocaleWithNotice` and `Disabled`.
+
+Inference behavior:
+
+- A configured suffix such as `README.fr.md` infers locale `fr` and groups with `README.md`.
+- A suffix that looks like a culture tag but is not configured emits `LocalizationUnsupportedLocale` and is excluded from the locale graph so it cannot masquerade as default-locale content.
+- A locale-prefixed folder such as `fr/guides/start.md` infers locale only when the page also authors `translation_key`; this avoids treating ordinary folders as language roots by accident.
+- A locale-prefixed folder that disagrees with authored `locale` emits `LocalizationLocaleFolderConflict`, and authored metadata wins.
+- A localized suffix variant without its base/default-locale document emits `LocalizationMissingBase`.
+- Two documents with the same `translation_key` and locale emit `LocalizationDuplicateVariant`.
+- A translation set with `locale_fallback: Disabled` or global `FallbackMode: Disabled` emits `LocalizationFallbackDisabledMissingVariant` when a configured locale has no variant.
+
+Decision guidance:
+
+- Prefer colocated files such as `README.md` and `README.fr.md` when translations should stay next to the source page and remain readable in GitHub.
+- Prefer explicit `translation_key` when translated source paths differ substantially, when locale folders are used, or when the source file name is not stable enough to identify the concept.
+- Keep `RoutePrefix` to one safe segment such as `fr` or `pt-br`. RazorDocs rejects prefixes that collide with reserved docs routes such as `search`, `versions`, and `v`.
+- Keep exact published-version localization out of this contract for now. Localized release exports need their own immutable artifact design.
+
+Pitfalls:
+
+- Do not expect enabling localization to create visible `/fr/...` pages yet. The internal graph can produce route candidates, but request routing and fallback rendering are follow-up work.
+- Do not use locale folder inference without `translation_key`. RazorDocs deliberately fails closed so a folder named `fr` can still be ordinary content.
+- Do not reuse a `translation_key` for unrelated pages. It is the identity that future switchers, fallback routes, and search grouping will depend on.
+- Do not parse diagnostic messages. Branch on `DocHarvestDiagnosticCodes.Localization*` constants.
+
 ### Option reference
 
 - `RazorDocs:Mode`
@@ -467,6 +563,28 @@ redirect_aliases:
   - `/` is supported for single-purpose unversioned docs hosts.
   - The path must be app-relative, must not end with `/` except for `/`, and cannot contain query or fragment segments.
   - When versioning is on, it cannot equal the route root and cannot use the route root's reserved archive or exact-version children, such as `/foo/bar/versions`, `/foo/bar/v`, or `/foo/bar/v/1.2.3`.
+- `RazorDocs:Localization:Enabled`
+  - Defaults to `false`.
+  - When `false`, RazorDocs keeps existing routes, visible UI, and search payload behavior.
+  - When `true`, `DefaultLocale` and at least one configured locale are required.
+- `RazorDocs:Localization:DefaultLocale`
+  - Defaults to `en`.
+  - Must match one configured locale code when localization is enabled.
+- `RazorDocs:Localization:Locales`
+  - Defaults to an empty array.
+  - Each entry requires `Code` when localization is enabled. `Code` and optional `Lang` must be valid BCP-47 culture tags.
+  - `Label` is optional reader-facing text for future language UI.
+  - `Direction` supports `Ltr` and `Rtl`.
+  - `RoutePrefix` defaults to `Code`; it must be one safe segment and cannot collide with reserved docs routes.
+- `RazorDocs:Localization:RouteMode`
+  - Defaults to `LocalePrefix`.
+  - The enum is public and versioned for future route strategies, but `LocalePrefix` is the only supported value today.
+- `RazorDocs:Localization:FallbackMode`
+  - Defaults to `DefaultLocaleWithNotice`.
+  - `Disabled` means missing variants should not receive fallback pages once localized route rendering exists.
+- `RazorDocs:Localization:SearchMode`
+  - Defaults to `ActiveLocale`.
+  - Phase 1 preserves the existing v1 search payload for every projection; locale-filtered search is deferred.
 - `RazorDocs:Versioning:Enabled`
   - Turns on the published-version route contract and archive surface.
   - Does not switch the runtime into bundle mode.

@@ -1,3 +1,5 @@
+using ForgeTrust.AppSurface.Docs;
+
 namespace ForgeTrust.AppSurface.Docs.Models;
 
 /// <summary>
@@ -130,6 +132,16 @@ public sealed record DocMetadata
     /// </summary>
     public DocContributorMetadata? Contributor { get; init; }
 
+    /// <summary>
+    /// Gets optional localization metadata used to connect translated variants of the same conceptual document.
+    /// </summary>
+    /// <remarks>
+    /// This nested contract keeps i18n-specific fields together while allowing friendly Markdown front matter aliases
+    /// such as <c>locale</c> and <c>translation_key</c>. <see cref="DocLocalizationMetadata.TranslationKey"/> is the
+    /// stable identity RazorDocs uses to switch languages without relying on matching localized paths.
+    /// </remarks>
+    public DocLocalizationMetadata? Localization { get; init; }
+
     internal bool? PageTypeIsDerived { get; init; }
 
     internal bool? AudienceIsDerived { get; init; }
@@ -215,7 +227,8 @@ public sealed record DocMetadata
             BreadcrumbsMatchPathTargets = breadcrumbsMatchPathTargets,
             FeaturedPageGroups = MergeLists(primary.FeaturedPageGroups, fallback.FeaturedPageGroups),
             Trust = DocTrustMetadata.Merge(primary.Trust, fallback.Trust),
-            Contributor = DocContributorMetadata.Merge(primary.Contributor, fallback.Contributor)
+            Contributor = DocContributorMetadata.Merge(primary.Contributor, fallback.Contributor),
+            Localization = DocLocalizationMetadata.Merge(primary.Localization, fallback.Localization)
         };
     }
 
@@ -261,6 +274,58 @@ public sealed record DocMetadata
         return fallbackValue is not null
             ? (fallbackValue, fallbackFlag)
             : (null, null);
+    }
+}
+
+/// <summary>
+/// Page-level localization metadata for one documentation node.
+/// </summary>
+/// <remarks>
+/// Authors can provide this metadata directly under <c>localization</c>, or with friendly flat front matter keys such
+/// as <c>locale</c>, <c>translation_key</c>, <c>localized_title</c>, and <c>locale_fallback</c>. The metadata does not
+/// make a page public on its own; the locale-aware document graph combines it with configured locales and route identity.
+/// </remarks>
+public sealed record DocLocalizationMetadata
+{
+    /// <summary>
+    /// Gets the authored or inferred BCP-47 locale code for this document variant.
+    /// </summary>
+    public string? Locale { get; init; }
+
+    /// <summary>
+    /// Gets the stable conceptual page identity shared by translated variants.
+    /// </summary>
+    public string? TranslationKey { get; init; }
+
+    /// <summary>
+    /// Gets an optional localized title override for language-switching and graph-derived navigation.
+    /// </summary>
+    public string? LocalizedTitle { get; init; }
+
+    /// <summary>
+    /// Gets an optional page-level missing-translation fallback policy.
+    /// </summary>
+    public RazorDocsLocaleFallbackMode? LocaleFallback { get; init; }
+
+    internal static DocLocalizationMetadata? Merge(DocLocalizationMetadata? primary, DocLocalizationMetadata? fallback)
+    {
+        if (primary is null)
+        {
+            return fallback;
+        }
+
+        if (fallback is null)
+        {
+            return primary;
+        }
+
+        return new DocLocalizationMetadata
+        {
+            Locale = DocTrustMergeHelpers.PreferNonBlank(primary.Locale, fallback.Locale),
+            TranslationKey = DocTrustMergeHelpers.PreferNonBlank(primary.TranslationKey, fallback.TranslationKey),
+            LocalizedTitle = DocTrustMergeHelpers.PreferNonBlank(primary.LocalizedTitle, fallback.LocalizedTitle),
+            LocaleFallback = primary.LocaleFallback ?? fallback.LocaleFallback
+        };
     }
 }
 
@@ -733,6 +798,31 @@ public static class DocHarvestDiagnosticCodes
     /// RazorDocs had to drop or fold characters while normalizing a public route slug.
     /// </summary>
     public const string DocLossySlugNormalization = "razordocs.routes.lossy_slug_normalization";
+
+    /// <summary>
+    /// A localized document variant declared or inferred an unsupported locale.
+    /// </summary>
+    public const string LocalizationUnsupportedLocale = "razordocs.localization.unsupported_locale";
+
+    /// <summary>
+    /// A localized document variant uses a colocated locale suffix but the base document is missing.
+    /// </summary>
+    public const string LocalizationMissingBase = "razordocs.localization.missing_base";
+
+    /// <summary>
+    /// Multiple localized variants resolved to the same translation identity and locale.
+    /// </summary>
+    public const string LocalizationDuplicateVariant = "razordocs.localization.duplicate_variant";
+
+    /// <summary>
+    /// Folder-inferred locale and authored locale metadata disagree.
+    /// </summary>
+    public const string LocalizationLocaleFolderConflict = "razordocs.localization.locale_folder_conflict";
+
+    /// <summary>
+    /// A document disables fallback but is missing one or more configured locale variants.
+    /// </summary>
+    public const string LocalizationFallbackDisabledMissingVariant = "razordocs.localization.fallback_disabled_missing_variant";
 }
 
 /// <summary>

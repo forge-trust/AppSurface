@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Docs.Models;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
@@ -27,6 +28,11 @@ public class DocModelsTests
             {
                 SourcePathOverride = "docs/guide.md",
                 LastUpdatedOverride = new DateTimeOffset(2026, 4, 22, 23, 19, 0, TimeSpan.Zero)
+            },
+            Localization = new DocLocalizationMetadata
+            {
+                Locale = "fr",
+                TranslationKey = "guides/quickstart"
             },
             FeaturedPageGroups =
             [
@@ -79,6 +85,8 @@ public class DocModelsTests
         Assert.Equal("/docs/releases/upgrade-policy.md.html", node.Metadata?.Trust?.Migration?.Href);
         Assert.Equal("docs/guide.md", node.Metadata?.Contributor?.SourcePathOverride);
         Assert.Equal(new DateTimeOffset(2026, 4, 22, 23, 19, 0, TimeSpan.Zero), node.Metadata?.Contributor?.LastUpdatedOverride);
+        Assert.Equal("fr", node.Metadata?.Localization?.Locale);
+        Assert.Equal("guides/quickstart", node.Metadata?.Localization?.TranslationKey);
         Assert.Single(node.Metadata?.FeaturedPageGroups!);
         Assert.Equal(["alias-one"], node.Metadata?.Aliases);
         Assert.Equal(["legacy/alias"], node.Metadata?.RedirectAliases);
@@ -233,6 +241,35 @@ public class DocModelsTests
         Assert.Equal(
             new DateTimeOffset(2026, 4, 22, 23, 19, 0, TimeSpan.Zero),
             merged.Contributor.LastUpdatedOverride);
+    }
+
+    [Fact]
+    public void Merge_ShouldMergeLocalizationMetadata_FieldByField()
+    {
+        var merged = DocMetadata.Merge(
+            new DocMetadata
+            {
+                Localization = new DocLocalizationMetadata
+                {
+                    Locale = "fr",
+                    LocaleFallback = RazorDocsLocaleFallbackMode.Disabled
+                }
+            },
+            new DocMetadata
+            {
+                Localization = new DocLocalizationMetadata
+                {
+                    TranslationKey = "guides/getting-started",
+                    LocalizedTitle = "Getting started",
+                    LocaleFallback = RazorDocsLocaleFallbackMode.DefaultLocaleWithNotice
+                }
+            });
+
+        Assert.NotNull(merged?.Localization);
+        Assert.Equal("fr", merged!.Localization!.Locale);
+        Assert.Equal("guides/getting-started", merged.Localization.TranslationKey);
+        Assert.Equal("Getting started", merged.Localization.LocalizedTitle);
+        Assert.Equal(RazorDocsLocaleFallbackMode.Disabled, merged.Localization.LocaleFallback);
     }
 
     [Fact]
