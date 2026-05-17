@@ -840,8 +840,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
     private readonly ConcurrentQueue<string> _appLogs = new();
     private readonly TaskCompletionSource<string> _boundBaseUrlSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private CancellationTokenSource? _appProcessCancellation;
-    private Task<CliCommandResult>? _appProcessTask;
+    private CliWrapProcessLease? _appProcess;
     private IPlaywright? _playwright;
 
     public IBrowser Browser { get; private set; } = null!;
@@ -884,28 +883,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
         }
         finally
         {
-            if (_appProcessCancellation is not null)
-            {
-                await _appProcessCancellation.CancelAsync();
-            }
-
-            if (_appProcessTask is not null)
-            {
-                try
-                {
-                    await _appProcessTask.WaitAsync(TimeSpan.FromSeconds(10));
-                }
-                catch (OperationCanceledException) when (_appProcessCancellation?.IsCancellationRequested == true)
-                {
-                    // CliWrap converts cancellation into process-tree termination for this test child process.
-                }
-                catch (TimeoutException)
-                {
-                    // Best-effort fixture cleanup should not hide the original test failure.
-                }
-            }
-
-            _appProcessCancellation?.Dispose();
+            await DisposeAppProcessAsync();
         }
     }
 
@@ -949,9 +927,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
             throw new FileNotFoundException("Could not find RazorWire MVC example project.", projectPath);
         }
 
-        var appProcessCancellation = new CancellationTokenSource();
-        _appProcessCancellation = appProcessCancellation;
-        _appProcessTask = Cli.Wrap("dotnet")
+        var appProcess = CliWrapProcessLease.Start(Cli.Wrap("dotnet")
             .WithArguments(BuildExampleAppArguments(repoRoot, readmeProjectPath))
             .WithWorkingDirectory(repoRoot)
             .WithEnvironmentVariables(new Dictionary<string, string?>
@@ -962,14 +938,13 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
             })
             .WithValidation(CommandResultValidation.None)
             .WithStandardOutputPipe(PipeTarget.ToDelegate(CaptureAppLog))
-            .WithStandardErrorPipe(PipeTarget.ToDelegate(CaptureAppLog))
-            .ExecuteAsync(appProcessCancellation.Token)
-            .Task;
+            .WithStandardErrorPipe(PipeTarget.ToDelegate(CaptureAppLog)));
+        _appProcess = appProcess;
 
-        _ = _appProcessTask.ContinueWith(
+        _ = appProcess.Completion.ContinueWith(
             task =>
             {
-                if (appProcessCancellation.IsCancellationRequested)
+                if (appProcess.IsCancellationRequested)
                 {
                     return;
                 }
@@ -1016,6 +991,17 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
         }
 
         return $"exited with code {task.Result.ExitCode}";
+    }
+
+    private async ValueTask DisposeAppProcessAsync()
+    {
+        if (_appProcess is null)
+        {
+            return;
+        }
+
+        await _appProcess.DisposeAsync();
+        _appProcess = null;
     }
 
     private static string ResolveCurrentConfiguration()
@@ -1069,14 +1055,14 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
 
         while (!timeoutCts.Token.IsCancellationRequested)
         {
-            if (_appProcessTask is null)
+            if (_appProcess is null)
             {
                 throw new InvalidOperationException($"RazorWire MVC example exited before it became ready.{Environment.NewLine}{GetRecentLogs()}");
             }
 
-            if (_appProcessTask.IsCompleted)
+            if (_appProcess.Completion.IsCompleted)
             {
-                throw new InvalidOperationException($"RazorWire MVC example {DescribeExampleAppExit(_appProcessTask)} before it became ready.{Environment.NewLine}{GetRecentLogs()}");
+                throw new InvalidOperationException($"RazorWire MVC example {DescribeExampleAppExit(_appProcess.Completion)} before it became ready.{Environment.NewLine}{GetRecentLogs()}");
             }
 
             try
@@ -1238,6 +1224,47 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
     private string GetRecentLogs()
     {
         return string.Join(Environment.NewLine, _appLogs);
+    }
+
+    private sealed class CliWrapProcessLease : IAsyncDisposable
+    {
+        private readonly CancellationTokenSource _cancellation = new();
+        private readonly CommandTask<CliCommandResult> _commandTask;
+
+        private CliWrapProcessLease(CliWrap.Command command)
+        {
+            _commandTask = command.ExecuteAsync(_cancellation.Token);
+        }
+
+        public Task<CliCommandResult> Completion => _commandTask.Task;
+
+        public bool IsCancellationRequested => _cancellation.IsCancellationRequested;
+
+        public static CliWrapProcessLease Start(CliWrap.Command command)
+        {
+            return new CliWrapProcessLease(command);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            using var cancellation = _cancellation;
+            using var commandTask = _commandTask;
+
+            await cancellation.CancelAsync();
+
+            try
+            {
+                await commandTask.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+                // CliWrap converts cancellation into process-tree termination for this test child process.
+            }
+            catch (TimeoutException)
+            {
+                // Best-effort fixture cleanup should not hide the original test failure.
+            }
+        }
     }
 
 }
