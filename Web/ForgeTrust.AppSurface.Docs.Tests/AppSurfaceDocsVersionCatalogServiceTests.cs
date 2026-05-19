@@ -812,6 +812,131 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         Assert.NotNull(catalog.RecommendedVersion);
     }
 
+    [Fact]
+    public void GetCatalog_ShouldReturnUnavailable_WhenCatalogRootIsNotObjectOrNull()
+    {
+        var catalogPath = WriteRawCatalogJson("[]");
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalog.Status);
+        Assert.Equal(catalogPath, catalog.CatalogPath);
+        Assert.Empty(catalog.PublicVersions);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldReturnUnavailable_WhenVersionsPayloadIsNotArray()
+    {
+        var catalogPath = WriteRawCatalogJson(
+            """
+            {
+              "versions": {}
+            }
+            """);
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalog.Status);
+        Assert.Equal(catalogPath, catalog.CatalogPath);
+        Assert.Empty(catalog.PublicVersions);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldIgnoreInvalidRecommendedVersionMetadata_AndSkipNonObjectEntries()
+    {
+        var stableTree = CreateExactTree("stable-invalid-recommended");
+        var catalogPath = WriteRawCatalogJson(
+            $$"""
+            {
+              "recommendedVersion": 123,
+              "versions": [
+                "not-an-entry",
+                {
+                  "version": "1.2.3",
+                  "exactTreePath": "{{EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree))}}"
+                }
+              ]
+            }
+            """);
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        Assert.Null(catalog.RecommendedVersion);
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.Equal("1.2.3", version.Version);
+        Assert.True(version.IsAvailable);
+    }
+
+    [Theory]
+    [InlineData("label", "false")]
+    [InlineData("summary", "[]")]
+    [InlineData("visibility", "\"NotAVisibility\"")]
+    [InlineData("advisoryState", "\"NotAnAdvisory\"")]
+    public void GetCatalog_ShouldSkipEntriesWithInvalidOptionalProperties(string propertyName, string invalidJsonValue)
+    {
+        var stableTree = CreateExactTree("stable-invalid-optional");
+        var relativeTree = EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree));
+        var catalogPath = WriteRawCatalogJson(
+            $$"""
+            {
+              "recommendedVersion": "1.2.3",
+              "versions": [
+                {
+                  "version": "9.9.9",
+                  "exactTreePath": "{{relativeTree}}",
+                  "{{propertyName}}": {{invalidJsonValue}}
+                },
+                {
+                  "version": "1.2.3",
+                  "exactTreePath": "{{relativeTree}}"
+                }
+              ]
+            }
+            """);
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.Equal("1.2.3", version.Version);
+        Assert.True(version.IsAvailable);
+        Assert.NotNull(catalog.RecommendedVersion);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldSkipEntriesWithInvalidExactTreePathMetadata()
+    {
+        var stableTree = CreateExactTree("stable-invalid-exact-tree-path");
+        var relativeTree = EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree));
+        var catalogPath = WriteRawCatalogJson(
+            $$"""
+            {
+              "recommendedVersion": "1.2.3",
+              "versions": [
+                {
+                  "version": "9.9.9",
+                  "exactTreePath": 42
+                },
+                {
+                  "version": "1.2.3",
+                  "exactTreePath": "{{relativeTree}}"
+                }
+              ]
+            }
+            """);
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.Equal("1.2.3", version.Version);
+        Assert.True(version.IsAvailable);
+        Assert.NotNull(catalog.RecommendedVersion);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDirectory))

@@ -71,4 +71,22 @@ public sealed class AppSurfaceDocsIdentityResolverTests
         Assert.Null(resolver.Identity.Logo);
         Assert.Empty(resolver.Identity.Favicons);
     }
+
+    [Theory]
+    [InlineData("~/brand/logo.svg", true, "~/brand/logo.svg", "")]
+    [InlineData("/", true, "/", "")]
+    [InlineData("~/https://example.test/logo.svg", false, null, "remote URL")]
+    [InlineData("/data:image/svg+xml;base64,PHN2Zy8+", false, null, "remote URL")]
+    public void IdentityPath_ShouldNormalizeOrRejectBrowserPaths(
+        string value,
+        bool expectedResult,
+        string? expectedPath,
+        string expectedErrorFragment)
+    {
+        var result = AppSurfaceDocsIdentityPath.TryNormalizeBrowserPath(value, out var normalizedPath, out var error);
+
+        Assert.Equal(expectedResult, result);
+        Assert.Equal(expectedPath, normalizedPath);
+        Assert.Contains(expectedErrorFragment, error, StringComparison.OrdinalIgnoreCase);
+    }
 }
