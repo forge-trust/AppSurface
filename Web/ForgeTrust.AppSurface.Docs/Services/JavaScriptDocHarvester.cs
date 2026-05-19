@@ -854,7 +854,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     {
         var fullRoot = Path.GetFullPath(rootPath);
         var yielded = new HashSet<string>(PathComparer);
-        foreach (var includeRoot in ResolveIncludeRoots(fullRoot, options.IncludeGlobs))
+        foreach (var includeRoot in ResolveIncludeRoots(fullRoot, options.IncludeGlobs ?? []))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(includeRoot))
@@ -915,13 +915,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
-    private static IEnumerable<string> ResolveIncludeRoots(string rootPath, IEnumerable<string>? includePatterns)
+    private static IEnumerable<string> ResolveIncludeRoots(string rootPath, IEnumerable<string> includePatterns)
     {
-        if (includePatterns is null)
-        {
-            yield break;
-        }
-
         var fullRoot = Path.GetFullPath(rootPath);
         var yielded = new HashSet<string>(PathComparer);
         foreach (var pattern in includePatterns)
@@ -939,11 +934,6 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
             var staticRoot = GetStaticIncludeRoot(NormalizeRelativePath(trimmedPattern));
             var localStaticRoot = staticRoot.Replace('/', Path.DirectorySeparatorChar);
-            if (localStaticRoot.Length > 0 && Path.IsPathRooted(localStaticRoot))
-            {
-                continue;
-            }
-
             var candidate = localStaticRoot.Length == 0
                 ? fullRoot
                 : Path.GetFullPath(Path.Join(fullRoot, localStaticRoot));
