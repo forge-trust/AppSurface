@@ -33,13 +33,13 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var diagnostic = Assert.Single(GetDiagnostics(harvester));
 
         Assert.Empty(docs);
-        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptMissingInclude, diagnostic.Code);
         Assert.Contains("include globs", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Include", diagnostic.Fix, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task HarvestAsync_ShouldIgnoreBlankIncludeGlobs()
+    public async Task HarvestAsync_ShouldWarn_WhenEnabledWithOnlyBlankIncludeGlobs()
     {
         await WriteAsync(
             "src/public-api.js",
@@ -53,9 +53,10 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var harvester = CreateHarvester(CreateEnabledOptions(""));
 
         var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
 
         Assert.Empty(docs);
-        Assert.Empty(GetDiagnostics(harvester));
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptMissingInclude, diagnostic.Code);
     }
 
     [Fact]
@@ -348,6 +349,28 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
         Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-duplicate", StringComparison.Ordinal));
         Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-duplicate-2", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldReportReadDiagnostic_WhenMatchedFileCannotBeRead()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = Path.Combine(_testRoot, "src");
+        Directory.CreateDirectory(directory);
+        var linkPath = Path.Combine(directory, "missing.js");
+        File.CreateSymbolicLink(linkPath, Path.Combine(directory, "target-does-not-exist.js"));
+        var harvester = CreateHarvester(CreateEnabledOptions("src/missing.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+        Assert.Empty(docs);
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptParseFailed, diagnostic.Code);
+        Assert.Contains("could not be read", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

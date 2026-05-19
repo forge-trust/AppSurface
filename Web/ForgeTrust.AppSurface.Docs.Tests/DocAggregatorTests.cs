@@ -2931,6 +2931,28 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldPreserveHarvestedDocs_WhenDiagnosticProviderThrows()
+    {
+        var harvester = new DiagnosticThrowingHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]);
+        var aggregator = CreateHarvestHealthAggregator([harvester]);
+
+        var docs = await aggregator.GetDocsAsync();
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Single(docs);
+        Assert.Equal(DocHarvestHealthStatus.Healthy, health.Status);
+        Assert.Equal(1, health.TotalHarvesters);
+        Assert.Equal(1, health.SuccessfulHarvesters);
+        Assert.Equal(0, health.FailedHarvesters);
+        var harvesterHealth = Assert.Single(health.Harvesters);
+        Assert.Equal(nameof(DiagnosticThrowingHarvester), harvesterHealth.HarvesterType);
+        Assert.Equal(DocHarvesterHealthStatus.Succeeded, harvesterHealth.Status);
+        Assert.Equal(1, harvesterHealth.DocCount);
+        Assert.Empty(health.Diagnostics);
+        Assert.Equal(1, CountLogCalls(_loggerFake, LogLevel.Warning, "failed to provide supplemental diagnostics"));
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldReturnEmpty_WhenRegisteredHarvestersReturnNoDocs()
     {
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
@@ -4047,6 +4069,21 @@ public class DocAggregatorTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("Disabled harvesters should not participate.");
+        }
+    }
+
+    private sealed class DiagnosticThrowingHarvester(IReadOnlyList<DocNode> docs) : IDocHarvester, IDocHarvesterDiagnosticProvider
+    {
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(docs);
+        }
+
+        public IReadOnlyList<DocHarvestDiagnostic> GetHarvestDiagnostics()
+        {
+            throw new InvalidOperationException("diagnostics unavailable");
         }
     }
 

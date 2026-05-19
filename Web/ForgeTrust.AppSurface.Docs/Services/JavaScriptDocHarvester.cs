@@ -23,6 +23,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 {
     private const string HarvesterType = nameof(JavaScriptDocHarvester);
     private static readonly Regex UnsafeSlugCharacterRegex = new("[^a-z0-9]+", RegexOptions.Compiled | RegexOptions.NonBacktracking);
+    private static readonly string[] AlwaysPrunedDirectoryNames = [".git"];
 
     private readonly RazorDocsOptions _options;
     private readonly ILogger<JavaScriptDocHarvester> _logger;
@@ -63,10 +64,10 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 return [];
             }
 
-            if (javaScriptOptions.Include.Length == 0)
+            if (!HasUsableIncludeGlobs(javaScriptOptions.Include))
             {
                 diagnostics.Add(CreateDiagnostic(
-                    DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet,
+                    DocHarvestDiagnosticCodes.JavaScriptMissingInclude,
                     DocHarvestDiagnosticSeverity.Warning,
                     "JavaScript harvesting is enabled without include globs.",
                     "RazorDocs does not perform implicit repository-wide JavaScript crawling, so no JavaScript files were scanned.",
@@ -75,7 +76,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             }
 
             var harvestedItems = new List<JavaScriptApiItem>();
-            foreach (var filePath in EnumerateJavaScriptFiles(rootPath, cancellationToken))
+            foreach (var filePath in EnumerateJavaScriptFiles(rootPath, javaScriptOptions, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -85,21 +86,21 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     continue;
                 }
 
-                var fileInfo = new FileInfo(filePath);
-                if (fileInfo.Length > javaScriptOptions.MaxFileSizeBytes)
-                {
-                    diagnostics.Add(CreateDiagnostic(
-                        DocHarvestDiagnosticCodes.JavaScriptFileTooLarge,
-                        DocHarvestDiagnosticSeverity.Warning,
-                        $"Skipped JavaScript file '{relativePath}' because it is larger than the configured limit.",
-                        $"The file is {fileInfo.Length.ToString(CultureInfo.InvariantCulture)} bytes and RazorDocs:Harvest:JavaScript:MaxFileSizeBytes is {javaScriptOptions.MaxFileSizeBytes.ToString(CultureInfo.InvariantCulture)}.",
-                        "Raise the JavaScript max-file-size limit only for authored source files that should be parsed, or keep generated bundles excluded."));
-                    continue;
-                }
-
-                var source = await File.ReadAllTextAsync(filePath, cancellationToken);
                 try
                 {
+                    var fileInfo = new FileInfo(filePath);
+                    if (fileInfo.Length > javaScriptOptions.MaxFileSizeBytes)
+                    {
+                        diagnostics.Add(CreateDiagnostic(
+                            DocHarvestDiagnosticCodes.JavaScriptFileTooLarge,
+                            DocHarvestDiagnosticSeverity.Warning,
+                            $"Skipped JavaScript file '{relativePath}' because it is larger than the configured limit.",
+                            $"The file is {fileInfo.Length.ToString(CultureInfo.InvariantCulture)} bytes and RazorDocs:Harvest:JavaScript:MaxFileSizeBytes is {javaScriptOptions.MaxFileSizeBytes.ToString(CultureInfo.InvariantCulture)}.",
+                            "Raise the JavaScript max-file-size limit only for authored source files that should be parsed, or keep generated bundles excluded."));
+                        continue;
+                    }
+
+                    var source = await File.ReadAllTextAsync(filePath, cancellationToken);
                     harvestedItems.AddRange(ParseFile(source, relativePath, javaScriptOptions, diagnostics));
                 }
                 catch (ParseErrorException ex)
@@ -110,6 +111,15 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         $"Skipped JavaScript file '{relativePath}' because the parser rejected it.",
                         $"Acornima reported {ex.Message} at line {ex.LineNumber.ToString(CultureInfo.InvariantCulture)}, column {ex.Column.ToString(CultureInfo.InvariantCulture)}.",
                         "Fix the JavaScript syntax, remove the file from the JavaScript include set, or exclude generated syntax that the v1 harvester should not parse."));
+                }
+                catch (Exception ex) when (IsFileReadException(ex))
+                {
+                    diagnostics.Add(CreateDiagnostic(
+                        DocHarvestDiagnosticCodes.JavaScriptParseFailed,
+                        DocHarvestDiagnosticSeverity.Warning,
+                        $"Skipped JavaScript file '{relativePath}' because it could not be read.",
+                        ex.Message,
+                        "Fix file permissions or locks, or exclude this file from JavaScript harvesting."));
                 }
             }
 
@@ -796,26 +806,212 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return $@"<span data-razordocs-symbol-source=""{WebUtility.HtmlEncode(anchorId)}""></span>";
     }
 
-    private static IEnumerable<string> EnumerateJavaScriptFiles(string rootPath, CancellationToken cancellationToken)
+    private static IEnumerable<string> EnumerateJavaScriptFiles(
+        string rootPath,
+        RazorDocsJavaScriptHarvestOptions options,
+        CancellationToken cancellationToken)
+    {
+        var fullRoot = Path.GetFullPath(rootPath);
+        var yielded = new HashSet<string>(PathComparer);
+        foreach (var includeRoot in ResolveIncludeRoots(fullRoot, options.Include))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (File.Exists(includeRoot))
+            {
+                if (IsJavaScriptFile(includeRoot) && yielded.Add(includeRoot))
+                {
+                    yield return includeRoot;
+                }
+
+                continue;
+            }
+
+            if (!Directory.Exists(includeRoot))
+            {
+                if (IsJavaScriptFile(includeRoot) && yielded.Add(includeRoot))
+                {
+                    yield return includeRoot;
+                }
+
+                continue;
+            }
+
+            foreach (var file in EnumerateJavaScriptFilesUnderRoot(fullRoot, includeRoot, options, yielded, cancellationToken))
+            {
+                yield return file;
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateJavaScriptFilesUnderRoot(
+        string repositoryRoot,
+        string traversalRoot,
+        RazorDocsJavaScriptHarvestOptions options,
+        HashSet<string> yielded,
+        CancellationToken cancellationToken)
     {
         var pending = new Stack<string>();
-        pending.Push(rootPath);
+        pending.Push(traversalRoot);
 
         while (pending.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var current = pending.Pop();
-            foreach (var file in Directory.EnumerateFiles(current, "*.js", SearchOption.TopDirectoryOnly))
+            foreach (var file in EnumerateFilesSafely(current))
             {
-                yield return file;
+                if (yielded.Add(file))
+                {
+                    yield return file;
+                }
             }
 
-            foreach (var directory in Directory.EnumerateDirectories(current))
+            foreach (var directory in EnumerateDirectoriesSafely(current))
             {
+                if (ShouldPruneDirectory(repositoryRoot, directory, options))
+                {
+                    continue;
+                }
+
                 pending.Push(directory);
             }
         }
     }
+
+    private static IEnumerable<string> ResolveIncludeRoots(string rootPath, IEnumerable<string>? includePatterns)
+    {
+        if (includePatterns is null)
+        {
+            yield break;
+        }
+
+        var fullRoot = Path.GetFullPath(rootPath);
+        var yielded = new HashSet<string>(PathComparer);
+        foreach (var pattern in includePatterns)
+        {
+            if (string.IsNullOrWhiteSpace(pattern))
+            {
+                continue;
+            }
+
+            var staticRoot = GetStaticIncludeRoot(NormalizeRelativePath(pattern.Trim()));
+            var candidate = staticRoot.Length == 0
+                ? fullRoot
+                : Path.GetFullPath(Path.Combine(fullRoot, staticRoot.Replace('/', Path.DirectorySeparatorChar)));
+            if (!IsUnderRoot(fullRoot, candidate) || !yielded.Add(candidate))
+            {
+                continue;
+            }
+
+            yield return candidate;
+        }
+    }
+
+    private static string GetStaticIncludeRoot(string pattern)
+    {
+        var segments = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var staticSegments = new List<string>();
+        foreach (var segment in segments)
+        {
+            if (ContainsGlobToken(segment))
+            {
+                break;
+            }
+
+            staticSegments.Add(segment);
+        }
+
+        return string.Join('/', staticSegments);
+    }
+
+    private static bool ShouldPruneDirectory(
+        string repositoryRoot,
+        string directory,
+        RazorDocsJavaScriptHarvestOptions options)
+    {
+        var directoryInfo = new DirectoryInfo(directory);
+        if (AlwaysPrunedDirectoryNames.Contains(directoryInfo.Name, StringComparer.OrdinalIgnoreCase)
+            || directoryInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            return true;
+        }
+
+        var relativePath = NormalizeRelativePath(Path.GetRelativePath(repositoryRoot, directory));
+        var directoryPath = relativePath.EndsWith("/", StringComparison.Ordinal)
+            ? relativePath
+            : relativePath + "/";
+        return options.Exclude.Any(pattern => JavaScriptGlobMatcher.IsMatch(directoryPath, pattern)
+                                             || JavaScriptGlobMatcher.IsMatch(relativePath, pattern));
+    }
+
+    private static IReadOnlyList<string> EnumerateFilesSafely(string directory)
+    {
+        try
+        {
+            return Directory.GetFiles(directory, "*.js", SearchOption.TopDirectoryOnly);
+        }
+        catch (Exception ex) when (IsFileReadException(ex))
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<string> EnumerateDirectoriesSafely(string directory)
+    {
+        try
+        {
+            return Directory.GetDirectories(directory);
+        }
+        catch (Exception ex) when (IsFileReadException(ex))
+        {
+            return [];
+        }
+    }
+
+    private static bool HasUsableIncludeGlobs(IEnumerable<string>? includePatterns)
+    {
+        return includePatterns?.Any(static pattern => !string.IsNullOrWhiteSpace(pattern)) == true;
+    }
+
+    private static bool ContainsGlobToken(string value)
+    {
+        return value.Contains('*', StringComparison.Ordinal) || value.Contains('?', StringComparison.Ordinal);
+    }
+
+    private static bool IsJavaScriptFile(string path)
+    {
+        return string.Equals(Path.GetExtension(path), ".js", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsUnderRoot(string rootPath, string candidatePath)
+    {
+        var fullRoot = EnsureTrailingSeparator(Path.GetFullPath(rootPath));
+        var fullCandidate = Path.GetFullPath(candidatePath);
+        return fullCandidate.StartsWith(fullRoot, PathComparison)
+               || string.Equals(
+                   fullCandidate.TrimEnd(Path.DirectorySeparatorChar),
+                   fullRoot.TrimEnd(Path.DirectorySeparatorChar),
+                   PathComparison);
+    }
+
+    private static string EnsureTrailingSeparator(string path)
+    {
+        return path.EndsWith(Path.DirectorySeparatorChar)
+            ? path
+            : path + Path.DirectorySeparatorChar;
+    }
+
+    private static bool IsFileReadException(Exception exception)
+    {
+        return exception is IOException or UnauthorizedAccessException;
+    }
+
+    private static StringComparer PathComparer => OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
+
+    private static StringComparison PathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
 
     private static bool ShouldHarvest(string relativePath, RazorDocsJavaScriptHarvestOptions options)
     {

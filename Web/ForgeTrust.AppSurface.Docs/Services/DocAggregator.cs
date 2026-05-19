@@ -897,9 +897,7 @@ public class DocAggregator
         {
             var harvestTask = harvester.HarvestAsync(repositoryRoot, timeoutCts.Token);
             var docs = await harvestTask.WaitAsync(harvesterTimeout) ?? [];
-            var additionalDiagnostics = harvester is IDocHarvesterDiagnosticProvider diagnosticProvider
-                ? diagnosticProvider.GetHarvestDiagnostics()
-                : [];
+            var additionalDiagnostics = CollectHarvestDiagnostics(harvester, harvesterType, logger);
             var status = docs.Count == 0
                 ? DocHarvesterHealthStatus.ReturnedEmpty
                 : DocHarvesterHealthStatus.Succeeded;
@@ -967,6 +965,30 @@ public class DocAggregator
                     "A RazorDocs harvester failed.",
                     "The harvester threw while scanning the docs repository, so RazorDocs skipped its docs for this snapshot.",
                     "Inspect the host logs for exception details, then fix the harvester configuration, repository root, or source content."));
+        }
+    }
+
+    private static IReadOnlyList<DocHarvestDiagnostic> CollectHarvestDiagnostics(
+        IDocHarvester harvester,
+        string harvesterType,
+        ILogger logger)
+    {
+        if (harvester is not IDocHarvesterDiagnosticProvider diagnosticProvider)
+        {
+            return [];
+        }
+
+        try
+        {
+            return diagnosticProvider.GetHarvestDiagnostics() ?? [];
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Harvester {HarvesterType} returned docs but failed to provide supplemental diagnostics. Continuing with harvested docs.",
+                harvesterType);
+            return [];
         }
     }
 

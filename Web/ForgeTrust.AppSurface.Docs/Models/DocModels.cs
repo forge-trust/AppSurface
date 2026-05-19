@@ -790,6 +790,11 @@ public static class DocHarvestDiagnosticCodes
     public const string JavaScriptParseFailed = "razordocs.javascript.parse_failed";
 
     /// <summary>
+    /// JavaScript harvesting is enabled but is missing a usable include configuration.
+    /// </summary>
+    public const string JavaScriptMissingInclude = "razordocs.javascript.missing_include";
+
+    /// <summary>
     /// A public JavaScript doclet used a shape outside the v1 harvester contract and was skipped.
     /// </summary>
     public const string JavaScriptUnsupportedPublicShape = "razordocs.javascript.unsupported_public_shape";

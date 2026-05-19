@@ -58,6 +58,7 @@ public sealed class RazorDocsOptionsTests
         Assert.Equal("razordocs.harvest.all_failed", DocHarvestDiagnosticCodes.AllFailed);
         Assert.Equal("razordocs.javascript.file_too_large", DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
         Assert.Equal("razordocs.javascript.parse_failed", DocHarvestDiagnosticCodes.JavaScriptParseFailed);
+        Assert.Equal("razordocs.javascript.missing_include", DocHarvestDiagnosticCodes.JavaScriptMissingInclude);
         Assert.Equal("razordocs.javascript.unsupported_public_shape", DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
         Assert.Equal("razordocs.javascript.malformed_public_doclet", DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
         Assert.Equal("razordocs.javascript.incomplete_public_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
@@ -491,6 +492,31 @@ public sealed class RazorDocsOptionsTests
 
         Assert.Contains(
             ex.Failures,
+            failure => failure.Contains("JavaScript", StringComparison.OrdinalIgnoreCase)
+                       && failure.Contains("Include", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void RazorDocsOptionsValidator_ShouldRejectEnabledJavaScriptHarvestWithOnlyBlankIncludes()
+    {
+        var result = new RazorDocsOptionsValidator().Validate(
+            null,
+            new RazorDocsOptions
+            {
+                Harvest = new RazorDocsHarvestOptions
+                {
+                    JavaScript = new RazorDocsJavaScriptHarvestOptions
+                    {
+                        Enabled = true,
+                        Include = [" ", "\t"],
+                        Exclude = []
+                    }
+                }
+            });
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
             failure => failure.Contains("JavaScript", StringComparison.OrdinalIgnoreCase)
                        && failure.Contains("Include", StringComparison.OrdinalIgnoreCase));
     }

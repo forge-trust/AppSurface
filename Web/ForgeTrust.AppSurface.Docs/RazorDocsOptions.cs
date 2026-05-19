@@ -219,6 +219,8 @@ public sealed class RazorDocsJavaScriptHarvestOptions
     /// <c>Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js</c> for a single file or
     /// <c>src/widgets/**/*.js</c> for a bounded source tree. Include globs are evaluated before
     /// <see cref="Exclude"/> so hosts can keep default generated-file exclusions while opting into a narrow source set.
+    /// Blank entries are ignored during options normalization, and enabled hosts must provide at least one nonblank
+    /// include glob.
     /// </remarks>
     public string[] Include { get; set; } = [];
 
@@ -760,7 +762,8 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
                 }
 
                 if (harvest.JavaScript.Enabled
-                    && (harvest.JavaScript.Include is null || harvest.JavaScript.Include.Length == 0))
+                    && (harvest.JavaScript.Include is null
+                        || !harvest.JavaScript.Include.Any(static include => !string.IsNullOrWhiteSpace(include))))
                 {
                     failures.Add("RazorDocs JavaScript harvesting requires at least one RazorDocs:Harvest:JavaScript:Include glob when enabled.");
                 }

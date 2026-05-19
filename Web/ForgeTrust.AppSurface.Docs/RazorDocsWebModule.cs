@@ -248,7 +248,10 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
     /// root, adds the archive surface below that route root, and serves preview-surface assets from either the live web
     /// root or the packaged Razor Class Library depending on whether published-tree mounts can shadow the stable docs root.
     /// Asset routes are built with <see cref="DocsUrlBuilder.BuildAssetUrl(string)"/> for <c>search.css</c>,
-    /// <c>minisearch.min.js</c>, <c>search-client.js</c>, and the page-local <c>outline-client.js</c>. Preview hosts can
+    /// <c>minisearch.min.js</c>, <c>search-client.js</c>, and the page-local <c>outline-client.js</c>. The package also
+    /// maps embedded fallbacks for those assets plus <c>RazorDocsStaticAssetBasePath + "/appsurface-docs-icon.svg"</c>
+    /// to <c>docs/appsurface-docs-icon.svg</c> so packaged hosts can render the AppSurface brand icon without a live web
+    /// root. Preview hosts can
     /// serve those files directly from the web root; otherwise the current-surface URLs redirect through
     /// <see cref="ResolveLegacySearchAssetBasePath"/> to the packaged RazorDocs assets. Legacy asset redirects preserve
     /// only the request query string, while the redirect path itself is constrained to an app-relative URL so

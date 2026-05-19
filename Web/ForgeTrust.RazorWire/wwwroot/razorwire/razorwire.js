@@ -543,7 +543,7 @@
      * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
      * @property {number|null} detail.statusCode - HTTP status code when a response was received.
      * @property {boolean} detail.handled - Whether the server response already handled the failure.
-     * @property {string} detail.responseKind - Failure category such as validation, antiforgery, authorization, server, or network.
+     * @property {string} detail.responseKind - Failure category: turbo-stream, html, json, unknown, or network.
      * @property {Element|null} detail.target - Element RazorWire will use for generated failure UI.
      * @property {string} detail.message - Reader-facing fallback message.
      * @property {Object|null} detail.developmentDiagnostic - Development-only diagnostic payload when enabled.
