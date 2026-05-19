@@ -311,6 +311,63 @@ public class ProcessUtilsTests
     }
 
     [Fact]
+    public async Task ExecuteProcessAsync_UsesConfiguredWorkingDirectory()
+    {
+        var logger = new ListLogger();
+        var tempDirectory = Directory.CreateDirectory(
+            Path.Join(Directory.GetCurrentDirectory(), $"appsurface-process-utils-{Guid.NewGuid():N}")).FullName;
+        var (fileName, args) = CreateShellCommand("cd", "pwd");
+
+        try
+        {
+            var result = await ProcessUtils.ExecuteProcessAsync(
+                fileName,
+                args,
+                tempDirectory,
+                logger,
+                CancellationToken.None);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Equal(
+                NormalizePathForComparison(tempDirectory),
+                NormalizePathForComparison(result.Stdout.Trim()));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteProcessAsync_InheritsParentEnvironmentVariables()
+    {
+        var logger = new ListLogger();
+        var variableName = $"APPSURFACE_PROCESS_UTILS_{Guid.NewGuid():N}";
+        const string expectedValue = "inherited-from-parent";
+        Environment.SetEnvironmentVariable(variableName, expectedValue);
+        var (fileName, args) = CreateShellCommand(
+            $"echo %{variableName}%",
+            $"printf '%s' \"${variableName}\"");
+
+        try
+        {
+            var result = await ProcessUtils.ExecuteProcessAsync(
+                fileName,
+                args,
+                Directory.GetCurrentDirectory(),
+                logger,
+                CancellationToken.None);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Equal(expectedValue, result.Stdout.Trim());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variableName, null);
+        }
+    }
+
+    [Fact]
     public async Task ExecuteProcessAsync_PropagatesStreamingFailures_WhenLoggerThrows()
     {
         var logger = new ThrowingLogger(LogLevel.Information);
@@ -368,62 +425,6 @@ public class ProcessUtilsTests
                 && entry.Message.Contains(fileName, StringComparison.Ordinal));
     }
 
-    [Fact]
-    public async Task ExecuteProcessAsync_LogsAndThrows_WhenProcessStartReturnsFalse()
-    {
-        var logger = new ListLogger();
-        const string fileName = "synthetic-process";
-
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            ProcessUtils.ExecuteProcessAsync(
-                fileName,
-                [],
-                Directory.GetCurrentDirectory(),
-                logger,
-                CancellationToken.None,
-                streamOutput: false,
-                stderrLogLevelSelector: null,
-                hooks: new ProcessUtils.ProcessExecutionHooks
-                {
-                    StartProcessOverride = _ => false
-                }));
-
-        Assert.Equal($"Failed to start process: {fileName}", exception.Message);
-        Assert.Contains(
-            logger.Messages,
-            entry => entry.LogLevel == LogLevel.Error
-                && entry.Message.Contains(fileName, StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task ExecuteProcessAsync_LogsDebug_WhenCleanupKillThrows()
-    {
-        var logger = new ListLogger();
-        var (fileName, args) = CreateShellCommand(
-            "(echo steady) & exit /b 0",
-            "printf 'steady\\n'");
-
-        var result = await ProcessUtils.ExecuteProcessAsync(
-            fileName,
-            args,
-            Directory.GetCurrentDirectory(),
-            logger,
-            CancellationToken.None,
-            streamOutput: false,
-            stderrLogLevelSelector: null,
-            hooks: new ProcessUtils.ProcessExecutionHooks
-            {
-                HasExitedOverride = _ => false,
-                KillProcessOverride = _ => throw new InvalidOperationException("kill failure")
-            });
-
-        Assert.Equal(0, result.ExitCode);
-        Assert.Contains(
-            logger.Messages,
-            entry => entry.LogLevel == LogLevel.Debug
-                && entry.Exception?.Message == "kill failure");
-    }
-
     private static (string FileName, IReadOnlyList<string> Args) CreateShellCommand(string windowsScript, string unixScript)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -432,6 +433,14 @@ public class ProcessUtilsTests
         }
 
         return ("/bin/sh", ["-c", unixScript]);
+    }
+
+    private static string NormalizePathForComparison(string path)
+    {
+        var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? fullPath.ToUpperInvariant()
+            : fullPath;
     }
 
     private static string GetPlatformMultilineOutput(params string[] lines)

@@ -46,7 +46,7 @@ This approach aims to:
 
 ### [Core](./ForgeTrust.AppSurface.Core/README.md)
 
-- [**ForgeTrust.AppSurface.Core**](./ForgeTrust.AppSurface.Core/README.md) – Core abstractions for defining modules and starting an application via `AppSurfaceStartup` and `StartupContext`.
+- [**ForgeTrust.AppSurface.Core**](./ForgeTrust.AppSurface.Core/README.md) – Core abstractions for defining modules, starting an application via `AppSurfaceStartup` and `StartupContext`, and running AppSurface-owned process workflows through a CliWrap-backed policy surface.
 
 ### [Console](./Console/README.md)
 
@@ -126,6 +126,8 @@ This command:
 - Excludes test modules (`*.Tests` and `*.IntegrationTests`) from coverage.
 - Produces one merged Cobertura file at `TestResults/coverage-merged/coverage.cobertura.xml`.
 - Writes a summary to `TestResults/coverage-merged/summary.txt`.
+
+When tests need to launch child processes, prefer CliWrap-backed helpers over raw `System.Diagnostics.Process` setup. Keep process-output capture in the helper result so CI failures include stdout and stderr, and reserve raw `Process` usage for tests that intentionally exercise process-wrapper behavior.
 
 Check out the examples to see how modules are composed in practice:
 

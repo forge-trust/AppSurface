@@ -224,8 +224,8 @@ public class ExportEngineTests
 
         try
         {
-            var handler = new FrameAwareHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var handler = new FrameAwareHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
@@ -269,7 +269,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Fallback_To_Root_When_Seed_File_Has_No_Valid_Routes()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         var seedFile = Path.Combine(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["mailto:test@example.com", "javascript:void(0)", ""]);
@@ -297,7 +297,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Use_InMemory_Seed_Routes_When_No_Seed_File_Is_Provided()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -309,6 +309,38 @@ public class ExportEngineTests
             var context = new ExportContext(
                 tempDir,
                 seedRoutesPath: null,
+                initialSeedRoutes: ["/docs"],
+                baseUrl: "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Join(tempDir, "docs.html")));
+            Assert.Contains("/docs", handler.RequestPaths);
+            Assert.DoesNotContain("/", context.RouteOutcomes.Keys);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Use_InMemory_Seed_Routes_When_Seed_File_Is_Blank()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var handler = new DocsSeedHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: " ",
                 initialSeedRoutes: ["/docs"],
                 baseUrl: "http://localhost:5000");
             await _sut.RunAsync(context);

@@ -297,6 +297,7 @@
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
+          "CliWrap": "[3.10.1, )",
           "Microsoft.Extensions.Hosting": "[9.0.6, )",
           "Microsoft.Extensions.Logging.Console": "[9.0.6, )"
         }
@@ -368,6 +369,12 @@
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )"
         }
+      },
+      "CliWrap": {
+        "type": "CentralTransitive",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
       "HtmlSanitizer": {
         "type": "CentralTransitive",

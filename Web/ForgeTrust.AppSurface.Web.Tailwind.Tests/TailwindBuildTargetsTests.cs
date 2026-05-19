@@ -1,6 +1,7 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using CliWrap;
+using CliWrap.Buffered;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
@@ -252,34 +253,16 @@ exit 0
 
     private static async Task<DotNetCommandResult> RunDotNetBuildAsync(string projectPath, string workingDirectory)
     {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "dotnet",
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            }
-        };
-
-        process.StartInfo.ArgumentList.Add("build");
-        process.StartInfo.ArgumentList.Add(projectPath);
-        process.StartInfo.ArgumentList.Add("-nologo");
-        process.StartInfo.ArgumentList.Add("-v:minimal");
-
-        process.Start();
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-
-        await process.WaitForExitAsync();
+        var result = await Cli.Wrap("dotnet")
+            .WithArguments(["build", projectPath, "-nologo", "-v:minimal"])
+            .WithWorkingDirectory(workingDirectory)
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync();
 
         return new DotNetCommandResult(
-            process.ExitCode,
-            await stdoutTask,
-            await stderrTask);
+            result.ExitCode,
+            result.StandardOutput,
+            result.StandardError);
     }
 
     private static async Task AssertBuildManifestContainsGeneratedCssAsync(string manifestPath)

@@ -2,6 +2,12 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
+      "CliWrap": {
+        "type": "Direct",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
+      },
       "coverlet.collector": {
         "type": "Direct",
         "requested": "[6.0.4, )",
@@ -387,12 +393,13 @@
         "type": "Project",
         "dependencies": {
           "CliFx": "[2.3.6, )",
-          "ForgeTrust.AppSurface.Core": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
+          "CliWrap": "[3.10.1, )",
           "Microsoft.Extensions.Hosting": "[9.0.6, )",
           "Microsoft.Extensions.Logging.Console": "[9.0.6, )"
         }
@@ -400,13 +407,13 @@
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Core": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
       "forgetrust.razorwire": {
         "type": "Project",
         "dependencies": {
-          "ForgeTrust.AppSurface.Web": "[1.0.0, )",
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
         }
       },
@@ -414,9 +421,9 @@
         "type": "Project",
         "dependencies": {
           "CliFx": "[2.3.6, )",
-          "ForgeTrust.AppSurface.Console": "[1.0.0, )",
-          "ForgeTrust.AppSurface.Web": "[1.0.0, )",
-          "ForgeTrust.RazorWire": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Console": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )",
+          "ForgeTrust.RazorWire": "[0.1.0, )"
         }
       },
       "CliFx": {

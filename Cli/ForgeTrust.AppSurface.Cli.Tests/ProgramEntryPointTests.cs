@@ -386,6 +386,22 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsExportCommand_Should_Reject_Missing_Seed_File()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        var missingSeedFile = System.IO.Path.Join(repository.Path, "missing-seeds.txt");
+        var runner = new CapturingRazorDocsExportRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "export", "--repo", repository.Path, "--seeds", missingSeedFile],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains($"The --seeds file does not exist: {missingSeedFile}", result.AllText, StringComparison.Ordinal);
+        Assert.Null(runner.Args);
+    }
+
+    [Fact]
     public async Task DocsExportCommand_Should_Reject_Seeds_Short_Alias()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");

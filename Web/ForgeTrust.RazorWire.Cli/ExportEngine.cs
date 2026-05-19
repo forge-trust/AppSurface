@@ -259,7 +259,7 @@ public class ExportEngine
 
     private async Task QueueSeedRoutesAsync(ExportContext context, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrEmpty(context.SeedRoutesPath))
+        if (!string.IsNullOrWhiteSpace(context.SeedRoutesPath))
         {
             if (!File.Exists(context.SeedRoutesPath))
             {

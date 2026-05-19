@@ -179,6 +179,11 @@ internal sealed class DocsExportCommand : RazorDocsRepositoryCommand, ICommand
         var seedRoutesPath = string.IsNullOrWhiteSpace(SeedRoutesPath)
             ? null
             : Path.GetFullPath(SeedRoutesPath);
+        if (seedRoutesPath is not null && !File.Exists(seedRoutesPath))
+        {
+            throw new CommandException($"The --seeds file does not exist: {seedRoutesPath}");
+        }
+
         var initialSeedRoutes = seedRoutesPath is null
             ? BuildDefaultSeedRoutes()
             : null;
