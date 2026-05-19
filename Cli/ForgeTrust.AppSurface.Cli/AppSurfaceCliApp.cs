@@ -28,6 +28,7 @@ internal static class AppSurfaceCliApp
     /// This value is passed to <see cref="CommandService"/> so help output, error messages, and usage text display the
     /// command users type (<c>appsurface</c>) instead of the underlying assembly invocation. It must stay aligned with
     /// the project file <c>ToolCommandName</c> property and the package index <c>tool_command_name</c> manifest value.
+    /// Package index validation, publish plan validation, and post-publish smoke tests detect drift across those layers.
     /// </remarks>
     internal const string ToolCommandName = "appsurface";
 

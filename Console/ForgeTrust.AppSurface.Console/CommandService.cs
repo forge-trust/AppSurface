@@ -26,10 +26,19 @@ internal class CommandService : CriticalService
         PrimaryServiceProvider = primaryServiceProvider;
         _commands = commands;
         _context = context;
-        _executableName = null;
         _suggester = suggester;
     }
 
+    /// <summary>
+    /// Creates a command service that can run a supplied command set without the hosted service provider pipeline.
+    /// </summary>
+    /// <param name="commands">Commands to register with CliFx.</param>
+    /// <param name="context">Startup context used when command instances need AppSurface runtime state.</param>
+    /// <param name="suggester">Option suggester used to enrich CliFx parse errors.</param>
+    /// <param name="executableName">
+    /// Optional executable display name used in usage, help, and error output. Leave unset to let CliFx choose its
+    /// default executable name.
+    /// </param>
     internal CommandService(
         IEnumerable<ICommand> commands,
         StartupContext context,
