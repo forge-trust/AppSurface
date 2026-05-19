@@ -374,6 +374,146 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldReportReadDiagnostic_WhenExactIncludedFileIsMissing()
+    {
+        var harvester = CreateHarvester(CreateEnabledOptions("src/missing.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+        Assert.Empty(docs);
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptParseFailed, diagnostic.Code);
+        Assert.Contains("src/missing.js", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("could not be read", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldIgnoreBlankDuplicateAndEscapingIncludeRoots()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public function.
+             * @public
+             * @namespace RazorWire
+             */
+            function publicApi() {}
+            """);
+        await WriteAsync(
+            "ignored/public-api.js",
+            """
+            /**
+             * Ignored function.
+             * @public
+             * @namespace RazorWire
+             */
+            function ignoredApi() {}
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions(
+            "",
+            " ",
+            "../outside.js",
+            "src/public-api.js",
+            "src/public-api.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#function-publicapi", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-ignoredapi", StringComparison.Ordinal));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldPruneRepositoryAndDefaultExcludedDirectories()
+    {
+        await WriteAsync(
+            "src/components/public.js",
+            """
+            /**
+             * Public function.
+             * @public
+             * @namespace RazorWire
+             */
+            function publicApi() {}
+            """);
+        await WriteAsync(".git/broken.js", "function broken( {");
+        await WriteAsync("node_modules/broken.js", "function broken( {");
+        var harvester = CreateHarvester(CreateEnabledOptions("**/*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#function-publicapi", StringComparison.Ordinal));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldContinueWhenTraversalDirectoryCannotBeEnumerated()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await WriteAsync(
+            "src/public.js",
+            """
+            /**
+             * Public function.
+             * @public
+             * @namespace RazorWire
+             */
+            function publicApi() {}
+            """);
+        var unreadableDirectory = Path.Combine(_testRoot, "src", "unreadable");
+        Directory.CreateDirectory(unreadableDirectory);
+        File.SetUnixFileMode(unreadableDirectory, UnixFileMode.None);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/**/*.js"));
+
+        try
+        {
+            var docs = await harvester.HarvestAsync(_testRoot);
+
+            Assert.Contains(docs, doc => doc.Path.EndsWith("#function-publicapi", StringComparison.Ordinal));
+            Assert.Empty(GetDiagnostics(harvester));
+        }
+        finally
+        {
+            File.SetUnixFileMode(
+                unreadableDirectory,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipReparsePointDirectoriesWhileTraversing()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await WriteAsync(
+            "src/public.js",
+            """
+            /**
+             * Public function.
+             * @public
+             * @namespace RazorWire
+             */
+            function publicApi() {}
+            """);
+        var sourceDirectory = Path.Combine(_testRoot, "src");
+        Directory.CreateSymbolicLink(Path.Combine(sourceDirectory, "loop"), sourceDirectory);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/**/*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Single(docs, doc => doc.Path.EndsWith("#function-publicapi", StringComparison.Ordinal));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldEmitDiagnostics_ForMalformedStandaloneDocletsAndCommonJsExports()
     {
         await WriteAsync(
