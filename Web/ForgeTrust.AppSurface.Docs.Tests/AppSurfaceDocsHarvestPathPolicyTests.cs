@@ -280,6 +280,24 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
     }
 
     [Fact]
+    public void ShouldPruneDirectory_KeepsDefaultGroupDirectoriesForFileLevelAllows()
+    {
+        var policy = CreatePolicy(
+            options =>
+            {
+                options.Harvest.Markdown.DefaultExclusions.AllowGlobs["HiddenDirectories"] = [".github/workflows/*.md"];
+            });
+
+        Assert.False(policy.ShouldPruneDirectory(".github", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.False(policy.ShouldPruneDirectory(".github/workflows", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(policy.ShouldPruneDirectory(".git", AppSurfaceDocsHarvestSourceKind.Markdown));
+        AssertDecision(
+            policy.Evaluate(".github/workflows/README.md", AppSurfaceDocsHarvestSourceKind.Markdown),
+            included: true,
+            AppSurfaceDocsHarvestPathDecisionCode.IncludedByDefaultGroupAllow);
+    }
+
+    [Fact]
     public void ShouldPruneDirectory_WhenDirectoryPathIsUnsafeReturnsTrue()
     {
         Assert.True(AppSurfaceDocsHarvestPathPolicy.CreateDefault().ShouldPruneDirectory("../secret", AppSurfaceDocsHarvestSourceKind.Markdown));

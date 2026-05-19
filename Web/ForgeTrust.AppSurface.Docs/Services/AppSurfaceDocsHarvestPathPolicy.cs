@@ -330,9 +330,9 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
     /// Returns whether a normalized repository-relative directory can be skipped during traversal.
     /// </summary>
     /// <remarks>
-    /// Invalid directories are pruned. Default-excluded directories are pruned unless the matched group has an allow glob
-    /// that can apply to the directory or a descendant. Configured subtree excludes prune only when a <c>/**</c> pattern
-    /// matches the directory.
+    /// Invalid directories are pruned. Default-excluded directories are pruned unless the matched group has an allow
+    /// glob that can apply to a file inside the directory or a descendant. Configured subtree excludes prune only when a
+    /// <c>/**</c> pattern matches the directory.
     /// </remarks>
     public bool ShouldPruneDirectory(
         string relativeDirectory,
@@ -355,7 +355,7 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
             treatLastSegmentAsDirectory: true)
             .Where(group => !IsDefaultGroupDisabled(group, sourcePolicy));
 
-        if (matchedDefaultGroups.Any(group => !HasDefaultGroupAllowPatternForSubtree(group, normalizedDirectory, sourcePolicy)))
+        if (matchedDefaultGroups.Any(group => !HasDefaultGroupAllowPatternForDescendants(group, normalizedDirectory, sourcePolicy)))
         {
             return true;
         }
@@ -581,15 +581,15 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
             : null;
     }
 
-    private bool HasDefaultGroupAllowPatternForSubtree(
+    private bool HasDefaultGroupAllowPatternForDescendants(
         AppSurfaceDocsHarvestDefaultExclusionGroup group,
         string normalizedDirectory,
         SourceScopePolicy sourcePolicy)
     {
         return _globalAllowMatchers.TryGetValue(group, out var globalMatcher)
-               && globalMatcher.MatchDirectoryOrDescendantSubtree(normalizedDirectory) is not null
+               && globalMatcher.MatchDirectoryOrDescendant(normalizedDirectory) is not null
                || sourcePolicy.AllowMatchers.TryGetValue(group, out var sourceMatcher)
-               && sourceMatcher.MatchDirectoryOrDescendantSubtree(normalizedDirectory) is not null;
+               && sourceMatcher.MatchDirectoryOrDescendant(normalizedDirectory) is not null;
     }
 
     private sealed class SourceScopePolicy(

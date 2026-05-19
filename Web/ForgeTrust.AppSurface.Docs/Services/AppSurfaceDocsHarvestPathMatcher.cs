@@ -7,8 +7,8 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </summary>
 /// <remarks>
 /// Matching is case-insensitive. <see cref="MatchFirst"/> is order-dependent and returns the first configured pattern
-/// that matches the candidate. Directory-subtree helpers are intentionally conservative and only reason about patterns
-/// that end in <c>/**</c>; callers should validate and normalize paths before invoking the matcher.
+/// that matches the candidate. Directory helpers are conservative because pruning must never skip a file that a later
+/// allow pattern could include; callers should validate and normalize paths before invoking the matcher.
 /// </remarks>
 internal sealed class AppSurfaceDocsHarvestPathMatcher
 {
@@ -69,6 +69,22 @@ internal sealed class AppSurfaceDocsHarvestPathMatcher
     }
 
     /// <summary>
+    /// Returns the first pattern that could match a file inside <paramref name="relativeDirectory"/> or a descendant.
+    /// </summary>
+    /// <remarks>
+    /// This is intentionally broader than <see cref="MatchDirectoryOrDescendantSubtree"/> so file-level allow globs
+    /// such as <c>.github/workflows/*.yml</c> keep the containing default-excluded directories enumerable.
+    /// </remarks>
+    public string? MatchDirectoryOrDescendant(string relativeDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(relativeDirectory);
+
+        var normalizedDirectory = relativeDirectory.TrimEnd('/');
+        return _matchers
+            .FirstOrDefault(matcher => matcher.CouldMatchDirectoryOrDescendant(normalizedDirectory))?.Pattern;
+    }
+
+    /// <summary>
     /// Wraps a single configured glob pattern and exposes case-insensitive match helpers.
     /// </summary>
     private sealed class PatternMatcher
@@ -111,9 +127,51 @@ internal sealed class AppSurfaceDocsHarvestPathMatcher
                        || relativeDirectory.StartsWith($"{subtreeRoot}/", StringComparison.OrdinalIgnoreCase));
         }
 
+        /// <summary>
+        /// Returns whether <see cref="Pattern"/> could match any file under <paramref name="relativeDirectory"/>.
+        /// </summary>
+        public bool CouldMatchDirectoryOrDescendant(string relativeDirectory)
+        {
+            if (Matches($"{relativeDirectory}/_"))
+            {
+                return true;
+            }
+
+            var literalDirectoryPrefix = GetLiteralDirectoryPrefix(Pattern);
+            if (literalDirectoryPrefix.Length == 0)
+            {
+                return Pattern.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault() is { } firstSegment
+                       && HasGlobSyntax(firstSegment);
+            }
+
+            return literalDirectoryPrefix.Equals(relativeDirectory, StringComparison.OrdinalIgnoreCase)
+                   || literalDirectoryPrefix.StartsWith($"{relativeDirectory}/", StringComparison.OrdinalIgnoreCase)
+                   || relativeDirectory.StartsWith($"{literalDirectoryPrefix}/", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool HasGlobSyntax(string pattern)
         {
             return pattern.IndexOfAny(['*', '?', '[', '{']) >= 0;
+        }
+
+        private static string GetLiteralDirectoryPrefix(string pattern)
+        {
+            var segments = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var prefixSegments = new List<string>();
+
+            for (var index = 0; index < segments.Length; index++)
+            {
+                var segment = segments[index];
+                if (HasGlobSyntax(segment) || index == segments.Length - 1)
+                {
+                    break;
+                }
+
+                prefixSegments.Add(segment);
+            }
+
+            return string.Join('/', prefixSegments);
         }
     }
 }
