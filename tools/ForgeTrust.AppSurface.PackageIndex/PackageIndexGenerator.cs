@@ -328,8 +328,8 @@ internal sealed class PackageIndexGenerator
     /// </exception>
     /// <remarks>
     /// The value must be a single file-name-safe token. It must not be blank, <c>.</c>, <c>..</c>,
-    /// a Windows reserved device name, or contain whitespace, path separators, control characters, or portable
-    /// file-name-invalid characters.
+    /// a Windows reserved device name or dotted alias such as <c>con.txt</c>, or contain whitespace, path separators,
+    /// control characters, or portable file-name-invalid characters.
     /// </remarks>
     internal static void ValidateToolCommandNameValue(string projectPath, string commandName)
     {
@@ -338,10 +338,10 @@ internal sealed class PackageIndexGenerator
             throw new PackageIndexException($"Tool command name ('tool_command_name') for '{projectPath}' must be provided.");
         }
 
-        if (ReservedWindowsDeviceNames.Contains(commandName))
+        if (IsWindowsReservedDeviceName(commandName))
         {
             throw new PackageIndexException(
-                $"Tool command name ('tool_command_name') for '{projectPath}' is invalid: '{commandName}'. Tool command names must not use Windows reserved device names.");
+                $"Tool command name ('tool_command_name') for '{projectPath}' is invalid: '{commandName}'. Tool command names must not use Windows reserved device names or dotted aliases.");
         }
 
         if (string.Equals(commandName, ".", StringComparison.Ordinal)
@@ -349,7 +349,7 @@ internal sealed class PackageIndexGenerator
             || commandName.Any(IsInvalidToolCommandNameCharacter))
         {
             throw new PackageIndexException(
-                $"Tool command name ('tool_command_name') for '{projectPath}' is invalid: '{commandName}'. Tool command names must not be reserved path segments, Windows reserved device names, or contain whitespace, path separators, control characters, or characters invalid in file names.");
+                $"Tool command name ('tool_command_name') for '{projectPath}' is invalid: '{commandName}'. Tool command names must not be reserved path segments, Windows reserved device names or dotted aliases, or contain whitespace, path separators, control characters, or characters invalid in file names.");
         }
     }
 
@@ -358,6 +358,13 @@ internal sealed class PackageIndexGenerator
         return char.IsWhiteSpace(value)
             || char.IsControl(value)
             || value is '/' or '\\' or '<' or '>' or ':' or '"' or '|' or '?' or '*';
+    }
+
+    private static bool IsWindowsReservedDeviceName(string commandName)
+    {
+        var extensionStart = commandName.IndexOf('.', StringComparison.Ordinal);
+        var deviceName = extensionStart < 0 ? commandName : commandName[..extensionStart];
+        return ReservedWindowsDeviceNames.Contains(deviceName);
     }
 
     private static void ValidatePublishContract(PackageManifestEntry entry, IReadOnlySet<string> knownPackageIds)
@@ -571,7 +578,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine($"- Edit `packages/package-index.yml` when the public package story changes.");
         builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
-        builder.AppendLine("- Keep `tool_command_name` aligned with each public .NET tool project's `ToolCommandName` so package validation and post-publish smoke tests run the command users will type. The value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, Windows reserved device names, control characters, or Windows-invalid file-name characters.");
+        builder.AppendLine("- Keep `tool_command_name` aligned with each public .NET tool project's `ToolCommandName` so package validation and post-publish smoke tests run the command users will type. The value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications or package READMEs.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, or Tailwind runtime payloads.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");
@@ -1378,8 +1385,8 @@ internal sealed class PackageManifestEntry
     /// This field is only valid for projects that set <c>PackAsTool=true</c>. Public tool packages must provide a
     /// value so package validation, publish planning, and post-publish smoke tests can execute the command users type;
     /// non-tool packages must leave it unset. The value must be one file-name-safe command token rather than a path:
-    /// no whitespace, path separators, reserved <c>.</c>/<c>..</c> segments, Windows reserved device names, control
-    /// characters, or Windows-invalid file-name characters.
+    /// no whitespace, path separators, reserved <c>.</c>/<c>..</c> segments, Windows reserved device names or dotted
+    /// aliases, control characters, or Windows-invalid file-name characters.
     /// </remarks>
     public string? ToolCommandName { get; init; }
 

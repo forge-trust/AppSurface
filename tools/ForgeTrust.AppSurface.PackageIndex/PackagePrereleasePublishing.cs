@@ -793,9 +793,11 @@ internal sealed class PackageSmokeInstallWorkflow
 
     private static bool ContainsToolCommandUsage(string output, string commandName)
     {
+        var commandPattern = $@"{Regex.Escape(commandName)}(?:\.exe)?";
+
         return Regex.IsMatch(
             output,
-            $@"(?im)(^|\s|`){Regex.Escape(commandName)}($|\s|\[|`)",
+            $@"(?im)(^|\s|`){commandPattern}($|\s|\[|`)",
             RegexOptions.CultureInvariant);
     }
 

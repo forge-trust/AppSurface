@@ -1257,6 +1257,51 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task RunPackageGateAsync_ThrowsWhenSupportPublishToolCommandNameIsMissing()
+    {
+        await WritePublicToolRepoAsync(toolCommandName: null, publishDecision: "support_publish");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"] = CreateMetadata(
+                "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                "ForgeTrust.AppSurface.Cli",
+                isTool: true,
+                outputType: "Exe")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.RunPackageGateAsync(CreateRequest()));
+
+        Assert.Contains("tool_command_name", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunPackageGateAsync_AllowsSupportPublishToolCommandNameWhenValid()
+    {
+        await WritePublicToolRepoAsync("appsurface", publishDecision: "support_publish");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"] = CreateMetadata(
+                "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                "ForgeTrust.AppSurface.Cli",
+                isTool: true,
+                outputType: "Exe")
+        });
+
+        var report = await generator.RunPackageGateAsync(CreateRequest());
+
+        Assert.Equal(2, report.PackageCount);
+    }
+
+    [Fact]
     public async Task RunPackageGateAsync_ThrowsWhenNonToolDefinesToolCommandName()
     {
         await WritePublicToolRepoAsync("appsurface");
@@ -1288,6 +1333,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     [InlineData("CON")]
     [InlineData("Com1")]
     [InlineData("clock$")]
+    [InlineData("con.txt")]
     public async Task RunPackageGateAsync_ThrowsWhenToolCommandNameIsInvalid(string toolCommandName)
     {
         await WritePublicToolRepoAsync(toolCommandName);
@@ -2117,7 +2163,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             """);
     }
 
-    private async Task WritePublicToolRepoAsync(string? toolCommandName)
+    private async Task WritePublicToolRepoAsync(string? toolCommandName, string publishDecision = "publish")
     {
         var toolCommandYaml = toolCommandName is null
             ? string.Empty
@@ -2141,7 +2187,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
                 classification: public
-                publish_decision: publish
+                publish_decision: {{publishDecision}}
                 release_status: public_preview
                 commercial_status: commercial_ready
                 release_notes_path: releases/unreleased.md

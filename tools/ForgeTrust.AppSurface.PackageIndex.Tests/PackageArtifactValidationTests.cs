@@ -1491,6 +1491,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Theory]
     [InlineData("../appsurface")]
     [InlineData("con")]
+    [InlineData("con.txt")]
     public async Task PackageArtifactManifestReader_RejectsInvalidToolCommandName(string toolCommandName)
     {
         var manifestPath = CombineSafeChildPath(_repositoryRoot, "manifest.json");
@@ -2104,8 +2105,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("NUGET_PACKAGES", commandRunner.Requests[0].Environment!.Keys);
     }
 
-    [Fact]
-    public async Task PackageSmokeInstallWorkflow_InstallsToolAndRunsHelpCommand()
+    [Theory]
+    [InlineData("USAGE\nappsurface [command]")]
+    [InlineData("USAGE\nappsurface.exe [command]")]
+    public async Task PackageSmokeInstallWorkflow_InstallsToolAndRunsHelpCommand(string helpOutput)
     {
         await WriteFileAsync("packages/package-index.yml",
             """
@@ -2152,7 +2155,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var commandRunner = new RecordingExternalCommandRunner([
             new ExternalCommandResult(0, "restored", string.Empty),
             new ExternalCommandResult(0, "installed", string.Empty),
-            new ExternalCommandResult(0, "USAGE\nappsurface [command]", string.Empty)
+            new ExternalCommandResult(0, helpOutput, string.Empty)
         ]);
         var workflow = new PackageSmokeInstallWorkflow(
             new PackageArtifactManifestReader(),
