@@ -1334,6 +1334,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     [InlineData("Com1")]
     [InlineData("clock$")]
     [InlineData("con.txt")]
+    [InlineData("appsurface.")]
     public async Task RunPackageGateAsync_ThrowsWhenToolCommandNameIsInvalid(string toolCommandName)
     {
         await WritePublicToolRepoAsync(toolCommandName);

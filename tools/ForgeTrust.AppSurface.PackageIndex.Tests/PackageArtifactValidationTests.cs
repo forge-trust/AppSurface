@@ -421,6 +421,37 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void PackageArtifactValidator_ThrowsWhenToolSettingsFileDeclaresExtraCommand()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Cli",
+            PackageVersion,
+            EmptyDependencies,
+            packageTypes: ["DotnetTool"],
+            toolCommandNames: ["appsurface", "extra-command"]);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        "ForgeTrust.AppSurface.Cli",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: true,
+                        ToolCommandName: "appsurface")
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("extra-command", error.Message, StringComparison.Ordinal);
+        Assert.Contains("only expected command 'appsurface'", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PackageArtifactValidator_ThrowsWhenToolSettingsAreMissing()
     {
         var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
@@ -2326,9 +2357,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public void CombineSafeChildPath_RejectsTraversalOutsideDirectory()
     {
-        var error = Assert.Throws<InvalidOperationException>(
+        var error = Assert.Throws<ArgumentException>(
             () => CombineSafeChildPath(_repositoryRoot, "../outside.txt"));
 
+        Assert.Equal("childPath", error.ParamName);
         Assert.Contains("escapes", error.Message, StringComparison.Ordinal);
     }
 
@@ -2699,12 +2731,12 @@ public sealed class PackageArtifactValidationTests : IDisposable
     {
         if (string.IsNullOrWhiteSpace(childPath))
         {
-            throw new InvalidOperationException("Child path must not be empty.");
+            throw new ArgumentException("Child path must not be empty.", nameof(childPath));
         }
 
         if (Path.IsPathRooted(childPath))
         {
-            throw new InvalidOperationException($"Child path '{childPath}' must not be rooted.");
+            throw new ArgumentException($"Child path '{childPath}' must not be rooted.", nameof(childPath));
         }
 
         var fullDirectory = Path.GetFullPath(directory);
@@ -2715,7 +2747,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             || relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal)
             || Path.IsPathRooted(relativePath))
         {
-            throw new InvalidOperationException($"Child path '{childPath}' escapes '{directory}'.");
+            throw new ArgumentException($"Child path '{childPath}' escapes '{directory}'.", nameof(childPath));
         }
 
         return fullCandidate;

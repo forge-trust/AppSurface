@@ -151,7 +151,14 @@ internal sealed class PackageArtifactValidator
         if (expected.IsTool)
         {
             var settingsFilesMissingExpectedCommand = inspected.ToolSettingsFiles
-                .Where(settingsFile => !settingsFile.CommandNames.Contains(expected.ToolCommandName, StringComparer.Ordinal))
+                .Where(settingsFile =>
+                {
+                    var distinctCommandNames = settingsFile.CommandNames
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray();
+                    return distinctCommandNames.Length != 1
+                        || !string.Equals(distinctCommandNames[0], expected.ToolCommandName, StringComparison.Ordinal);
+                })
                 .ToArray();
             if (settingsFilesMissingExpectedCommand.Length > 0)
             {
@@ -164,7 +171,7 @@ internal sealed class PackageArtifactValidator
                         return $"{settingsFile.EntryPath} ({commandNames})";
                     });
                 throw new PackageIndexException(
-                    $"Tool package '{expected.PackageId}' settings file(s) [{string.Join("; ", settingsFileDescriptions)}] must each declare expected command '{expected.ToolCommandName}'.");
+                    $"Tool package '{expected.PackageId}' settings file(s) [{string.Join("; ", settingsFileDescriptions)}] must each declare only expected command '{expected.ToolCommandName}'.");
             }
         }
 

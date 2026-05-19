@@ -117,8 +117,8 @@ flag, declared tool command name for .NET tools, and SHA-512 hash for every
 `publish` and `support_publish` package selected from `packages/package-index.yml`.
 The `tool_command_name` value must be one file-name-safe command token, not a
 path: no whitespace, path separators, reserved `.`/`..` segments, control
-characters, Windows reserved device names or dotted aliases, or
-Windows-invalid file-name characters.
+characters, trailing periods, Windows reserved device names or dotted aliases,
+or Windows-invalid file-name characters.
 
 The protected publish job downloads that exact artifact bundle and runs:
 
