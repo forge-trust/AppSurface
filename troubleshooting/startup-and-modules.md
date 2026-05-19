@@ -80,7 +80,7 @@ The wrong module is registered, the app's host identity is not the assembly that
 
 - Confirm the expected web module is registered.
 - Confirm the startup log shows the URL you are opening.
-- For RazorDocs, check whether the app is mounted at `/docs` or a configured docs root.
+- For AppSurface Docs, check whether the app is mounted at `/docs` or a configured docs root.
 - For static web assets in custom hosts, check `StartupContext.HostApplicationName` and `StartupContext.OverrideEntryPointAssembly`.
 
 ### Fix
@@ -103,4 +103,4 @@ Read the [AppSurface v0.1 package chooser](../packages/README.md). Start with th
 
 ### Fix
 
-For a normal ASP.NET Core app, start with `ForgeTrust.AppSurface.Web`. Add optional packages such as OpenAPI, Scalar, RazorWire, Tailwind, or RazorDocs only when the app needs them.
+For a normal ASP.NET Core app, start with `ForgeTrust.AppSurface.Web`. Add optional packages such as OpenAPI, Scalar, RazorWire, Tailwind, or AppSurface Docs only when the app needs them.

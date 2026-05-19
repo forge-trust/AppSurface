@@ -22,18 +22,18 @@ Examples out of scope:
 - arbitrary app markup inside a RazorWire form
 - view components, partials, or layouts authored by the host app
 - sample-app visual styling
-- RazorDocs documentation chrome
+- AppSurface Docs documentation chrome
 - consumer-owned Tailwind, Bootstrap, or design-system classes
 
 If a node is authored by the application, RazorWire should not impose a visual opinion on it. RazorWire may add behavior attributes or script hooks where the feature requires them, but the host application owns the element's design.
 
-## RazorWire Is Not RazorDocs
+## RazorWire Is Not AppSurface Docs
 
-RazorDocs owns a full documentation workspace with its own editorial chrome, navigation, search, and package-specific design language. RazorWire does not.
+AppSurface Docs owns a full documentation workspace with its own editorial chrome, navigation, search, and package-specific design language. RazorWire does not.
 
 RazorWire-generated UI should inherit from the application around it. It should feel like a quiet enhancement inside the host app, not like a branded AppSurface component transplanted onto the page.
 
-Use the RazorDocs design language only when working on RazorDocs. For RazorWire, this file is the package-level source of truth.
+Use the AppSurface Docs design language only when working on AppSurface Docs. For RazorWire, this file is the package-level source of truth.
 
 ## Visual Posture
 

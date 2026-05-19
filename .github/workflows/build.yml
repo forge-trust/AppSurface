@@ -72,7 +72,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  export-razordocs:
+  export-appsurface-docs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -99,38 +99,39 @@ jobs:
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj -- verify
 
-      - name: Build RazorWire CLI (Release)
+      - name: Build AppSurface CLI (Release)
         run: |
-          dotnet build Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj -c Release
+          dotnet build Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release
 
-      - name: Export RazorDocs static site with CDN validation
+      - name: Export AppSurface Docs static site with CDN validation
         env:
-          RazorDocs__Contributor__DefaultBranch: ${{ github.head_ref || github.ref_name }}
-          RazorDocs__Contributor__SourceRef: ${{ github.sha }}
-          RazorDocs__Contributor__SourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{branch}/{path}
-          RazorDocs__Contributor__SymbolSourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{ref}/{path}#L{line}
-          RazorDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
-          RazorDocs__Contributor__LastUpdatedMode: Git
-          RazorDocs__Harvest__JavaScript__Enabled: "true"
-          RazorDocs__Harvest__JavaScript__Include__0: Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js
+          AppSurfaceDocs__Contributor__DefaultBranch: ${{ github.head_ref || github.ref_name }}
+          AppSurfaceDocs__Contributor__SourceRef: ${{ github.sha }}
+          AppSurfaceDocs__Contributor__SourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{branch}/{path}
+          AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{ref}/{path}#L{line}
+          AppSurfaceDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
+          AppSurfaceDocs__Contributor__LastUpdatedMode: Git
+          AppSurfaceDocs__Harvest__JavaScript__Enabled: "true"
+          AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js
         run: |
-          printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/razordocs-seeds.txt"
-          dotnet run --project Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj -c Release -- \
-            export \
+          printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/appsurface-docs-seeds.txt"
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+            docs export \
+            --repo . \
             --mode cdn \
-            --seeds "$RUNNER_TEMP/razordocs-seeds.txt" \
-            --output "$RUNNER_TEMP/razordocs-pages" \
-            --project Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj
+            --seeds "$RUNNER_TEMP/appsurface-docs-seeds.txt" \
+            --output "$RUNNER_TEMP/appsurface-docs-pages" \
+            --strict
 
       - name: Upload Pages artifact
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         uses: actions/upload-pages-artifact@v4
         with:
-          path: ${{ runner.temp }}/razordocs-pages
+          path: ${{ runner.temp }}/appsurface-docs-pages
 
-  deploy-razordocs:
+  deploy-appsurface-docs:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: export-razordocs
+    needs: export-appsurface-docs
     runs-on: ubuntu-latest
     permissions:
       pages: write

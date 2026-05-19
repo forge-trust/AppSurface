@@ -85,7 +85,7 @@ Exactly one source option is required: `--url`, `--project`, or `--dll`.
 - `/about` is emitted as `about.html` and internal references rewrite to `/about.html`.
 - `/docs/start` is emitted as `docs/start.html` and internal references rewrite to `/docs/start.html`.
 - Dotted page slugs still follow page-route rules: `/docs/web/forgetrust.razorwire` is emitted as `docs/web/forgetrust.razorwire.html`, while assets that return non-HTML content keep their real extension.
-- RazorDocs content frames also emit `.partial.html` artifacts when a `doc-content` frame exists, so static frame navigation can fetch the content island.
+- AppSurface Docs content frames also emit `.partial.html` artifacts when a `doc-content` frame exists, so static frame navigation can fetch the content island.
 - Assets that already have extensions, such as `/css/site.css`, `/img/logo.png`, or `/_content/.../razorwire.js`, keep their path. Cache-busting query strings on assets are allowed only when the query-free path maps to an exported file.
 - The conventional `/_appsurface/errors/404` page, when available, is emitted as `404.html` and participates in the same CDN validation and URL rewriting.
 
@@ -119,16 +119,19 @@ For both `--project` and `--dll`:
 - The launched app inherits the parent process environment, while the CLI forces `ASPNETCORE_ENVIRONMENT=Production` and `DOTNET_ENVIRONMENT=Production` for deployed-runtime semantics.
 - The CLI waits for startup, crawls the app, then shuts the process down automatically.
 
-### RazorDocs versioned export notes
+### AppSurface Docs versioned export notes
 
-When the target app hosts RazorDocs:
+When the target app hosts AppSurface Docs:
 
-- Export the live unreleased preview surface from its configured live docs root, such as `/docs` when versioning is off, `/docs/next` when versioning is on with defaults, or `/foo/bar/next` when the host sets `RazorDocs:Routing:RouteRootPath` to `/foo/bar`.
+- Use `appsurface docs export --repo .` for AppSurface's own repository docs surface. That command starts the AppSurface Docs standalone host in-process, uses the same packaged static-asset fallbacks as preview, derives default seeds from AppSurface Docs routing, and keeps `-r` reserved for `--repo`.
+- Export the live unreleased preview surface from its configured live docs root, such as `/docs` when versioning is off, `/docs/next` when versioning is on with defaults, or `/foo/bar/next` when the host sets `AppSurfaceDocs:Routing:RouteRootPath` to `/foo/bar`.
 - Export exact published release trees as standalone static subtrees that already contain their own `index.html`, `search.html`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, section routes, and detail pages.
-- Treat those exact release trees as immutable publish artifacts. The RazorDocs runtime mounts them later under `{RouteRootPath}/v/{version}` and may also mount the recommended one at `{RouteRootPath}`.
-- The exporter recognizes custom-root RazorDocs pages by their RazorDocs client configuration or `doc-content` frame, not just by a `/docs` URL prefix. This keeps static partial generation working for mounted roots such as `/foo/bar/next`.
+- Treat those exact release trees as immutable publish artifacts. The AppSurface Docs runtime mounts them later under `{RouteRootPath}/v/{version}` and may also mount the recommended one at `{RouteRootPath}`.
+- The exporter recognizes custom-root AppSurface Docs pages by their AppSurface Docs client configuration or `doc-content` frame, not just by a `/docs` URL prefix. This keeps static partial generation working for mounted roots such as `/foo/bar/next`.
 - Use `--seeds` when you want deterministic seeds for docs-specific surfaces instead of relying only on crawl discovery.
-- For release publishing, set `RazorDocs__Harvest__FailOnFailure=true` in the parent environment before `razorwire export --project` or `razorwire export --dll`. The launched target app inherits that setting, fails before listening when aggregate harvest health is `Failed`, and the export command surfaces the target app's startup output. The strict exception summary is redacted, but ordinary target host logs may still contain operator diagnostics such as repository paths or raw exception messages.
+- For release publishing, set `AppSurfaceDocs__Harvest__FailOnFailure=true` in the parent environment before `razorwire export --project` or `razorwire export --dll`. The launched target app inherits that setting, fails before listening when aggregate harvest health is `Failed`, and the export command surfaces the target app's startup output. The strict exception summary is redacted, but ordinary target host logs may still contain operator diagnostics such as repository paths or raw exception messages.
+
+Keep `razorwire export` for arbitrary RazorWire apps where the CLI must launch a `--project`, launch a `--dll`, or crawl a pre-running `--url`. Use `appsurface docs export` when the AppSurface CLI owns the AppSurface Docs repository host and should avoid the generic child-process startup path.
 
 **Example:**
 

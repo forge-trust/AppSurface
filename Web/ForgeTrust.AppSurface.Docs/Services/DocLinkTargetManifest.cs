@@ -3,7 +3,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Enumerates the documentation targets harvested into a RazorDocs snapshot so link rewriting can avoid guessing from
+/// Enumerates the documentation targets harvested into an AppSurface Docs snapshot so link rewriting can avoid guessing from
 /// file extensions alone.
 /// </summary>
 /// <remarks>
@@ -23,7 +23,7 @@ internal sealed class DocLinkTargetManifest
     /// <summary>
     /// Creates a manifest from harvested documentation nodes.
     /// </summary>
-    /// <param name="nodes">The harvested documentation nodes that may be linked through RazorDocs routes.</param>
+    /// <param name="nodes">The harvested documentation nodes that may be linked through AppSurface Docs routes.</param>
     /// <returns>A manifest containing source and canonical target forms for the supplied nodes.</returns>
     internal static DocLinkTargetManifest FromNodes(IEnumerable<DocNode> nodes)
     {

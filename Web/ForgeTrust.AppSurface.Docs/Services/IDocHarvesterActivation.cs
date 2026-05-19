@@ -1,7 +1,7 @@
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Lets an optional harvester tell RazorDocs whether it should participate in the current source snapshot.
+/// Lets an optional harvester tell AppSurface Docs whether it should participate in the current source snapshot.
 /// </summary>
 /// <remarks>
 /// Disabled optional harvesters are omitted from aggregate harvest-health accounting so a deliberately disabled feature

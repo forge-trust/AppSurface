@@ -18,7 +18,7 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public void Constructor_ShouldThrow_WhenAggregatorIsNull()
     {
-        var options = new RazorDocsOptions();
+        var options = new AppSurfaceDocsOptions();
 
         Assert.Throws<ArgumentNullException>(() => new SidebarViewComponent(null!, options));
     }
@@ -30,7 +30,7 @@ public sealed class SidebarViewComponentTests
         using var memo = new Memo(cache);
         var harvester = A.Fake<IDocHarvester>();
         var env = A.Fake<IWebHostEnvironment>();
-        var sanitizer = A.Fake<IRazorDocsHtmlSanitizer>();
+        var sanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
         var logger = A.Fake<ILogger<DocAggregator>>();
         A.CallTo(() => env.ContentRootPath).Returns(Path.GetTempPath());
         A.CallTo(() => sanitizer.Sanitize(A<string>._))
@@ -38,7 +38,7 @@ public sealed class SidebarViewComponentTests
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns(Array.Empty<DocNode>());
 
-        var aggregator = new DocAggregator(new[] { harvester }, new RazorDocsOptions(), env, memo, sanitizer, logger);
+        var aggregator = new DocAggregator(new[] { harvester }, new AppSurfaceDocsOptions(), env, memo, sanitizer, logger);
 
         Assert.Throws<ArgumentNullException>(() => new SidebarViewComponent(aggregator, null!));
     }
@@ -50,7 +50,7 @@ public sealed class SidebarViewComponentTests
         using var memo = new Memo(cache);
         var harvester = A.Fake<IDocHarvester>();
         var env = A.Fake<IWebHostEnvironment>();
-        var sanitizer = A.Fake<IRazorDocsHtmlSanitizer>();
+        var sanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
         var logger = A.Fake<ILogger<DocAggregator>>();
         A.CallTo(() => env.ContentRootPath).Returns(Path.GetTempPath());
         A.CallTo(() => sanitizer.Sanitize(A<string>._))
@@ -58,8 +58,8 @@ public sealed class SidebarViewComponentTests
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns(Array.Empty<DocNode>());
 
-        var aggregator = new DocAggregator(new[] { harvester }, new RazorDocsOptions(), env, memo, sanitizer, logger);
-        var options = new RazorDocsOptions { Sidebar = null! };
+        var aggregator = new DocAggregator(new[] { harvester }, new AppSurfaceDocsOptions(), env, memo, sanitizer, logger);
+        var options = new AppSurfaceDocsOptions { Sidebar = null! };
 
         Assert.Throws<ArgumentNullException>(() => new SidebarViewComponent(aggregator, options));
     }
@@ -123,9 +123,9 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldUseDevelopmentHealthDefaults_WhenHarvestHealthOptionsAreNull()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Harvest = new RazorDocsHarvestOptions
+            Harvest = new AppSurfaceDocsHarvestOptions
             {
                 Health = null!
             }
@@ -148,7 +148,7 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldUseDevelopmentHealthDefaults_WhenHarvestOptionsAreNull()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
             Harvest = null!
         };
@@ -170,14 +170,14 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldHideHarvestHealthChrome_WhenExposureValueIsUnsupported()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Harvest = new RazorDocsHarvestOptions
+            Harvest = new AppSurfaceDocsHarvestOptions
             {
-                Health = new RazorDocsHarvestHealthOptions
+                Health = new AppSurfaceDocsHarvestHealthOptions
                 {
-                    ExposeRoutes = RazorDocsHarvestHealthExposure.Always,
-                    ShowChrome = (RazorDocsHarvestHealthExposure)999
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Always,
+                    ShowChrome = (AppSurfaceDocsHarvestHealthExposure)999
                 }
             }
         };
@@ -198,14 +198,14 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldRespectShowChromeIndependentlyFromExposeRoutes()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Harvest = new RazorDocsHarvestOptions
+            Harvest = new AppSurfaceDocsHarvestOptions
             {
-                Health = new RazorDocsHarvestHealthOptions
+                Health = new AppSurfaceDocsHarvestHealthOptions
                 {
-                    ExposeRoutes = RazorDocsHarvestHealthExposure.Never,
-                    ShowChrome = RazorDocsHarvestHealthExposure.Always
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Never,
+                    ShowChrome = AppSurfaceDocsHarvestHealthExposure.Always
                 }
             }
         };
@@ -399,9 +399,9 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldExposeConfiguredNamespacePrefixes_WhenProvided()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Sidebar = new RazorDocsSidebarOptions
+            Sidebar = new AppSurfaceDocsSidebarOptions
             {
                 NamespacePrefixes = [" ", "Contoso.Product.", "Contoso.Product"]
             }
@@ -489,9 +489,9 @@ public sealed class SidebarViewComponentTests
                 CreateDoc("Web", "Namespaces/ForgeTrust.AppSurface.Web", "API Reference"),
                 CreateDoc("Core", "Namespaces/ForgeTrust.AppSurface.Core", "API Reference")
             ],
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Sidebar = new RazorDocsSidebarOptions { NamespacePrefixes = [] }
+                Sidebar = new AppSurfaceDocsSidebarOptions { NamespacePrefixes = [] }
             });
         using (memo)
         using (cache)
@@ -643,9 +643,9 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldMarkSectionActive_ForRootMountedSectionRoutes()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/"
             }
@@ -671,9 +671,9 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldMarkSectionActive_ForRootMountedSectionRoutesWithTrailingSlash()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/"
             }
@@ -699,9 +699,9 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldMarkDocSectionActive_ForRootMountedDocRoutes()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/"
             }
@@ -730,9 +730,9 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldMarkDocSectionActive_ForRootMountedDocRoutesWithTrailingSlash()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/"
             }
@@ -761,9 +761,9 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldMarkStartHereSectionActive_ForRootMountedHomeRoute()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/"
             }
@@ -792,9 +792,9 @@ public sealed class SidebarViewComponentTests
     [InlineData("/search-index.json")]
     public async Task InvokeAsync_ShouldKeepSectionsInactive_ForRootMountedSearchRoutes(string requestPath)
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/"
             }
@@ -819,9 +819,9 @@ public sealed class SidebarViewComponentTests
     [Fact]
     public async Task InvokeAsync_ShouldMarkRootMountedPlainHtmlDocRoutes_AsCurrent()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/"
             }
@@ -914,16 +914,16 @@ public sealed class SidebarViewComponentTests
 
     private static (SidebarViewComponent Component, MemoryCache Cache, Memo Memo) CreateComponent(
         IEnumerable<DocNode> docs,
-        RazorDocsOptions? options = null,
+        AppSurfaceDocsOptions? options = null,
         string? environmentName = null)
     {
         var harvester = A.Fake<IDocHarvester>();
         var env = A.Fake<IWebHostEnvironment>();
-        var sanitizer = A.Fake<IRazorDocsHtmlSanitizer>();
+        var sanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
         var logger = A.Fake<ILogger<DocAggregator>>();
         var cache = new MemoryCache(new MemoryCacheOptions());
         var memo = new Memo(cache);
-        var docsOptions = options ?? new RazorDocsOptions();
+        var docsOptions = options ?? new AppSurfaceDocsOptions();
 
         A.CallTo(() => env.ContentRootPath).Returns(Path.GetTempPath());
         A.CallTo(() => env.EnvironmentName).Returns(environmentName ?? Environments.Development);

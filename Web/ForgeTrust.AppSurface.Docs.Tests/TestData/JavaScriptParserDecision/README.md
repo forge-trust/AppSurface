@@ -1,10 +1,10 @@
-# RazorDocs JavaScript Parser Decision
+# AppSurface Docs JavaScript Parser Decision
 
 Issue: https://github.com/forge-trust/AppSurface/issues/299
 
 ## Decision
 
-Use `Acornima` as the first parser dependency for the RazorDocs JavaScript public API harvester.
+Use `Acornima` as the first parser dependency for the AppSurface Docs JavaScript public API harvester.
 
 The original spike kept the dependency in `ForgeTrust.AppSurface.Docs.Tests` only while the parser decision was still being proven. The product harvester now references Acornima from `ForgeTrust.AppSurface.Docs`, keeps this probe as regression coverage, and ships third-party notice material with the package.
 
@@ -38,15 +38,15 @@ The original spike kept the dependency in `ForgeTrust.AppSurface.Docs.Tests` onl
 - `Esprima` remains viable but supports ECMAScript 2022 on the current NuGet line, while Acornima reports current ECMAScript 2026 Test262 coverage and the same .NET-contained parser model.
 - `Jint` is an execution engine, not a parser-only dependency. It is too much runtime surface for a docs harvester that only needs syntax and comments.
 - `NUglify` is optimized for minification scenarios, not source-provenance-heavy public API documentation.
-- `ANTLR` is a parser-generator strategy, not a ready JavaScript parser decision. It would make RazorDocs own generated parser code, grammar updates, hidden-channel comment handling, and AST shaping before the first JavaScript harvester proves user value.
-- `Tree-sitter` is the more interesting future multi-language parser substrate because it is built around source-spanned concrete syntax trees and broad grammar coverage. It should be evaluated when RazorDocs starts a second or third code-language harvester, but the native/runtime packaging story needs a separate AppSurface CLI distribution review.
+- `ANTLR` is a parser-generator strategy, not a ready JavaScript parser decision. It would make AppSurface Docs own generated parser code, grammar updates, hidden-channel comment handling, and AST shaping before the first JavaScript harvester proves user value.
+- `Tree-sitter` is the more interesting future multi-language parser substrate because it is built around source-spanned concrete syntax trees and broad grammar coverage. It should be evaluated when AppSurface Docs starts a second or third code-language harvester, but the native/runtime packaging story needs a separate AppSurface CLI distribution review.
 - A regex-only harvester is rejected. It would fail the source-span and failure-isolation requirements and would make public API docs depend on source formatting luck.
 
 ## Multi-Language Parser Strategy
 
-Do not make the JavaScript v1 harvester pay for a cross-language parser abstraction yet. The right near-term boundary is a small internal RazorDocs parser result model that can be backed by Acornima for JavaScript now and by another parser later.
+Do not make the JavaScript v1 harvester pay for a cross-language parser abstraction yet. The right near-term boundary is a small internal AppSurface Docs parser result model that can be backed by Acornima for JavaScript now and by another parser later.
 
-Revisit ANTLR, Tree-sitter, and language-specific parsers after RazorDocs has at least two code-language harvesters with concrete needs. Otherwise the abstraction is theory, and theory has a way of becoming a 400-line options object.
+Revisit ANTLR, Tree-sitter, and language-specific parsers after AppSurface Docs has at least two code-language harvesters with concrete needs. Otherwise the abstraction is theory, and theory has a way of becoming a 400-line options object.
 
 ## License Compliance Case
 
@@ -58,9 +58,9 @@ Historical spike use:
 
 Current product use:
 
-- `ForgeTrust.AppSurface.Docs` now references Acornima for JavaScript public API harvesting, so the package redistributes Acornima transitively when hosts install RazorDocs.
+- `ForgeTrust.AppSurface.Docs` now references Acornima for JavaScript public API harvesting, so the package redistributes Acornima transitively when hosts install AppSurface Docs.
 - `Web/ForgeTrust.AppSurface.Docs/THIRD-PARTY-NOTICES.md` carries the Acornima package identity, version, BSD-3-Clause license, project URL, and redistribution requirements.
-- No endorsement: release and marketing copy must not imply Acornima, Adam Simon, or Acornima contributors endorse AppSurface or RazorDocs without specific written permission.
+- No endorsement: release and marketing copy must not imply Acornima, Adam Simon, or Acornima contributors endorse AppSurface or AppSurface Docs without specific written permission.
 - Keep the notice file in the package when Acornima remains in product code, and update it when the package version or parser dependency changes.
 
 ## Parser Probe
@@ -94,14 +94,14 @@ dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Test
 | Fixture/file | Size | Parse time | Notes |
 | --- | ---: | ---: | --- |
 | `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js` | 41,380 bytes | 13.434 ms | real RazorWire dogfood file; parsed successfully with 4,380 AST nodes and 2 block comments |
-| `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/search-client.js` | 68,314 bytes | 4.560 ms | larger RazorDocs browser asset; parsed successfully with 9,460 AST nodes |
+| `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/search-client.js` | 68,314 bytes | 4.560 ms | larger AppSurface Docs browser asset; parsed successfully with 9,460 AST nodes |
 | `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/minisearch.min.js` | 944 bytes | skipped | should stay excluded by `*.min.js` by default |
 | `malformed.js` | 107 bytes | 0.450 ms | failure path; catchable parse exception |
 | synthetic large public-doclet fixture | 117,965 bytes | 5.563 ms | 750 public function doclets; parsed successfully with 4,503 AST nodes and 750 block comments |
 
 ## Known Unsupported Syntax For V1 Harvesting
 
-The parser can accept more JavaScript than RazorDocs v1 should harvest. The first harvester should still treat these as unsupported public shapes until later issues add explicit product behavior:
+The parser can accept more JavaScript than AppSurface Docs v1 should harvest. The first harvester should still treat these as unsupported public shapes until later issues add explicit product behavior:
 
 - TypeScript syntax
 - JSX unless `Acornima.Extras` is deliberately added

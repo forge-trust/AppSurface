@@ -59,7 +59,7 @@ public sealed class MarkdownFrontMatterParserTests
         Assert.Equal("fr", metadata?.Localization?.Locale);
         Assert.Equal("guides/getting-started", metadata?.Localization?.TranslationKey);
         Assert.Equal("Démarrer", metadata?.Localization?.LocalizedTitle);
-        Assert.Equal(RazorDocsLocaleFallbackMode.Disabled, metadata?.Localization?.LocaleFallback);
+        Assert.Equal(AppSurfaceDocsLocaleFallbackMode.Disabled, metadata?.Localization?.LocaleFallback);
     }
 
     [Fact]
@@ -161,7 +161,7 @@ public sealed class MarkdownFrontMatterParserTests
 
         Assert.Equal("FR", result.Metadata?.Localization?.Locale);
         Assert.Equal("Guides/Getting-Started", result.Metadata?.Localization?.TranslationKey);
-        Assert.Equal(RazorDocsLocaleFallbackMode.Disabled, result.Metadata?.Localization?.LocaleFallback);
+        Assert.Equal(AppSurfaceDocsLocaleFallbackMode.Disabled, result.Metadata?.Localization?.LocaleFallback);
         Assert.Empty(result.Diagnostics);
     }
 

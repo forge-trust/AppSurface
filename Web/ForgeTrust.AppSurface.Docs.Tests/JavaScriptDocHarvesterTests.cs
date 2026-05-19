@@ -15,7 +15,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     [Fact]
     public async Task HarvestAsync_ShouldReturnNoDocs_WhenJavaScriptHarvestingIsDisabled()
     {
-        var harvester = CreateHarvester(new RazorDocsOptions());
+        var harvester = CreateHarvester(new AppSurfaceDocsOptions());
 
         var docs = await harvester.HarvestAsync(_testRoot);
 
@@ -35,7 +35,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Empty(docs);
         Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptMissingInclude, diagnostic.Code);
         Assert.Contains("include globs", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Include", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("IncludeGlobs", diagnostic.Fix, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal("RazorWire JavaScript API", page.Title);
         Assert.Equal("javascript-api", page.Metadata?.PageType);
         Assert.Contains("event-razorwire-form-failure", page.Content, StringComparison.Ordinal);
-        Assert.Contains("data-razordocs-symbol-source=\"event-razorwire-form-failure\"", page.Content, StringComparison.Ordinal);
+        Assert.Contains("data-appsurfacedocs-symbol-source=\"event-razorwire-form-failure\"", page.Content, StringComparison.Ordinal);
         Assert.Contains(page.Outline!, item => item.Id == "event-razorwire-form-failure" && item.Level == 2);
         Assert.Contains(
             page.SymbolSourceProvenance!,
@@ -290,7 +290,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             function hidden() {}
             """);
         var options = CreateEnabledOptions("src/**/*.js");
-        options.Harvest.JavaScript.Exclude = ["src/private/**"];
+        options.Harvest.JavaScript.ExcludeGlobs = ["src/private/**"];
         var harvester = CreateHarvester(options);
 
         var docs = await harvester.HarvestAsync(_testRoot);
@@ -620,7 +620,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
-    public async Task HarvestAsync_ShouldRenderOptionalEventMetadataAndMatchQuestionMarkGlobs()
+    public async Task HarvestAsync_ShouldRenderOptionalEventMetadataAndMatchWildcardGlobs()
     {
         await WriteAsync(
             "src/public1.js",
@@ -638,7 +638,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * form.addEventListener('razorwire:failure', event => event.preventDefault());
              */
             """);
-        var harvester = CreateHarvester(CreateEnabledOptions("src/public?.js"));
+        var harvester = CreateHarvester(CreateEnabledOptions("src/public*.js"));
 
         var docs = await harvester.HarvestAsync(_testRoot);
 
@@ -675,7 +675,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             options,
             new TestWebHostEnvironment(_testRoot),
             new Memo(new MemoryCache(new MemoryCacheOptions())),
-            new RazorDocsHtmlSanitizer(),
+            new AppSurfaceDocsHtmlSanitizer(),
             NullLogger<DocAggregator>.Instance);
 
         var payload = await aggregator.GetSearchIndexPayloadAsync();
@@ -703,7 +703,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             options,
             new TestWebHostEnvironment(_testRoot),
             new Memo(new MemoryCache(new MemoryCacheOptions())),
-            new RazorDocsHtmlSanitizer(),
+            new AppSurfaceDocsHtmlSanitizer(),
             NullLogger<DocAggregator>.Instance);
 
         var health = await aggregator.GetHarvestHealthAsync();
@@ -719,22 +719,22 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Directory.Delete(_testRoot, recursive: true);
     }
 
-    private static JavaScriptDocHarvester CreateHarvester(RazorDocsOptions options)
+    private static JavaScriptDocHarvester CreateHarvester(AppSurfaceDocsOptions options)
     {
         return new JavaScriptDocHarvester(options, NullLogger<JavaScriptDocHarvester>.Instance);
     }
 
-    private static RazorDocsOptions CreateEnabledOptions(params string[] include)
+    private static AppSurfaceDocsOptions CreateEnabledOptions(params string[] include)
     {
-        return new RazorDocsOptions
+        return new AppSurfaceDocsOptions
         {
-            Harvest = new RazorDocsHarvestOptions
+            Harvest = new AppSurfaceDocsHarvestOptions
             {
-                JavaScript = new RazorDocsJavaScriptHarvestOptions
+                JavaScript = new AppSurfaceDocsJavaScriptHarvestOptions
                 {
                     Enabled = true,
-                    Include = include,
-                    Exclude = [.. RazorDocsJavaScriptHarvestOptions.DefaultExclude]
+                    IncludeGlobs = include,
+                    ExcludeGlobs = [.. AppSurfaceDocsJavaScriptHarvestOptions.DefaultExcludeGlobs]
                 }
             }
         };

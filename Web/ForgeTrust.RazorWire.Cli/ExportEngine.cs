@@ -85,7 +85,7 @@ public class ExportEngine
 
     private const string DocsStaticPartialsMetaName = "rw-docs-static-partials";
     private const string DocsStaticPartialsMetaTag = "<meta name=\"rw-docs-static-partials\" content=\"1\" />";
-    private const string RazorDocsClientConfigMarker = "window.__razorDocsConfig";
+    private const string AppSurfaceDocsClientConfigMarker = "window.__appSurfaceDocsConfig";
 
     private static readonly Regex TurboFrameOpenTagRegex = new(
         @"<turbo-frame\b[^>]*>",
@@ -112,7 +112,7 @@ public class ExportEngine
     /// <param name="context">Export configuration and runtime state including base URL, output path, queue, and visited set.</param>
     /// <param name="cancellationToken">Token to observe for cooperative cancellation of the crawl and export operations.</param>
     /// <remarks>
-    /// If <see cref="ExportContext.SeedRoutesPath"/> is provided, the file is read and each line is validated and normalized to a root-relative route; invalid seeds are logged. If the seed file exists but yields no valid routes, the root path ("/") is enqueued. If no seed file is provided, the root path is enqueued. Before crawl processing begins, the engine probes AppSurface's reserved conventional 404 route and stages <c>404.html</c> when the route returns a successful HTML response. That reserved-route probe is best-effort only: failures are logged, do not abort the crawl, and do not prevent queued seed routes from being processed. Once staged, the <c>404.html</c> body participates in the same CDN validation and reference rewriting as other HTML artifacts.
+    /// If <see cref="ExportContext.SeedRoutesPath"/> is provided, the file is read and each line is validated and normalized to a root-relative route; invalid seeds are logged. If the seed file exists but yields no valid routes, the root path ("/") is enqueued. If no seed file is provided, <see cref="ExportContext.InitialSeedRoutes"/> is used when present; invalid in-memory seeds are logged and an all-invalid set also falls back to the root path. If neither source is provided, the root path is enqueued. Before crawl processing begins, the engine probes AppSurface's reserved conventional 404 route and stages <c>404.html</c> when the route returns a successful HTML response. That reserved-route probe is best-effort only: failures are logged, do not abort the crawl, and do not prevent queued seed routes from being processed. Once staged, the <c>404.html</c> body participates in the same CDN validation and reference rewriting as other HTML artifacts.
     ///
     /// Export then runs as a three-stage pipeline:
     ///
@@ -259,7 +259,7 @@ public class ExportEngine
 
     private async Task QueueSeedRoutesAsync(ExportContext context, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrEmpty(context.SeedRoutesPath))
+        if (!string.IsNullOrWhiteSpace(context.SeedRoutesPath))
         {
             if (!File.Exists(context.SeedRoutesPath))
             {
@@ -272,22 +272,7 @@ public class ExportEngine
 
             var seeds = await File.ReadAllLinesAsync(context.SeedRoutesPath, cancellationToken);
 
-            foreach (var seed in seeds)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var added = false;
-                if (TryGetNormalizedSeedRoute(seed, context, out var normalized))
-                {
-                    added = true;
-                    EnqueueRoute(context, normalized);
-                }
-
-                if (!added)
-                {
-                    _logger.LogWarning("Invalid seed route: {SeedRoute}", seed);
-                }
-            }
+            QueueSeedRoutes(context, seeds, cancellationToken);
 
             if (context.Queue.Count == 0)
             {
@@ -299,7 +284,50 @@ public class ExportEngine
             return;
         }
 
+        if (context.InitialSeedRoutes.Count > 0)
+        {
+            QueueSeedRoutes(context, context.InitialSeedRoutes, cancellationToken);
+
+            if (context.Queue.Count == 0)
+            {
+                _logger.LogWarning(
+                    "Initial seed routes were provided but no valid routes were found. Falling back to default root path.");
+                EnqueueRoute(context, "/");
+            }
+
+            return;
+        }
+
         EnqueueRoute(context, "/");
+    }
+
+    /// <summary>
+    /// Validates, normalizes, and enqueues seed routes from a file or in-memory route collection.
+    /// </summary>
+    /// <param name="context">Export context whose queue receives valid normalized routes.</param>
+    /// <param name="seeds">Raw seed route values to validate.</param>
+    /// <param name="cancellationToken">Token observed between seed values.</param>
+    private void QueueSeedRoutes(
+        ExportContext context,
+        IEnumerable<string> seeds,
+        CancellationToken cancellationToken)
+    {
+        foreach (var seed in seeds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var added = false;
+            if (TryGetNormalizedSeedRoute(seed, context, out var normalized))
+            {
+                added = true;
+                EnqueueRoute(context, normalized);
+            }
+
+            if (!added)
+            {
+                _logger.LogWarning("Invalid seed route: {SeedRoute}", seed);
+            }
+        }
     }
 
     private async Task MaterializeTextRoutesAsync(ExportContext context, CancellationToken cancellationToken)
@@ -590,17 +618,17 @@ public class ExportEngine
     }
 
     /// <summary>
-    /// Determines whether an exported HTML page should receive RazorDocs static partial support.
+    /// Determines whether an exported HTML page should receive AppSurfaceDocs static partial support.
     /// </summary>
     /// <param name="route">The root-relative route being exported.</param>
     /// <param name="html">The fetched HTML document.</param>
     /// <param name="docContentFrame">The extracted <c>doc-content</c> frame, when the caller has already parsed it.</param>
     /// <returns>
-    /// <c>true</c> for the legacy <c>/docs</c> route family or HTML that carries RazorDocs runtime markers; otherwise
+    /// <c>true</c> for the legacy <c>/docs</c> route family or HTML that carries AppSurfaceDocs runtime markers; otherwise
     /// <c>false</c>.
     /// </returns>
     /// <remarks>
-    /// Custom RazorDocs hosts can mount under route families such as <c>/foo/bar</c>, so export detection cannot rely
+    /// Custom AppSurfaceDocs hosts can mount under route families such as <c>/foo/bar</c>, so export detection cannot rely
     /// only on path prefixes. The client config marker covers search and shell pages, while the content frame covers
     /// document detail pages.
     /// </remarks>
@@ -611,7 +639,7 @@ public class ExportEngine
 
         return IsDocsRoute(route)
                || !string.IsNullOrWhiteSpace(docContentFrame)
-               || html.Contains(RazorDocsClientConfigMarker, StringComparison.Ordinal);
+               || html.Contains(AppSurfaceDocsClientConfigMarker, StringComparison.Ordinal);
     }
 
     internal static string MapHtmlFilePathToPartialPath(string htmlFilePath)

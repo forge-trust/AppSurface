@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Text;
@@ -6,6 +5,7 @@ using System.Text.RegularExpressions;
 using Acornima;
 using Acornima.Ast;
 using ForgeTrust.AppSurface.Docs.Models;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
@@ -13,8 +13,8 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// Harvests intentionally public JavaScript API doclets from configured plain <c>.js</c> source files.
 /// </summary>
 /// <remarks>
-/// The harvester is disabled by default through <see cref="RazorDocsJavaScriptHarvestOptions.Enabled"/> and scans only
-/// repository-relative paths matched by <see cref="RazorDocsJavaScriptHarvestOptions.Include"/>. V1 is deliberately
+/// The harvester is disabled by default through <see cref="AppSurfaceDocsJavaScriptHarvestOptions.Enabled"/> and scans only
+/// repository-relative paths matched by <see cref="AppSurfaceDocsJavaScriptHarvestOptions.IncludeGlobs"/>. V1 is deliberately
 /// strict: it reads JSDoc-shaped block comments, requires <c>@public</c> by default, treats <c>@internal</c>,
 /// <c>@private</c>, and <c>@ignore</c> as hard exclusions, and renders only functions, constants, globals, standalone
 /// events, and standalone typedefs. Unsupported public shapes become harvest diagnostics instead of partial docs.
@@ -25,26 +25,43 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     private static readonly Regex UnsafeSlugCharacterRegex = new("[^a-z0-9]+", RegexOptions.Compiled | RegexOptions.NonBacktracking);
     private static readonly string[] AlwaysPrunedDirectoryNames = [".git"];
 
-    private readonly RazorDocsOptions _options;
+    private readonly AppSurfaceDocsOptions _options;
     private readonly ILogger<JavaScriptDocHarvester> _logger;
+    private readonly AppSurfaceDocsHarvestPathPolicy _pathPolicy;
     private IReadOnlyList<DocHarvestDiagnostic> _lastDiagnostics = [];
 
     /// <summary>
     /// Initializes a new instance of <see cref="JavaScriptDocHarvester"/>.
     /// </summary>
-    /// <param name="options">Normalized RazorDocs options that contain JavaScript harvest settings.</param>
+    /// <param name="options">Normalized AppSurface Docs options that contain JavaScript harvest settings.</param>
     /// <param name="logger">Logger used for non-fatal JavaScript harvest diagnostics.</param>
-    public JavaScriptDocHarvester(RazorDocsOptions options, ILogger<JavaScriptDocHarvester> logger)
+    public JavaScriptDocHarvester(AppSurfaceDocsOptions options, ILogger<JavaScriptDocHarvester> logger)
+        : this(options, logger, new AppSurfaceDocsHarvestPathPolicy(options, NullLogger<AppSurfaceDocsHarvestPathPolicy>.Instance))
     {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(logger);
-
-        _options = options;
-        _logger = logger;
     }
 
     /// <summary>
-    /// Scans configured JavaScript files under the repository root and returns generated RazorDocs API nodes.
+    /// Initializes a new instance of <see cref="JavaScriptDocHarvester"/> with a shared harvest path policy.
+    /// </summary>
+    /// <param name="options">Normalized AppSurface Docs options that contain JavaScript harvest settings.</param>
+    /// <param name="logger">Logger used for non-fatal JavaScript harvest diagnostics.</param>
+    /// <param name="pathPolicy">Shared harvest path policy used to decide which JavaScript candidates publish.</param>
+    internal JavaScriptDocHarvester(
+        AppSurfaceDocsOptions options,
+        ILogger<JavaScriptDocHarvester> logger,
+        AppSurfaceDocsHarvestPathPolicy pathPolicy)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(pathPolicy);
+
+        _options = options;
+        _logger = logger;
+        _pathPolicy = pathPolicy;
+    }
+
+    /// <summary>
+    /// Scans configured JavaScript files under the repository root and returns generated AppSurface Docs API nodes.
     /// </summary>
     /// <param name="rootPath">The repository root used to resolve include and exclude globs.</param>
     /// <param name="cancellationToken">An optional token to observe while reading and parsing files.</param>
@@ -58,20 +75,20 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         var diagnostics = new List<DocHarvestDiagnostic>();
         try
         {
-            var javaScriptOptions = _options.Harvest?.JavaScript ?? new RazorDocsJavaScriptHarvestOptions();
+            var javaScriptOptions = _options.Harvest?.JavaScript ?? new AppSurfaceDocsJavaScriptHarvestOptions();
             if (!javaScriptOptions.Enabled)
             {
                 return [];
             }
 
-            if (!HasUsableIncludeGlobs(javaScriptOptions.Include))
+            if (!HasUsableIncludeGlobs(javaScriptOptions.IncludeGlobs))
             {
                 diagnostics.Add(CreateDiagnostic(
                     DocHarvestDiagnosticCodes.JavaScriptMissingInclude,
                     DocHarvestDiagnosticSeverity.Warning,
                     "JavaScript harvesting is enabled without include globs.",
-                    "RazorDocs does not perform implicit repository-wide JavaScript crawling, so no JavaScript files were scanned.",
-                    "Configure at least one RazorDocs:Harvest:JavaScript:Include glob for the public runtime files that should be documented."));
+                    "AppSurface Docs does not perform implicit repository-wide JavaScript crawling, so no JavaScript files were scanned.",
+                    "Configure at least one AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs glob for the public runtime files that should be documented."));
                 return [];
             }
 
@@ -81,7 +98,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var relativePath = NormalizeRelativePath(Path.GetRelativePath(rootPath, filePath));
-                if (!ShouldHarvest(relativePath, javaScriptOptions))
+                if (!_pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.JavaScript))
                 {
                     continue;
                 }
@@ -95,7 +112,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                             DocHarvestDiagnosticCodes.JavaScriptFileTooLarge,
                             DocHarvestDiagnosticSeverity.Warning,
                             $"Skipped JavaScript file '{relativePath}' because it is larger than the configured limit.",
-                            $"The file is {fileInfo.Length.ToString(CultureInfo.InvariantCulture)} bytes and RazorDocs:Harvest:JavaScript:MaxFileSizeBytes is {javaScriptOptions.MaxFileSizeBytes.ToString(CultureInfo.InvariantCulture)}.",
+                            $"The file is {fileInfo.Length.ToString(CultureInfo.InvariantCulture)} bytes and AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes is {javaScriptOptions.MaxFileSizeBytes.ToString(CultureInfo.InvariantCulture)}.",
                             "Raise the JavaScript max-file-size limit only for authored source files that should be parsed, or keep generated bundles excluded."));
                         continue;
                     }
@@ -133,7 +150,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             {
                 _logger.Log(
                     diagnostic.Severity >= DocHarvestDiagnosticSeverity.Error ? LogLevel.Error : LogLevel.Warning,
-                    "RazorDocs JavaScript harvest diagnostic {DiagnosticCode}: {Problem}",
+                    "AppSurface Docs JavaScript harvest diagnostic {DiagnosticCode}: {Problem}",
                     diagnostic.Code,
                     diagnostic.Problem);
             }
@@ -150,7 +167,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     private static IReadOnlyList<JavaScriptApiItem> ParseFile(
         string source,
         string relativePath,
-        RazorDocsJavaScriptHarvestOptions options,
+        AppSurfaceDocsJavaScriptHarvestOptions options,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var comments = new List<Comment>();
@@ -303,7 +320,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         Node provenanceNode,
         string? name,
         JavaScriptApiKind kind,
-        RazorDocsJavaScriptHarvestOptions options,
+        AppSurfaceDocsJavaScriptHarvestOptions options,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var comment = FindLeadingBlockComment(comments, attachmentNode, source);
@@ -373,7 +390,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         ICollection<JavaScriptApiItem> items,
         string source,
         string relativePath,
-        RazorDocsJavaScriptHarvestOptions options,
+        AppSurfaceDocsJavaScriptHarvestOptions options,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         if (comment.Kind != CommentKind.Block)
@@ -475,7 +492,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor,
                         DocHarvestDiagnosticSeverity.Warning,
                         $"JavaScript API group '{group.Key}' has duplicate anchor '{anchorGroup.Key}'.",
-                        "Multiple public JavaScript API items normalized to the same anchor, so RazorDocs appended deterministic suffixes.",
+                        "Multiple public JavaScript API items normalized to the same anchor, so AppSurface Docs appended deterministic suffixes.",
                         "Rename one of the public JavaScript items or set clearer doclet names if the suffixes are not reader-friendly."));
                 }
 
@@ -803,17 +820,17 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static string CreateSymbolSourcePlaceholder(string anchorId)
     {
-        return $@"<span data-razordocs-symbol-source=""{WebUtility.HtmlEncode(anchorId)}""></span>";
+        return $@"<span data-appsurfacedocs-symbol-source=""{WebUtility.HtmlEncode(anchorId)}""></span>";
     }
 
-    private static IEnumerable<string> EnumerateJavaScriptFiles(
+    private IEnumerable<string> EnumerateJavaScriptFiles(
         string rootPath,
-        RazorDocsJavaScriptHarvestOptions options,
+        AppSurfaceDocsJavaScriptHarvestOptions options,
         CancellationToken cancellationToken)
     {
         var fullRoot = Path.GetFullPath(rootPath);
         var yielded = new HashSet<string>(PathComparer);
-        foreach (var includeRoot in ResolveIncludeRoots(fullRoot, options.Include))
+        foreach (var includeRoot in ResolveIncludeRoots(fullRoot, options.IncludeGlobs))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(includeRoot))
@@ -843,10 +860,10 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
-    private static IEnumerable<string> EnumerateJavaScriptFilesUnderRoot(
+    private IEnumerable<string> EnumerateJavaScriptFilesUnderRoot(
         string repositoryRoot,
         string traversalRoot,
-        RazorDocsJavaScriptHarvestOptions options,
+        AppSurfaceDocsJavaScriptHarvestOptions options,
         HashSet<string> yielded,
         CancellationToken cancellationToken)
     {
@@ -864,7 +881,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
             foreach (var directory in EnumerateDirectoriesSafely(current))
             {
-                if (ShouldPruneDirectory(repositoryRoot, directory, options))
+                if (ShouldPruneDirectory(repositoryRoot, directory))
                 {
                     continue;
                 }
@@ -932,10 +949,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return string.Join('/', staticSegments);
     }
 
-    private static bool ShouldPruneDirectory(
+    private bool ShouldPruneDirectory(
         string repositoryRoot,
-        string directory,
-        RazorDocsJavaScriptHarvestOptions options)
+        string directory)
     {
         var directoryInfo = new DirectoryInfo(directory);
         if (AlwaysPrunedDirectoryNames.Contains(directoryInfo.Name, StringComparer.OrdinalIgnoreCase)
@@ -945,11 +961,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         var relativePath = NormalizeRelativePath(Path.GetRelativePath(repositoryRoot, directory));
-        var directoryPath = relativePath.EndsWith("/", StringComparison.Ordinal)
-            ? relativePath
-            : relativePath + "/";
-        return options.Exclude.Any(pattern => JavaScriptGlobMatcher.IsMatch(directoryPath, pattern)
-                                             || JavaScriptGlobMatcher.IsMatch(relativePath, pattern));
+        return _pathPolicy.ShouldPruneDirectory(relativePath, AppSurfaceDocsHarvestSourceKind.JavaScript);
     }
 
     private static IReadOnlyList<string> EnumerateFilesSafely(string directory)
@@ -1022,12 +1034,6 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         ? StringComparison.OrdinalIgnoreCase
         : StringComparison.Ordinal;
 
-    private static bool ShouldHarvest(string relativePath, RazorDocsJavaScriptHarvestOptions options)
-    {
-        return options.Include.Any(pattern => JavaScriptGlobMatcher.IsMatch(relativePath, pattern))
-               && !options.Exclude.Any(pattern => JavaScriptGlobMatcher.IsMatch(relativePath, pattern));
-    }
-
     private static Comment? FindLeadingBlockComment(IReadOnlyList<Comment> comments, Node node, string source)
     {
         for (var index = comments.Count - 1; index >= 0; index--)
@@ -1044,7 +1050,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return null;
     }
 
-    private static bool ShouldIncludeDoclet(JavaScriptDoclet doclet, RazorDocsJavaScriptHarvestOptions options)
+    private static bool ShouldIncludeDoclet(JavaScriptDoclet doclet, AppSurfaceDocsJavaScriptHarvestOptions options)
     {
         if (IsHardExcluded(doclet))
         {
@@ -1422,72 +1428,4 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         public string AnchorId { get; set; } = string.Empty;
     }
 
-    private static class JavaScriptGlobMatcher
-    {
-        private static readonly ConcurrentDictionary<string, Regex> RegexCache = new(StringComparer.OrdinalIgnoreCase);
-
-        public static bool IsMatch(string path, string pattern)
-        {
-            ArgumentNullException.ThrowIfNull(path);
-            ArgumentNullException.ThrowIfNull(pattern);
-
-            var normalizedPath = path.Replace('\\', '/').TrimStart('/');
-            var normalizedPattern = pattern.Replace('\\', '/').TrimStart('/');
-            if (normalizedPattern.Length == 0)
-            {
-                return false;
-            }
-
-            var regex = RegexCache.GetOrAdd(
-                normalizedPattern,
-                static pattern => new Regex(
-                    "^" + ConvertGlobToRegex(pattern) + "$",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking));
-
-            return regex.IsMatch(normalizedPath);
-        }
-
-        private static string ConvertGlobToRegex(string pattern)
-        {
-            var builder = new StringBuilder();
-            for (var index = 0; index < pattern.Length; index++)
-            {
-                var current = pattern[index];
-                if (current == '*')
-                {
-                    var isDoubleStar = index + 1 < pattern.Length && pattern[index + 1] == '*';
-                    if (isDoubleStar)
-                    {
-                        var followedBySlash = index + 2 < pattern.Length && pattern[index + 2] == '/';
-                        if (followedBySlash)
-                        {
-                            builder.Append("(?:.*/)?");
-                            index += 2;
-                        }
-                        else
-                        {
-                            builder.Append(".*");
-                            index++;
-                        }
-                    }
-                    else
-                    {
-                        builder.Append("[^/]*");
-                    }
-
-                    continue;
-                }
-
-                if (current == '?')
-                {
-                    builder.Append("[^/]");
-                    continue;
-                }
-
-                builder.Append(Regex.Escape(current.ToString()));
-            }
-
-            return builder.ToString();
-        }
-    }
 }

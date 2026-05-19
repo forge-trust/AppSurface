@@ -3,7 +3,7 @@ using System.Text;
 namespace ForgeTrust.AppSurface.Docs.Models;
 
 /// <summary>
-/// Defines the canonical public-section labels, slugs, purpose copy, and alias lookup rules used by RazorDocs.
+/// Defines the canonical public-section labels, slugs, purpose copy, and alias lookup rules used by AppSurface Docs.
 /// </summary>
 internal static class DocPublicSectionCatalog
 {
@@ -155,7 +155,7 @@ internal static class DocPublicSectionCatalog
     /// <param name="section">The section whose href should be returned.</param>
     /// <param name="docsRootPath">
     /// The pre-normalized, app-relative docs root path to anchor the section route under. Callers are expected to pass
-    /// the validated live docs root from <see cref="RazorDocsRoutingOptions.DocsRootPath"/> or
+    /// the validated live docs root from <see cref="AppSurfaceDocsRoutingOptions.DocsRootPath"/> or
     /// <see cref="Services.DocsUrlBuilder.CurrentDocsRootPath"/>, not an arbitrary or unvalidated value.
     /// </param>
     /// <returns>

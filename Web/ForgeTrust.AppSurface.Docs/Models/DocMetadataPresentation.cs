@@ -18,7 +18,7 @@ public sealed record DocPageTypeBadgePresentation
     public string Label { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the badge variant suffix used by built-in RazorDocs CSS classes such as <c>docs-page-badge--guide</c>.
+    /// Gets the badge variant suffix used by built-in AppSurface Docs CSS classes such as <c>docs-page-badge--guide</c>.
     /// </summary>
     public string Variant { get; init; } = "neutral";
 }
@@ -28,12 +28,12 @@ public sealed record DocPageTypeBadgePresentation
 /// </summary>
 /// <remarks>
 /// Use this helper from Razor views, search payload generation, or custom UI surfaces when you want the built-in
-/// RazorDocs page-type treatment to remain consistent across landing, detail, and search experiences.
+/// AppSurface Docs page-type treatment to remain consistent across landing, detail, and search experiences.
 /// </remarks>
 public static class DocMetadataPresentation
 {
     /// <summary>
-    /// Resolves the built-in RazorDocs page-type badge presentation for a raw metadata value.
+    /// Resolves the built-in AppSurface Docs page-type badge presentation for a raw metadata value.
     /// </summary>
     /// <param name="pageType">The raw page-type metadata value, such as <c>guide</c>, <c>api-reference</c>, or <c>release-note</c>.</param>
     /// <returns>
@@ -87,7 +87,7 @@ public static class DocMetadataPresentation
     /// no non-delimiter segments after trimming and splitting.
     /// </returns>
     /// <remarks>
-    /// RazorDocs trims the input, splits on spaces, tabs, carriage returns, line feeds, underscores, and hyphens,
+    /// AppSurface Docs trims the input, splits on spaces, tabs, carriage returns, line feeds, underscores, and hyphens,
     /// removes empty segments, lowercases each remaining segment, and rejoins them with <c>-</c>.
     /// </remarks>
     internal static string? NormalizeToken(string? value)

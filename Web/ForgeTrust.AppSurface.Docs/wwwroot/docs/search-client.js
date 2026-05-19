@@ -1,5 +1,5 @@
 (() => {
-  const rawConfig = window.__razorDocsConfig || {};
+  const rawConfig = window.__appSurfaceDocsConfig || {};
   const docsRootPath = normalizeDocsRootPath(rawConfig.docsRootPath || '/docs');
   const docsSearchUrl = rawConfig.docsSearchUrl || joinDocsPath(docsRootPath, 'search');
   const indexUrl = rawConfig.docsSearchIndexUrl || joinDocsPath(docsRootPath, 'search-index.json');

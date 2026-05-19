@@ -1683,7 +1683,8 @@ body {
     padding-top: 1.35rem;
 }
 
-.docs-content .doc-code__language {
+.docs-content .doc-code::before {
+    content: attr(data-doc-code-language);
     position: absolute;
     top: 0.78rem;
     right: 0.9rem;
@@ -1701,7 +1702,7 @@ body {
     border-color: var(--docs-color-border-code-plain);
 }
 
-.docs-content .doc-code--plain .doc-code__language {
+.docs-content .doc-code--plain::before {
     color: var(--docs-color-text-subtle);
 }
 

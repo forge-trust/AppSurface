@@ -219,13 +219,13 @@ public class ExportEngineTests
     [Fact]
     public async Task ExtractAssets_Should_Extract_Turbo_Frame_Dependencies_During_Run()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var handler = new FrameAwareHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var handler = new FrameAwareHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
@@ -246,7 +246,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Throw_When_Seed_File_Is_Missing()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
         try
         {
@@ -269,21 +269,115 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Fallback_To_Root_When_Seed_File_Has_No_Valid_Routes()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         var seedFile = Path.Combine(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["mailto:test@example.com", "javascript:void(0)", ""]);
 
         try
         {
-            var handler = new TestHttpMessageHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
             Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Use_InMemory_Seed_Routes_When_No_Seed_File_Is_Provided()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var handler = new DocsSeedHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/docs"],
+                baseUrl: "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Join(tempDir, "docs.html")));
+            Assert.Contains("/docs", handler.RequestPaths);
+            Assert.DoesNotContain("/", context.RouteOutcomes.Keys);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Use_InMemory_Seed_Routes_When_Seed_File_Is_Blank()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var handler = new DocsSeedHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: " ",
+                initialSeedRoutes: ["/docs"],
+                baseUrl: "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Join(tempDir, "docs.html")));
+            Assert.Contains("/docs", handler.RequestPaths);
+            Assert.DoesNotContain("/", context.RouteOutcomes.Keys);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_Fallback_To_Root_When_InMemory_Seed_Routes_Have_No_Valid_Routes()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["mailto:test@example.com", "javascript:void(0)", ""],
+                baseUrl: "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
         }
         finally
         {
@@ -1280,12 +1374,12 @@ public class ExportEngineTests
     }
 
     [Fact]
-    public void IsDocsExportPage_ShouldDetectCustomRootRazorDocsClientConfig()
+    public void IsDocsExportPage_ShouldDetectCustomRootAppSurfaceDocsClientConfig()
     {
         var html = """
             <html>
               <head>
-                <script>window.__razorDocsConfig = {"docsRootPath":"/foo/bar/next"};</script>
+                <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/foo/bar/next"};</script>
               </head>
             </html>
             """;
@@ -1497,6 +1591,21 @@ public class ExportEngineTests
             return path == "/app/docs"
                 ? Html("<html><body><h1>Path base docs</h1></body></html>")
                 : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class DocsSeedHandler : TestHttpMessageHandler
+    {
+        public List<string> RequestPaths { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            RequestPaths.Add(path);
+
+            return path == "/docs"
+                ? Html("<html><body><h1>Docs</h1></body></html>")
+                : base.SendAsync(request, cancellationToken);
         }
     }
 
@@ -1887,7 +1996,7 @@ public class ExportEngineTests
                 var html = """
                     <html>
                       <head>
-                        <script>window.__razorDocsConfig = {"docsRootPath":"/foo/bar/next","docsSearchUrl":"/foo/bar/next/search","docsSearchIndexUrl":"/foo/bar/next/search-index.json"};</script>
+                        <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/foo/bar/next","docsSearchUrl":"/foo/bar/next/search","docsSearchIndexUrl":"/foo/bar/next/search-index.json"};</script>
                       </head>
                       <body>
                         <turbo-frame id="doc-content">

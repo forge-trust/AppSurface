@@ -12,6 +12,7 @@ internal class CommandService : CriticalService
 {
     private readonly IEnumerable<ICommand> _commands;
     private readonly StartupContext _context;
+    private readonly string? _executableName;
     private readonly IOptionSuggester _suggester;
 
     public CommandService(
@@ -28,15 +29,27 @@ internal class CommandService : CriticalService
         _suggester = suggester;
     }
 
+    /// <summary>
+    /// Creates a command service that can run a supplied command set without the hosted service provider pipeline.
+    /// </summary>
+    /// <param name="commands">Commands to register with CliFx.</param>
+    /// <param name="context">Startup context used when command instances need AppSurface runtime state.</param>
+    /// <param name="suggester">Option suggester used to enrich CliFx parse errors.</param>
+    /// <param name="executableName">
+    /// Optional executable display name used in usage, help, and error output. Leave unset to let CliFx choose its
+    /// default executable name.
+    /// </param>
     internal CommandService(
         IEnumerable<ICommand> commands,
         StartupContext context,
-        IOptionSuggester suggester) : base(
+        IOptionSuggester suggester,
+        string? executableName = null) : base(
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CommandService>.Instance,
             new DummyApplicationLifetime())
     {
         _commands = commands;
         _context = context;
+        _executableName = executableName;
         _suggester = suggester;
     }
 
@@ -62,6 +75,11 @@ internal class CommandService : CriticalService
         foreach (var cmd in _commands)
         {
             builder.AddCommand(cmd.GetType());
+        }
+
+        if (!string.IsNullOrWhiteSpace(_executableName))
+        {
+            builder.SetExecutableName(_executableName);
         }
 
         var consoleFromDi = serviceProvider.GetService<IConsole>();

@@ -8,9 +8,9 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldReturnDisabledGraph_WhenLocalizationIsDisabled()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            new RazorDocsLocalizationOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc("README.md", "Home"));
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            new AppSurfaceDocsLocalizationOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("README.md", "Home"));
 
         Assert.False(graph.Enabled);
         Assert.Empty(graph.DocSets);
@@ -21,12 +21,12 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldInferColocatedLocaleSuffixAndTranslationKeyFromBaseDocument()
     {
-        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var options = AppSurfaceDocsLocalizationFixture.CreateOptions();
 
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
             options,
-            RazorDocsLocalizationFixture.MarkdownDoc("README.md", "Home"),
-            RazorDocsLocalizationFixture.MarkdownDoc("README.fr.md", "Accueil"));
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("README.md", "Home"),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("README.fr.md", "Accueil"));
 
         var docSet = Assert.Single(graph.DocSets);
         Assert.Equal("README", docSet.TranslationKey);
@@ -54,9 +54,9 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldEmitMissingBaseDiagnostic_ForColocatedLocaleSuffixWithoutBase()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.fr.md", "Configuration"));
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/configuration.fr.md", "Configuration"));
 
         Assert.Contains(
             graph.Diagnostics,
@@ -68,9 +68,9 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldEmitUnsupportedLocaleDiagnostic_ForConfiguredMismatch()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.es.md", "Configuration"));
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/configuration.es.md", "Configuration"));
 
         Assert.Contains(
             graph.Diagnostics,
@@ -82,9 +82,9 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldEmitUnsupportedLocaleDiagnostic_ForExplicitUnsupportedLocale()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.md", "Configuration", locale: "es"));
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/configuration.md", "Configuration", locale: "es"));
 
         Assert.Contains(
             graph.Diagnostics,
@@ -95,9 +95,9 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldIgnoreNonMarkdownLocaleSuffixInference()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc("api/configuration.fr", "Configuration"));
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("api/configuration.fr", "Configuration"));
 
         var variant = Assert.Single(graph.VariantsBySourcePath.Values);
 
@@ -109,9 +109,9 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldTreatUnknownCultureLikeSuffixAsOrdinaryDefaultLocaleDoc()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.not_a_culture.md", "Configuration"));
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/configuration.not_a_culture.md", "Configuration"));
 
         var variant = Assert.Single(graph.VariantsBySourcePath.Values);
 
@@ -123,10 +123,10 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldInferMarkdownExtensionLocaleSuffixes()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.markdown", "Configuration"),
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.fr.markdown", "Configuration"));
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/configuration.markdown", "Configuration"),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/configuration.fr.markdown", "Configuration"));
 
         var docSet = Assert.Single(graph.DocSets);
 
@@ -137,19 +137,19 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldKeepGraphEmpty_WhenDefaultLocaleCannotBeResolved()
     {
-        var options = new RazorDocsLocalizationOptions
+        var options = new AppSurfaceDocsLocalizationOptions
         {
             Enabled = true,
             DefaultLocale = null!,
             Locales =
             [
-                new RazorDocsLocaleOptions { Code = "en" }
+                new AppSurfaceDocsLocaleOptions { Code = "en" }
             ]
         };
 
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
             options,
-            RazorDocsLocalizationFixture.MarkdownDoc("README.md", "Home"));
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("README.md", "Home"));
 
         Assert.Empty(graph.DocSets);
         Assert.Empty(graph.VariantsBySourcePath);
@@ -159,9 +159,9 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldResolveLocalizedTitleBeforeMetadataTitle()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc(
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc(
                 "guides/configuration.md",
                 "Configuration",
                 localizedTitle: "Localized configuration"));
@@ -174,10 +174,10 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldInferFolderLocaleOnlyWhenTranslationKeyIsAuthored()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc("fr/guides/demarrer.md", "Démarrer"),
-            RazorDocsLocalizationFixture.MarkdownDoc(
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("fr/guides/demarrer.md", "Démarrer"),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc(
                 "fr/guides/configuration.md",
                 "Configuration",
                 translationKey: "guides/configuration"));
@@ -194,9 +194,9 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldEmitFolderConflictDiagnostic_WhenAuthoredLocaleDisagreesWithFolderLocale()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc(
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc(
                 "fr/guides/configuration.md",
                 "Configuration",
                 locale: "en",
@@ -210,10 +210,10 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldEmitDuplicateVariantDiagnostic_ForSameTranslationKeyAndLocale()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/one.md", "One", locale: "fr", translationKey: "guides/shared"),
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/two.md", "Two", locale: "fr", translationKey: "guides/shared"));
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/one.md", "One", locale: "fr", translationKey: "guides/shared"),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/two.md", "Two", locale: "fr", translationKey: "guides/shared"));
 
         Assert.Contains(
             graph.Diagnostics,
@@ -223,12 +223,12 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldEmitFallbackDisabledMissingVariantDiagnostic()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc(
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc(
                 "guides/configuration.md",
                 "Configuration",
-                fallback: RazorDocsLocaleFallbackMode.Disabled));
+                fallback: AppSurfaceDocsLocaleFallbackMode.Disabled));
 
         Assert.Contains(
             graph.Diagnostics,
@@ -238,20 +238,20 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldEmitFallbackConflictDiagnostic_ForConflictingVariantFallbackModes()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc(
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc(
                 "guides/configuration.md",
                 "Configuration",
-                fallback: RazorDocsLocaleFallbackMode.Disabled),
-            RazorDocsLocalizationFixture.MarkdownDoc(
+                fallback: AppSurfaceDocsLocaleFallbackMode.Disabled),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc(
                 "guides/configuration.fr.md",
                 "Configuration",
-                fallback: RazorDocsLocaleFallbackMode.DefaultLocaleWithNotice));
+                fallback: AppSurfaceDocsLocaleFallbackMode.DefaultLocaleWithNotice));
 
         var docSet = Assert.Single(graph.DocSets);
 
-        Assert.Equal(RazorDocsLocaleFallbackMode.Disabled, docSet.FallbackMode);
+        Assert.Equal(AppSurfaceDocsLocaleFallbackMode.Disabled, docSet.FallbackMode);
         Assert.Contains(
             graph.Diagnostics,
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.LocalizationFallbackConflict);
@@ -260,10 +260,10 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void Build_ShouldSkipFragmentStubSourcePaths()
     {
-        var graph = RazorDocsLocalizationFixture.BuildGraph(
-            RazorDocsLocalizationFixture.CreateOptions(),
-            RazorDocsLocalizationFixture.MarkdownDoc("api/Foo.md", "Foo"),
-            RazorDocsLocalizationFixture.MarkdownDoc("api/Foo.md#TypeId", "Foo type"));
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(
+            AppSurfaceDocsLocalizationFixture.CreateOptions(),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("api/Foo.md", "Foo"),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("api/Foo.md#TypeId", "Foo type"));
 
         var variant = Assert.Single(graph.VariantsBySourcePath.Values);
 
@@ -276,13 +276,13 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void RouteCatalog_ShouldBuildLocalePrefixedRouteCandidatesFromGraph()
     {
-        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var options = AppSurfaceDocsLocalizationFixture.CreateOptions();
         var docs = new[]
         {
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/getting-started.md", "Getting started"),
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/getting-started.fr.md", "Démarrer")
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/getting-started.md", "Getting started"),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/getting-started.fr.md", "Démarrer")
         };
-        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new AppSurfaceDocsOptions()));
         var graph = new LocalizedDocsGraphBuilder(options).Build(docs, catalog);
 
         var candidates = catalog.BuildLocalizedRouteCandidates(graph, options);
@@ -302,16 +302,16 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void RouteCatalog_ShouldAvoidDoublePrefixForFolderInferredLocaleCandidates()
     {
-        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var options = AppSurfaceDocsLocalizationFixture.CreateOptions();
         var docs = new[]
         {
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/getting-started.md", "Getting started"),
-            RazorDocsLocalizationFixture.MarkdownDoc(
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/getting-started.md", "Getting started"),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc(
                 "fr/guides/getting-started.md",
                 "Démarrer",
                 translationKey: "guides/getting-started")
         };
-        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new AppSurfaceDocsOptions()));
         var graph = new LocalizedDocsGraphBuilder(options).Build(docs, catalog);
 
         var candidates = catalog.BuildLocalizedRouteCandidates(graph, options);
@@ -329,17 +329,17 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void RouteCatalog_ShouldAvoidDoublePrefixForExplicitLocaleInLocaleFolder()
     {
-        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var options = AppSurfaceDocsLocalizationFixture.CreateOptions();
         var docs = new[]
         {
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.md", "Configuration"),
-            RazorDocsLocalizationFixture.MarkdownDoc(
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/configuration.md", "Configuration"),
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc(
                 "fr/guides/configuration.md",
                 "Configuration",
                 locale: "fr",
                 translationKey: "guides/configuration")
         };
-        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new AppSurfaceDocsOptions()));
         var graph = new LocalizedDocsGraphBuilder(options).Build(docs, catalog);
 
         var candidates = catalog.BuildLocalizedRouteCandidates(graph, options);
@@ -357,12 +357,12 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void RouteCatalog_ShouldBuildHomeLocaleRouteCandidateWithoutTrailingSlash()
     {
-        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var options = AppSurfaceDocsLocalizationFixture.CreateOptions();
         var docs = new[]
         {
-            RazorDocsLocalizationFixture.MarkdownDoc("README.md", "Home")
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("README.md", "Home")
         };
-        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new AppSurfaceDocsOptions()));
         var graph = new LocalizedDocsGraphBuilder(options).Build(docs, catalog);
 
         var candidate = Assert.Single(catalog.BuildLocalizedRouteCandidates(graph, options));
@@ -374,13 +374,13 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void RouteCatalog_ShouldReturnNoLocalizedRouteCandidates_WhenGraphIsDisabled()
     {
-        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var options = AppSurfaceDocsLocalizationFixture.CreateOptions();
         var docs = new[]
         {
-            RazorDocsLocalizationFixture.MarkdownDoc("README.md", "Home")
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("README.md", "Home")
         };
-        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
-        var graph = RazorDocsLocalizationFixture.BuildGraph(new RazorDocsLocalizationOptions(), docs);
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new AppSurfaceDocsOptions()));
+        var graph = AppSurfaceDocsLocalizationFixture.BuildGraph(new AppSurfaceDocsLocalizationOptions(), docs);
 
         var candidates = catalog.BuildLocalizedRouteCandidates(graph, options);
 
@@ -390,12 +390,12 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void RouteCatalog_ShouldSkipLocalizedRouteCandidatesForUnconfiguredLocale()
     {
-        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var options = AppSurfaceDocsLocalizationFixture.CreateOptions();
         var docs = new[]
         {
-            RazorDocsLocalizationFixture.MarkdownDoc("guides/configuration.md", "Configuration")
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc("guides/configuration.md", "Configuration")
         };
-        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new AppSurfaceDocsOptions()));
         var graph = new LocalizedDocsGraph(
             Enabled: true,
             DefaultLocale: "en",
@@ -415,7 +415,7 @@ public sealed class LocalizedDocsGraphBuilderTests
                             LocaleWasInferred: false,
                             TranslationKeyWasInferred: false)
                     ],
-                    RazorDocsLocaleFallbackMode.DefaultLocaleWithNotice)
+                    AppSurfaceDocsLocaleFallbackMode.DefaultLocaleWithNotice)
             ],
             VariantsBySourcePath: new Dictionary<string, LocalizedDocVariant>(StringComparer.OrdinalIgnoreCase),
             Diagnostics: []);
@@ -428,17 +428,17 @@ public sealed class LocalizedDocsGraphBuilderTests
     [Fact]
     public void RouteCatalog_ShouldSkipLocalizedRouteCandidatesWithoutPublicRoute()
     {
-        var options = RazorDocsLocalizationFixture.CreateOptions();
+        var options = AppSurfaceDocsLocalizationFixture.CreateOptions();
         var docs = new[]
         {
-            RazorDocsLocalizationFixture.MarkdownDoc(
+            AppSurfaceDocsLocalizationFixture.MarkdownDoc(
                 "guides/broken.md",
                 "Broken",
                 locale: "fr",
                 translationKey: "guides/broken",
                 canonicalSlug: "../broken")
         };
-        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        var catalog = DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new AppSurfaceDocsOptions()));
         var graph = new LocalizedDocsGraphBuilder(options).Build(docs, catalog);
 
         var candidates = catalog.BuildLocalizedRouteCandidates(graph, options);

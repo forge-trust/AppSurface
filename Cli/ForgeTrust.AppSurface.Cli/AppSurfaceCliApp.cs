@@ -3,6 +3,7 @@ using System.Reflection;
 using CliFx;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.RazorWire.Cli;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -20,6 +21,17 @@ namespace ForgeTrust.AppSurface.Cli;
 /// </remarks>
 internal static class AppSurfaceCliApp
 {
+    /// <summary>
+    /// The published command name for the AppSurface CLI .NET tool.
+    /// </summary>
+    /// <remarks>
+    /// This value is passed to <see cref="CommandService"/> so help output, error messages, and usage text display the
+    /// command users type (<c>appsurface</c>) instead of the underlying assembly invocation. It must stay aligned with
+    /// the project file <c>ToolCommandName</c> property and the package index <c>tool_command_name</c> manifest value.
+    /// Package index validation, publish plan validation, and post-publish smoke tests detect drift across those layers.
+    /// </remarks>
+    internal const string ToolCommandName = "appsurface";
+
     /// <summary>
     /// Runs the AppSurface CLI with the provided command-line arguments.
     /// </summary>
@@ -54,7 +66,11 @@ internal static class AppSurfaceCliApp
         services.AddSingleton(context);
         services.AddSingleton(context.EnvironmentProvider);
         services.AddSingleton<IOptionSuggester, LevenshteinOptionSuggester>();
-        services.AddSingleton<IRazorDocsHostRunner, RazorDocsStandaloneHostRunner>();
+        services.AddSingleton<IAppSurfaceDocsHostRunner, AppSurfaceDocsStandaloneHostRunner>();
+        services.AddSingleton<IAppSurfaceDocsExportRunner, AppSurfaceDocsInProcessExportRunner>();
+        services.AddSingleton<IRazorWireStaticExporter, RazorWireExportEngineAdapter>();
+        services.AddSingleton<ExportEngine>();
+        services.AddHttpClient("ExportEngine", client => { client.Timeout = TimeSpan.FromSeconds(60); });
         services.AddLogging(builder =>
         {
             builder.AddConsole();
@@ -78,7 +94,7 @@ internal static class AppSurfaceCliApp
             .Select(commandType => (ICommand)serviceProvider.GetRequiredService(commandType))
             .ToArray();
         var suggester = serviceProvider.GetRequiredService<IOptionSuggester>();
-        var commandService = new CommandService(commands, context, suggester);
+        var commandService = new CommandService(commands, context, suggester, ToolCommandName);
         var previousServiceProvider = CommandService.PrimaryServiceProvider;
 
         try
