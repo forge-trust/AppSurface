@@ -19,7 +19,7 @@ internal static class DocOutlinePolicy
     private const int GeneralMinimumH3Count = 8;
     private const double GeneralRepeatedRatio = 0.60;
     private const int GeneralMinimumH2Count = 3;
-    private const int MinimumDistinctRepeatedH3Titles = 2;
+    private const int MinimumDistinctRepeatedH3Titles = 1;
     private const int MinimumRepeatedHeadingParentCount = 2;
 
     /// <summary>

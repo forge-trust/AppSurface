@@ -404,6 +404,40 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldSuppressSingleRepeatedH3Outline_WhenTitleRepeatsAcrossParents()
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            """
+            ---
+            page_type: troubleshooting
+            ---
+            # Troubleshooting
+
+            ## Login fails
+
+            ### Example
+
+            ## Build fails
+
+            ### Example
+
+            ## Deploy fails
+
+            ### Example
+
+            ## Rollback fails
+
+            ### Example
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(["Login fails", "Build fails", "Deploy fails", "Rollback fails"], doc.Outline!.Select(item => item.Title));
+        Assert.Contains("<h3 id=\"example\"", doc.Content);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldKeepRepeatedH3Outline_WhenRepeatedHeadingsStayUnderOneParent()
     {
         await WriteMarkdownAsync(
