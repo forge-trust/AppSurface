@@ -1,7 +1,7 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Options;
-using System.Globalization;
 
 namespace ForgeTrust.AppSurface.Docs;
 

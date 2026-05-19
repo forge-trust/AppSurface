@@ -8,6 +8,24 @@ Documentation site generation and hosting for AppSurface web applications.
 
 If you are evaluating RazorDocs for your own repository, start with [Use RazorDocs in your repository](./use-razordocs.md). That page explains the consumer model, host shape, authoring metadata, and adoption checklist before you drill into this package reference.
 
+## Preview and Export Commands
+
+Use the AppSurface CLI when working with this repository's RazorDocs surface:
+
+```bash
+appsurface docs --repo . --port 5189
+appsurface docs preview --repo . --port 5189
+appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
+```
+
+`appsurface docs` and `appsurface docs preview` run the standalone host for local inspection. `appsurface docs export` starts that same host in-process, binds an internal `http://127.0.0.1:0` listener, resolves the actual Kestrel address, and exports through RazorWire's static export engine.
+
+Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands.
+
+`--strict` and `--mode cdn` check different things. `--strict` fails host startup when every configured harvester fails. `--mode cdn` validates the emitted static artifact and preserves RazorWire `RWEXPORT00x` diagnostics for missing or unrewritable managed URLs.
+
+Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `--project`, or `--dll`. Use `appsurface docs export` when AppSurface owns the RazorDocs repository host.
+
 ## What It Provides
 
 - `RazorDocsWebModule` for wiring the docs UI into an AppSurface web host

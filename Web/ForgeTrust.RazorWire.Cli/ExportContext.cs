@@ -13,7 +13,21 @@ public class ExportContext
     /// <summary>
     /// Gets the optional path to a seed routes file.
     /// </summary>
+    /// <remarks>
+    /// When this path is set, file-based seeds take precedence over <see cref="InitialSeedRoutes"/> so existing CLI
+    /// callers keep their explicit seed-file behavior.
+    /// </remarks>
     public string? SeedRoutesPath { get; }
+
+    /// <summary>
+    /// Gets optional in-memory seed routes used when <see cref="SeedRoutesPath"/> is not configured.
+    /// </summary>
+    /// <remarks>
+    /// Hosts that already know their default routes can pass them directly instead of writing a temporary seed file. Values
+    /// are validated and normalized by the export engine using the same rules as file-based seeds. When no valid in-memory
+    /// seed remains, the engine falls back to the root route (<c>/</c>).
+    /// </remarks>
+    public IReadOnlyList<string> InitialSeedRoutes { get; }
 
     /// <summary>
     /// Gets the base URL of the source application being exported.
@@ -97,9 +111,39 @@ public class ExportContext
         string? seedRoutesPath,
         string baseUrl,
         ExportMode mode = ExportMode.Cdn)
+        : this(outputPath, seedRoutesPath, initialSeedRoutes: null, baseUrl, mode)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="ExportContext"/> with the specified configuration and in-memory seed
+    /// routes.
+    /// </summary>
+    /// <param name="outputPath">The target directory for export.</param>
+    /// <param name="seedRoutesPath">
+    /// The path to initial seed routes, if any. When provided, this file is used instead of
+    /// <paramref name="initialSeedRoutes"/>.
+    /// </param>
+    /// <param name="initialSeedRoutes">Optional in-memory initial seed routes used when <paramref name="seedRoutesPath"/> is null or blank.</param>
+    /// <param name="baseUrl">The base URL of the site to export.</param>
+    /// <param name="mode">
+    /// The export mode. <see cref="ExportMode.Cdn"/> is the default and validates plus rewrites exporter-managed URLs for static
+    /// hosting. Use <see cref="ExportMode.Hybrid"/> when the exported output will still be served by application-aware routing.
+    /// </param>
+    /// <remarks>
+    /// This overload is for hosts that can derive seed routes directly from their own routing options. The engine applies
+    /// the same normalization and fallback rules to in-memory seeds that it applies to seed-file lines.
+    /// </remarks>
+    public ExportContext(
+        string outputPath,
+        string? seedRoutesPath,
+        IEnumerable<string>? initialSeedRoutes,
+        string baseUrl,
+        ExportMode mode = ExportMode.Cdn)
     {
         OutputPath = outputPath;
         SeedRoutesPath = seedRoutesPath;
+        InitialSeedRoutes = initialSeedRoutes?.ToArray() ?? [];
         BaseUrl = baseUrl.TrimEnd('/');
         Mode = mode;
     }

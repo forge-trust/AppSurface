@@ -361,6 +361,15 @@
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
         }
       },
+      "forgetrust.razorwire.cli": {
+        "type": "Project",
+        "dependencies": {
+          "CliFx": "[2.3.6, )",
+          "ForgeTrust.AppSurface.Console": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )",
+          "ForgeTrust.RazorWire": "[0.1.0, )"
+        }
+      },
       "CliWrap": {
         "type": "CentralTransitive",
         "requested": "[3.10.1, )",

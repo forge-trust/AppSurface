@@ -3,6 +3,7 @@ using System.Reflection;
 using CliFx;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.RazorWire.Cli;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -57,6 +58,10 @@ internal static class AppSurfaceCliApp
         services.AddSingleton(context.EnvironmentProvider);
         services.AddSingleton<IOptionSuggester, LevenshteinOptionSuggester>();
         services.AddSingleton<IRazorDocsHostRunner, RazorDocsStandaloneHostRunner>();
+        services.AddSingleton<IRazorDocsExportRunner, RazorDocsInProcessExportRunner>();
+        services.AddSingleton<IRazorWireStaticExporter, RazorWireExportEngineAdapter>();
+        services.AddSingleton<ExportEngine>();
+        services.AddHttpClient("ExportEngine", client => { client.Timeout = TimeSpan.FromSeconds(60); });
         services.AddLogging(builder =>
         {
             builder.AddConsole();
