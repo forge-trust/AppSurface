@@ -292,6 +292,18 @@ internal sealed class PackageIndexGenerator
         }
     }
 
+    /// <summary>
+    /// Validates the manifest-declared tool command token for one project.
+    /// </summary>
+    /// <param name="projectPath">Repository-relative project path used in actionable error messages.</param>
+    /// <param name="commandName">Command token read from <c>tool_command_name</c>.</param>
+    /// <exception cref="PackageIndexException">
+    /// Thrown when the command token is missing or uses a value that cannot safely resolve to one command shim file.
+    /// </exception>
+    /// <remarks>
+    /// The value must be a single file-name-safe token. It must not be blank, <c>.</c>, <c>..</c>,
+    /// or contain whitespace, path separators, control characters, or portable file-name-invalid characters.
+    /// </remarks>
     internal static void ValidateToolCommandNameValue(string projectPath, string commandName)
     {
         if (string.IsNullOrWhiteSpace(commandName))

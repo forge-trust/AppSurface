@@ -323,7 +323,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public void PackageArtifactValidator_AcceptsToolPackageType()
     {
-        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
         WritePackage(
             artifactDirectory,
@@ -356,7 +356,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public void PackageArtifactValidator_ThrowsWhenToolSettingsCommandDoesNotMatchPlan()
     {
-        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
         WritePackage(
             artifactDirectory,
@@ -387,7 +387,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public void PackageArtifactValidator_ThrowsWhenAnyToolSettingsFileDoesNotDeclareExpectedCommand()
     {
-        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
         WritePackage(
             artifactDirectory,
@@ -423,7 +423,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public void PackageArtifactValidator_ThrowsWhenToolSettingsAreMissing()
     {
-        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
         WritePackage(
             artifactDirectory,
@@ -452,7 +452,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public void PackageArtifactValidator_ThrowsWhenToolSettingsXmlIsInvalid()
     {
-        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
         WritePackage(
             artifactDirectory,
@@ -1397,7 +1397,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public async Task PackageArtifactManifestReader_RejectsArtifactFileNamesWithDirectorySegments()
     {
-        var manifestPath = Path.Combine(_repositoryRoot, "manifest.json");
+        var manifestPath = CombineSafeChildPath(_repositoryRoot, "manifest.json");
         await File.WriteAllTextAsync(
             manifestPath,
             $$"""
@@ -1428,7 +1428,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public async Task PackageArtifactManifestReader_RejectsToolEntryWithoutToolCommandName()
     {
-        var manifestPath = Path.Combine(_repositoryRoot, "manifest.json");
+        var manifestPath = CombineSafeChildPath(_repositoryRoot, "manifest.json");
         await File.WriteAllTextAsync(
             manifestPath,
             $$"""
@@ -1459,7 +1459,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public async Task PackageArtifactManifestReader_RejectsToolCommandNameOnNonToolEntry()
     {
-        var manifestPath = Path.Combine(_repositoryRoot, "manifest.json");
+        var manifestPath = CombineSafeChildPath(_repositoryRoot, "manifest.json");
         await File.WriteAllTextAsync(
             manifestPath,
             $$"""

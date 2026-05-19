@@ -767,7 +767,22 @@ internal sealed class PackageSmokeInstallWorkflow
 
     private static string ResolveToolShimPath(string toolPath, string commandName)
     {
+        try
+        {
+            PackageIndexGenerator.ValidateToolCommandNameValue(nameof(commandName), commandName);
+        }
+        catch (PackageIndexException ex)
+        {
+            throw new ArgumentException(ex.Message, nameof(commandName), ex);
+        }
+
         var shimName = OperatingSystem.IsWindows() ? $"{commandName}.exe" : commandName;
+        if (Path.IsPathRooted(shimName)
+            || !string.Equals(Path.GetFileName(shimName), shimName, StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"Tool shim name '{shimName}' must be a file name, not a path.", nameof(commandName));
+        }
+
         return Path.Combine(toolPath, shimName);
     }
 
