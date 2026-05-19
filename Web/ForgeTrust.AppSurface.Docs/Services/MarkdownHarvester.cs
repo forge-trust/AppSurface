@@ -98,7 +98,7 @@ public class MarkdownHarvester : IDocHarvester
     /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
     /// <returns>A collection of DocNode objects representing each processed Markdown source file, including the display title, path relative to <paramref name="rootPath"/>, generated HTML, metadata, and <see cref="DocNode.Outline"/> entries when outline headings are available.</returns>
     /// <remarks>
-    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", and "Tests") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included. The root <c>LICENSE</c> file is also included when present so repository-relative license links can resolve in static exports. If a file's name is "README" (case-insensitive), its title is set to the parent directory name or "Home" for a repository root README. The Markdown body is parsed once with <c>Markdown.Parse(markdownBody, _pipeline)</c>; HTML is rendered from that AST and <see cref="DocNode.Outline"/> is populated from the same AST with <see cref="ExtractOutline"/> so callers can rely on outline data being present when eligible headings are available. Files that fail to process are skipped and an error is logged.
+    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", and "Tests") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included. The root <c>LICENSE</c> file is also included when present so repository-relative license links can resolve in static exports. If a file's name is "README" (case-insensitive), its title is set to the parent directory name or "Home" for a repository root README. The Markdown body is parsed once with <c>Markdown.Parse(markdownBody, _pipeline)</c>; HTML is rendered from that AST and <see cref="DocNode.Outline"/> is populated from the same AST with <see cref="ExtractOutline"/>, then filtered through the resolved Markdown outline policy so callers can rely on display outline data being present when eligible headings are available. Files that fail to process are skipped and an error is logged.
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
     {
@@ -138,7 +138,7 @@ public class MarkdownHarvester : IDocHarvester
                     explicitMetadata,
                     ExtractSummary(markdownBody),
                     _logger);
-                var outline = ExtractOutline(document);
+                var outline = DocOutlinePolicy.Apply(ExtractOutline(document), metadata);
 
                 nodes.Add(new DocNode(resolvedTitle, relativePath, html, Metadata: metadata, Outline: outline));
             }

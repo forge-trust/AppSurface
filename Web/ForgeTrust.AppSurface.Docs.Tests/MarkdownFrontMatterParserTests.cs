@@ -83,6 +83,88 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void Extract_ShouldParseOutlineMetadata()
+    {
+        var markdown = """
+            ---
+            outline:
+              max_heading_level: 2
+              repeated_heading_policy: h2_only
+            ---
+            # Guide
+            """;
+
+        var (_, metadata) = MarkdownFrontMatterParser.Extract(markdown);
+
+        Assert.Equal(2, metadata?.Outline?.MaxHeadingLevel);
+        Assert.Equal("h2_only", metadata?.Outline?.RepeatedHeadingPolicy);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldIgnoreInvalidOutlineMaxHeadingLevel_AndKeepValidPolicy()
+    {
+        var markdown = """
+            ---
+            outline:
+              max_heading_level: two
+              repeated_heading_policy: include
+            ---
+            # Guide
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata?.Outline?.MaxHeadingLevel);
+        Assert.Equal("include", result.Metadata?.Outline?.RepeatedHeadingPolicy);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("invalid-outline-max-heading-level", diagnostic.Code);
+        Assert.Equal("outline.max_heading_level", diagnostic.FieldPath);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldIgnoreInvalidOutlinePolicy_AndKeepValidMaxHeadingLevel()
+    {
+        var markdown = """
+            ---
+            outline:
+              max_heading_level: 2
+              repeated_heading_policy: sometimes
+            ---
+            # Guide
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Equal(2, result.Metadata?.Outline?.MaxHeadingLevel);
+        Assert.Null(result.Metadata?.Outline?.RepeatedHeadingPolicy);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("invalid-outline-repeated-heading-policy", diagnostic.Code);
+        Assert.Equal("outline.repeated_heading_policy", diagnostic.FieldPath);
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("[]")]
+    public void ExtractWithDiagnostics_ShouldIgnoreMalformedOutlineMetadata_AndKeepOtherMetadata(string outlineValue)
+    {
+        var markdown = string.Join(
+            "\n",
+            "---",
+            "title: Guide",
+            $"outline: {outlineValue}",
+            "---",
+            "# Guide");
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Equal("Guide", result.Metadata?.Title);
+        Assert.Null(result.Metadata?.Outline);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("invalid-outline-metadata", diagnostic.Code);
+        Assert.Equal("outline", diagnostic.FieldPath);
+    }
+
+    [Fact]
     public void ExtractWithDiagnostics_ShouldReportInvalidLocaleFallback()
     {
         var markdown = """

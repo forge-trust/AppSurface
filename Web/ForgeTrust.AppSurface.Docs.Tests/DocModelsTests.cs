@@ -34,6 +34,11 @@ public class DocModelsTests
                 Locale = "fr",
                 TranslationKey = "guides/quickstart"
             },
+            Outline = new DocOutlineMetadata
+            {
+                MaxHeadingLevel = 2,
+                RepeatedHeadingPolicy = "h2_only"
+            },
             FeaturedPageGroups =
             [
                 new DocFeaturedPageGroupDefinition
@@ -87,6 +92,8 @@ public class DocModelsTests
         Assert.Equal(new DateTimeOffset(2026, 4, 22, 23, 19, 0, TimeSpan.Zero), node.Metadata?.Contributor?.LastUpdatedOverride);
         Assert.Equal("fr", node.Metadata?.Localization?.Locale);
         Assert.Equal("guides/quickstart", node.Metadata?.Localization?.TranslationKey);
+        Assert.Equal(2, node.Metadata?.Outline?.MaxHeadingLevel);
+        Assert.Equal("h2_only", node.Metadata?.Outline?.RepeatedHeadingPolicy);
         Assert.Single(node.Metadata?.FeaturedPageGroups!);
         Assert.Equal(["alias-one"], node.Metadata?.Aliases);
         Assert.Equal(["legacy/alias"], node.Metadata?.RedirectAliases);
@@ -147,6 +154,54 @@ public class DocModelsTests
         Assert.Equal(["keyword"], merged.Keywords);
         Assert.True(merged.HideFromSearch);
         Assert.True(merged.HideFromPublicNav);
+    }
+
+    [Fact]
+    public void Merge_ShouldMergeOutlineMetadata_FieldByField()
+    {
+        var merged = DocMetadata.Merge(
+            new DocMetadata
+            {
+                Outline = new DocOutlineMetadata
+                {
+                    RepeatedHeadingPolicy = "include"
+                }
+            },
+            new DocMetadata
+            {
+                Outline = new DocOutlineMetadata
+                {
+                    MaxHeadingLevel = 2,
+                    RepeatedHeadingPolicy = "h2_only"
+                }
+            });
+
+        Assert.NotNull(merged);
+        Assert.Equal(2, merged!.Outline?.MaxHeadingLevel);
+        Assert.Equal("include", merged.Outline?.RepeatedHeadingPolicy);
+    }
+
+    [Fact]
+    public void Merge_ShouldTreatWhitespaceOutlinePolicyAsMissing_AndKeepFallbackPolicy()
+    {
+        var merged = DocMetadata.Merge(
+            new DocMetadata
+            {
+                Outline = new DocOutlineMetadata
+                {
+                    RepeatedHeadingPolicy = "   "
+                }
+            },
+            new DocMetadata
+            {
+                Outline = new DocOutlineMetadata
+                {
+                    RepeatedHeadingPolicy = "h2_only"
+                }
+            });
+
+        Assert.NotNull(merged);
+        Assert.Equal("h2_only", merged!.Outline?.RepeatedHeadingPolicy);
     }
 
     [Fact]

@@ -119,6 +119,17 @@ public sealed record DocMetadata
     public IReadOnlyList<DocFeaturedPageGroupDefinition>? FeaturedPageGroups { get; init; }
 
     /// <summary>
+    /// Gets optional page-local outline behavior for Markdown documents.
+    /// </summary>
+    /// <remarks>
+    /// This metadata controls the harvested display outline only. Rendered HTML headings and their fragment IDs remain
+    /// available in the page body even when the outline policy hides repeated lower-level entries from the "On this page"
+    /// rail or search heading metadata. Custom harvesters may ignore this metadata unless they intentionally mirror the
+    /// built-in Markdown outline behavior.
+    /// </remarks>
+    public DocOutlineMetadata? Outline { get; init; }
+
+    /// <summary>
     /// Gets optional trust and provenance metadata rendered near the top of the page.
     /// </summary>
     /// <remarks>
@@ -226,6 +237,7 @@ public sealed record DocMetadata
             Breadcrumbs = breadcrumbs,
             BreadcrumbsMatchPathTargets = breadcrumbsMatchPathTargets,
             FeaturedPageGroups = MergeLists(primary.FeaturedPageGroups, fallback.FeaturedPageGroups),
+            Outline = DocOutlineMetadata.Merge(primary.Outline, fallback.Outline),
             Trust = DocTrustMetadata.Merge(primary.Trust, fallback.Trust),
             Contributor = DocContributorMetadata.Merge(primary.Contributor, fallback.Contributor),
             Localization = DocLocalizationMetadata.Merge(primary.Localization, fallback.Localization)
@@ -358,6 +370,53 @@ public sealed record DocOutlineItem
     /// Gets the normalized heading level for this entry.
     /// </summary>
     public int Level { get; init; }
+}
+
+/// <summary>
+/// Markdown page-local outline behavior supplied through front matter or paired sidecar metadata.
+/// </summary>
+/// <remarks>
+/// <see cref="MaxHeadingLevel"/> accepts <c>2</c> or <c>3</c> and has precedence over
+/// <see cref="RepeatedHeadingPolicy"/>. <see cref="RepeatedHeadingPolicy"/> accepts <c>auto</c>, <c>include</c>, or
+/// <c>h2_only</c>. Invalid authored values are normalized away by the Markdown metadata parser so a paired fallback can
+/// still contribute the valid child field.
+/// </remarks>
+public sealed record DocOutlineMetadata
+{
+    /// <summary>
+    /// Gets the deepest heading level to include in the display outline.
+    /// </summary>
+    public int? MaxHeadingLevel { get; init; }
+
+    /// <summary>
+    /// Gets the repeated-heading policy for pages whose repeated H3 headings would overwhelm the outline.
+    /// </summary>
+    public string? RepeatedHeadingPolicy { get; init; }
+
+    internal static DocOutlineMetadata? Merge(DocOutlineMetadata? primary, DocOutlineMetadata? fallback)
+    {
+        if (primary is null)
+        {
+            return fallback;
+        }
+
+        if (fallback is null)
+        {
+            return primary;
+        }
+
+        var merged = new DocOutlineMetadata
+        {
+            MaxHeadingLevel = primary.MaxHeadingLevel ?? fallback.MaxHeadingLevel,
+            RepeatedHeadingPolicy = DocTrustMergeHelpers.PreferNonBlank(
+                primary.RepeatedHeadingPolicy,
+                fallback.RepeatedHeadingPolicy)
+        };
+
+        return merged.MaxHeadingLevel is null && merged.RepeatedHeadingPolicy is null
+            ? null
+            : merged;
+    }
 }
 
 /// <summary>
