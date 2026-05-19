@@ -57,4 +57,23 @@ public sealed class AppSurfaceDocsHarvestPathMatcherTests
 
         Assert.Null(matcher.MatchDirectoryOrDescendantSubtree(".github"));
     }
+
+    [Fact]
+    public void MatchDirectoryOrDescendantSubtree_FindsLiteralSubtreePatterns()
+    {
+        var matcher = new AppSurfaceDocsHarvestPathMatcher([".github/workflows/**"]);
+
+        Assert.Equal(".github/workflows/**", matcher.MatchDirectoryOrDescendantSubtree(".github"));
+        Assert.Equal(".github/workflows/**", matcher.MatchDirectoryOrDescendantSubtree(".github/workflows"));
+        Assert.Equal(".github/workflows/**", matcher.MatchDirectoryOrDescendantSubtree(".github/workflows/nested"));
+        Assert.Null(matcher.MatchDirectoryOrDescendantSubtree(".git"));
+    }
+
+    [Fact]
+    public void MatchDirectoryOrDescendantSubtree_IgnoresGlobSubtreeRootsWithoutDirectoryMatch()
+    {
+        var matcher = new AppSurfaceDocsHarvestPathMatcher(["docs/*/**"]);
+
+        Assert.Null(matcher.MatchDirectoryOrDescendantSubtree("docs"));
+    }
 }
