@@ -480,7 +480,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications or package READMEs.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, or Tailwind runtime payloads.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");
-        builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so AppSurfaceDocs metadata, trust-bar copy, and section placement stay intentional.");
+        builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so AppSurface Docs metadata, trust-bar copy, and section placement stay intentional.");
 
         return NormalizeMarkdownNewlines(builder.ToString()).TrimEnd('\n') + "\n";
     }
