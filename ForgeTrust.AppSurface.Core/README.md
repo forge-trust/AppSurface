@@ -16,7 +16,7 @@ The Core library is designed to be lightweight and implementation-agnostic. It p
 - **`ConsoleOutputMode`**: Shared core enum that lets console-oriented packages describe whether command output should remain host-centric or command-first.
 - **`AppSurfaceStartup`**: The base class that orchestrates the host building and service registration process.
 - **`AppSurfaceStartup.RegisterDependencies`**: A protected seam for specialized startup types that need the module graph prepared before they build the Generic Host.
-- **`ProcessUtils`**: The AppSurface-owned process execution surface for framework code that needs captured stdout, captured stderr, non-throwing non-zero exit codes, cancellation-aware execution, and optional line-by-line logging.
+- **`ProcessUtils`**: The AppSurface-owned process execution surface for framework code that needs to capture stdout and stderr, non-throwing non-zero exit codes, cancellation-aware execution, and optional line-by-line logging.
 
 ## Application labels and host identity
 
