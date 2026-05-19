@@ -47,7 +47,7 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 Options:
 
 - `--repo`, `-r`: Repository root to harvest. Defaults to the current directory.
-- `--output`, `-o`: Output directory for exported static docs. Defaults to `dist/docs`; CI should pass this explicitly.
+- `--output`, `-o`: Output directory for exported static docs. Defaults to `dist/docs`; existing files are rejected because the exporter writes a directory tree. CI should pass this explicitly.
 - `--mode`, `-m`: Export mode. `cdn` is the default and validates plus rewrites managed URLs for plain static hosts. Use `hybrid` only when the output still sits behind application-aware routing.
 - `--seeds`: Optional path to a seed-route file. This is long-only because `-r` means `--repo` in AppSurface CLI commands.
 - `--strict`: Enables `RazorDocs:Harvest:FailOnFailure=true`, which fails startup when every configured harvester fails. This is separate from `--mode cdn`, which validates the emitted static artifact and preserves `RWEXPORT00x` diagnostics.

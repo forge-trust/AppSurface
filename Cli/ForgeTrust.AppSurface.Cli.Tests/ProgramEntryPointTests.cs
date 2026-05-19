@@ -386,6 +386,26 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsExportCommand_Should_Reject_Output_File()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        var outputFile = System.IO.Path.Join(repository.Path, "docs.html");
+        await File.WriteAllTextAsync(outputFile, "not a directory");
+        var runner = new CapturingRazorDocsExportRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "export", "--repo", repository.Path, "--output", outputFile],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(
+            $"The --output value must point to an export directory, but an existing file was found: {outputFile}",
+            result.AllText,
+            StringComparison.Ordinal);
+        Assert.Null(runner.Args);
+    }
+
+    [Fact]
     public async Task DocsExportCommand_Should_Reject_Missing_Seed_File()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
@@ -573,6 +593,39 @@ public sealed class ProgramEntryPointTests
         {
             hostStarter.Complete(new TrackingHost());
         }
+    }
+
+    [Fact]
+    public async Task RazorDocsInProcessExportRunner_Should_Log_When_Late_Startup_Faults_After_External_Cancellation()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        using var cts = new CancellationTokenSource();
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Debug);
+            builder.AddProvider(loggerProvider);
+        });
+        var hostStarter = new ControllableExportHostStarter();
+        var runner = new RazorDocsInProcessExportRunner(
+            loggerFactory.CreateLogger<RazorDocsInProcessExportRunner>(),
+            new CapturingStaticExporter(),
+            hostStarter);
+
+        var exportTask = runner.ExportAsync(
+            CreateExportArgs(repository.Path, output.Path, TimeSpan.FromSeconds(30)),
+            cts.Token);
+        await hostStarter.Started.WaitAsync(TimeSpan.FromSeconds(1));
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => exportTask);
+
+        hostStarter.Fail(new InvalidOperationException("Late startup fault."));
+
+        await WaitForLogMessageAsync(loggerProvider, "completed after external cancellation.");
+        Assert.DoesNotContain(
+            loggerProvider.GetMessages(),
+            message => message.Contains("completed after the startup timeout.", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -175,6 +175,12 @@ internal sealed class DocsExportCommand : RazorDocsRepositoryCommand, ICommand
             throw new CommandException("The --output value must point to an export directory.");
         }
 
+        var outputPath = Path.GetFullPath(OutputPath);
+        if (File.Exists(outputPath))
+        {
+            throw new CommandException($"The --output value must point to an export directory, but an existing file was found: {outputPath}");
+        }
+
         var hostArgs = BuildHostArgs(defaultEnvironmentName: Environments.Production);
         var seedRoutesPath = string.IsNullOrWhiteSpace(SeedRoutesPath)
             ? null
@@ -190,7 +196,7 @@ internal sealed class DocsExportCommand : RazorDocsRepositoryCommand, ICommand
 
         return new RazorDocsExportArgs(
             hostArgs,
-            Path.GetFullPath(OutputPath),
+            outputPath,
             seedRoutesPath,
             initialSeedRoutes,
             Mode,
@@ -749,7 +755,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         }
         catch (OperationCanceledException)
         {
-            ObserveTimedOutStartupTask(startTask, startupTimeoutCts.Transfer());
+            ObserveCanceledStartupTask(startTask, startupTimeoutCts.Transfer());
             throw;
         }
     }
@@ -763,10 +769,24 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
 
     private void ObserveTimedOutStartupTask(Task<IHost> startTask, CancellationTokenSource startupTimeoutCts)
     {
-        _ = ObserveTimedOutStartupTaskAsync(startTask, startupTimeoutCts);
+        _ = ObserveStartupTaskAsync(
+            startTask,
+            startupTimeoutCts,
+            "RazorDocs export host startup task completed after the startup timeout.");
     }
 
-    private async Task ObserveTimedOutStartupTaskAsync(Task<IHost> startTask, CancellationTokenSource startupTimeoutCts)
+    private void ObserveCanceledStartupTask(Task<IHost> startTask, CancellationTokenSource startupTimeoutCts)
+    {
+        _ = ObserveStartupTaskAsync(
+            startTask,
+            startupTimeoutCts,
+            "RazorDocs export host startup task completed after external cancellation.");
+    }
+
+    private async Task ObserveStartupTaskAsync(
+        Task<IHost> startTask,
+        CancellationTokenSource startupTimeoutCts,
+        string lateCompletionMessage)
     {
         using var cts = startupTimeoutCts;
 
@@ -777,7 +797,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         }
         catch (Exception ex) when (IsNonFatalException(ex))
         {
-            _logger.LogDebug(ex, "RazorDocs export host startup task completed after the startup timeout.");
+            _logger.LogDebug(ex, lateCompletionMessage);
         }
     }
 
