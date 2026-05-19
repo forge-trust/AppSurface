@@ -1078,12 +1078,20 @@ public class RazorDocsWebModuleRegressionTests
                 await searchClientResponse.Content.ReadAsStringAsync(),
                 StringComparison.Ordinal);
 
+            // Regression: ISSUE-001 — packaged appsurface docs rendered a broken brand image.
+            // Found by /qa on 2026-05-19.
+            // Report: .gstack/qa-reports/qa-report-appsurface-docs-2026-05-19.md
             using var brandIconResponse = await client.GetAsync($"{PackagedAssetBasePath}/appsurface-docs-icon.svg");
             Assert.Equal(HttpStatusCode.OK, brandIconResponse.StatusCode);
             Assert.Equal("image/svg+xml", brandIconResponse.Content.Headers.ContentType?.MediaType);
+            var brandIcon = await brandIconResponse.Content.ReadAsStringAsync();
+            Assert.Contains(
+                "<svg",
+                brandIcon,
+                StringComparison.OrdinalIgnoreCase);
             Assert.Contains(
                 "AppSurface layered document mark",
-                await brandIconResponse.Content.ReadAsStringAsync(),
+                brandIcon,
                 StringComparison.Ordinal);
 
             using var packagedSearchCssResponse = await client.GetAsync($"{PackagedAssetBasePath}/search.css");

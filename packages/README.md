@@ -34,6 +34,7 @@ Release and readiness:
 - Add `ForgeTrust.AppSurface.Web.Scalar` after `ForgeTrust.AppSurface.Web.OpenApi` when you want a hosted API reference UI.
 - Add `ForgeTrust.RazorWire` when you want reactive Razor UI, Turbo-style streams, and server-rendered islands.
 - Add `ForgeTrust.AppSurface.Web.Tailwind` when you want Tailwind without a separate Node.js asset pipeline.
+- Install `ForgeTrust.AppSurface.Cli` when you want the `appsurface docs` repository preview command without running from source.
 
 ## Package matrix
 
@@ -52,6 +53,7 @@ Swipe to compare package details on narrow screens.
 | `ForgeTrust.AppSurface.Web.Scalar` | Add this after OpenAPI when you want Scalar's interactive API reference UI served by your AppSurface web app. | `dotnet package add ForgeTrust.AppSurface.Web.Scalar` | Scalar UI endpoint mapping and the OpenAPI module dependency needed to feed it. | OpenAPI authoring by itself without the base web host, or reactive Razor component streaming. | [Package README](../Web/ForgeTrust.AppSurface.Web.Scalar/README.md) | public preview<br />commercial ready<br />[notes](../releases/unreleased.md) |
 | `ForgeTrust.RazorWire` | Add this when you want reactive Razor fragments, Turbo-style page updates, server-sent streams, or islands without moving to a separate frontend app. | `dotnet package add ForgeTrust.RazorWire` | RazorWire modules, TagHelpers, stream helpers, Razor fragment updates, and hybrid island support. | OpenAPI generation, API reference UI, or Tailwind asset compilation. | [Package README](../Web/ForgeTrust.RazorWire/README.md) | public preview<br />commercial ready<br />[notes](../releases/unreleased.md) |
 | `ForgeTrust.AppSurface.Web.Tailwind` | Add this when you want Tailwind build and watch integration in an AppSurface web app without carrying a Node.js asset pipeline. | `dotnet package add ForgeTrust.AppSurface.Web.Tailwind` | Tailwind standalone CLI integration, watch mode, generated CSS output, and transitive runtime package selection for supported build hosts. | JavaScript plugin ecosystems that require npm-first tooling, or direct runtime-package selection. | [Package README](../Web/ForgeTrust.AppSurface.Web.Tailwind/README.md) | public preview<br />commercial ready<br />[notes](../releases/unreleased.md) |
+| `ForgeTrust.AppSurface.Cli` | Install this when you want repository-level AppSurface tooling from a global or local .NET tool command. | `dotnet tool install --global ForgeTrust.AppSurface.Cli --prerelease` | The `appsurface` .NET tool command and the `appsurface docs` RazorDocs preview workflow. | App runtime packages, RazorWire-specific export workflows, or a replacement for project package references. | [AppSurface CLI README](../Cli/ForgeTrust.AppSurface.Cli/README.md) | public preview<br />commercial ready<br />[notes](../releases/unreleased.md) |
 
 ## Support and proof-host surfaces
 
@@ -70,13 +72,13 @@ Swipe to compare package details on narrow screens.
 
 ### Not in the direct-install matrix
 
-- `ForgeTrust.AppSurface.Cli`: Planned public `appsurface` .NET tool. The `docs` verb owns RazorDocs preview workflows that were previously sketched as a separate `razordocs` CLI. Release: excluded; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.RazorWire.Cli`: Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance. Release: excluded; not applicable; [notes](../releases/unreleased.md).
 
 ## Maintainer notes
 
 - Edit `packages/package-index.yml` when the public package story changes.
 - Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.
+- Keep `tool_command_name` aligned with each public .NET tool project's `ToolCommandName` so package validation and post-publish smoke tests run the command users will type. The value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.
 - Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications or package READMEs.
 - Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, or Tailwind runtime payloads.
 - Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.

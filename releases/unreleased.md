@@ -39,7 +39,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 ### Console and CLI polish
 
 - AppSurface console apps can now opt into a command-first output contract so public CLI help and validation flows stay quiet instead of printing Generic Host lifecycle chatter.
-- AppSurface now plans two public CLI tools: `appsurface` for repository-level AppSurface workflows, starting with `appsurface docs` for RazorDocs preview and `appsurface docs export` for repo-owned RazorDocs static export, and `razorwire` for RazorWire-specific export workflows.
+- AppSurface now publishes the public `appsurface` .NET tool for repository-level workflows, starting with `appsurface docs` for RazorDocs preview and `appsurface docs export` for repo-owned RazorDocs static export. RazorWire-specific export workflows remain owned by the separate `razorwire` tool.
 - RazorWire CLI now uses that contract for `--help`, `export --help`, invalid option output, and missing-source validation while still preserving command-owned export progress logs.
 - RazorWire CLI now names export seed-route files with `-r|--seeds`, matching the seed terminology used throughout the exporter and docs.
 - The shared console startup seam now exposes `ConsoleOptions` and `ConsoleOutputMode`, so future public AppSurface CLIs can adopt the same behavior without forking startup logic.

@@ -5,8 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <IsPackable Condition="'$(EnableAppSurfaceCliToolPackaging)' != 'true'">false</IsPackable>
-    <IsPackable Condition="'$(EnableAppSurfaceCliToolPackaging)' == 'true'">true</IsPackable>
+    <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>appsurface</ToolCommandName>
     <PackageId>ForgeTrust.AppSurface.Cli</PackageId>
