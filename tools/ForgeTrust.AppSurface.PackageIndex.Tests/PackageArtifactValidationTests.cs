@@ -2321,6 +2321,15 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public void CombineSafeChildPath_RejectsTraversalOutsideDirectory()
+    {
+        var error = Assert.Throws<InvalidOperationException>(
+            () => CombineSafeChildPath(_repositoryRoot, "../outside.txt"));
+
+        Assert.Contains("escapes", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PackageSmokeInstallWorkflow_RejectsManifestThatDoesNotMatchPackagePlan()
     {
         await WriteFileAsync("packages/package-index.yml",
@@ -2685,12 +2694,28 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     private static string CombineSafeChildPath(string directory, string childPath)
     {
+        if (string.IsNullOrWhiteSpace(childPath))
+        {
+            throw new InvalidOperationException("Child path must not be empty.");
+        }
+
         if (Path.IsPathRooted(childPath))
         {
             throw new InvalidOperationException($"Child path '{childPath}' must not be rooted.");
         }
 
-        return Path.Join(directory, childPath);
+        var fullDirectory = Path.GetFullPath(directory);
+        var fullCandidate = Path.GetFullPath(Path.Join(fullDirectory, childPath));
+        var relativePath = Path.GetRelativePath(fullDirectory, fullCandidate);
+        if (relativePath == ".."
+            || relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            || relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal)
+            || Path.IsPathRooted(relativePath))
+        {
+            throw new InvalidOperationException($"Child path '{childPath}' escapes '{directory}'.");
+        }
+
+        return fullCandidate;
     }
 
     private PackagePublishPlanResolver CreateResolver(IReadOnlyDictionary<string, PackageProjectMetadata> metadataByProject)
