@@ -485,7 +485,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public void PackageArtifactValidator_ThrowsWhenToolSettingsCommandNameIsMissing()
     {
-        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
         WritePackage(
             artifactDirectory,
@@ -1491,7 +1491,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
     [Fact]
     public async Task PackageArtifactManifestReader_RejectsInvalidToolCommandName()
     {
-        var manifestPath = Path.Combine(_repositoryRoot, "manifest.json");
+        var manifestPath = CombineSafeChildPath(_repositoryRoot, "manifest.json");
         await File.WriteAllTextAsync(
             manifestPath,
             $$"""
@@ -2302,7 +2302,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         var shimPath = PackageSmokeInstallWorkflow.ResolveToolShimPath(toolPath, "appsurface");
 
-        Assert.Equal(Path.Combine(toolPath, expectedShimName), shimPath);
+        Assert.Equal(Path.Join(toolPath, expectedShimName), shimPath);
     }
 
     [Theory]

@@ -788,7 +788,7 @@ internal sealed class PackageSmokeInstallWorkflow
         var shimName = OperatingSystem.IsWindows() ? $"{commandName}.exe" : commandName;
         if (Path.IsPathRooted(shimName) || !string.Equals(Path.GetFileName(shimName), shimName, StringComparison.Ordinal)) throw new ArgumentException($"Tool shim name '{shimName}' must be a file name, not a path.", nameof(commandName));
 
-        return Path.Combine(toolPath, shimName);
+        return Path.Join(toolPath, shimName);
     }
 
     private static bool ContainsToolCommandUsage(string output, string commandName)
