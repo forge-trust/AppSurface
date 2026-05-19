@@ -98,8 +98,14 @@ public sealed class AppSurfaceDocsIdentityResolverTests
     [InlineData("~/brand/logo.svg", true, "~/brand/logo.svg", "")]
     [InlineData("/", true, "/", "")]
     [InlineData("~//cdn.example/logo.svg", false, null, "protocol-relative")]
+    [InlineData("//cdn.example/logo.svg", false, null, "protocol-relative")]
     [InlineData("~/https://example.test/logo.svg", false, null, "remote URL")]
     [InlineData("/data:image/svg+xml;base64,PHN2Zy8+", false, null, "remote URL")]
+    [InlineData("/brand/logo.svg?cache=1", false, null, "query string")]
+    [InlineData("/brand/logo.svg#mark", false, null, "fragment")]
+    [InlineData("/brand\\logo.svg", false, null, "forward slashes")]
+    [InlineData("/brand/../logo.svg", false, null, "traversal")]
+    [InlineData("brand/logo.svg", false, null, "app-root browser path")]
     public void IdentityPath_ShouldNormalizeOrRejectBrowserPaths(
         string value,
         bool expectedResult,
