@@ -80,11 +80,9 @@ public class AppSurfaceDocsWebModuleTests
         // Assert
         Assert.Contains(
             services,
-            s => s.ServiceType == typeof(IDocHarvester) && s.ImplementationType == typeof(MarkdownHarvester));
-        Assert.Contains(
-            services,
-            s => s.ServiceType == typeof(IDocHarvester) && s.ImplementationType == typeof(CSharpDocHarvester));
+            s => s.ServiceType == typeof(IDocHarvester) && s.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, s => s.ServiceType == typeof(DocAggregator));
+        Assert.Contains(services, s => s.ServiceType == typeof(AppSurfaceDocsHarvestPathPolicy));
         Assert.Contains(
             services,
             s => s.ServiceType == typeof(IAppSurfaceDocsHtmlSanitizer) && s.Lifetime == ServiceLifetime.Singleton);
@@ -108,7 +106,9 @@ public class AppSurfaceDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetRequiredService<IMemoryCache>());
         Assert.NotNull(serviceProvider.GetRequiredService<IMemo>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
+        Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>());
         Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is MarkdownHarvester);
+        Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is CSharpDocHarvester);
         Assert.Equal(AppSurfaceDocsAssetPathResolver.PackagedStylesheetPath, assetPathResolver.StylesheetPath);
         Assert.Contains("section", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("article", sanitizer.InnerSanitizer.AllowedTags);
@@ -121,6 +121,18 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("class", sanitizer.InnerSanitizer.AllowedAttributes);
         Assert.Contains("id", sanitizer.InnerSanitizer.AllowedAttributes);
         Assert.Contains("open", sanitizer.InnerSanitizer.AllowedAttributes);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_WhenCalledTwiceShouldNotRegisterDuplicateDefaultHarvesters()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+
+        services.AddAppSurfaceDocs();
+        services.AddAppSurfaceDocs();
+
+        Assert.Equal(2, services.Count(service => service.ServiceType == typeof(IDocHarvester)));
     }
 
     [Fact]

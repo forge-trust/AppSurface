@@ -320,6 +320,28 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AppSurfaceDocsOptions_ShouldDefaultHarvestPathPolicyToOpenConfiguredBoundary()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.NotNull(options.Harvest.Paths);
+        Assert.NotNull(options.Harvest.Markdown);
+        Assert.NotNull(options.Harvest.CSharp);
+        Assert.Empty(options.Harvest.Paths.IncludeGlobs);
+        Assert.Empty(options.Harvest.Paths.ExcludeGlobs);
+        Assert.Empty(options.Harvest.Paths.DefaultExclusions.DisabledGroups);
+        Assert.Empty(options.Harvest.Paths.DefaultExclusions.AllowGlobs);
+        Assert.Empty(options.Harvest.Markdown.IncludeGlobs);
+        Assert.Empty(options.Harvest.Markdown.ExcludeGlobs);
+        Assert.Empty(options.Harvest.Markdown.DefaultExclusions.DisabledGroups);
+        Assert.Empty(options.Harvest.Markdown.DefaultExclusions.AllowGlobs);
+        Assert.Empty(options.Harvest.CSharp.IncludeGlobs);
+        Assert.Empty(options.Harvest.CSharp.ExcludeGlobs);
+        Assert.Empty(options.Harvest.CSharp.DefaultExclusions.DisabledGroups);
+        Assert.Empty(options.Harvest.CSharp.DefaultExclusions.AllowGlobs);
+    }
+
+    [Fact]
     public void AppSurfaceDocsOptions_ShouldDefaultLocalizationToDisabledEnglish()
     {
         var options = new AppSurfaceDocsOptions();
@@ -378,6 +400,48 @@ public sealed class AppSurfaceDocsOptionsTests
                 Assert.Equal("Français", fr.Label);
                 Assert.Equal(AppSurfaceDocsTextDirection.Rtl, fr.Direction);
             });
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindAndNormalizeConfiguredHarvestPathOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Paths:IncludeGlobs:0"] = " docs\\** ",
+                        ["AppSurfaceDocs:Harvest:Paths:IncludeGlobs:1"] = "docs/**",
+                        ["AppSurfaceDocs:Harvest:Paths:IncludeGlobs:2"] = " ",
+                        ["AppSurfaceDocs:Harvest:Paths:ExcludeGlobs:0"] = " artifacts\\TestResults\\** ",
+                        ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups:0"] = " testprojects ",
+                        ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups:1"] = "TestProjects",
+                        ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:AllowGlobs:HiddenDirectories:0"] = " .github\\workflows\\** ",
+                        ["AppSurfaceDocs:Harvest:Markdown:IncludeGlobs:0"] = "docs\\guides\\**",
+                        ["AppSurfaceDocs:Harvest:Markdown:ExcludeGlobs:0"] = "docs\\drafts\\**",
+                        ["AppSurfaceDocs:Harvest:Markdown:DefaultExclusions:AllowGlobs:BuildOutput:0"] = "docs\\bin\\README.md",
+                        ["AppSurfaceDocs:Harvest:CSharp:IncludeGlobs:0"] = "src\\**",
+                        ["AppSurfaceDocs:Harvest:CSharp:DefaultExclusions:DisabledGroups:0"] = " csharpexamplesource "
+                    })
+                .Build());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal(["docs/**"], options.Harvest.Paths.IncludeGlobs);
+        Assert.Equal(["artifacts/TestResults/**"], options.Harvest.Paths.ExcludeGlobs);
+        Assert.Equal(["TestProjects"], options.Harvest.Paths.DefaultExclusions.DisabledGroups);
+        Assert.Equal([".github/workflows/**"], options.Harvest.Paths.DefaultExclusions.AllowGlobs["HiddenDirectories"]);
+        Assert.Equal(["docs/guides/**"], options.Harvest.Markdown.IncludeGlobs);
+        Assert.Equal(["docs/drafts/**"], options.Harvest.Markdown.ExcludeGlobs);
+        Assert.Equal(["docs/bin/README.md"], options.Harvest.Markdown.DefaultExclusions.AllowGlobs["BuildOutput"]);
+        Assert.Equal(["src/**"], options.Harvest.CSharp.IncludeGlobs);
+        Assert.Equal(["CSharpExampleSource"], options.Harvest.CSharp.DefaultExclusions.DisabledGroups);
+        Assert.NotNull(provider.GetRequiredService<ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsHarvestPathPolicy>());
     }
 
     [Fact]
@@ -955,6 +1019,12 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Source);
         Assert.NotNull(options.Harvest);
         Assert.NotNull(options.Harvest.Health);
+        Assert.NotNull(options.Harvest.Paths);
+        Assert.NotNull(options.Harvest.Paths.DefaultExclusions);
+        Assert.NotNull(options.Harvest.Markdown);
+        Assert.NotNull(options.Harvest.Markdown.DefaultExclusions);
+        Assert.NotNull(options.Harvest.CSharp);
+        Assert.NotNull(options.Harvest.CSharp.DefaultExclusions);
         Assert.NotNull(options.Bundle);
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Contributor);
@@ -1078,6 +1148,12 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Source);
         Assert.NotNull(options.Harvest);
         Assert.NotNull(options.Harvest.Health);
+        Assert.NotNull(options.Harvest.Paths);
+        Assert.NotNull(options.Harvest.Paths.DefaultExclusions);
+        Assert.NotNull(options.Harvest.Markdown);
+        Assert.NotNull(options.Harvest.Markdown.DefaultExclusions);
+        Assert.NotNull(options.Harvest.CSharp);
+        Assert.NotNull(options.Harvest.CSharp.DefaultExclusions);
         Assert.NotNull(options.Bundle);
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Contributor);
@@ -1091,6 +1167,37 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("en", options.Localization.DefaultLocale);
         Assert.NotNull(options.Localization.Locales);
         Assert.Empty(options.Localization.Locales);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldRehydrateExplicitlyNullNestedHarvestPathOptionsObjects()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+
+        services.AddAppSurfaceDocs();
+        services.Configure<AppSurfaceDocsOptions>(
+            options =>
+            {
+                options.Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    Health = null!,
+                    Paths = null!,
+                    Markdown = null!,
+                    CSharp = null!
+                };
+            });
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.NotNull(options.Harvest.Health);
+        Assert.NotNull(options.Harvest.Paths);
+        Assert.NotNull(options.Harvest.Paths.DefaultExclusions);
+        Assert.NotNull(options.Harvest.Markdown);
+        Assert.NotNull(options.Harvest.Markdown.DefaultExclusions);
+        Assert.NotNull(options.Harvest.CSharp);
+        Assert.NotNull(options.Harvest.CSharp.DefaultExclusions);
     }
 
     [Fact]
@@ -1205,6 +1312,232 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(
             result.Failures,
             failure => failure.Contains(expectedMessage, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNullHarvestPathPolicyBlocks()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Paths = null!,
+                Markdown = null!,
+                CSharp = null!
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Paths must not be null", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Markdown must not be null", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:CSharp must not be null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("/docs/**")]
+    [InlineData("./docs/**")]
+    [InlineData("https://example.com/docs/**")]
+    [InlineData("C:/repo/docs/**")]
+    [InlineData("docs/../secret/**")]
+    [InlineData("docs/**?raw=1")]
+    [InlineData("docs/**#fragment")]
+    [InlineData("")]
+    public void Validator_ShouldRejectInvalidHarvestGlobPatterns(string invalidPattern)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Paths = new AppSurfaceDocsHarvestPathOptions
+                {
+                    IncludeGlobs = [invalidPattern],
+                    DefaultExclusions = new AppSurfaceDocsHarvestDefaultExclusionOptions
+                    {
+                        AllowGlobs = new Dictionary<string, string[]>
+                        {
+                            ["HiddenDirectories"] = [invalidPattern]
+                        }
+                    }
+                },
+                Markdown = new AppSurfaceDocsMarkdownHarvestOptions
+                {
+                    ExcludeGlobs = [invalidPattern]
+                },
+                CSharp = new AppSurfaceDocsCSharpHarvestOptions
+                {
+                    IncludeGlobs = [invalidPattern]
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("invalid repository-relative glob pattern", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectUnknownDefaultExclusionGroups()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Paths = new AppSurfaceDocsHarvestPathOptions
+                {
+                    DefaultExclusions = new AppSurfaceDocsHarvestDefaultExclusionOptions
+                    {
+                        DisabledGroups = ["LegacyTemp"],
+                        AllowGlobs = new Dictionary<string, string[]>
+                        {
+                            ["MysteryGroup"] = ["docs/**"]
+                        }
+                    }
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("unsupported default exclusion group 'LegacyTemp'", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("unsupported default exclusion group 'MysteryGroup'", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("BuildOutput", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("HiddenDirectories", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("TestProjects", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("CSharpExampleSource", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNullHarvestPathContainersAndCollections()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Paths = new AppSurfaceDocsHarvestPathOptions
+                {
+                    IncludeGlobs = null!,
+                    ExcludeGlobs = null!,
+                    DefaultExclusions = new AppSurfaceDocsHarvestDefaultExclusionOptions
+                    {
+                        DisabledGroups = null!,
+                        AllowGlobs = null!
+                    }
+                },
+                Markdown = null!,
+                CSharp = new AppSurfaceDocsCSharpHarvestOptions
+                {
+                    DefaultExclusions = null!
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Paths:IncludeGlobs must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Paths:ExcludeGlobs must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Paths:DefaultExclusions:AllowGlobs must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Markdown must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:CSharp:DefaultExclusions must not be null.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNumericDefaultExclusionGroups()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Paths = new AppSurfaceDocsHarvestPathOptions
+                {
+                    DefaultExclusions = new AppSurfaceDocsHarvestDefaultExclusionOptions
+                    {
+                        DisabledGroups = ["0"],
+                        AllowGlobs = new Dictionary<string, string[]>
+                        {
+                            ["42"] = ["docs/**"]
+                        }
+                    }
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("unsupported default exclusion group '0'", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("unsupported default exclusion group '42'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldKeepNumericDefaultExclusionGroupsInvalidAfterNormalization()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups:0"] = "0",
+                        ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:AllowGlobs:42:0"] = "docs/**"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var exception = Assert.Throws<OptionsValidationException>(
+            () => provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.Contains(exception.Failures, failure => failure.Contains("unsupported default exclusion group '0'", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(exception.Failures, failure => failure.Contains("unsupported default exclusion group '42'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldAcceptRepositoryRelativeHarvestGlobPatterns()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Paths = new AppSurfaceDocsHarvestPathOptions
+                {
+                    IncludeGlobs = ["README.md", "docs/**/*.md", "LICENSE"],
+                    ExcludeGlobs = ["docs/drafts/**"],
+                    DefaultExclusions = new AppSurfaceDocsHarvestDefaultExclusionOptions
+                    {
+                        DisabledGroups = ["TestProjects"],
+                        AllowGlobs = new Dictionary<string, string[]>
+                        {
+                            ["HiddenDirectories"] = [".github/workflows/**"]
+                        }
+                    }
+                },
+                Markdown = new AppSurfaceDocsMarkdownHarvestOptions
+                {
+                    IncludeGlobs = ["docs/**"]
+                },
+                CSharp = new AppSurfaceDocsCSharpHarvestOptions
+                {
+                    IncludeGlobs = ["src/**/*.cs"]
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(result.Failed);
     }
 
     [Fact]

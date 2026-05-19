@@ -4,6 +4,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Docs;
@@ -81,6 +82,12 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Source ??= new AppSurfaceDocsSourceOptions();
                     options.Harvest ??= new AppSurfaceDocsHarvestOptions();
                     options.Harvest.Health ??= new AppSurfaceDocsHarvestHealthOptions();
+                    options.Harvest.Paths ??= new AppSurfaceDocsHarvestPathOptions();
+                    options.Harvest.Paths.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
+                    options.Harvest.Markdown ??= new AppSurfaceDocsMarkdownHarvestOptions();
+                    options.Harvest.Markdown.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
+                    options.Harvest.CSharp ??= new AppSurfaceDocsCSharpHarvestOptions();
+                    options.Harvest.CSharp.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
                     options.Bundle ??= new AppSurfaceDocsBundleOptions();
                     options.Sidebar ??= new AppSurfaceDocsSidebarOptions();
                     options.Contributor ??= new AppSurfaceDocsContributorOptions();
@@ -100,6 +107,19 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Identity.Favicon.SvgPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.SvgPath);
                     options.Identity.Favicon.IcoPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.IcoPath);
                     options.Identity.Favicon.PngPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.PngPath);
+                    options.Harvest.Paths.IncludeGlobs = NormalizeGlobArray(options.Harvest.Paths.IncludeGlobs);
+                    options.Harvest.Paths.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Paths.ExcludeGlobs);
+                    options.Harvest.Paths.DefaultExclusions =
+                        NormalizeDefaultExclusions(options.Harvest.Paths.DefaultExclusions);
+                    options.Harvest.Markdown.IncludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.IncludeGlobs);
+                    options.Harvest.Markdown.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.ExcludeGlobs);
+                    options.Harvest.Markdown.DefaultExclusions =
+                        NormalizeDefaultExclusions(options.Harvest.Markdown.DefaultExclusions);
+                    options.Harvest.CSharp.IncludeGlobs = NormalizeGlobArray(options.Harvest.CSharp.IncludeGlobs);
+                    options.Harvest.CSharp.ExcludeGlobs = NormalizeGlobArray(options.Harvest.CSharp.ExcludeGlobs);
+                    options.Harvest.CSharp.DefaultExclusions =
+                        NormalizeDefaultExclusions(options.Harvest.CSharp.DefaultExclusions);
+
                     options.Source.RepositoryRoot = options.Source.RepositoryRoot?.Trim();
                     options.Bundle.Path = NormalizeOrNull(options.Bundle.Path);
                     options.Contributor.DefaultBranch = NormalizeOrNull(options.Contributor.DefaultBranch);
@@ -154,14 +174,50 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.AddMemoryCache();
         services.TryAddSingleton<IMemo, Memo>();
         services.TryAddSingleton<IAppSurfaceDocsHtmlSanitizer, AppSurfaceDocsHtmlSanitizer>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IDocHarvester, MarkdownHarvester>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IDocHarvester, CSharpDocHarvester>());
+        services.TryAddSingleton<AppSurfaceDocsHarvestPathPolicy>();
+        TryAddMarkdownHarvester(services);
+        TryAddCSharpDocHarvester(services);
         services.TryAddSingleton<DocFeaturedPageResolver>();
         services.TryAddSingleton<DocAggregator>();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, AppSurfaceDocsHarvestFailurePreflightService>());
 
         return services;
+    }
+
+    private static void TryAddMarkdownHarvester(IServiceCollection services)
+    {
+        if (services.Any(
+                descriptor => descriptor.ServiceType == typeof(MarkdownHarvesterRegistrationMarker)
+                              || descriptor.ServiceType == typeof(IDocHarvester)
+                              && descriptor.ImplementationType == typeof(MarkdownHarvester)))
+        {
+            return;
+        }
+
+        services.AddSingleton(new MarkdownHarvesterRegistrationMarker());
+        services.AddSingleton<IDocHarvester>(
+            sp => new MarkdownHarvester(
+                sp.GetRequiredService<ILogger<MarkdownHarvester>>(),
+                sp.GetRequiredService<ILoggerFactory>(),
+                sp.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>()));
+    }
+
+    private static void TryAddCSharpDocHarvester(IServiceCollection services)
+    {
+        if (services.Any(
+                descriptor => descriptor.ServiceType == typeof(CSharpDocHarvesterRegistrationMarker)
+                              || descriptor.ServiceType == typeof(IDocHarvester)
+                              && descriptor.ImplementationType == typeof(CSharpDocHarvester)))
+        {
+            return;
+        }
+
+        services.AddSingleton(new CSharpDocHarvesterRegistrationMarker());
+        services.AddSingleton<IDocHarvester>(
+            sp => new CSharpDocHarvester(
+                sp.GetRequiredService<ILogger<CSharpDocHarvester>>(),
+                sp.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>()));
     }
 
     private static string? NormalizeOrNull(string? value)
@@ -174,4 +230,45 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         return value.Trim();
     }
 
+    private static string[] NormalizeGlobArray(IEnumerable<string>? values)
+    {
+        return (values ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => AppSurfaceDocsHarvestPathPatternValidator.NormalizeSlashes(value.Trim()))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static AppSurfaceDocsHarvestDefaultExclusionOptions NormalizeDefaultExclusions(
+        AppSurfaceDocsHarvestDefaultExclusionOptions options)
+    {
+        options.DisabledGroups = (options.DisabledGroups ?? [])
+            .Where(group => !string.IsNullOrWhiteSpace(group))
+            .Select(AppSurfaceDocsHarvestPathPolicy.NormalizeDefaultGroupId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var allowGlobs = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (groupId, patterns) in options.AllowGlobs ?? [])
+        {
+            var normalizedGroupId = AppSurfaceDocsHarvestPathPolicy.NormalizeDefaultGroupId(groupId);
+            var normalizedPatterns = NormalizeGlobArray(patterns);
+            if (allowGlobs.TryGetValue(normalizedGroupId, out var existingPatterns))
+            {
+                normalizedPatterns = existingPatterns
+                    .Concat(normalizedPatterns)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+
+            allowGlobs[normalizedGroupId] = normalizedPatterns;
+        }
+
+        options.AllowGlobs = allowGlobs;
+        return options;
+    }
+
+    private sealed class MarkdownHarvesterRegistrationMarker;
+
+    private sealed class CSharpDocHarvesterRegistrationMarker;
 }

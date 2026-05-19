@@ -19,13 +19,14 @@ public class MarkdownHarvester : IDocHarvester
     private readonly MarkdownPipeline _pipeline;
     private readonly ILogger<MarkdownHarvester> _logger;
     private readonly Func<string, CancellationToken, Task<string>> _readAllTextAsync;
+    private readonly AppSurfaceDocsHarvestPathPolicy _pathPolicy;
 
     /// <summary>
     /// Initializes a new instance of <see cref="MarkdownHarvester"/> with the specified logger and configures the Markdown pipeline.
     /// </summary>
     /// <param name="logger">Logger used for recording harvesting events and errors.</param>
     public MarkdownHarvester(ILogger<MarkdownHarvester> logger)
-        : this(logger, File.ReadAllTextAsync)
+        : this(logger, File.ReadAllTextAsync, AppSurfaceDocsHarvestPathPolicy.CreateDefault())
     {
     }
 
@@ -40,7 +41,27 @@ public class MarkdownHarvester : IDocHarvester
         : this(
             logger,
             File.ReadAllTextAsync,
-            CreateDefaultHighlighter(loggerFactory))
+            CreateDefaultHighlighter(loggerFactory),
+            AppSurfaceDocsHarvestPathPolicy.CreateDefault())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> with configurable harvest path policy and
+    /// observable diagnostics for the default code highlighter.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="loggerFactory">Logger factory used to create the TextMate grammar-load and highlighting fallback logger.</param>
+    /// <param name="pathPolicy">Shared harvest path policy used to decide which Markdown candidates publish.</param>
+    internal MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        ILoggerFactory loggerFactory,
+        AppSurfaceDocsHarvestPathPolicy pathPolicy)
+        : this(
+            logger,
+            File.ReadAllTextAsync,
+            CreateDefaultHighlighter(loggerFactory),
+            pathPolicy)
     {
     }
 
@@ -56,7 +77,21 @@ public class MarkdownHarvester : IDocHarvester
             logger,
             readAllTextAsync,
             AppSurfaceDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
-                NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance))
+                NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance),
+            AppSurfaceDocsHarvestPathPolicy.CreateDefault())
+    {
+    }
+
+    internal MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        Func<string, CancellationToken, Task<string>> readAllTextAsync,
+        AppSurfaceDocsHarvestPathPolicy pathPolicy)
+        : this(
+            logger,
+            readAllTextAsync,
+            AppSurfaceDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
+                NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance),
+            pathPolicy)
     {
     }
 
@@ -70,13 +105,28 @@ public class MarkdownHarvester : IDocHarvester
         ILogger<MarkdownHarvester> logger,
         Func<string, CancellationToken, Task<string>> readAllTextAsync,
         IAppSurfaceDocsCodeHighlighter codeHighlighter)
+        : this(
+            logger,
+            readAllTextAsync,
+            codeHighlighter,
+            AppSurfaceDocsHarvestPathPolicy.CreateDefault())
+    {
+    }
+
+    internal MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        Func<string, CancellationToken, Task<string>> readAllTextAsync,
+        IAppSurfaceDocsCodeHighlighter codeHighlighter,
+        AppSurfaceDocsHarvestPathPolicy pathPolicy)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(readAllTextAsync);
         ArgumentNullException.ThrowIfNull(codeHighlighter);
+        ArgumentNullException.ThrowIfNull(pathPolicy);
 
         _logger = logger;
         _readAllTextAsync = readAllTextAsync;
+        _pathPolicy = pathPolicy;
         _pipeline = new MarkdownPipelineBuilder()
             .UseAdvancedExtensions()
             .Use(new AppSurfaceDocsCodeBlockMarkdownExtension(codeHighlighter))
@@ -103,13 +153,13 @@ public class MarkdownHarvester : IDocHarvester
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
     {
         var nodes = new List<DocNode>();
-        foreach (var file in EnumerateMarkdownSourceFiles(rootPath))
+        foreach (var file in EnumerateMarkdownSourceFiles(rootPath, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var relativePath = Path.GetRelativePath(rootPath, file).Replace('\\', '/');
-                if (HarvestPathExclusions.ShouldExcludeFilePath(relativePath))
+                if (!_pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.Markdown))
                 {
                     continue;
                 }
@@ -155,9 +205,15 @@ public class MarkdownHarvester : IDocHarvester
         return nodes;
     }
 
-    private static IEnumerable<string> EnumerateMarkdownSourceFiles(string rootPath)
+    private IEnumerable<string> EnumerateMarkdownSourceFiles(
+        string rootPath,
+        CancellationToken cancellationToken)
     {
-        foreach (var file in Directory.EnumerateFiles(rootPath, "*.md", SearchOption.AllDirectories))
+        foreach (var file in _pathPolicy.EnumerateCandidateFiles(
+                     rootPath,
+                     AppSurfaceDocsHarvestSourceKind.Markdown,
+                     "*.md",
+                     cancellationToken))
         {
             yield return file;
         }
