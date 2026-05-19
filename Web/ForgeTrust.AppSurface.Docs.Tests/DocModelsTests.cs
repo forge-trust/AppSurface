@@ -205,6 +205,32 @@ public class DocModelsTests
     }
 
     [Fact]
+    public void OutlineMerge_ShouldReturnFallback_WhenPrimaryIsNull()
+    {
+        var fallback = new DocOutlineMetadata
+        {
+            MaxHeadingLevel = 2
+        };
+
+        var merged = DocOutlineMetadata.Merge(null, fallback);
+
+        Assert.Same(fallback, merged);
+    }
+
+    [Fact]
+    public void OutlineMerge_ShouldReturnPrimary_WhenFallbackIsNull()
+    {
+        var primary = new DocOutlineMetadata
+        {
+            RepeatedHeadingPolicy = "include"
+        };
+
+        var merged = DocOutlineMetadata.Merge(primary, null);
+
+        Assert.Same(primary, merged);
+    }
+
+    [Fact]
     public void Merge_ShouldTreatWhitespaceTitleAsMissing_AndKeepFallbackTitle()
     {
         var merged = DocMetadata.Merge(
@@ -219,6 +245,38 @@ public class DocModelsTests
 
         Assert.NotNull(merged);
         Assert.Equal("Fallback Title", merged!.Title);
+    }
+
+    [Fact]
+    public void LocalizationMerge_ShouldReturnPrimary_WhenFallbackIsNull()
+    {
+        var primary = new DocLocalizationMetadata
+        {
+            Locale = "fr"
+        };
+
+        var merged = DocLocalizationMetadata.Merge(primary, null);
+
+        Assert.Same(primary, merged);
+    }
+
+    [Fact]
+    public void DetailsViewModel_HasOutline_ShouldReflectOutlineEntries()
+    {
+        var details = new DocDetailsViewModel
+        {
+            Outline =
+            [
+                new DocOutlineItem
+                {
+                    Title = "Install",
+                    Id = "install",
+                    Level = 2
+                }
+            ]
+        };
+
+        Assert.True(details.HasOutline);
     }
 
     [Fact]

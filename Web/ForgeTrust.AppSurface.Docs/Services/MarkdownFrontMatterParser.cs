@@ -430,7 +430,7 @@ internal static class MarkdownFrontMatterParser
         return null;
     }
 
-    private static bool TryConvertOutlineMaxHeadingLevel(object rawValue, out int maxHeadingLevel)
+    internal static bool TryConvertOutlineMaxHeadingLevel(object rawValue, out int maxHeadingLevel)
     {
         switch (rawValue)
         {
@@ -491,14 +491,12 @@ internal static class MarkdownFrontMatterParser
         string key,
         out object? value)
     {
-        foreach (var entry in mapping)
+        foreach (var entry in mapping.Where(
+                     entry => entry.Key is string candidate
+                              && string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase)))
         {
-            if (entry.Key is string candidate
-                && string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase))
-            {
-                value = entry.Value;
-                return true;
-            }
+            value = entry.Value;
+            return true;
         }
 
         value = null;

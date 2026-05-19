@@ -101,6 +101,24 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void Extract_ShouldParseCaseInsensitiveOutlineKeys_AndNormalizeQuotedValues()
+    {
+        var markdown = """
+            ---
+            outline:
+              MAX_HEADING_LEVEL: "3"
+              REPEATED_HEADING_POLICY: h2-only
+            ---
+            # Guide
+            """;
+
+        var (_, metadata) = MarkdownFrontMatterParser.Extract(markdown);
+
+        Assert.Equal(3, metadata?.Outline?.MaxHeadingLevel);
+        Assert.Equal("h2_only", metadata?.Outline?.RepeatedHeadingPolicy);
+    }
+
+    [Fact]
     public void ExtractWithDiagnostics_ShouldIgnoreInvalidOutlineMaxHeadingLevel_AndKeepValidPolicy()
     {
         var markdown = """
@@ -140,6 +158,52 @@ public sealed class MarkdownFrontMatterParserTests
         var diagnostic = Assert.Single(result.Diagnostics);
         Assert.Equal("invalid-outline-repeated-heading-policy", diagnostic.Code);
         Assert.Equal("outline.repeated_heading_policy", diagnostic.FieldPath);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldReportNonStringOutlinePolicy()
+    {
+        var markdown = """
+            ---
+            outline:
+              repeated_heading_policy: 2
+            ---
+            # Guide
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata?.Outline);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("invalid-outline-repeated-heading-policy", diagnostic.Code);
+        Assert.Equal("outline.repeated_heading_policy", diagnostic.FieldPath);
+    }
+
+    [Fact]
+    public void TryConvertOutlineMaxHeadingLevel_ShouldConvertIntegerValues()
+    {
+        var result = MarkdownFrontMatterParser.TryConvertOutlineMaxHeadingLevel(2, out var maxHeadingLevel);
+
+        Assert.True(result);
+        Assert.Equal(2, maxHeadingLevel);
+    }
+
+    [Fact]
+    public void TryConvertOutlineMaxHeadingLevel_ShouldConvertLongValuesInsideIntegerRange()
+    {
+        var result = MarkdownFrontMatterParser.TryConvertOutlineMaxHeadingLevel(3L, out var maxHeadingLevel);
+
+        Assert.True(result);
+        Assert.Equal(3, maxHeadingLevel);
+    }
+
+    [Fact]
+    public void TryConvertOutlineMaxHeadingLevel_ShouldRejectLongValuesOutsideIntegerRange()
+    {
+        var result = MarkdownFrontMatterParser.TryConvertOutlineMaxHeadingLevel((long)int.MaxValue + 1, out var maxHeadingLevel);
+
+        Assert.False(result);
+        Assert.Equal(0, maxHeadingLevel);
     }
 
     [Theory]

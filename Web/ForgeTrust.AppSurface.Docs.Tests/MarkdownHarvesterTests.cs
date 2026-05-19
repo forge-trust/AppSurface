@@ -1311,6 +1311,8 @@ public class MarkdownHarvesterTests : IDisposable
 
     private async Task WriteMarkdownAsync(string relativePath, string content)
     {
+        Assert.False(Path.IsPathRooted(relativePath));
+
         var path = Path.Combine(_testRoot, relativePath);
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))
