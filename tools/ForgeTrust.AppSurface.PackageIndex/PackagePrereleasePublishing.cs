@@ -976,7 +976,12 @@ internal sealed record PackageArtifactManifest(
 /// <param name="ArtifactFileName">Package artifact file name without directory segments.</param>
 /// <param name="Sha512">Lowercase hexadecimal SHA-512 hash of the package artifact.</param>
 /// <param name="IsTool">Whether the artifact is a .NET tool package.</param>
-/// <param name="ToolCommandName">Command shim expected for .NET tool packages.</param>
+/// <param name="ToolCommandName">
+/// Validated command shim token carried from the package index for tool smoke verification. The value must be empty
+/// when <paramref name="IsTool"/> is <see langword="false"/>. When <paramref name="IsTool"/> is
+/// <see langword="true"/>, it is required and must be the same single file-name-safe command token declared in the
+/// package index <c>tool_command_name</c> field.
+/// </param>
 internal sealed record PackageArtifactManifestEntry(
     [property: JsonPropertyName("package_id")] string PackageId,
     [property: JsonPropertyName("project_path")] string ProjectPath,

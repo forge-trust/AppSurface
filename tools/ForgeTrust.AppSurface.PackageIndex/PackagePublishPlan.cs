@@ -192,7 +192,10 @@ internal sealed record PackagePublishPlan(IReadOnlyList<PackagePublishPlanEntry>
 /// <param name="Decision">Publish decision from the manifest.</param>
 /// <param name="ExpectedDependencyPackageIds">Expected same-version package dependencies.</param>
 /// <param name="IsTool">Whether the package is a .NET tool package.</param>
-/// <param name="ToolCommandName">Command shim expected from a .NET tool package.</param>
+/// <param name="ToolCommandName">
+/// Validated command shim token from <c>tool_command_name</c>. It is empty for non-tool packages and required for tool
+/// packages so the pack/publish workflow can carry the exact command name into artifact validation and smoke tests.
+/// </param>
 internal sealed record PackagePublishPlanEntry(
     string ProjectPath,
     string PackageId,

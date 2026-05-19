@@ -21,6 +21,14 @@ namespace ForgeTrust.AppSurface.Cli;
 /// </remarks>
 internal static class AppSurfaceCliApp
 {
+    /// <summary>
+    /// The published command name for the AppSurface CLI .NET tool.
+    /// </summary>
+    /// <remarks>
+    /// This value is passed to <see cref="CommandService"/> so help output, error messages, and usage text display the
+    /// command users type (<c>appsurface</c>) instead of the underlying assembly invocation. It must stay aligned with
+    /// the project file <c>ToolCommandName</c> property and the package index <c>tool_command_name</c> manifest value.
+    /// </remarks>
     internal const string ToolCommandName = "appsurface";
 
     /// <summary>

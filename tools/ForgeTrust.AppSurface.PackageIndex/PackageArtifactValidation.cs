@@ -593,7 +593,10 @@ internal sealed record PackageArtifactValidationReport(
 /// <param name="ExpectedDependencyPackageIds">Expected same-version package dependency ids.</param>
 /// <param name="ArtifactPath">Validated <c>.nupkg</c> artifact path.</param>
 /// <param name="IsTool">Whether the package is a .NET tool package.</param>
-/// <param name="ToolCommandName">Command shim validated for .NET tool packages.</param>
+/// <param name="ToolCommandName">
+/// Validated command shim token from <c>tool_command_name</c>. It is empty for non-tool packages and required for tool
+/// packages so artifact reports show the exact command that publish smoke tests execute.
+/// </param>
 internal sealed record PackageArtifactValidationReportEntry(
     string PackageId,
     string ProjectPath,

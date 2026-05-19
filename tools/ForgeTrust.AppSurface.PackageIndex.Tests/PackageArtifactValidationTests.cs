@@ -1488,8 +1488,10 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Contains("not marked as a tool", error.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task PackageArtifactManifestReader_RejectsInvalidToolCommandName()
+    [Theory]
+    [InlineData("../appsurface")]
+    [InlineData("con")]
+    public async Task PackageArtifactManifestReader_RejectsInvalidToolCommandName(string toolCommandName)
     {
         var manifestPath = CombineSafeChildPath(_repositoryRoot, "manifest.json");
         await File.WriteAllTextAsync(
@@ -1507,7 +1509,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                   "artifact_file_name": "ForgeTrust.AppSurface.Cli.{{PackageVersion}}.nupkg",
                   "sha512": "abc",
                   "is_tool": true,
-                  "tool_command_name": "../appsurface"
+                  "tool_command_name": "{{toolCommandName}}"
                 }
               ]
             }
