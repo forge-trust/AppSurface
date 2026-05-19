@@ -133,9 +133,8 @@ public sealed class AppSurfaceDocsPublicRebrandTests
         foreach (var line in File.ReadLines(file))
         {
             lineNumber++;
-            if (line.Contains("RazorDocs", StringComparison.Ordinal)
-                || line.Contains("razordocs", StringComparison.Ordinal)
-                || line.Contains("Razor Docs", StringComparison.Ordinal))
+            if (line.Contains("RazorDocs", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Razor Docs", StringComparison.OrdinalIgnoreCase))
             {
                 yield return $"{Path.GetRelativePath(repoRoot, file)}:{lineNumber}: {line.Trim()}";
             }

@@ -63,7 +63,7 @@ This approach aims to:
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including the `appsurface docs` AppSurface Docs preview workflow.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including `appsurface docs` preview and `appsurface docs export` static AppSurface Docs export workflows.
 
 ### [Dependency](./Dependency/README.md)
 

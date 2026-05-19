@@ -87,6 +87,13 @@ public sealed class AppSurfaceDocsIdentityResolverTests
 
         Assert.Equal(expectedResult, result);
         Assert.Equal(expectedPath, normalizedPath);
-        Assert.Contains(expectedErrorFragment, error, StringComparison.OrdinalIgnoreCase);
+        if (expectedResult)
+        {
+            Assert.True(string.IsNullOrWhiteSpace(error));
+        }
+        else
+        {
+            Assert.Contains(expectedErrorFragment, error, StringComparison.OrdinalIgnoreCase);
+        }
     }
 }

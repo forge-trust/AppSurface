@@ -296,12 +296,19 @@ internal static class DocMetadataFactory
                 : parts[0];
         }
 
-        return parts[0] switch
+        var rootPart = parts[0];
+        if (rootPart.Equals("Docs", StringComparison.OrdinalIgnoreCase))
         {
-            "Docs" => "AppSurface Docs",
-            "Web" or "Dependency" => parts[1],
-            _ => parts[0]
-        };
+            return "AppSurface Docs";
+        }
+
+        if (rootPart.Equals("Web", StringComparison.OrdinalIgnoreCase)
+            || rootPart.Equals("Dependency", StringComparison.OrdinalIgnoreCase))
+        {
+            return parts[1];
+        }
+
+        return rootPart;
     }
 
     private static bool IsInternalSegment(string segment)

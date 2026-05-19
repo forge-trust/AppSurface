@@ -14,9 +14,10 @@ For public command-line workflows, use the AppSurface CLI as the public command 
 
 ```bash
 dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo .
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs export --repo . --output ./dist/docs --mode cdn --strict
 ```
 
-The CLI delegates to this standalone host, so the host remains the source of truth for AppSurface Docs startup, static web assets, routes, and configuration binding.
+The CLI delegates to this standalone host, so the host remains the source of truth for AppSurface Docs startup, static web assets, routes, and configuration binding. Preview runs this host until shutdown. Export starts it in-process through `AppSurfaceDocsStandaloneHost.CreateBuilder`, binds `http://127.0.0.1:0`, crawls the resolved loopback address with RazorWire export, then stops and disposes the host.
 
 ## Entry Point
 
@@ -33,7 +34,9 @@ Do not duplicate standalone setup in test fixtures. If a scenario needs differen
 `CreateBuilder` is lower level than `RunAsync`: callers that build and start the host themselves should pass `--urls`, `--port`, or configure the web host before `Build()` instead of relying on the executable startup path's development-port fallback.
 The builder pins this standalone assembly as the host entry point identity so in-process callers, including xUnit, resolve the same static web asset manifest as the executable.
 
-The optional `configureOptions` callback is for host-shape seams that must stay on the normal AppSurface Web path. `appsurface docs` uses it to disable static web asset manifest loading for packaged tool runs because AppSurface Docs and RazorWire runtime assets are embedded in their assemblies. The shared AppSurface Web startup watchdog still applies through `WebOptions.StartupTimeout`, which defaults to 10 seconds and fails fast when the process stalls before Kestrel starts listening.
+The optional `configureOptions` callback is for host-shape seams that must stay on the normal AppSurface Web path. `appsurface docs` and `appsurface docs export` use it to disable static web asset manifest loading for packaged tool runs because AppSurface Docs and RazorWire runtime assets are embedded in their assemblies.
+
+The shared AppSurface Web startup watchdog still applies through `WebOptions.StartupTimeout`, which defaults to 10 seconds and fails fast when the process stalls before Kestrel starts listening. Export also enforces its own startup timeout because callers that build and start the host directly bypass the `RunAsync` watchdog path.
 
 ## Strict Harvest Failure
 
@@ -45,6 +48,14 @@ dotnet run --project Web/ForgeTrust.AppSurface.Docs.Standalone -- --urls http://
 ```
 
 Strict mode fails only when every configured harvester fails, times out, or cancels. Empty docs and partially degraded docs still start. The thrown `AppSurfaceDocsHarvestFailedException` uses a redacted summary suitable for CI output; raw exception details and repository paths remain in host logs for operators.
+
+For the public AppSurface CLI export path, prefer the equivalent flag:
+
+```bash
+appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
+```
+
+`--strict` is the harvest fail-closed gate. `--mode cdn` is the static artifact validation gate and preserves RazorWire `RWEXPORT00x` diagnostics when managed URLs cannot become CDN-safe files.
 
 ## Local URL Behavior
 

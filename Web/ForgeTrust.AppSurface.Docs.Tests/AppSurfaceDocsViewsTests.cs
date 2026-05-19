@@ -43,6 +43,7 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("data-rw-search-runtime=\"minisearch\"", layout);
         Assert.DoesNotContain("src=\"~/docs/outline-client.js\"", layout);
         Assert.Contains("window.__appSurfaceDocsConfig", layout);
+        Assert.Contains("rel=\"icon\" type=\"image/svg+xml\" href=\"@docsBrandIconUrl\"", layout);
         Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"search-client.js\")", layout);
         Assert.Contains("AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, \"minisearch.min.js\")", layout);
     }
@@ -98,7 +99,7 @@ public class AppSurfaceDocsViewsTests
 
         Assert.Contains("<title>Documentation Index - AppSurface Docs</title>", html);
         Assert.Contains(">AppSurface Docs</span>", html);
-        Assert.DoesNotContain("rel=\"icon\"", html);
+        Assert.Contains("rel=\"icon\" type=\"image/svg+xml\" href=\"/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg\"", html);
         Assert.DoesNotContain("<img src=\"/brand", html);
     }
 
