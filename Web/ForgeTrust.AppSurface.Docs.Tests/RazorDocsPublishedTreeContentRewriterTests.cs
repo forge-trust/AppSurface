@@ -41,6 +41,37 @@ public sealed class RazorDocsPublishedTreeContentRewriterTests
     }
 
     [Fact]
+    public void RewriteHtml_ShouldRebaseSearchRecoveryAnchors()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <script>window.__razorDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body>
+              <section id="docs-search-page-starter">
+                <a href="/docs/search?q=getting%20started" data-rw-search-suggestion="getting started">getting started</a>
+              </section>
+              <section id="docs-search-page-recovery">
+                <a href="/docs/sections/start-here">Start Here</a>
+                <a href="/docs/packages/README.md">Packages</a>
+                <a href="/docs/search-index.json">Search index</a>
+              </section>
+            </body>
+            </html>
+            """;
+
+        var rewritten = RazorDocsPublishedTreeContentRewriter.RewriteHtml(html, "/docs/v/1.2.3");
+
+        Assert.Contains("href=\"/docs/v/1.2.3/search?q=getting%20started\"", rewritten);
+        Assert.Contains("href=\"/docs/v/1.2.3/sections/start-here\"", rewritten);
+        Assert.Contains("href=\"/docs/v/1.2.3/packages/README.md\"", rewritten);
+        Assert.Contains("href=\"/docs/v/1.2.3/search-index.json\"", rewritten);
+    }
+
+    [Fact]
     public void RewriteHtml_ShouldRebaseMiniSearchUrlWithoutSuffix()
     {
         const string html =

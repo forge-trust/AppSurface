@@ -1885,10 +1885,136 @@ public class DocsControllerTests : IDisposable
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
         Assert.Equal("Search Documentation", model.Title);
-        Assert.Equal(3, model.FailureFallbackLinks.Count);
-        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Browse guides" && link.Href == "/docs/guides/start" && link.UsesDocsFrame);
-        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Open an example" && link.UsesDocsFrame);
-        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Explore API reference" && link.UsesDocsFrame);
+        Assert.Equal(4, model.FailureFallbackLinks.Count);
+        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Start Here" && link.Href == "/docs/guides/start" && link.UsesDocsFrame);
+        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Examples" && link.UsesDocsFrame);
+        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "API Reference" && link.UsesDocsFrame);
+        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Documentation index" && link.Href == "/docs" && !link.UsesDocsFrame);
+    }
+
+    [Fact]
+    public async Task Search_ShouldBuildOrderedServerRenderedRecoveryBuckets()
+    {
+        var docs = new List<DocNode>
+        {
+            new(
+                "Start Landing",
+                "start/index.md",
+                "<p>Start body</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "Start Here",
+                    SectionLanding = true,
+                    Order = 1
+                }),
+            new(
+                "Example",
+                "examples/hello.md",
+                "<p>Example body</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "Examples",
+                    Order = 2
+                }),
+            new(
+                "Packages",
+                "packages/README.md",
+                "<p>Package body</p>",
+                Metadata: new DocMetadata
+                {
+                    Order = 3
+                }),
+            new(
+                "Troubleshooting",
+                "troubleshooting/search.md",
+                "<p>Troubleshooting body</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "Troubleshooting",
+                    Order = 4
+                }),
+            new(
+                "API",
+                "Namespaces/ForgeTrust.AppSurface.Web",
+                "<p>API body</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "API Reference",
+                    Order = 5
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        var result = await _controller.Search();
+
+        var viewResult = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
+        Assert.Collection(
+            model.FailureFallbackLinks,
+            link =>
+            {
+                Assert.Equal("Start Here", link.Title);
+                Assert.Equal("/docs/sections/start-here", link.Href);
+            },
+            link =>
+            {
+                Assert.Equal("Examples", link.Title);
+                Assert.Equal("/docs/sections/examples", link.Href);
+            },
+            link =>
+            {
+                Assert.Equal("Packages", link.Title);
+                Assert.Equal("/docs/packages", link.Href);
+            },
+            link =>
+            {
+                Assert.Equal("Troubleshooting", link.Title);
+                Assert.Equal("/docs/sections/troubleshooting", link.Href);
+            },
+            link =>
+            {
+                Assert.Equal("API Reference", link.Title);
+                Assert.Equal("/docs/sections/api-reference", link.Href);
+            });
+        Assert.All(model.FailureFallbackLinks, link => Assert.True(link.UsesDocsFrame));
+    }
+
+    [Fact]
+    public async Task Search_ShouldAddDocsHomeFallback_WhenSomeRecoveryBucketsAreMissing()
+    {
+        var docs = new List<DocNode>
+        {
+            new(
+                "Start Landing",
+                "start/index.md",
+                "<p>Start body</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "Start Here",
+                    SectionLanding = true,
+                    Order = 1
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        var result = await _controller.Search();
+
+        var viewResult = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
+        Assert.Collection(
+            model.FailureFallbackLinks,
+            link =>
+            {
+                Assert.Equal("Start Here", link.Title);
+                Assert.Equal("/docs/sections/start-here", link.Href);
+                Assert.True(link.UsesDocsFrame);
+            },
+            link =>
+            {
+                Assert.Equal("Documentation index", link.Title);
+                Assert.Equal("/docs", link.Href);
+                Assert.False(link.UsesDocsFrame);
+            });
     }
 
     [Fact]
@@ -1955,7 +2081,7 @@ public class DocsControllerTests : IDisposable
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
-        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "Browse namespaces");
+        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "API Reference" && link.Href.Contains("Namespaces", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(model.FailureFallbackLinks, link => link.Href == "/docs" && !link.UsesDocsFrame);
     }
 
@@ -2008,8 +2134,8 @@ public class DocsControllerTests : IDisposable
         var sharedHref = DocAggregator.BuildSearchDocUrl("guides/shared-example");
 
         Assert.Equal(1, model.FailureFallbackLinks.Count(link => link.Href == sharedHref));
-        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Browse guides");
-        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "Open an example");
+        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Start Here");
+        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "Examples");
     }
 
     [Fact]
@@ -2044,7 +2170,7 @@ public class DocsControllerTests : IDisposable
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
-        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "Browse guides");
+        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "Start Here");
         Assert.Contains(model.FailureFallbackLinks, link => link.Href == "/docs" && !link.UsesDocsFrame);
     }
 

@@ -286,6 +286,37 @@ public sealed class RazorDocsSearchPlaywrightTests
     }
 
     [Fact]
+    public async Task SearchPage_StarterAnchorAllowsModifiedClicks_WhenSearchIsReady()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+        await page.WaitForSelectorAsync("#docs-search-page-starter", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+
+        var defaultPrevented = await page.Locator("[data-rw-search-suggestion]").First.EvaluateAsync<bool>(
+            """
+            element => {
+              const event = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                button: 0,
+                metaKey: true
+              });
+              element.dispatchEvent(event);
+              return event.defaultPrevented;
+            }
+            """);
+
+        Assert.False(defaultPrevented);
+    }
+
+    [Fact]
     public async Task SearchPage_StarterState_ShowsRepresentativeRows_ForAvailablePageTypes()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
@@ -613,7 +644,10 @@ public sealed class RazorDocsSearchPlaywrightTests
         });
 
         Assert.True(await page.Locator("#docs-search-page-retry").IsVisibleAsync());
-        Assert.True(await page.Locator("#docs-search-page-failure a[href]").First.IsVisibleAsync());
+        Assert.True(await page.Locator("#docs-search-page-starter").IsVisibleAsync());
+        Assert.True(await page.Locator("#docs-search-page-recovery").IsVisibleAsync());
+        Assert.True(await page.Locator("#docs-search-page-recovery a[href]").First.IsVisibleAsync());
+        Assert.Equal(0, await page.Locator("#docs-search-page-failure a[href]").CountAsync());
 
         await page.EvaluateAsync(
             """
@@ -635,6 +669,50 @@ public sealed class RazorDocsSearchPlaywrightTests
 
         Assert.False(await page.Locator("#docs-search-page-failure").IsVisibleAsync());
         Assert.True(await page.Locator("#docs-search-page-starter").IsVisibleAsync());
+    }
+
+    [Fact]
+    public async Task SearchPage_StarterAnchorNavigates_WhenIndexFails()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        await page.RouteAsync(
+            $"**{SearchIndexPath}",
+            async route =>
+            {
+                await route.FulfillAsync(new RouteFulfillOptions
+                {
+                    Status = 503,
+                    ContentType = "application/json",
+                    Body = "{}"
+                });
+            });
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await page.WaitForSelectorAsync("#docs-search-page-failure", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+
+        var chip = page.Locator("[data-rw-search-suggestion]").First;
+        var href = await chip.GetAttributeAsync("href");
+        Assert.Contains("/docs/search?q=", href);
+
+        var response = await page.RunAndWaitForResponseAsync(
+            () => chip.ClickAsync(),
+            response => response.Request.ResourceType.Equals("document", StringComparison.OrdinalIgnoreCase)
+                        && response.Url.Contains("/docs/search?q=", StringComparison.Ordinal),
+            new PageRunAndWaitForResponseOptions { Timeout = 30_000 });
+
+        Assert.True(response.Ok, $"Starter query anchor navigation failed with status {(int)response.Status}.");
+        await page.WaitForSelectorAsync("#docs-search-page-failure", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+        Assert.Contains("?q=", page.Url, StringComparison.Ordinal);
     }
 
     [Fact]
