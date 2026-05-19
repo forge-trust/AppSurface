@@ -93,9 +93,9 @@ public class MarkdownHarvesterTests : IDisposable
                 {
                     options.Harvest.Markdown.DefaultExclusions.AllowGlobs["HiddenDirectories"] = [".github/**"];
                 }));
-        var workflowsDir = Path.Combine(_testRoot, ".github", "workflows");
+        var workflowsDir = CombineUnder(_testRoot, ".github", "workflows");
         Directory.CreateDirectory(workflowsDir);
-        await File.WriteAllTextAsync(Path.Combine(workflowsDir, "Actions.md"), "# Actions");
+        await File.WriteAllTextAsync(CombineUnder(workflowsDir, "Actions.md"), "# Actions");
 
         var results = (await harvester.HarvestAsync(_testRoot)).ToList();
 

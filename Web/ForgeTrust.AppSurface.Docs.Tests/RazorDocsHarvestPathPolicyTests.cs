@@ -265,7 +265,7 @@ public sealed class RazorDocsHarvestPathPolicyTests
     }
 
     [Fact]
-    public void ShouldPruneDirectory_KeepsDefaultGroupDirectoryWhenAnyAllowExists()
+    public void ShouldPruneDirectory_KeepsOnlyDefaultGroupDirectoriesWithMatchingAllows()
     {
         var policy = CreatePolicy(
             options =>
@@ -274,6 +274,8 @@ public sealed class RazorDocsHarvestPathPolicyTests
             });
 
         Assert.False(policy.ShouldPruneDirectory(".github", RazorDocsHarvestSourceKind.Markdown));
+        Assert.False(policy.ShouldPruneDirectory(".github/workflows", RazorDocsHarvestSourceKind.Markdown));
+        Assert.True(policy.ShouldPruneDirectory(".git", RazorDocsHarvestSourceKind.Markdown));
         Assert.True(policy.ShouldPruneDirectory(".github", RazorDocsHarvestSourceKind.CSharp));
     }
 

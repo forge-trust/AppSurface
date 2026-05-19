@@ -2,6 +2,16 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
+/// <summary>
+/// Applies RazorDocs harvest path rules for source-backed Markdown and C# documentation.
+/// </summary>
+/// <remarks>
+/// Policy order is intentionally fixed: built-in source candidates are checked first, then global includes,
+/// source-specific includes, default exclusion groups and their allows, global excludes, and source-specific excludes.
+/// Default groups protect build output, hidden directories, test projects, and C# source under <c>examples</c>. Directory
+/// pruning uses the same defaults and clear <c>/**</c> subtree excludes, but keeps a default-excluded subtree only when a
+/// configured group allow can match that directory or one of its descendants.
+/// </remarks>
 internal sealed class RazorDocsHarvestPathPolicy
 {
     private static readonly string[] TestProjectSuffixes =
@@ -30,6 +40,9 @@ internal sealed class RazorDocsHarvestPathPolicy
     private readonly HashSet<RazorDocsHarvestDefaultExclusionGroup> _globalDisabledGroups;
     private readonly Dictionary<RazorDocsHarvestDefaultExclusionGroup, RazorDocsHarvestPathMatcher> _globalAllowMatchers;
 
+    /// <summary>
+    /// Initializes a path policy from normalized RazorDocs options.
+    /// </summary>
     public RazorDocsHarvestPathPolicy(
         RazorDocsOptions options,
         ILogger<RazorDocsHarvestPathPolicy> logger)
@@ -58,11 +71,22 @@ internal sealed class RazorDocsHarvestPathPolicy
     {
     }
 
+    /// <summary>
+    /// Creates a policy with package defaults and no configured include or exclude globs.
+    /// </summary>
     public static RazorDocsHarvestPathPolicy CreateDefault()
     {
         return new RazorDocsHarvestPathPolicy(new RazorDocsOptions());
     }
 
+    /// <summary>
+    /// Evaluates a repository-relative path and returns the include/exclude decision with rule trace details.
+    /// </summary>
+    /// <remarks>
+    /// The input must be a normalized relative candidate. Invalid paths are excluded with
+    /// <see cref="RazorDocsHarvestPathDecisionCode.ExcludedByInvalidPath"/>. Include misses use the <c>Miss</c> codes,
+    /// while configured exclude and default-group denials use their corresponding <c>ExcludedBy*</c> codes.
+    /// </remarks>
     public RazorDocsHarvestPathDecision Evaluate(
         string relativePath,
         RazorDocsHarvestSourceKind sourceKind)
@@ -250,6 +274,9 @@ internal sealed class RazorDocsHarvestPathPolicy
             matchedDefaultGroups.Select(group => group.ToString()).ToArray());
     }
 
+    /// <summary>
+    /// Returns whether <paramref name="relativePath"/> is included by <see cref="Evaluate"/>.
+    /// </summary>
     public bool ShouldIncludeFilePath(
         string relativePath,
         RazorDocsHarvestSourceKind sourceKind)
@@ -257,6 +284,13 @@ internal sealed class RazorDocsHarvestPathPolicy
         return Evaluate(relativePath, sourceKind).Included;
     }
 
+    /// <summary>
+    /// Enumerates candidate files under <paramref name="rootPath"/> while pruning policy-excluded subtrees.
+    /// </summary>
+    /// <remarks>
+    /// The <paramref name="searchPattern"/> is passed to <see cref="Directory.EnumerateFiles(string, string, SearchOption)"/>
+    /// for each visited directory. Cancellation is observed between directory visits.
+    /// </remarks>
     public IEnumerable<string> EnumerateCandidateFiles(
         string rootPath,
         RazorDocsHarvestSourceKind sourceKind,
@@ -292,6 +326,14 @@ internal sealed class RazorDocsHarvestPathPolicy
         }
     }
 
+    /// <summary>
+    /// Returns whether a normalized repository-relative directory can be skipped during traversal.
+    /// </summary>
+    /// <remarks>
+    /// Invalid directories are pruned. Default-excluded directories are pruned unless the matched group has an allow glob
+    /// that can apply to the directory or a descendant. Configured subtree excludes prune only when a <c>/**</c> pattern
+    /// matches the directory.
+    /// </remarks>
     public bool ShouldPruneDirectory(
         string relativeDirectory,
         RazorDocsHarvestSourceKind sourceKind)
@@ -313,7 +355,7 @@ internal sealed class RazorDocsHarvestPathPolicy
             treatLastSegmentAsDirectory: true)
             .Where(group => !IsDefaultGroupDisabled(group, sourcePolicy));
 
-        if (matchedDefaultGroups.Any(group => !HasAnyDefaultGroupAllowPattern(group, sourcePolicy)))
+        if (matchedDefaultGroups.Any(group => !HasDefaultGroupAllowPatternForSubtree(group, normalizedDirectory, sourcePolicy)))
         {
             return true;
         }
@@ -322,11 +364,20 @@ internal sealed class RazorDocsHarvestPathPolicy
                || sourcePolicy.ExcludeMatcher.MatchDirectorySubtree(normalizedDirectory) is not null;
     }
 
+    /// <summary>
+    /// Returns whether <paramref name="groupId"/> is a supported named default exclusion group.
+    /// </summary>
+    /// <remarks>
+    /// Matching is case-insensitive but name-only; numeric enum values are rejected so configuration stays stable.
+    /// </remarks>
     public static bool IsKnownDefaultGroupId(string? groupId)
     {
         return TryParseDefaultGroupName(groupId, out _);
     }
 
+    /// <summary>
+    /// Normalizes a named default exclusion group to canonical casing, or returns the trimmed input when unsupported.
+    /// </summary>
     public static string NormalizeDefaultGroupId(string? groupId)
     {
         var trimmedGroupId = groupId?.Trim() ?? string.Empty;
@@ -530,12 +581,15 @@ internal sealed class RazorDocsHarvestPathPolicy
             : null;
     }
 
-    private bool HasAnyDefaultGroupAllowPattern(
+    private bool HasDefaultGroupAllowPatternForSubtree(
         RazorDocsHarvestDefaultExclusionGroup group,
+        string normalizedDirectory,
         SourceScopePolicy sourcePolicy)
     {
-        return _globalAllowMatchers.TryGetValue(group, out var globalMatcher) && globalMatcher.HasPatterns
-               || sourcePolicy.AllowMatchers.TryGetValue(group, out var sourceMatcher) && sourceMatcher.HasPatterns;
+        return _globalAllowMatchers.TryGetValue(group, out var globalMatcher)
+               && globalMatcher.MatchDirectoryOrDescendantSubtree(normalizedDirectory) is not null
+               || sourcePolicy.AllowMatchers.TryGetValue(group, out var sourceMatcher)
+               && sourceMatcher.MatchDirectoryOrDescendantSubtree(normalizedDirectory) is not null;
     }
 
     private sealed class SourceScopePolicy(

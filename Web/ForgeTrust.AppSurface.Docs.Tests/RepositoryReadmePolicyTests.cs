@@ -84,9 +84,11 @@ public sealed class RepositoryReadmePolicyTests
 
     private static ServiceProvider CreatePolicyProvider(string repoRoot)
     {
+        var standaloneConfigRelativePath = Path.Join("Web", "ForgeTrust.AppSurface.Docs.Standalone", "appsettings.json");
+        var standaloneConfigPath = Path.Join(repoRoot, standaloneConfigRelativePath);
         var configuration = new ConfigurationBuilder()
             .AddJsonFile(
-                Path.Combine(repoRoot, "Web", "ForgeTrust.AppSurface.Docs.Standalone", "appsettings.json"),
+                standaloneConfigPath,
                 optional: false,
                 reloadOnChange: false)
             .Build();
