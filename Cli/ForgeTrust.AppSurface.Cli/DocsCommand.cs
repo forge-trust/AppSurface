@@ -20,69 +20,69 @@ using Microsoft.Extensions.Logging;
 namespace ForgeTrust.AppSurface.Cli;
 
 /// <summary>
-/// Previews RazorDocs for a local repository through the public <c>appsurface docs</c> command.
+/// Previews AppSurface Docs for a local repository through the public <c>appsurface docs</c> command.
 /// </summary>
 /// <remarks>
-/// This command starts the RazorDocs standalone host with CLI-friendly defaults and delegates option validation and
-/// argument construction to <see cref="RazorDocsPreviewCommand"/>.
+/// This command starts the AppSurface Docs standalone host with CLI-friendly defaults and delegates option validation and
+/// argument construction to <see cref="AppSurfaceDocsPreviewCommand"/>.
 /// </remarks>
-[Command("docs", Description = "Preview RazorDocs for a repository. Related: docs preview, docs export.")]
-internal sealed class DocsCommand : RazorDocsPreviewCommand
+[Command("docs", Description = "Preview AppSurface Docs for a repository. Related: docs preview, docs export.")]
+internal sealed class DocsCommand : AppSurfaceDocsPreviewCommand
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="DocsCommand"/> class.
     /// </summary>
     /// <param name="logger">Logger used for command diagnostics.</param>
-    /// <param name="hostRunner">Runner that starts the RazorDocs host.</param>
-    public DocsCommand(ILogger<DocsCommand> logger, IRazorDocsHostRunner hostRunner)
+    /// <param name="hostRunner">Runner that starts the AppSurface Docs host.</param>
+    public DocsCommand(ILogger<DocsCommand> logger, IAppSurfaceDocsHostRunner hostRunner)
         : base(logger, hostRunner)
     {
     }
 }
 
 /// <summary>
-/// Previews RazorDocs for a local repository through the <c>appsurface docs preview</c> alias.
+/// Previews AppSurface Docs for a local repository through the <c>appsurface docs preview</c> alias.
 /// </summary>
 /// <remarks>
 /// Use this alias when a command hierarchy reads better in scripts. It has the same options and behavior as
 /// <see cref="DocsCommand"/>.
 /// </remarks>
-[Command("docs preview", Description = "Preview RazorDocs for a repository.")]
-internal sealed class DocsPreviewCommand : RazorDocsPreviewCommand
+[Command("docs preview", Description = "Preview AppSurface Docs for a repository.")]
+internal sealed class DocsPreviewCommand : AppSurfaceDocsPreviewCommand
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="DocsPreviewCommand"/> class.
     /// </summary>
     /// <param name="logger">Logger used for command diagnostics.</param>
-    /// <param name="hostRunner">Runner that starts the RazorDocs host.</param>
-    public DocsPreviewCommand(ILogger<DocsPreviewCommand> logger, IRazorDocsHostRunner hostRunner)
+    /// <param name="hostRunner">Runner that starts the AppSurface Docs host.</param>
+    public DocsPreviewCommand(ILogger<DocsPreviewCommand> logger, IAppSurfaceDocsHostRunner hostRunner)
         : base(logger, hostRunner)
     {
     }
 }
 
 /// <summary>
-/// Exports RazorDocs for a local repository through the <c>appsurface docs export</c> command.
+/// Exports AppSurface Docs for a local repository through the <c>appsurface docs export</c> command.
 /// </summary>
 /// <remarks>
 /// This command owns the AppSurface Docs source-host lifecycle and delegates static crawling, URL rewriting, CDN
 /// validation, and materialization to the RazorWire export engine.
 /// </remarks>
-[Command("docs export", Description = "Export RazorDocs for a repository to static files.")]
-internal sealed class DocsExportCommand : RazorDocsRepositoryCommand, ICommand
+[Command("docs export", Description = "Export AppSurface Docs for a repository to static files.")]
+internal sealed class DocsExportCommand : AppSurfaceDocsRepositoryCommand, ICommand
 {
     private const string DefaultExportUrl = "http://127.0.0.1:0";
     private const string DefaultOutputPath = "dist/docs";
 
     private readonly ILogger<DocsExportCommand> _logger;
-    private readonly IRazorDocsExportRunner _exportRunner;
+    private readonly IAppSurfaceDocsExportRunner _exportRunner;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocsExportCommand"/> class.
     /// </summary>
     /// <param name="logger">Logger used for command diagnostics.</param>
     /// <param name="exportRunner">Runner that starts the docs host and performs static export.</param>
-    public DocsExportCommand(ILogger<DocsExportCommand> logger, IRazorDocsExportRunner exportRunner)
+    public DocsExportCommand(ILogger<DocsExportCommand> logger, IAppSurfaceDocsExportRunner exportRunner)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(exportRunner);
@@ -142,7 +142,7 @@ internal sealed class DocsExportCommand : RazorDocsRepositoryCommand, ICommand
     {
         var exportArgs = BuildExportArgs();
         _logger.LogInformation(
-            "Exporting RazorDocs for {RepositoryRoot} to {OutputPath}.",
+            "Exporting AppSurface Docs for {RepositoryRoot} to {OutputPath}.",
             exportArgs.HostArgs.RepositoryRoot,
             exportArgs.OutputPath);
 
@@ -168,7 +168,7 @@ internal sealed class DocsExportCommand : RazorDocsRepositoryCommand, ICommand
     /// Export defaults to Production and binds a loopback ephemeral port internally. It does not expose preview's
     /// <c>--urls</c> or <c>--port</c> options because humans and CI should not manage export listener ports.
     /// </remarks>
-    internal RazorDocsExportArgs BuildExportArgs()
+    internal AppSurfaceDocsExportArgs BuildExportArgs()
     {
         if (string.IsNullOrWhiteSpace(OutputPath))
         {
@@ -194,7 +194,7 @@ internal sealed class DocsExportCommand : RazorDocsRepositoryCommand, ICommand
             ? BuildDefaultSeedRoutes()
             : null;
 
-        return new RazorDocsExportArgs(
+        return new AppSurfaceDocsExportArgs(
             hostArgs,
             outputPath,
             seedRoutesPath,
@@ -204,14 +204,14 @@ internal sealed class DocsExportCommand : RazorDocsRepositoryCommand, ICommand
     }
 
     /// <summary>
-    /// Builds the default export seed routes from the resolved RazorDocs routing options.
+    /// Builds the default export seed routes from the resolved AppSurface Docs routing options.
     /// </summary>
     /// <returns>The root route plus the live docs root, with duplicates removed.</returns>
     private IReadOnlyList<string> BuildDefaultSeedRoutes()
     {
-        var docsUrlBuilder = new DocsUrlBuilder(new RazorDocsOptions
+        var docsUrlBuilder = new DocsUrlBuilder(new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 RouteRootPath = RouteRootPath,
                 DocsRootPath = DocsRootPath
@@ -225,26 +225,26 @@ internal sealed class DocsExportCommand : RazorDocsRepositoryCommand, ICommand
 }
 
 /// <summary>
-/// Shared implementation for RazorDocs preview commands.
+/// Shared implementation for AppSurface Docs preview commands.
 /// </summary>
 /// <remarks>
-/// The base command translates CLI options into RazorDocs standalone host arguments. It keeps command parsing separate
+/// The base command translates CLI options into AppSurface Docs standalone host arguments. It keeps command parsing separate
 /// from process hosting so tests can verify validation and argument forwarding without starting Kestrel.
 /// </remarks>
-internal abstract class RazorDocsPreviewCommand : RazorDocsRepositoryCommand, ICommand
+internal abstract class AppSurfaceDocsPreviewCommand : AppSurfaceDocsRepositoryCommand, ICommand
 {
     private readonly ILogger _logger;
-    private readonly IRazorDocsHostRunner _hostRunner;
+    private readonly IAppSurfaceDocsHostRunner _hostRunner;
 
     /// <summary>
-    /// Initializes shared RazorDocs preview command state.
+    /// Initializes shared AppSurface Docs preview command state.
     /// </summary>
     /// <param name="logger">Logger used for command diagnostics.</param>
-    /// <param name="hostRunner">Runner that starts the translated RazorDocs host invocation.</param>
+    /// <param name="hostRunner">Runner that starts the translated AppSurface Docs host invocation.</param>
     /// <remarks>
     /// Derived command aliases share the same implementation so validation and host argument translation cannot drift.
     /// </remarks>
-    protected RazorDocsPreviewCommand(ILogger logger, IRazorDocsHostRunner hostRunner)
+    protected AppSurfaceDocsPreviewCommand(ILogger logger, IAppSurfaceDocsHostRunner hostRunner)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(hostRunner);
@@ -254,23 +254,23 @@ internal abstract class RazorDocsPreviewCommand : RazorDocsRepositoryCommand, IC
     }
 
     /// <summary>
-    /// Gets the explicit URL binding forwarded to the RazorDocs host.
+    /// Gets the explicit URL binding forwarded to the AppSurface Docs host.
     /// </summary>
     /// <remarks>
     /// Use this for a full Kestrel binding such as <c>http://127.0.0.1:5189</c>. Prefer <see cref="Port"/> when only the
     /// port needs to change.
     /// </remarks>
-    [CommandOption("urls", 'u', Description = "URL binding forwarded to the RazorDocs host, for example http://127.0.0.1:5189.")]
+    [CommandOption("urls", 'u', Description = "URL binding forwarded to the AppSurface Docs host, for example http://127.0.0.1:5189.")]
     public string? Urls { get; init; }
 
     /// <summary>
-    /// Gets the port shortcut forwarded to the RazorDocs host.
+    /// Gets the port shortcut forwarded to the AppSurface Docs host.
     /// </summary>
     /// <remarks>
     /// Use this for local preview scripts that only need a port override. Use <see cref="Urls"/> for explicit host,
     /// scheme, or multi-binding scenarios.
     /// </remarks>
-    [CommandOption("port", 'p', Description = "Port shortcut forwarded to the RazorDocs host.")]
+    [CommandOption("port", 'p', Description = "Port shortcut forwarded to the AppSurface Docs host.")]
     public int? Port { get; init; }
 
     /// <summary>
@@ -296,7 +296,7 @@ internal abstract class RazorDocsPreviewCommand : RazorDocsRepositoryCommand, IC
     internal async ValueTask ExecuteAsync(CancellationToken cancellationToken)
     {
         var hostArgs = BuildHostArgs(Urls, Port, defaultEnvironmentName: Environments.Development);
-        _logger.LogInformation("Starting RazorDocs preview for {RepositoryRoot}.", hostArgs.RepositoryRoot);
+        _logger.LogInformation("Starting AppSurface Docs preview for {RepositoryRoot}.", hostArgs.RepositoryRoot);
         using var currentDirectory = CurrentDirectoryScope.ChangeTo(hostArgs.RepositoryRoot);
         await _hostRunner.RunAsync(hostArgs.Args, hostArgs.StartupTimeout, cancellationToken);
     }
@@ -309,7 +309,7 @@ internal abstract class RazorDocsPreviewCommand : RazorDocsRepositoryCommand, IC
 /// Preview and export share these options so route and source configuration cannot drift. Preview adds listener binding
 /// options, while export keeps listener management internal and adds output/export options instead.
 /// </remarks>
-internal abstract class RazorDocsRepositoryCommand
+internal abstract class AppSurfaceDocsRepositoryCommand
 {
     /// <summary>
     /// Gets the repository root to harvest.
@@ -322,24 +322,24 @@ internal abstract class RazorDocsRepositoryCommand
     public string RepositoryRoot { get; init; } = ".";
 
     /// <summary>
-    /// Gets a value indicating whether startup should fail when every configured RazorDocs harvester fails.
+    /// Gets a value indicating whether startup should fail when every configured AppSurface Docs harvester fails.
     /// </summary>
     /// <remarks>
     /// This is a source-harvest fail-closed gate. Static artifact validation is controlled separately by
     /// <c>docs export --mode cdn</c>.
     /// </remarks>
-    [CommandOption("strict", Description = "Fail startup when every configured RazorDocs harvester fails.")]
+    [CommandOption("strict", Description = "Fail startup when every configured AppSurface Docs harvester fails.")]
     public bool StrictHarvest { get; init; }
 
     /// <summary>
-    /// Gets the route-family root for RazorDocs version and archive routes.
+    /// Gets the route-family root for AppSurface Docs version and archive routes.
     /// </summary>
     /// <remarks>
     /// Use this when the docs route family is mounted somewhere other than <c>/docs</c>, for example
     /// <c>--route-root /reference</c>. Pair it with <see cref="DocsRootPath"/> when the live docs path should differ from
     /// archive/version routes.
     /// </remarks>
-    [CommandOption("route-root", Description = "Route-family root for RazorDocs version and archive routes.")]
+    [CommandOption("route-root", Description = "Route-family root for AppSurface Docs version and archive routes.")]
     public string? RouteRootPath { get; init; }
 
     /// <summary>
@@ -347,19 +347,19 @@ internal abstract class RazorDocsRepositoryCommand
     /// </summary>
     /// <remarks>
     /// Use this to serve current docs under a nested route, for example <c>--route-root /reference --docs-root
-    /// /reference/next</c>. Leave unset to use RazorDocs defaults.
+    /// /reference/next</c>. Leave unset to use AppSurface Docs defaults.
     /// </remarks>
     [CommandOption("docs-root", Description = "Live docs root path.")]
     public string? DocsRootPath { get; init; }
 
     /// <summary>
-    /// Gets the host environment forwarded to the RazorDocs standalone host.
+    /// Gets the host environment forwarded to the AppSurface Docs standalone host.
     /// </summary>
     /// <remarks>
     /// Preview defaults to <c>Development</c> so the host can use deterministic per-workspace local endpoints. Export
     /// defaults to <c>Production</c> before starting the in-process host.
     /// </remarks>
-    [CommandOption("environment", 'e', Description = "Host environment forwarded to the RazorDocs host.")]
+    [CommandOption("environment", 'e', Description = "Host environment forwarded to the AppSurface Docs host.")]
     public string? EnvironmentName { get; init; }
 
     /// <summary>
@@ -369,27 +369,27 @@ internal abstract class RazorDocsRepositoryCommand
     /// Defaults to 10 seconds. Set to <c>0</c> to disable the startup watchdog. Negative, infinite, and NaN values are
     /// rejected before the host starts.
     /// </remarks>
-    [CommandOption("startup-timeout-seconds", Description = "Seconds to wait for the RazorDocs web host to start before failing fast. Use 0 to disable.")]
+    [CommandOption("startup-timeout-seconds", Description = "Seconds to wait for the AppSurface Docs web host to start before failing fast. Use 0 to disable.")]
     public double StartupTimeoutSeconds { get; init; } = 10;
 
     /// <summary>
-    /// Translates shared CLI options into standalone RazorDocs host arguments.
+    /// Translates shared CLI options into standalone AppSurface Docs host arguments.
     /// </summary>
     /// <param name="defaultEnvironmentName">Environment to use when <see cref="EnvironmentName"/> is blank.</param>
     /// <returns>The repository root, forwarded host arguments, startup timeout, and resolved environment.</returns>
-    internal RazorDocsHostArgs BuildHostArgs(string? defaultEnvironmentName)
+    internal AppSurfaceDocsHostArgs BuildHostArgs(string? defaultEnvironmentName)
     {
         return BuildHostArgs(urls: null, port: null, defaultEnvironmentName);
     }
 
     /// <summary>
-    /// Translates shared and preview-only CLI options into standalone RazorDocs host arguments.
+    /// Translates shared and preview-only CLI options into standalone AppSurface Docs host arguments.
     /// </summary>
     /// <param name="urls">Optional explicit preview URL binding.</param>
     /// <param name="port">Optional preview port shortcut.</param>
     /// <param name="defaultEnvironmentName">Environment to use when <see cref="EnvironmentName"/> is blank.</param>
     /// <returns>The repository root, forwarded host arguments, startup timeout, and resolved environment.</returns>
-    internal RazorDocsHostArgs BuildHostArgs(string? urls, int? port, string? defaultEnvironmentName)
+    internal AppSurfaceDocsHostArgs BuildHostArgs(string? urls, int? port, string? defaultEnvironmentName)
     {
         if (string.IsNullOrWhiteSpace(RepositoryRoot))
         {
@@ -399,13 +399,13 @@ internal abstract class RazorDocsRepositoryCommand
         var repositoryRoot = Path.GetFullPath(RepositoryRoot);
         if (!Directory.Exists(repositoryRoot))
         {
-            throw new CommandException($"The RazorDocs repository root does not exist: {repositoryRoot}");
+            throw new CommandException($"The AppSurface Docs repository root does not exist: {repositoryRoot}");
         }
 
         var environmentName = ResolveEnvironmentName(defaultEnvironmentName);
         var args = new List<string>
         {
-            "--RazorDocs:Source:RepositoryRoot",
+            "--AppSurfaceDocs:Source:RepositoryRoot",
             repositoryRoot
         };
 
@@ -423,15 +423,15 @@ internal abstract class RazorDocsRepositoryCommand
 
         if (StrictHarvest)
         {
-            args.Add("--RazorDocs:Harvest:FailOnFailure");
+            args.Add("--AppSurfaceDocs:Harvest:FailOnFailure");
             args.Add("true");
         }
 
-        AddOptional(args, "--RazorDocs:Routing:RouteRootPath", RouteRootPath);
-        AddOptional(args, "--RazorDocs:Routing:DocsRootPath", DocsRootPath);
+        AddOptional(args, "--AppSurfaceDocs:Routing:RouteRootPath", RouteRootPath);
+        AddOptional(args, "--AppSurfaceDocs:Routing:DocsRootPath", DocsRootPath);
         AddOptional(args, "--environment", environmentName);
 
-        return new RazorDocsHostArgs(repositoryRoot, args.ToArray(), ResolveStartupTimeout(), environmentName);
+        return new AppSurfaceDocsHostArgs(repositoryRoot, args.ToArray(), ResolveStartupTimeout(), environmentName);
     }
 
     private static void AddOptional(List<string> args, string name, string? value)
@@ -518,13 +518,13 @@ internal abstract class RazorDocsRepositoryCommand
 }
 
 /// <summary>
-/// Describes the RazorDocs host invocation produced by the CLI option translator.
+/// Describes the AppSurface Docs host invocation produced by the CLI option translator.
 /// </summary>
-/// <param name="RepositoryRoot">Absolute repository root that the RazorDocs host should harvest.</param>
-/// <param name="Args">Command-line arguments forwarded to the standalone RazorDocs host.</param>
+/// <param name="RepositoryRoot">Absolute repository root that the AppSurface Docs host should harvest.</param>
+/// <param name="Args">Command-line arguments forwarded to the standalone AppSurface Docs host.</param>
 /// <param name="StartupTimeout">Startup watchdog timeout, or <see langword="null"/> when disabled.</param>
 /// <param name="EnvironmentName">Resolved host environment, or <see langword="null"/> when the host should use its default.</param>
-internal readonly record struct RazorDocsHostArgs(
+internal readonly record struct AppSurfaceDocsHostArgs(
     string RepositoryRoot,
     string[] Args,
     TimeSpan? StartupTimeout,
@@ -533,14 +533,14 @@ internal readonly record struct RazorDocsHostArgs(
 /// <summary>
 /// Describes a one-shot AppSurface Docs static export request.
 /// </summary>
-/// <param name="HostArgs">Standalone RazorDocs host arguments.</param>
+/// <param name="HostArgs">Standalone AppSurface Docs host arguments.</param>
 /// <param name="OutputPath">Absolute output directory for exported files.</param>
 /// <param name="SeedRoutesPath">Optional absolute seed-route file path.</param>
 /// <param name="InitialSeedRoutes">Optional in-memory seed routes used when <paramref name="SeedRoutesPath"/> is null.</param>
 /// <param name="Mode">RazorWire static export mode.</param>
 /// <param name="RequestedBaseUrl">Loopback URL passed to Kestrel. The default uses port 0 so the OS chooses a free port.</param>
-internal readonly record struct RazorDocsExportArgs(
-    RazorDocsHostArgs HostArgs,
+internal readonly record struct AppSurfaceDocsExportArgs(
+    AppSurfaceDocsHostArgs HostArgs,
     string OutputPath,
     string? SeedRoutesPath,
     IReadOnlyList<string>? InitialSeedRoutes,
@@ -550,10 +550,10 @@ internal readonly record struct RazorDocsExportArgs(
 /// <summary>
 /// Applies shared host options required by packaged AppSurface docs tooling.
 /// </summary>
-internal static class RazorDocsCliHost
+internal static class AppSurfaceDocsCliHost
 {
     /// <summary>
-    /// Configures the standalone RazorDocs host shape used by packaged preview and export commands.
+    /// Configures the standalone AppSurface Docs host shape used by packaged preview and export commands.
     /// </summary>
     /// <param name="options">Web startup options to mutate.</param>
     /// <param name="startupTimeout">Startup watchdog timeout, or <see langword="null"/> when disabled.</param>
@@ -561,7 +561,7 @@ internal static class RazorDocsCliHost
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        // Packaged .NET tools often lack static web asset manifests; RazorWireWebModule and RazorDocs endpoint
+        // Packaged .NET tools often lack static web asset manifests; RazorWireWebModule and AppSurface Docs endpoint
         // fallbacks serve embedded assets instead so global/local tool distributions remain self-contained.
         options.StaticFiles.EnableStaticWebAssets = false;
         options.StartupTimeout = startupTimeout;
@@ -569,18 +569,18 @@ internal static class RazorDocsCliHost
 }
 
 /// <summary>
-/// Starts a RazorDocs host for CLI preview commands.
+/// Starts a AppSurface Docs host for CLI preview commands.
 /// </summary>
 /// <remarks>
 /// This seam keeps command parsing and validation testable without starting a real web host. Production implementations
 /// should honor cancellation before delegating into long-running host lifetimes.
 /// </remarks>
-internal interface IRazorDocsHostRunner
+internal interface IAppSurfaceDocsHostRunner
 {
     /// <summary>
-    /// Runs the RazorDocs host with translated command-line arguments.
+    /// Runs the AppSurface Docs host with translated command-line arguments.
     /// </summary>
-    /// <param name="args">Arguments forwarded to the standalone RazorDocs host.</param>
+    /// <param name="args">Arguments forwarded to the standalone AppSurface Docs host.</param>
     /// <param name="startupTimeout">Startup watchdog timeout, or <see langword="null"/> to disable it.</param>
     /// <param name="cancellationToken">Token that cancels before the host is started.</param>
     /// <returns>A task that completes when the host exits.</returns>
@@ -590,7 +590,7 @@ internal interface IRazorDocsHostRunner
 /// <summary>
 /// Starts the AppSurface Docs host and exports it to static files.
 /// </summary>
-internal interface IRazorDocsExportRunner
+internal interface IAppSurfaceDocsExportRunner
 {
     /// <summary>
     /// Starts the docs host, runs static export, and stops the host.
@@ -598,7 +598,7 @@ internal interface IRazorDocsExportRunner
     /// <param name="args">Resolved export arguments.</param>
     /// <param name="cancellationToken">Token observed during host startup and export.</param>
     /// <returns>A task that completes when export finishes.</returns>
-    Task ExportAsync(RazorDocsExportArgs args, CancellationToken cancellationToken);
+    Task ExportAsync(AppSurfaceDocsExportArgs args, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -616,56 +616,56 @@ internal interface IRazorWireStaticExporter
 }
 
 /// <summary>
-/// Production <see cref="IRazorDocsHostRunner"/> that delegates to the standalone RazorDocs web host.
+/// Production <see cref="IAppSurfaceDocsHostRunner"/> that delegates to the standalone AppSurface Docs web host.
 /// </summary>
 /// <remarks>
 /// Use this adapter for the packaged AppSurface CLI path. Tests should prefer fake runners so they can verify argument
 /// translation without starting Kestrel. The type is internal and sealed because callers should depend on
-/// <see cref="IRazorDocsHostRunner"/> rather than subclassing host lifetime behavior.
+/// <see cref="IAppSurfaceDocsHostRunner"/> rather than subclassing host lifetime behavior.
 /// </remarks>
 [ExcludeFromCodeCoverage(
     Justification = "Production adapter delegates into the long-running standalone web host; command tests cover argument and option construction before this boundary.")]
-internal sealed class RazorDocsStandaloneHostRunner : IRazorDocsHostRunner
+internal sealed class AppSurfaceDocsStandaloneHostRunner : IAppSurfaceDocsHostRunner
 {
     /// <inheritdoc />
     public Task RunAsync(string[] args, TimeSpan? startupTimeout, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return RazorDocsStandaloneHost.RunAsync(args, options => RazorDocsCliHost.ConfigurePackagedToolHost(options, startupTimeout));
+        return AppSurfaceDocsStandaloneHost.RunAsync(args, options => AppSurfaceDocsCliHost.ConfigurePackagedToolHost(options, startupTimeout));
     }
 }
 
 /// <summary>
-/// Production export runner that starts the standalone RazorDocs host in-process and exports it over real loopback HTTP.
+/// Production export runner that starts the standalone AppSurface Docs host in-process and exports it over real loopback HTTP.
 /// </summary>
-internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
+internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExportRunner
 {
-    private readonly ILogger<RazorDocsInProcessExportRunner> _logger;
+    private readonly ILogger<AppSurfaceDocsInProcessExportRunner> _logger;
     private readonly IRazorWireStaticExporter _exporter;
-    private readonly IRazorDocsExportHostStarter _hostStarter;
+    private readonly IAppSurfaceDocsExportHostStarter _hostStarter;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="RazorDocsInProcessExportRunner"/> class.
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsInProcessExportRunner"/> class.
     /// </summary>
     /// <param name="logger">Logger used for host lifecycle diagnostics.</param>
     /// <param name="exporter">Static exporter invoked after the in-process host starts.</param>
-    public RazorDocsInProcessExportRunner(
-        ILogger<RazorDocsInProcessExportRunner> logger,
+    public AppSurfaceDocsInProcessExportRunner(
+        ILogger<AppSurfaceDocsInProcessExportRunner> logger,
         IRazorWireStaticExporter exporter)
-        : this(logger, exporter, new RazorDocsStandaloneExportHostStarter())
+        : this(logger, exporter, new AppSurfaceDocsStandaloneExportHostStarter())
     {
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="RazorDocsInProcessExportRunner"/> class with an explicit host starter.
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsInProcessExportRunner"/> class with an explicit host starter.
     /// </summary>
     /// <param name="logger">Logger used for host lifecycle diagnostics.</param>
     /// <param name="exporter">Static exporter invoked after the in-process host starts.</param>
     /// <param name="hostStarter">Host starter used to build and start the docs application.</param>
-    internal RazorDocsInProcessExportRunner(
-        ILogger<RazorDocsInProcessExportRunner> logger,
+    internal AppSurfaceDocsInProcessExportRunner(
+        ILogger<AppSurfaceDocsInProcessExportRunner> logger,
         IRazorWireStaticExporter exporter,
-        IRazorDocsExportHostStarter hostStarter)
+        IAppSurfaceDocsExportHostStarter hostStarter)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(exporter);
@@ -677,20 +677,20 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
     }
 
     /// <inheritdoc />
-    public async Task ExportAsync(RazorDocsExportArgs args, CancellationToken cancellationToken)
+    public async Task ExportAsync(AppSurfaceDocsExportArgs args, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         var environmentName = args.HostArgs.EnvironmentName ?? Environments.Production;
         IHost? host = null;
-        using var currentDirectory = RazorDocsRepositoryCommand.CurrentDirectoryScope.ChangeTo(args.HostArgs.RepositoryRoot);
+        using var currentDirectory = AppSurfaceDocsRepositoryCommand.CurrentDirectoryScope.ChangeTo(args.HostArgs.RepositoryRoot);
 
         try
         {
             host = await BuildAndStartHostWithTimeoutAsync(args, environmentName, cancellationToken);
 
             var baseUrl = ResolveBoundBaseUrl(host);
-            _logger.LogInformation("RazorDocs export host started at {BaseUrl}.", baseUrl);
+            _logger.LogInformation("AppSurface Docs export host started at {BaseUrl}.", baseUrl);
 
             var context = new ExportContext(
                 args.OutputPath,
@@ -739,24 +739,24 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
     {
         if (addresses is null || addresses.Count == 0)
         {
-            throw new InvalidOperationException("RazorDocs export host did not publish a listening URL. No addresses were published.");
+            throw new InvalidOperationException("AppSurface Docs export host did not publish a listening URL. No addresses were published.");
         }
 
         if (addresses.Count != 1)
         {
-            throw new InvalidOperationException($"RazorDocs export host published {addresses.Count} listening URLs; expected exactly one. Values: '{string.Join("', '", addresses)}'.");
+            throw new InvalidOperationException($"AppSurface Docs export host published {addresses.Count} listening URLs; expected exactly one. Values: '{string.Join("', '", addresses)}'.");
         }
 
         var baseAddress = addresses.Single();
         if (!Uri.TryCreate(baseAddress, UriKind.Absolute, out var uri))
         {
-            throw new InvalidOperationException($"RazorDocs export host did not publish a valid listening URL. Value: '{baseAddress}'.");
+            throw new InvalidOperationException($"AppSurface Docs export host did not publish a valid listening URL. Value: '{baseAddress}'.");
         }
 
         if (!uri.IsLoopback)
         {
             throw new InvalidOperationException(
-                $"RazorDocs export host published non-loopback URL '{baseAddress}'; expected a single loopback listener.");
+                $"AppSurface Docs export host published non-loopback URL '{baseAddress}'; expected a single loopback listener.");
         }
 
         return uri.GetLeftPart(UriPartial.Authority);
@@ -771,7 +771,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
     /// <returns>The started host.</returns>
     /// <exception cref="TimeoutException">Thrown when the host does not start before the startup timeout.</exception>
     private async Task<IHost> BuildAndStartHostWithTimeoutAsync(
-        RazorDocsExportArgs args,
+        AppSurfaceDocsExportArgs args,
         string environmentName,
         CancellationToken cancellationToken)
     {
@@ -839,7 +839,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         _ = ObserveStartupTaskAsync(
             startTask,
             startupTimeoutCts,
-            "RazorDocs export host startup task completed after the startup timeout.");
+            "AppSurface Docs export host startup task completed after the startup timeout.");
     }
 
     /// <summary>
@@ -852,7 +852,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         _ = ObserveStartupTaskAsync(
             startTask,
             startupTimeoutCts,
-            "RazorDocs export host startup task completed after external cancellation.");
+            "AppSurface Docs export host startup task completed after external cancellation.");
     }
 
     /// <summary>
@@ -889,7 +889,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
     private static TimeoutException CreateStartupTimeoutException(TimeSpan startupTimeout, Exception? innerException)
     {
         var seconds = startupTimeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
-        return new TimeoutException($"RazorDocs export host did not start within {seconds} seconds.", innerException);
+        return new TimeoutException($"AppSurface Docs export host did not start within {seconds} seconds.", innerException);
     }
 
     /// <summary>
@@ -907,7 +907,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         }
         catch (Exception ex) when (IsNonFatalException(ex))
         {
-            _logger.LogWarning(ex, "RazorDocs export host failed during shutdown.");
+            _logger.LogWarning(ex, "AppSurface Docs export host failed during shutdown.");
         }
     }
 
@@ -984,7 +984,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
 /// <summary>
 /// Builds and starts the in-process AppSurface Docs export host.
 /// </summary>
-internal interface IRazorDocsExportHostStarter
+internal interface IAppSurfaceDocsExportHostStarter
 {
     /// <summary>
     /// Builds the standalone docs host, starts Kestrel, and returns the started host for export.
@@ -994,28 +994,28 @@ internal interface IRazorDocsExportHostStarter
     /// <param name="cancellationToken">Token observed while starting the host.</param>
     /// <returns>The started host.</returns>
     Task<IHost> BuildAndStartAsync(
-        RazorDocsExportArgs args,
+        AppSurfaceDocsExportArgs args,
         string environmentName,
         CancellationToken cancellationToken);
 }
 
 /// <summary>
-/// Production <see cref="IRazorDocsExportHostStarter"/> that uses the RazorDocs standalone host builder.
+/// Production <see cref="IAppSurfaceDocsExportHostStarter"/> that uses the AppSurface Docs standalone host builder.
 /// </summary>
 [ExcludeFromCodeCoverage(
     Justification = "Production adapter delegates into the real standalone host builder and Kestrel; command and runner tests cover behavior before this boundary.")]
-internal sealed class RazorDocsStandaloneExportHostStarter : IRazorDocsExportHostStarter
+internal sealed class AppSurfaceDocsStandaloneExportHostStarter : IAppSurfaceDocsExportHostStarter
 {
     /// <inheritdoc />
     public async Task<IHost> BuildAndStartAsync(
-        RazorDocsExportArgs args,
+        AppSurfaceDocsExportArgs args,
         string environmentName,
         CancellationToken cancellationToken)
     {
-        var builder = RazorDocsStandaloneHost.CreateBuilder(
+        var builder = AppSurfaceDocsStandaloneHost.CreateBuilder(
             args.HostArgs.Args,
             new FixedEnvironmentProvider(environmentName),
-            options => RazorDocsCliHost.ConfigurePackagedToolHost(options, args.HostArgs.StartupTimeout));
+            options => AppSurfaceDocsCliHost.ConfigurePackagedToolHost(options, args.HostArgs.StartupTimeout));
 
         builder.UseContentRoot(args.HostArgs.RepositoryRoot);
         builder.ConfigureWebHost(webHost =>

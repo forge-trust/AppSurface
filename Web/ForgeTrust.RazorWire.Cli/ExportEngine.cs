@@ -85,7 +85,7 @@ public class ExportEngine
 
     private const string DocsStaticPartialsMetaName = "rw-docs-static-partials";
     private const string DocsStaticPartialsMetaTag = "<meta name=\"rw-docs-static-partials\" content=\"1\" />";
-    private const string RazorDocsClientConfigMarker = "window.__razorDocsConfig";
+    private const string AppSurfaceDocsClientConfigMarker = "window.__appSurfaceDocsConfig";
 
     private static readonly Regex TurboFrameOpenTagRegex = new(
         @"<turbo-frame\b[^>]*>",
@@ -618,17 +618,17 @@ public class ExportEngine
     }
 
     /// <summary>
-    /// Determines whether an exported HTML page should receive RazorDocs static partial support.
+    /// Determines whether an exported HTML page should receive AppSurfaceDocs static partial support.
     /// </summary>
     /// <param name="route">The root-relative route being exported.</param>
     /// <param name="html">The fetched HTML document.</param>
     /// <param name="docContentFrame">The extracted <c>doc-content</c> frame, when the caller has already parsed it.</param>
     /// <returns>
-    /// <c>true</c> for the legacy <c>/docs</c> route family or HTML that carries RazorDocs runtime markers; otherwise
+    /// <c>true</c> for the legacy <c>/docs</c> route family or HTML that carries AppSurfaceDocs runtime markers; otherwise
     /// <c>false</c>.
     /// </returns>
     /// <remarks>
-    /// Custom RazorDocs hosts can mount under route families such as <c>/foo/bar</c>, so export detection cannot rely
+    /// Custom AppSurfaceDocs hosts can mount under route families such as <c>/foo/bar</c>, so export detection cannot rely
     /// only on path prefixes. The client config marker covers search and shell pages, while the content frame covers
     /// document detail pages.
     /// </remarks>
@@ -639,7 +639,7 @@ public class ExportEngine
 
         return IsDocsRoute(route)
                || !string.IsNullOrWhiteSpace(docContentFrame)
-               || html.Contains(RazorDocsClientConfigMarker, StringComparison.Ordinal);
+               || html.Contains(AppSurfaceDocsClientConfigMarker, StringComparison.Ordinal);
     }
 
     internal static string MapHtmlFilePathToPartialPath(string htmlFilePath)

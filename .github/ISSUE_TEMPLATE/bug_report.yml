@@ -37,7 +37,7 @@ body:
         - Console
         - Web
         - RazorWire
-        - RazorDocs
+        - AppSurface Docs
         - Caching
         - Config
         - Dependency injection

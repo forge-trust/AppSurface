@@ -307,7 +307,7 @@ public class DocModelsTests
                 Localization = new DocLocalizationMetadata
                 {
                     Locale = "fr",
-                    LocaleFallback = RazorDocsLocaleFallbackMode.Disabled
+                    LocaleFallback = AppSurfaceDocsLocaleFallbackMode.Disabled
                 }
             },
             new DocMetadata
@@ -316,7 +316,7 @@ public class DocModelsTests
                 {
                     TranslationKey = "guides/getting-started",
                     LocalizedTitle = "Getting started",
-                    LocaleFallback = RazorDocsLocaleFallbackMode.DefaultLocaleWithNotice
+                    LocaleFallback = AppSurfaceDocsLocaleFallbackMode.DefaultLocaleWithNotice
                 }
             });
 
@@ -325,7 +325,7 @@ public class DocModelsTests
         Assert.Equal("fr", localization.Locale);
         Assert.Equal("guides/getting-started", localization.TranslationKey);
         Assert.Equal("Getting started", localization.LocalizedTitle);
-        Assert.Equal(RazorDocsLocaleFallbackMode.Disabled, localization.LocaleFallback);
+        Assert.Equal(AppSurfaceDocsLocaleFallbackMode.Disabled, localization.LocaleFallback);
     }
 
     [Fact]

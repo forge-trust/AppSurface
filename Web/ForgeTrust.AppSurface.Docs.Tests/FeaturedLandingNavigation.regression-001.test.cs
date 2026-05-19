@@ -94,7 +94,7 @@ public class FeaturedLandingNavigationRegressionTests
         services.AddSingleton<IConfiguration>(_ => configuration);
         services.AddMemoryCache();
         services.AddSingleton<IMemo, Memo>();
-        services.AddRazorDocs();
+        services.AddAppSurfaceDocs();
         services.RemoveAll<IDocHarvester>();
         services.AddSingleton<IDocHarvester>(_ => new StaticDocHarvester(docs));
         services.AddControllersWithViews()
@@ -162,7 +162,7 @@ public class FeaturedLandingNavigationRegressionTests
     {
         public TestWebHostEnvironment(string contentRootPath)
         {
-            ApplicationName = typeof(DocsController).Assembly.GetName().Name ?? "RazorDocsRegressionTests";
+            ApplicationName = typeof(DocsController).Assembly.GetName().Name ?? "AppSurfaceDocsRegressionTests";
             EnvironmentName = Environments.Development;
             ContentRootPath = contentRootPath;
             ContentRootFileProvider = new PhysicalFileProvider(contentRootPath);

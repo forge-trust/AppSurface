@@ -1,0 +1,22 @@
+title: Use AppSurface Docs in your repository
+summary: Learn when to adopt AppSurface Docs, how to host it, and how to use authored metadata to turn repository Markdown and C# APIs into a usable docs site.
+page_type: guide
+nav_group: Start Here
+order: 60
+aliases:
+  - AppSurface Docs adoption
+  - repository docs
+  - docs hosting
+  - generated API reference
+keywords:
+  - AppSurfaceDocsWebModule
+  - AddAppSurfaceDocs
+  - featured_page_groups
+  - repository root
+breadcrumbs:
+  - Start Here
+  - Use AppSurface Docs in your repository
+related_pages:
+  - Web/ForgeTrust.AppSurface.Docs/README.md
+  - Web/ForgeTrust.AppSurface.Docs.Standalone/README.md
+  - packages/README.md

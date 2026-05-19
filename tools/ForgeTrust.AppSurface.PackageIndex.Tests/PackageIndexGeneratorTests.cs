@@ -433,7 +433,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj", "<Project />");
-        await WriteFileAsync("Web/ForgeTrust.AppSurface.Docs/README.md", "# RazorDocs");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Docs/README.md", "# AppSurfaceDocs");
 
         var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
@@ -2099,7 +2099,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             "Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj",
             "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj", "<Project />");
-        await WriteFileAsync("Web/ForgeTrust.AppSurface.Docs/README.md", "# RazorDocs");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Docs/README.md", "# AppSurfaceDocs");
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/README.md", "# RazorWire CLI");
         await WriteFileAsync("examples/web-app/README.md", "# Example");

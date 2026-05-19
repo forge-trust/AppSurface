@@ -66,8 +66,8 @@ internal static class AppSurfaceCliApp
         services.AddSingleton(context);
         services.AddSingleton(context.EnvironmentProvider);
         services.AddSingleton<IOptionSuggester, LevenshteinOptionSuggester>();
-        services.AddSingleton<IRazorDocsHostRunner, RazorDocsStandaloneHostRunner>();
-        services.AddSingleton<IRazorDocsExportRunner, RazorDocsInProcessExportRunner>();
+        services.AddSingleton<IAppSurfaceDocsHostRunner, AppSurfaceDocsStandaloneHostRunner>();
+        services.AddSingleton<IAppSurfaceDocsExportRunner, AppSurfaceDocsInProcessExportRunner>();
         services.AddSingleton<IRazorWireStaticExporter, RazorWireExportEngineAdapter>();
         services.AddSingleton<ExportEngine>();
         services.AddHttpClient("ExportEngine", client => { client.Timeout = TimeSpan.FromSeconds(60); });

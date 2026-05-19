@@ -38,7 +38,7 @@ internal static class MarkdownFrontMatterParser
     /// </returns>
     /// <remarks>
     /// This is the authoritative internal entry point for inline metadata parsing. Missing front matter returns the
-    /// original Markdown and an empty diagnostic list. Invalid inline YAML returns a <see cref="RazorDocsMetadataDiagnostic"/>
+    /// original Markdown and an empty diagnostic list. Invalid inline YAML returns a <see cref="AppSurfaceDocsMetadataDiagnostic"/>
     /// instead of throwing, and deliberately preserves the original Markdown so a malformed header remains visible to the
     /// reader. Callers should inspect <see cref="MarkdownMetadataParseResult.Diagnostics"/> for authoring warnings instead
     /// of relying on exceptions for inline metadata failures.
@@ -68,7 +68,7 @@ internal static class MarkdownFrontMatterParser
                 new MarkdownMetadataParseResult(
                     null,
                     [
-                        new RazorDocsMetadataDiagnostic(
+                        new AppSurfaceDocsMetadataDiagnostic(
                             "invalid-yaml",
                             "$",
                             "Inline front matter could not be parsed as YAML.",
@@ -103,7 +103,7 @@ internal static class MarkdownFrontMatterParser
     /// <param name="yaml">The raw YAML metadata document to deserialize.</param>
     /// <returns>
     /// A <see cref="MarkdownMetadataParseResult"/> containing optional normalized <see cref="DocMetadata"/> plus any
-    /// <see cref="RazorDocsMetadataDiagnostic"/> warnings produced while normalizing supported metadata fields.
+    /// <see cref="AppSurfaceDocsMetadataDiagnostic"/> warnings produced while normalizing supported metadata fields.
     /// </returns>
     /// <remarks>
     /// This is the authoritative internal entry point for metadata documents that are already known to be YAML, including
@@ -117,7 +117,7 @@ internal static class MarkdownFrontMatterParser
     {
         ArgumentNullException.ThrowIfNull(yaml);
 
-        var diagnostics = new List<RazorDocsMetadataDiagnostic>();
+        var diagnostics = new List<AppSurfaceDocsMetadataDiagnostic>();
         var document = Deserializer.Deserialize<FrontMatterDocument>(yaml);
         if (document is null)
         {
@@ -217,16 +217,16 @@ internal static class MarkdownFrontMatterParser
     private static IReadOnlyList<DocFeaturedPageGroupDefinition>? NormalizeFeaturedPageGroups(
         List<FrontMatterFeaturedPageGroupDefinition?>? groups,
         List<FrontMatterFeaturedPageDefinition?>? stalePages,
-        List<RazorDocsMetadataDiagnostic> diagnostics)
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
     {
         if (stalePages is not null)
         {
             diagnostics.Add(
-                new RazorDocsMetadataDiagnostic(
+                new AppSurfaceDocsMetadataDiagnostic(
                     "stale-featured-pages",
                     "featured_pages",
                     "The flat featured_pages field is no longer rendered.",
-                    "RazorDocs now groups landing curation by reader intent with featured_page_groups.",
+                    "AppSurface Docs now groups landing curation by reader intent with featured_page_groups.",
                     "Move each entry under featured_page_groups[].pages and give each group a label or intent."));
         }
 
@@ -243,7 +243,7 @@ internal static class MarkdownFrontMatterParser
             if (group is null)
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "null-featured-group",
                         groupPath,
                         "A featured page group entry is null.",
@@ -255,7 +255,7 @@ internal static class MarkdownFrontMatterParser
             if (group.HasFlatFeaturedPageShape())
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "flat-looking-featured-group",
                         groupPath,
                         "A featured_page_groups entry looks like an old flat featured page.",
@@ -269,11 +269,11 @@ internal static class MarkdownFrontMatterParser
             if (intent is null && label is null)
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "missing-featured-group-identity",
                         groupPath,
                         "A featured page group has no label or intent.",
-                        "RazorDocs needs one stable identity field for rendering and diagnostics.",
+                        "AppSurface Docs needs one stable identity field for rendering and diagnostics.",
                         "Add label for reader-facing text or intent for a stable slug."));
                 continue;
             }
@@ -281,7 +281,7 @@ internal static class MarkdownFrontMatterParser
             if (group.Pages is null)
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "missing-featured-group-pages",
                         $"{groupPath}.pages",
                         "A featured page group has no pages list.",
@@ -293,7 +293,7 @@ internal static class MarkdownFrontMatterParser
             if (group.Pages.Count == 0)
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "empty-featured-group-pages",
                         $"{groupPath}.pages",
                         "A featured page group has an empty pages list.",
@@ -322,7 +322,7 @@ internal static class MarkdownFrontMatterParser
                     if (question is not null || supportingCopy is not null || page.Order is not null)
                     {
                         diagnostics.Add(
-                            new RazorDocsMetadataDiagnostic(
+                            new AppSurfaceDocsMetadataDiagnostic(
                                 "missing-featured-group-page-path",
                                 $"{pagePath}.path",
                                 "A featured page entry has no path.",
@@ -347,11 +347,11 @@ internal static class MarkdownFrontMatterParser
             if (pages.Count == 0)
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "empty-featured-group-page-entries",
                         $"{groupPath}.pages",
                         "A featured page group has no usable page entries.",
-                        "Every page entry was null or normalized away, so RazorDocs cannot resolve any landing rows.",
+                        "Every page entry was null or normalized away, so AppSurface Docs cannot resolve any landing rows.",
                         "Add at least one page entry with a path, or remove the empty group."));
                 continue;
             }
@@ -373,7 +373,7 @@ internal static class MarkdownFrontMatterParser
 
     private static DocOutlineMetadata? NormalizeOutline(
         object? value,
-        List<RazorDocsMetadataDiagnostic> diagnostics)
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
     {
         if (value is null)
         {
@@ -383,11 +383,11 @@ internal static class MarkdownFrontMatterParser
         if (value is not IDictionary<object, object> mapping)
         {
             diagnostics.Add(
-                new RazorDocsMetadataDiagnostic(
+                new AppSurfaceDocsMetadataDiagnostic(
                     "invalid-outline-metadata",
                     "outline",
                     "The outline metadata value is not an object.",
-                    "RazorDocs expects outline metadata to be a mapping with supported child fields.",
+                    "AppSurface Docs expects outline metadata to be a mapping with supported child fields.",
                     "Use outline.max_heading_level or outline.repeated_heading_policy, or remove the outline field."));
             return null;
         }
@@ -406,7 +406,7 @@ internal static class MarkdownFrontMatterParser
 
     private static int? NormalizeOutlineMaxHeadingLevel(
         IDictionary<object, object> mapping,
-        List<RazorDocsMetadataDiagnostic> diagnostics)
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
     {
         if (!TryGetMappingValue(mapping, "max_heading_level", out var rawValue)
             || rawValue is null)
@@ -421,11 +421,11 @@ internal static class MarkdownFrontMatterParser
         }
 
         diagnostics.Add(
-            new RazorDocsMetadataDiagnostic(
+            new AppSurfaceDocsMetadataDiagnostic(
                 "invalid-outline-max-heading-level",
                 "outline.max_heading_level",
                 "The outline max_heading_level value is not supported.",
-                "RazorDocs only supports display outline heading depths of 2 or 3.",
+                "AppSurface Docs only supports display outline heading depths of 2 or 3.",
                 "Use max_heading_level: 2, max_heading_level: 3, or remove the field to use automatic behavior."));
         return null;
     }
@@ -453,7 +453,7 @@ internal static class MarkdownFrontMatterParser
 
     private static string? NormalizeOutlineRepeatedHeadingPolicy(
         IDictionary<object, object> mapping,
-        List<RazorDocsMetadataDiagnostic> diagnostics)
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
     {
         if (!TryGetMappingValue(mapping, "repeated_heading_policy", out var rawValue)
             || rawValue is null)
@@ -471,11 +471,11 @@ internal static class MarkdownFrontMatterParser
         }
 
         diagnostics.Add(
-            new RazorDocsMetadataDiagnostic(
+            new AppSurfaceDocsMetadataDiagnostic(
                 "invalid-outline-repeated-heading-policy",
                 "outline.repeated_heading_policy",
                 "The outline repeated_heading_policy value is not supported.",
-                "RazorDocs only supports auto, include, or h2_only for repeated heading behavior.",
+                "AppSurface Docs only supports auto, include, or h2_only for repeated heading behavior.",
                 "Use repeated_heading_policy: auto, repeated_heading_policy: include, repeated_heading_policy: h2_only, or remove the field."));
         return null;
     }
@@ -609,7 +609,7 @@ internal static class MarkdownFrontMatterParser
 
     private static DocLocalizationMetadata? NormalizeLocalization(
         FrontMatterDocument document,
-        List<RazorDocsMetadataDiagnostic> diagnostics)
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
     {
         var nested = document.Localization;
         var flatLocale = Normalize(document.Locale);
@@ -647,13 +647,13 @@ internal static class MarkdownFrontMatterParser
         var translationKey = flatTranslationKey ?? nestedTranslationKey;
         var localizedTitle = flatLocalizedTitle ?? nestedLocalizedTitle;
         var fallbackText = flatFallbackText ?? nestedFallbackText;
-        RazorDocsLocaleFallbackMode? fallback = null;
+        AppSurfaceDocsLocaleFallbackMode? fallback = null;
         if (fallbackText is not null)
         {
             var fallbackFieldPath = flatFallbackText is not null
                 ? "locale_fallback"
                 : "localization.locale_fallback";
-            if (Enum.TryParse<RazorDocsLocaleFallbackMode>(fallbackText, ignoreCase: true, out var parsedFallback)
+            if (Enum.TryParse<AppSurfaceDocsLocaleFallbackMode>(fallbackText, ignoreCase: true, out var parsedFallback)
                 && Enum.IsDefined(parsedFallback))
             {
                 fallback = parsedFallback;
@@ -661,11 +661,11 @@ internal static class MarkdownFrontMatterParser
             else
             {
                 diagnostics.Add(
-                    new RazorDocsMetadataDiagnostic(
+                    new AppSurfaceDocsMetadataDiagnostic(
                         "invalid-locale-fallback",
                         fallbackFieldPath,
                         "The locale fallback value is not supported.",
-                        "RazorDocs only supports DefaultLocaleWithNotice or Disabled for page-level localization fallback.",
+                        "AppSurface Docs only supports DefaultLocaleWithNotice or Disabled for page-level localization fallback.",
                         "Use locale_fallback: Disabled or remove the field to inherit the global fallback mode."));
             }
         }
@@ -690,7 +690,7 @@ internal static class MarkdownFrontMatterParser
         string nestedFieldPath,
         string? flatValue,
         string? nestedValue,
-        List<RazorDocsMetadataDiagnostic> diagnostics)
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
     {
         var comparison = GetLocalizationConflictComparison(flatFieldPath);
         if (flatValue is null
@@ -701,11 +701,11 @@ internal static class MarkdownFrontMatterParser
         }
 
         diagnostics.Add(
-            new RazorDocsMetadataDiagnostic(
+            new AppSurfaceDocsMetadataDiagnostic(
                 "localization-field-conflict",
                 flatFieldPath,
                 $"The flat localization {fieldName} conflicts with {nestedFieldPath}.",
-                "RazorDocs prefers the flat front matter value and ignores the nested value for that field.",
+                "AppSurface Docs prefers the flat front matter value and ignores the nested value for that field.",
                 $"Keep only {flatFieldPath} or {nestedFieldPath}, or make both values match."));
     }
 

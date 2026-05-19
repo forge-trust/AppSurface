@@ -3,10 +3,10 @@ using ForgeTrust.AppSurface.Docs.Models;
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Resolves authored, source, and canonical RazorDocs paths against a harvested documentation corpus.
+/// Resolves authored, source, and canonical AppSurface Docs paths against a harvested documentation corpus.
 /// </summary>
 /// <remarks>
-/// RazorDocs accepts paths from several authoring surfaces: browser routes, source-relative Markdown metadata, generated
+/// AppSurface Docs accepts paths from several authoring surfaces: browser routes, source-relative Markdown metadata, generated
 /// canonical paths, and route-prefixed links. This resolver is the shared source of truth for trimming route separators,
 /// ignoring lookup fragments when selecting candidate buckets, preserving exact fragment matches when available, and
 /// ranking fallback candidates when a fragment-specific page is not present.
@@ -46,7 +46,7 @@ internal sealed class DocPathResolver
     }
 
     /// <summary>
-    /// Resolves a path exactly as authored, using RazorDocs source and canonical matching rules.
+    /// Resolves a path exactly as authored, using AppSurface Docs source and canonical matching rules.
     /// </summary>
     /// <param name="path">The authored source or canonical path to resolve.</param>
     /// <returns>The best matching doc node, or <c>null</c> when no harvested doc matches.</returns>

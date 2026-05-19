@@ -1374,12 +1374,12 @@ public class ExportEngineTests
     }
 
     [Fact]
-    public void IsDocsExportPage_ShouldDetectCustomRootRazorDocsClientConfig()
+    public void IsDocsExportPage_ShouldDetectCustomRootAppSurfaceDocsClientConfig()
     {
         var html = """
             <html>
               <head>
-                <script>window.__razorDocsConfig = {"docsRootPath":"/foo/bar/next"};</script>
+                <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/foo/bar/next"};</script>
               </head>
             </html>
             """;
@@ -1996,7 +1996,7 @@ public class ExportEngineTests
                 var html = """
                     <html>
                       <head>
-                        <script>window.__razorDocsConfig = {"docsRootPath":"/foo/bar/next","docsSearchUrl":"/foo/bar/next/search","docsSearchIndexUrl":"/foo/bar/next/search-index.json"};</script>
+                        <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/foo/bar/next","docsSearchUrl":"/foo/bar/next/search","docsSearchIndexUrl":"/foo/bar/next/search-index.json"};</script>
                       </head>
                       <body>
                         <turbo-frame id="doc-content">

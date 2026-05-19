@@ -1,12 +1,12 @@
-# RazorDocs Roadmap
+# AppSurface Docs Roadmap
 
-This note keeps the in-repo RazorDocs plan aligned with the phased GitHub roadmap.
+This note keeps the in-repo AppSurface Docs plan aligned with the phased GitHub roadmap.
 
 ## Product Direction
 
-`RazorDocs` is being shaped as a `.NET`-native documentation framework for libraries and frameworks that unifies authored guides, examples, and source-derived API reference in one experience for human and agentic readers.
+AppSurface Docs is being shaped as a `.NET`-native documentation framework for libraries and frameworks that unifies authored guides, examples, and source-derived API reference in one experience for human and agentic readers.
 
-`AppSurface` is the first flagship consumer of this work. The initial phases should make AppSurface's documentation more trustworthy for evaluators while also proving the reusable RazorDocs product surface.
+`AppSurface` is the first flagship consumer of this work. The initial phases should make AppSurface's documentation more trustworthy for evaluators while also proving the reusable AppSurface Docs product surface.
 
 ## Phase 1: Metadata Foundation
 
@@ -24,9 +24,9 @@ This phase creates the foundation for later landing-page, search, and wayfinding
 
 ## Phase 2: Evaluator Experience
 
-GitHub milestone: [RazorDocs Phase 2: Evaluator Experience](https://github.com/forge-trust/AppSurface/milestone/1)
+GitHub milestone: [AppSurface Docs Phase 2: Evaluator Experience](https://github.com/forge-trust/AppSurface/milestone/1)
 
-Phase 2 is the first visible product slice built on top of the metadata foundation. The goal is to help an evaluating engineer answer trust questions quickly and move from high-level orientation into concrete examples and API details while also closing the baseline platform gaps that keep RazorDocs from feeling competitive as a serious docs product.
+Phase 2 is the first visible product slice built on top of the metadata foundation. The goal is to help an evaluating engineer answer trust questions quickly and move from high-level orientation into concrete examples and API details while also closing the baseline platform gaps that keep AppSurface Docs from feeling competitive as a serious docs product.
 
 This phase should now ship in four moves:
 
@@ -45,7 +45,7 @@ Primary issues:
 - [#123](https://github.com/forge-trust/AppSurface/issues/123) Add evaluator-first docs landing with featured proof paths
 - [#124](https://github.com/forge-trust/AppSurface/issues/124) Render metadata-driven page type badges across landing, details, and search
 - [#125](https://github.com/forge-trust/AppSurface/issues/125) Add featured page curation for evaluator questions
-- [#126](https://github.com/forge-trust/AppSurface/issues/126) Add a concise RazorDocs product explainer to the flagship docs experience
+- [#126](https://github.com/forge-trust/AppSurface/issues/126) Add a concise AppSurface Docs product explainer to the flagship docs experience
 - [#142](https://github.com/forge-trust/AppSurface/issues/142) Add docs versioning with version-aware navigation and search
 - [#143](https://github.com/forge-trust/AppSurface/issues/143) Add contributor workflow features like edit links and last-updated metadata
 - [#144](https://github.com/forge-trust/AppSurface/issues/144) Add i18n with locale-aware routing and search
@@ -59,13 +59,13 @@ Recommended shipping emphasis:
 5. contributor workflow affordances plus canonical routes
 6. locale-aware docs routing and search
 7. section and pillar landing follow-through using the same metadata contract
-8. concise RazorDocs product explainer
+8. concise AppSurface Docs product explainer
 
 ## Phase 3: Platform Breadth, Relevance, and Telemetry
 
-GitHub milestone: [RazorDocs Phase 3: Platform Breadth, Relevance, and Telemetry](https://github.com/forge-trust/AppSurface/milestone/2)
+GitHub milestone: [AppSurface Docs Phase 3: Platform Breadth, Relevance, and Telemetry](https://github.com/forge-trust/AppSurface/milestone/2)
 
-Phase 3 deepens the platform breadth after the evaluator-facing experience is visible. The goal is to improve search intelligence and telemetry while also expanding RazorDocs into a more complete documentation framework with adjacent content types, richer authoring, and explicit extension and deployment seams.
+Phase 3 deepens the platform breadth after the evaluator-facing experience is visible. The goal is to improve search intelligence and telemetry while also expanding AppSurface Docs into a more complete documentation framework with adjacent content types, richer authoring, and explicit extension and deployment seams.
 
 Primary issues:
 
@@ -80,6 +80,6 @@ Primary issues:
 
 - These phases are intended to be additive. Phase 2 should consume the Phase 1 foundation rather than reworking it.
 - Phase 1 made the metadata pipeline page-agnostic on purpose. Phase 2 should first consume that seam from the repo-root `README.md`, then reuse it for non-root landing pages without introducing a parallel content system.
-- `AppSurface` remains the first proof site, but the roadmap should favor reusable RazorDocs capabilities over one-off customizations.
-- Future RazorDocs styling work should follow the package-level styling boundary contract documented in `README.md` and explained in `DESIGN.md`, rather than reopening Tailwind-versus-semantic-CSS debates from scratch.
+- `AppSurface` remains the first proof site, but the roadmap should favor reusable AppSurface Docs capabilities over one-off customizations.
+- Future AppSurface Docs styling work should follow the package-level styling boundary contract documented in `README.md` and explained in `DESIGN.md`, rather than reopening Tailwind-versus-semantic-CSS debates from scratch.
 - Future phases can expand into more explicit agent-facing features once the evaluator experience and search relevance are working well.

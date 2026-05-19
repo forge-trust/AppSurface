@@ -437,6 +437,13 @@
           "Microsoft.Extensions.Caching.Memory": "[9.0.6, )"
         }
       },
+      "forgetrust.appsurface.config": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
+          "Microsoft.Extensions.Options": "[9.0.6, )"
+        }
+      },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
@@ -449,6 +456,7 @@
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Caching": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Config": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )",
           "HtmlSanitizer": "[9.0.892, )",

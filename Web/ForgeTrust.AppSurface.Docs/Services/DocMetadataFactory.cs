@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Builds normalized RazorDocs metadata defaults and fallbacks for harvested documentation nodes.
+/// Builds normalized AppSurface Docs metadata defaults and fallbacks for harvested documentation nodes.
 /// </summary>
 internal static class DocMetadataFactory
 {
@@ -38,7 +38,7 @@ internal static class DocMetadataFactory
     /// <param name="derivedSummary">Optional summary text derived from the document body.</param>
     /// <param name="logger">
     /// An optional logger that receives warnings when authored <c>nav_group</c> values do not resolve to a built-in public
-    /// section and RazorDocs falls back to the derived section assignment.
+    /// section and AppSurface Docs falls back to the derived section assignment.
     /// </param>
     /// <returns>The merged metadata with normalized section labels, fallback breadcrumbs, and derived-field flags.</returns>
     /// <remarks>
@@ -292,16 +292,23 @@ internal static class DocMetadataFactory
         if (parts.Count == 1)
         {
             return parts[0].Equals("Docs", StringComparison.OrdinalIgnoreCase)
-                ? "RazorDocs"
+                ? "AppSurface Docs"
                 : parts[0];
         }
 
-        return parts[0] switch
+        var rootPart = parts[0];
+        if (rootPart.Equals("Docs", StringComparison.OrdinalIgnoreCase))
         {
-            "Docs" => "RazorDocs",
-            "Web" or "Dependency" => parts[1],
-            _ => parts[0]
-        };
+            return "AppSurface Docs";
+        }
+
+        if (rootPart.Equals("Web", StringComparison.OrdinalIgnoreCase)
+            || rootPart.Equals("Dependency", StringComparison.OrdinalIgnoreCase))
+        {
+            return parts[1];
+        }
+
+        return rootPart;
     }
 
     private static bool IsInternalSegment(string segment)

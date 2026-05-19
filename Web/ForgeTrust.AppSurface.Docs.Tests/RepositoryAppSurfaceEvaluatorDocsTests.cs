@@ -112,7 +112,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var harvester = A.Fake<IDocHarvester>();
         var environment = A.Fake<IWebHostEnvironment>();
-        var sanitizer = A.Fake<IRazorDocsHtmlSanitizer>();
+        var sanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
         var cache = new MemoryCache(new MemoryCacheOptions());
         var memo = new Memo(cache);
 
@@ -122,9 +122,9 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
 
         return new DocAggregator(
             [harvester],
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Source = new RazorDocsSourceOptions
+                Source = new AppSurfaceDocsSourceOptions
                 {
                     RepositoryRoot = repoRoot
                 }
@@ -168,7 +168,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
                 "start-here/should-i-use-appsurface.md",
                 "start-here/first-success-path.md",
                 "packages/README.md",
-                "Web/ForgeTrust.AppSurface.Docs/use-razordocs.md"
+                "Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md"
             ],
             startHere.VisiblePages
                 .Where(doc =>
@@ -176,7 +176,7 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
                     || string.Equals(doc.Path, "packages/README.md", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(
                         doc.Path,
-                        "Web/ForgeTrust.AppSurface.Docs/use-razordocs.md",
+                        "Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md",
                         StringComparison.OrdinalIgnoreCase))
                 .Select(doc => doc.Path)
                 .ToArray());

@@ -1,6 +1,6 @@
 # Release contract maintainer notes
 
-This file lives under `.github/` on purpose so RazorDocs does not publish it as public documentation.
+This file lives under `.github/` on purpose so AppSurface Docs does not publish it as public documentation.
 
 ## `no-unreleased-entry` label
 
