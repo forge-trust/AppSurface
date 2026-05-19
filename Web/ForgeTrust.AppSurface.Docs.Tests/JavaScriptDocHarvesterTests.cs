@@ -410,18 +410,29 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              */
             function ignoredApi() {}
             """);
+        await WriteAsync(
+            "src/private-api.js",
+            """
+            /**
+             * Private function.
+             * @public
+             * @namespace RazorWire
+             */
+            function privateApi() {}
+            """);
         var harvester = CreateHarvester(CreateEnabledOptions(
             "",
             " ",
             Path.Join(_testRoot, "ignored", "public-api.js"),
             "../outside.js",
-            "src/public-api.js",
-            "src/public-api.js"));
+            "src/public*.js",
+            "src/public*.js"));
 
         var docs = await harvester.HarvestAsync(_testRoot);
 
         Assert.Contains(docs, doc => doc.Path.EndsWith("#function-publicapi", StringComparison.Ordinal));
         Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-ignoredapi", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-privateapi", StringComparison.Ordinal));
         Assert.Empty(GetDiagnostics(harvester));
     }
 
@@ -530,6 +541,13 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             module.exports = {};
 
             /**
+             * Destructured public binding.
+             * @public
+             * @namespace RazorWire
+             */
+            const { visible } = {};
+
+            /**
              * Missing typedef name.
              * @public
              * @typedef
@@ -560,6 +578,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape
             && diagnostic.Cause.Contains("CommonJS", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
+            && diagnostic.Cause.Contains("unnamed declaration", StringComparison.Ordinal));
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
             && diagnostic.Cause.Contains("typedef name", StringComparison.Ordinal));
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
