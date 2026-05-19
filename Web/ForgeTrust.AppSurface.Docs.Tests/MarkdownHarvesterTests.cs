@@ -337,6 +337,8 @@ public class MarkdownHarvesterTests : IDisposable
             first => Assert.Equal("Install", first.Title),
             second => Assert.Equal("Verify", second.Title));
         Assert.Contains("doc-code--language-json language-json", doc.Content);
+        Assert.Contains("data-doc-code-language=\"JSON\"", doc.Content);
+        Assert.DoesNotContain("doc-code__language", doc.Content);
     }
 
     [Fact]

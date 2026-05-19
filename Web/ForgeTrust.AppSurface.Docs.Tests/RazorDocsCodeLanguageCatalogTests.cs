@@ -10,12 +10,15 @@ public class RazorDocsCodeLanguageCatalogTests
     [InlineData("cs", "csharp", "csharp", "C#", "csharp", false)]
     [InlineData("c#", "csharp", "csharp", "C#", "csharp", false)]
     [InlineData("csharp", "csharp", "csharp", "C#", "csharp", false)]
+    [InlineData("yaml", "yaml", "yaml", "YAML", "yaml", false)]
+    [InlineData("yml", "yaml", "yaml", "YAML", "yaml", false)]
     [InlineData("sh", "bash", "bash", "Bash", "shellscript", false)]
     [InlineData("shell", "bash", "bash", "Bash", "shellscript", false)]
     [InlineData("js", "javascript", "javascript", "JavaScript", "javascript", false)]
     [InlineData("md", "markdown", "markdown", "Markdown", "markdown", false)]
     [InlineData("cshtml", "razor", "razor", "Razor", "razor", false)]
     [InlineData("text", "plaintext", "plaintext", "Plain text", null, true)]
+    [InlineData("plain", "plaintext", "plaintext", "Plain text", null, true)]
     public void Normalize_ShouldMapKnownAliases(
         string input,
         string normalized,

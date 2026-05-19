@@ -2677,6 +2677,29 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldNotIndexCodeLanguageChrome()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Guide",
+                "guides/guide.md",
+                """
+                <p>Run:</p>
+                <pre class="doc-code doc-code--highlighted doc-code--language-bash language-bash" data-doc-code-language="Bash"><code>dotnet run</code></pre>
+                """)
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+
+        var indexedDocument = Assert.Single(payload.Documents);
+        Assert.Equal("Run: dotnet run", indexedDocument.BodyText);
+        Assert.Equal("Run: dotnet run", indexedDocument.Snippet);
+        Assert.DoesNotContain("Bash dotnet", indexedDocument.BodyText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldOmitGeneratedSymbolSourceLinkText()
     {
         var harvester = A.Fake<IDocHarvester>();
