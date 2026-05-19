@@ -573,7 +573,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
         var safeRelativePath = normalizedRelativePath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var fullRoot = Path.GetFullPath(_testRoot);
-        var fullPath = Path.GetFullPath(Path.Combine(fullRoot, safeRelativePath));
+        var fullPath = Path.GetFullPath(Path.Join(fullRoot, safeRelativePath));
         var comparison = OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
