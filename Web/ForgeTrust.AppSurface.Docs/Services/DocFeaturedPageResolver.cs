@@ -3,7 +3,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Resolves authored reader-intent landing curation metadata into browser-facing RazorDocs featured-page groups.
+/// Resolves authored reader-intent landing curation metadata into browser-facing AppSurface Docs featured-page groups.
 /// </summary>
 /// <remarks>
 /// The resolver accepts the normalized <c>featured_page_groups</c> metadata on a landing document, matches each authored
@@ -21,13 +21,13 @@ public sealed class DocFeaturedPageResolver
     /// </summary>
     /// <remarks>
     /// This overload preserves the historical convenience API for ad hoc callers that only need the default
-    /// <c>/docs</c> routing surface. Hosts that customize <see cref="RazorDocsRoutingOptions.DocsRootPath"/> should use
+    /// <c>/docs</c> routing surface. Hosts that customize <see cref="AppSurfaceDocsRoutingOptions.DocsRootPath"/> should use
     /// <see cref="DocFeaturedPageResolver(ILogger{DocFeaturedPageResolver}, DocsUrlBuilder)"/> so resolved featured-page
     /// links match the configured live docs root.
     /// </remarks>
     /// <param name="logger">Logger used for authored curation diagnostics.</param>
     public DocFeaturedPageResolver(ILogger<DocFeaturedPageResolver> logger)
-        : this(logger, new DocsUrlBuilder(new RazorDocsOptions()))
+        : this(logger, new DocsUrlBuilder(new AppSurfaceDocsOptions()))
     {
     }
 

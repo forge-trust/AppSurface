@@ -89,4 +89,4 @@ Each marker pair must be unique, ordered, and contain non-empty content. Marker-
 
 Run `generate` after changing marked source files, then commit both the source change and the generated Markdown change. CI runs `verify` and fails when the checked-in Markdown drifts from the source markers.
 
-Do not use this for render-time includes. RazorDocs and other Markdown renderers should receive ordinary generated Markdown so package documentation stays portable across GitHub, NuGet, and static export surfaces.
+Do not use this for render-time includes. AppSurface Docs and other Markdown renderers should receive ordinary generated Markdown so package documentation stays portable across GitHub, NuGet, and static export surfaces.

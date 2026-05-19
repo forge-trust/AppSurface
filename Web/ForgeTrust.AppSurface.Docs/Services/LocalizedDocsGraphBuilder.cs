@@ -33,7 +33,7 @@ internal sealed record LocalizedDocSet(
     string TranslationKey,
     string? DefaultLocaleSourcePath,
     IReadOnlyList<LocalizedDocVariant> Variants,
-    RazorDocsLocaleFallbackMode FallbackMode);
+    AppSurfaceDocsLocaleFallbackMode FallbackMode);
 
 /// <summary>
 /// Describes one resolved localized document variant.
@@ -57,7 +57,7 @@ internal sealed record LocalizedDocVariant(
     string TranslationKey,
     string Title,
     string? PublicRoutePath,
-    RazorDocsLocaleFallbackMode? LocaleFallback,
+    AppSurfaceDocsLocaleFallbackMode? LocaleFallback,
     bool LocaleWasInferred,
     bool TranslationKeyWasInferred);
 
@@ -71,15 +71,15 @@ internal sealed record LocalizedDocVariant(
 /// </remarks>
 internal sealed class LocalizedDocsGraphBuilder
 {
-    private readonly RazorDocsLocalizationOptions _options;
-    private readonly IReadOnlyDictionary<string, RazorDocsLocaleOptions> _localesByCode;
-    private readonly IReadOnlyDictionary<string, RazorDocsLocaleOptions> _localesByRoutePrefix;
+    private readonly AppSurfaceDocsLocalizationOptions _options;
+    private readonly IReadOnlyDictionary<string, AppSurfaceDocsLocaleOptions> _localesByCode;
+    private readonly IReadOnlyDictionary<string, AppSurfaceDocsLocaleOptions> _localesByRoutePrefix;
 
     /// <summary>
     /// Initializes the graph builder with normalized locale lookups from the configured localization options.
     /// </summary>
-    /// <param name="options">Localization options for the current RazorDocs host.</param>
-    internal LocalizedDocsGraphBuilder(RazorDocsLocalizationOptions options)
+    /// <param name="options">Localization options for the current AppSurface Docs host.</param>
+    internal LocalizedDocsGraphBuilder(AppSurfaceDocsLocalizationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -186,7 +186,7 @@ internal sealed class LocalizedDocsGraphBuilder
             var defaultSourcePath = groupVariants
                 .FirstOrDefault(variant => string.Equals(variant.Locale, _options.DefaultLocale, StringComparison.OrdinalIgnoreCase))
                 ?.SourcePath;
-            if (fallbackMode == RazorDocsLocaleFallbackMode.Disabled)
+            if (fallbackMode == AppSurfaceDocsLocaleFallbackMode.Disabled)
             {
                 foreach (var missingLocale in _localesByCode.Keys.Where(
                              locale => groupVariants.All(variant => !string.Equals(variant.Locale, locale, StringComparison.OrdinalIgnoreCase))))
@@ -263,8 +263,8 @@ internal sealed class LocalizedDocsGraphBuilder
                 CreateDiagnostic(
                     DocHarvestDiagnosticCodes.LocalizationUnsupportedLocale,
                     $"Doc '{sourcePath}' uses unsupported locale '{locale}'.",
-                    "The locale is not configured for this RazorDocs host.",
-                    "Add the locale under RazorDocs:Localization:Locales or update the document metadata."));
+                    "The locale is not configured for this AppSurface Docs host.",
+                    "Add the locale under AppSurfaceDocs:Localization:Locales or update the document metadata."));
             return null;
         }
 
@@ -281,7 +281,7 @@ internal sealed class LocalizedDocsGraphBuilder
                         CreateDiagnostic(
                             DocHarvestDiagnosticCodes.LocalizationMissingBase,
                             $"Localized source '{sourcePath}' has no colocated base document '{sourceWithoutSuffix}'.",
-                            "RazorDocs can still infer an identity, but language switching may be incomplete.",
+                            "AppSurface Docs can still infer an identity, but language switching may be incomplete.",
                             $"Add '{sourceWithoutSuffix}' or author translation_key explicitly."));
                 }
 
@@ -330,7 +330,7 @@ internal sealed class LocalizedDocsGraphBuilder
                 DocHarvestDiagnosticCodes.LocalizationUnsupportedLocale,
                 $"Doc '{sourcePath}' uses unsupported locale suffix '{suffix}'.",
                 "The filename looks like a localized Markdown source, but the suffix is not one of the configured locales.",
-                "Add the locale under RazorDocs:Localization:Locales or rename the file if the suffix is not a locale."));
+                "Add the locale under AppSurfaceDocs:Localization:Locales or rename the file if the suffix is not a locale."));
         return true;
     }
 
@@ -447,7 +447,7 @@ internal sealed class LocalizedDocsGraphBuilder
         return segments.Count == 0 ? "README" : string.Join('/', segments);
     }
 
-    private RazorDocsLocaleFallbackMode ResolveDocSetFallbackMode(
+    private AppSurfaceDocsLocaleFallbackMode ResolveDocSetFallbackMode(
         string translationKey,
         IEnumerable<LocalizedDocVariant> variants,
         List<DocHarvestDiagnostic> diagnostics)
@@ -465,7 +465,7 @@ internal sealed class LocalizedDocsGraphBuilder
                 CreateDiagnostic(
                     DocHarvestDiagnosticCodes.LocalizationFallbackConflict,
                     $"Translation key '{translationKey}' declares conflicting locale fallback modes.",
-                    "Fallback behavior would otherwise depend on the first localized variant RazorDocs evaluates.",
+                    "Fallback behavior would otherwise depend on the first localized variant AppSurface Docs evaluates.",
                     "Use the same locale_fallback value across variants for a translation key, or remove per-page fallback metadata to inherit the global setting."));
         }
 

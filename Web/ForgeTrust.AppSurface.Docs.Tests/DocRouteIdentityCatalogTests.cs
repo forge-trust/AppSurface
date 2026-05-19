@@ -259,6 +259,6 @@ public sealed class DocRouteIdentityCatalogTests
 
     private static DocRouteIdentityCatalog CreateCatalog(params DocNode[] docs)
     {
-        return DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new RazorDocsOptions()));
+        return DocRouteIdentityCatalog.Create(docs, new DocsUrlBuilder(new AppSurfaceDocsOptions()));
     }
 }

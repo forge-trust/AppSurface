@@ -1,5 +1,5 @@
 @model ForgeTrust.AppSurface.Docs.Models.DocDetailsViewModel
-@inject ForgeTrust.AppSurface.Docs.RazorDocsAssetVersioner AssetVersioner
+@inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetVersioner AssetVersioner
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
     ViewData["Title"] = Model.Title;
@@ -43,7 +43,7 @@
         .ToList();
     var hasOutline = outlineItems.Count > 0;
     var documentContent = ResolveGeneratedContentHrefs(Model.Document.Content);
-    var visibleDocumentContent = ForgeTrust.AppSurface.Docs.Services.RazorDocsHeadingSuppressor.SuppressLeadingMarkdownH1(
+    var visibleDocumentContent = ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(
         documentContent,
         shellOwnsH1: !Model.IsCSharpApiDoc);
 }

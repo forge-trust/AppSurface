@@ -227,8 +227,8 @@ public sealed class DocMetadataFactoryTests
     }
 
     [Theory]
-    [InlineData("ForgeTrust.AppSurface.Docs.Services", "RazorDocs")]
-    [InlineData("ForgeTrust.AppSurface.Docs", "RazorDocs")]
+    [InlineData("ForgeTrust.AppSurface.Docs.Services", "AppSurface Docs")]
+    [InlineData("ForgeTrust.AppSurface.Docs", "AppSurface Docs")]
     [InlineData("ForgeTrust.RazorWire.Bridge", "RazorWire")]
     [InlineData("ForgeTrust.AppSurface.Dependency.Autofac", "Autofac")]
     [InlineData("ForgeTrust.AppSurface.Caching.Redis", "Caching")]

@@ -1,5 +1,5 @@
 (() => {
-    const clientKey = "__razorDocsOutlineClient";
+    const clientKey = "__appSurfaceDocsOutlineClient";
     const clientVersion = "rolling-context";
     const existingClient = window[clientKey];
     if (existingClient?.version === clientVersion && existingClient.init) {

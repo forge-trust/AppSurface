@@ -17,7 +17,7 @@ public class CSharpDocHarvesterTests : IDisposable
     {
         var loggerFake = A.Fake<ILogger<CSharpDocHarvester>>();
         _harvester = new CSharpDocHarvester(loggerFake);
-        _testRoot = Path.Combine(Path.GetTempPath(), "RazorDocsTests", Guid.NewGuid().ToString());
+        _testRoot = Path.Join(Path.GetTempPath(), "AppSurfaceDocsTests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testRoot);
     }
 
@@ -326,9 +326,9 @@ public class CSharpDocHarvesterTests : IDisposable
                 Assert.Equal(14, enumProvenance.StartLine);
             });
 
-        Assert.Contains("data-razordocs-symbol-source=\"Test-Calculator\"", namespaceNode.Content);
-        Assert.Contains("data-razordocs-symbol-source=\"Test-Mode\"", namespaceNode.Content);
-        Assert.Equal(4, Regex.Matches(namespaceNode.Content, "data-razordocs-symbol-source=").Count);
+        Assert.Contains("data-appsurfacedocs-symbol-source=\"Test-Calculator\"", namespaceNode.Content);
+        Assert.Contains("data-appsurfacedocs-symbol-source=\"Test-Mode\"", namespaceNode.Content);
+        Assert.Equal(4, Regex.Matches(namespaceNode.Content, "data-appsurfacedocs-symbol-source=").Count);
     }
 
     [Fact]
@@ -348,7 +348,7 @@ public class CSharpDocHarvesterTests : IDisposable
         var results = (await _harvester.HarvestAsync(_testRoot)).ToList();
         var namespaceNode = results.Single(n => n.Path == "Namespaces/Test");
 
-        Assert.Contains("data-razordocs-symbol-source=\"Test-Calculator\"", namespaceNode.Content);
+        Assert.Contains("data-appsurfacedocs-symbol-source=\"Test-Calculator\"", namespaceNode.Content);
         Assert.Contains(
             namespaceNode.SymbolSourceProvenance!,
             provenance => provenance.AnchorId == "Test-Calculator"

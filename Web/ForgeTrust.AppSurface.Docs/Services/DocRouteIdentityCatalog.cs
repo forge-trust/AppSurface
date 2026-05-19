@@ -44,7 +44,7 @@ internal sealed record LocalizedDocRouteCandidate(
     string PublicRoutePath);
 
 /// <summary>
-/// Owns the route identity contract for one cached RazorDocs snapshot.
+/// Owns the route identity contract for one cached AppSurface Docs snapshot.
 /// </summary>
 /// <remarks>
 /// The catalog deliberately separates source identity from public route identity:
@@ -268,7 +268,7 @@ internal sealed class DocRouteIdentityCatalog
     /// <returns>Sorted locale-prefixed candidates suitable for later route registration slices.</returns>
     internal IReadOnlyList<LocalizedDocRouteCandidate> BuildLocalizedRouteCandidates(
         LocalizedDocsGraph graph,
-        RazorDocsLocalizationOptions options)
+        AppSurfaceDocsLocalizationOptions options)
     {
         ArgumentNullException.ThrowIfNull(graph);
         ArgumentNullException.ThrowIfNull(options);
@@ -401,8 +401,8 @@ internal sealed class DocRouteIdentityCatalog
                 {
                     diagnostics.Add(CreateDiagnostic(
                         DocHarvestDiagnosticCodes.DocReservedRouteCollision,
-                        $"Doc route '{DisplayRoute(routePath)}' is reserved by RazorDocs.",
-                        "A documentation page resolved to a route used by RazorDocs chrome, search, health, versions, or assets.",
+                        $"Doc route '{DisplayRoute(routePath)}' is reserved by AppSurface Docs.",
+                        "A documentation page resolved to a route used by AppSurface Docs chrome, search, health, versions, or assets.",
                         $"Change canonical_slug for '{candidate.SourcePath}' or move the source file so it does not publish at '{DisplayRoute(routePath)}'."));
                 }
 
@@ -457,7 +457,7 @@ internal sealed class DocRouteIdentityCatalog
             {
                 diagnostics.Add(CreateDiagnostic(
                     DocHarvestDiagnosticCodes.DocInvalidRedirectAlias,
-                    $"Redirect alias '{DisplayRoute(aliasLookup)}' is reserved by RazorDocs.",
+                    $"Redirect alias '{DisplayRoute(aliasLookup)}' is reserved by AppSurface Docs.",
                     "A redirect alias cannot shadow docs chrome, search, health, versions, sections, or assets.",
                     $"Choose a different redirect_aliases entry for '{candidate.SourcePath}'."));
                 continue;
@@ -495,7 +495,7 @@ internal sealed class DocRouteIdentityCatalog
                 diagnostics.Add(CreateDiagnostic(
                     DocHarvestDiagnosticCodes.DocRedirectAliasCollision,
                     $"Redirect alias '{DisplayRoute(aliasLookup)}' is declared by multiple docs.",
-                    "RazorDocs cannot safely choose between duplicate redirect aliases.",
+                    "AppSurface Docs cannot safely choose between duplicate redirect aliases.",
                     $"Keep the alias on only one page."));
                 continue;
             }

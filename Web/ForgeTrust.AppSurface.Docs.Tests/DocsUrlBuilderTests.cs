@@ -9,25 +9,25 @@ public sealed class DocsUrlBuilderTests
     public void Constructor_ShouldDefaultDocsRootsFromVersioningState()
     {
         var disabledBuilder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = null!
                 },
-                Versioning = new RazorDocsVersioningOptions
+                Versioning = new AppSurfaceDocsVersioningOptions
                 {
                     Enabled = false
                 }
             });
         var enabledBuilder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = null!
                 },
-                Versioning = new RazorDocsVersioningOptions
+                Versioning = new AppSurfaceDocsVersioningOptions
                 {
                     Enabled = true,
                     CatalogPath = "catalog.json"
@@ -53,7 +53,7 @@ public sealed class DocsUrlBuilderTests
     public void Constructor_ShouldDefaultRoots_WhenRoutingOptionsAreMissing()
     {
         var builder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
                 Routing = null!
             });
@@ -67,21 +67,21 @@ public sealed class DocsUrlBuilderTests
     public void Constructor_ShouldDefaultLiveRootFromCustomRouteRoot()
     {
         var disabledBuilder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     RouteRootPath = "/foo/bar"
                 }
             });
         var enabledBuilder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     RouteRootPath = "/foo/bar"
                 },
-                Versioning = new RazorDocsVersioningOptions
+                Versioning = new AppSurfaceDocsVersioningOptions
                 {
                     Enabled = true,
                     CatalogPath = "catalog.json"
@@ -104,13 +104,13 @@ public sealed class DocsUrlBuilderTests
     public void Constructor_ShouldNotInferRouteRootFromConfiguredVersionedDocsRoot()
     {
         var builder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "/foo/bar/next"
                 },
-                Versioning = new RazorDocsVersioningOptions
+                Versioning = new AppSurfaceDocsVersioningOptions
                 {
                     Enabled = true,
                     CatalogPath = "catalog.json"
@@ -127,13 +127,13 @@ public sealed class DocsUrlBuilderTests
     public void Constructor_ShouldSupportRootRouteFamilyWithVersioning()
     {
         var builder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     RouteRootPath = "/"
                 },
-                Versioning = new RazorDocsVersioningOptions
+                Versioning = new AppSurfaceDocsVersioningOptions
                 {
                     Enabled = true,
                     CatalogPath = "catalog.json"
@@ -152,7 +152,7 @@ public sealed class DocsUrlBuilderTests
     [Fact]
     public void Routes_ShouldSupportInitOnlyNamedConstruction()
     {
-        var routes = new RazorDocsRouteReferences
+        var routes = new AppSurfaceDocsRouteReferences
         {
             Home = "/docs",
             Search = "/docs/search",
@@ -171,7 +171,7 @@ public sealed class DocsUrlBuilderTests
     [Fact]
     public void Routes_ShouldPreserveConstructorAndDeconstructionCompatibility()
     {
-        var routes = new RazorDocsRouteReferences(
+        var routes = new AppSurfaceDocsRouteReferences(
             "/docs",
             "/docs/search",
             "/docs/search-index.json",
@@ -192,7 +192,7 @@ public sealed class DocsUrlBuilderTests
     [Fact]
     public void Routes_ShouldRoundTripHealthRoutes_ForFullConstructorAndDeconstruct()
     {
-        var routes = new RazorDocsRouteReferences(
+        var routes = new AppSurfaceDocsRouteReferences(
             "/docs",
             "/docs/search",
             "/docs/search-index.json",
@@ -216,13 +216,13 @@ public sealed class DocsUrlBuilderTests
     public void Constructor_ShouldTrimTrailingSlashFromConfiguredDocsRootPath()
     {
         var builder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = " /docs/preview/ "
                 },
-                Versioning = new RazorDocsVersioningOptions
+                Versioning = new AppSurfaceDocsVersioningOptions
                 {
                     Enabled = true,
                     CatalogPath = "catalog.json"
@@ -236,13 +236,13 @@ public sealed class DocsUrlBuilderTests
     public void Constructor_ShouldNormalizeRelativeConfiguredDocsRootPathToAppRelativePath()
     {
         var builder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "docs/custom-preview"
                 },
-                Versioning = new RazorDocsVersioningOptions
+                Versioning = new AppSurfaceDocsVersioningOptions
                 {
                     Enabled = true,
                     CatalogPath = "catalog.json"
@@ -256,9 +256,9 @@ public sealed class DocsUrlBuilderTests
     public void Constructor_ShouldTreatMissingVersioningAsDisabled_AndPreserveAlreadyNormalizedRoot()
     {
         var builder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "/docs/preview"
                 },
@@ -272,7 +272,7 @@ public sealed class DocsUrlBuilderTests
     [Fact]
     public void BuildVersionUrls_ShouldEncodeVersionAndCanonicalPath()
     {
-        var builder = new DocsUrlBuilder(new RazorDocsOptions());
+        var builder = new DocsUrlBuilder(new AppSurfaceDocsOptions());
 
         var versionRoot = builder.BuildVersionRootUrl(" release/1 ");
         var versionDoc = builder.BuildVersionDocUrl(" release/1 ", "guides/Getting Started#install now");
@@ -285,9 +285,9 @@ public sealed class DocsUrlBuilderTests
     public void Builder_ShouldHandleRootMountedDocsSurfaceWithoutDoubleSlashes()
     {
         var builder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "/"
                 }
@@ -312,9 +312,9 @@ public sealed class DocsUrlBuilderTests
     public void IsCurrentDocsPath_ShouldMatchPathsUnderConfiguredRoot()
     {
         var builder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "/docs/next"
                 }
@@ -340,9 +340,9 @@ public sealed class DocsUrlBuilderTests
     public void BuildDocUrl_ShouldReturnDocsRoot_WhenRelativePathIsBlank(string docsRootPath, string? relativePath, string expected)
     {
         var builder = new DocsUrlBuilder(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = docsRootPath
                 }

@@ -3,7 +3,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 namespace ForgeTrust.AppSurface.Docs.ViewComponents;
 
 /// <summary>
-/// Normalizes RazorDocs sidebar labels, grouping, and namespace display names.
+/// Normalizes AppSurface Docs sidebar labels, grouping, and namespace display names.
 /// </summary>
 /// <remarks>
 /// <see cref="SidebarDisplayHelper"/> treats the authored <c>Namespaces</c> route family specially so API reference
