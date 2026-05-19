@@ -83,6 +83,47 @@ Add identity settings when the consuming repository should own the visible docs 
 
 Identity paths must be app-root paths such as `/brand/docs-logo.svg` or application-relative paths such as `~/brand/docs-logo.svg`. AppSurface Docs rejects remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments during startup validation so the docs chrome cannot accidentally point at unsafe or environment-specific locations.
 
+## Define the public source boundary
+
+Before pointing AppSurface Docs at a large repository, decide which paths are meant to be public. The safest production shape is a small global include list, then optional Markdown and C# refinements:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Paths": {
+        "IncludeGlobs": [
+          "README.md",
+          "LICENSE",
+          "docs/**/*.md",
+          "src/**/*.cs"
+        ],
+        "ExcludeGlobs": [
+          "docs/drafts/**",
+          "**/generated/**"
+        ]
+      },
+      "Markdown": {
+        "IncludeGlobs": [
+          "README.md",
+          "LICENSE",
+          "docs/**/*.md"
+        ]
+      },
+      "CSharp": {
+        "IncludeGlobs": [
+          "src/**/*.cs"
+        ]
+      }
+    }
+  }
+}
+```
+
+Use repository-relative globs with `/` separators. AppSurface Docs rejects rooted paths, URI-shaped patterns, query strings, fragments, and `..` segments during startup validation. Empty includes mean the built-in harvester defaults are used; nonempty global includes become the outer boundary for both Markdown and C#.
+
+The package also keeps protective defaults for build output, hidden directories, test projects, and C# source under `examples`. These defaults prevent common accidental publication without requiring every host to write the same excludes. If a default is too broad, use `DefaultExclusions:AllowGlobs` for narrow exceptions or `DefaultExclusions:DisabledGroups` when the entire group is intentionally public. Use the named group IDs, not numeric enum values; ordinals fail startup validation. Allows are group-aware, so a path inside `.github/bin` needs an allow for both `HiddenDirectories` and `BuildOutput` unless one group is disabled.
+
 ## Author the first useful page set
 
 Start with pages that answer adoption questions before you tune visuals:
@@ -184,6 +225,7 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 
 - Pick a host: embedded AppSurface web module or standalone AppSurface Docs app.
 - Configure `AppSurfaceDocs:Source:RepositoryRoot` for the repository to harvest.
+- Configure `AppSurfaceDocs:Harvest:Paths` so only intentional public source paths are eligible.
 - Keep `AppSurfaceDocs:Mode` set to `Source` unless a later bundle-hosting slice changes that contract.
 - Add sidecar metadata for repository and package README files.
 - Feature the first consumer paths through `featured_page_groups`.

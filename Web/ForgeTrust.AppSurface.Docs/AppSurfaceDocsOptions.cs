@@ -256,7 +256,9 @@ public sealed class AppSurfaceDocsSourceOptions
 /// <remarks>
 /// The default policy is tolerant so public runtime hosts can continue serving even when source harvesting has a
 /// transient problem. Enable <see cref="FailOnFailure"/> in CI or export hosts that should fail closed when every
-/// configured harvester fails, times out, or cancels.
+/// configured harvester fails, times out, or cancels. Use <see cref="Paths"/>, <see cref="Markdown"/>, and
+/// <see cref="CSharp"/> to define the repository-relative public documentation boundary shared by runtime hosts,
+/// export flows, and hygiene checks.
 /// </remarks>
 public sealed class AppSurfaceDocsHarvestOptions
 {
@@ -274,6 +276,26 @@ public sealed class AppSurfaceDocsHarvestOptions
     /// Gets health-surface settings for the operator-facing AppSurface Docs harvest health routes and sidebar chrome.
     /// </summary>
     public AppSurfaceDocsHarvestHealthOptions Health { get; set; } = new();
+
+    /// <summary>
+    /// Gets global repository-relative path policy settings shared by every built-in harvester.
+    /// </summary>
+    /// <remarks>
+    /// Global include globs are a repository-wide boundary. When configured, every built-in source kind must match
+    /// one global include before harvester-specific includes are considered. Global excludes win over includes and
+    /// default-exclusion allows.
+    /// </remarks>
+    public AppSurfaceDocsHarvestPathOptions Paths { get; set; } = new();
+
+    /// <summary>
+    /// Gets Markdown-specific path policy settings that refine the global path policy.
+    /// </summary>
+    public AppSurfaceDocsMarkdownHarvestOptions Markdown { get; set; } = new();
+
+    /// <summary>
+    /// Gets C# API-reference path policy settings that refine the global path policy.
+    /// </summary>
+    public AppSurfaceDocsCSharpHarvestOptions CSharp { get; set; } = new();
 }
 
 /// <summary>
@@ -810,6 +832,10 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                     failures.Add($"Unsupported AppSurface Docs harvest health chrome exposure mode '{harvest.Health.ShowChrome}'.");
                 }
             }
+
+            ValidateHarvestPathOptions(harvest.Paths, "AppSurfaceDocs:Harvest:Paths", failures);
+            ValidateHarvestSourceOptions(harvest.Markdown, "AppSurfaceDocs:Harvest:Markdown", failures);
+            ValidateHarvestSourceOptions(harvest.CSharp, "AppSurfaceDocs:Harvest:CSharp", failures);
         }
 
         if (bundle is null)
@@ -1064,6 +1090,121 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         }
 
         return trimmedPath.IndexOfAny(['?', '#']) < 0;
+    }
+
+    private static void ValidateHarvestPathOptions(
+        AppSurfaceDocsHarvestPathOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
+        ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
+        ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+    }
+
+    private static void ValidateHarvestSourceOptions(
+        AppSurfaceDocsMarkdownHarvestOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
+        ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
+        ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+    }
+
+    private static void ValidateHarvestSourceOptions(
+        AppSurfaceDocsCSharpHarvestOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
+        ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
+        ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+    }
+
+    private static void ValidateGlobPatterns(
+        IReadOnlyList<string>? patterns,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (patterns is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        foreach (var pattern in patterns.Where(pattern => !AppSurfaceDocsHarvestPathPatternValidator.IsValidConfiguredGlobPattern(pattern)))
+        {
+            failures.Add(
+                $"{configurationPath} contains invalid repository-relative glob pattern '{pattern}'. Use forward-slash paths without leading '/', './', URI schemes, drive roots, query strings, fragments, or '..' segments.");
+        }
+    }
+
+    private static void ValidateDefaultExclusions(
+        AppSurfaceDocsHarvestDefaultExclusionOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        if (options.DisabledGroups is null)
+        {
+            failures.Add($"{configurationPath}:DisabledGroups must not be null.");
+        }
+        else
+        {
+            foreach (var groupId in options.DisabledGroups)
+            {
+                ValidateDefaultGroupId(groupId, $"{configurationPath}:DisabledGroups", failures);
+            }
+        }
+
+        if (options.AllowGlobs is null)
+        {
+            failures.Add($"{configurationPath}:AllowGlobs must not be null.");
+            return;
+        }
+
+        foreach (var (groupId, patterns) in options.AllowGlobs)
+        {
+            ValidateDefaultGroupId(groupId, $"{configurationPath}:AllowGlobs", failures);
+            ValidateGlobPatterns(patterns, $"{configurationPath}:AllowGlobs:{groupId}", failures);
+        }
+    }
+
+    private static void ValidateDefaultGroupId(
+        string? groupId,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (string.IsNullOrWhiteSpace(groupId)
+            || !AppSurfaceDocsHarvestPathPolicy.IsKnownDefaultGroupId(groupId))
+        {
+            failures.Add(
+                $"{configurationPath} contains unsupported default exclusion group '{groupId}'. Supported groups are: {string.Join(", ", Enum.GetNames<AppSurfaceDocsHarvestDefaultExclusionGroup>())}.");
+        }
     }
 
     private static bool IsReservedRouteFamilyChildPath(string path)
