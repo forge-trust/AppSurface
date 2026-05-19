@@ -2258,6 +2258,67 @@ public sealed class PackageArtifactValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task PackageSmokeInstallWorkflow_FailsToolSmokeWhenInstallFails()
+    {
+        var installFailure = new ExternalCommandResult(1, string.Empty, "install failed");
+        var (report, commandRunner) = await RunToolOnlySmokeWorkflowAsync(
+            new ExternalCommandResult(0, "web restored", string.Empty),
+            installFailure,
+            installFailure,
+            installFailure,
+            installFailure,
+            installFailure);
+
+        var toolEntry = Assert.Single(report.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Cli");
+        Assert.Equal(PackageSmokeInstallStatus.Failed, toolEntry.Status);
+        Assert.Equal(1, toolEntry.ExitCode);
+        Assert.Contains("install failed", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Equal(6, commandRunner.Requests.Count);
+        Assert.Equal("dotnet restore", commandRunner.Requests[0].OperationName);
+        Assert.All(commandRunner.Requests.Skip(1), request => Assert.Equal("dotnet tool install", request.OperationName));
+    }
+
+    [Fact]
+    public async Task PackageSmokeInstallWorkflow_FailsToolSmokeWhenHelpCommandFails()
+    {
+        var (report, commandRunner) = await RunToolOnlySmokeWorkflowAsync(
+            new ExternalCommandResult(0, "web restored", string.Empty),
+            new ExternalCommandResult(0, "installed", string.Empty),
+            new ExternalCommandResult(2, string.Empty, "help failed"));
+
+        var toolEntry = Assert.Single(report.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Cli");
+        Assert.Equal(PackageSmokeInstallStatus.Failed, toolEntry.Status);
+        Assert.Equal(2, toolEntry.ExitCode);
+        Assert.Contains("installed", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Contains("help failed", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Equal(["dotnet restore", "dotnet tool install", "dotnet tool run"], commandRunner.Requests.Select(request => request.OperationName).ToArray());
+    }
+
+    [Fact]
+    public void PackageSmokeInstallWorkflow_ResolveToolShimPathUsesToolDirectory()
+    {
+        var toolPath = CombineSafeChildPath(_repositoryRoot, "tools");
+        var expectedShimName = OperatingSystem.IsWindows() ? "appsurface.exe" : "appsurface";
+
+        var shimPath = PackageSmokeInstallWorkflow.ResolveToolShimPath(toolPath, "appsurface");
+
+        Assert.Equal(Path.Combine(toolPath, expectedShimName), shimPath);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("../appsurface")]
+    [InlineData(".")]
+    [InlineData("app surface")]
+    public void PackageSmokeInstallWorkflow_ResolveToolShimPathRejectsInvalidCommandName(string commandName)
+    {
+        var error = Assert.Throws<ArgumentException>(
+            () => PackageSmokeInstallWorkflow.ResolveToolShimPath(CombineSafeChildPath(_repositoryRoot, "tools"), commandName));
+
+        Assert.Equal("commandName", error.ParamName);
+    }
+
+    [Fact]
     public async Task PackageSmokeInstallWorkflow_RejectsManifestThatDoesNotMatchPackagePlan()
     {
         await WriteFileAsync("packages/package-index.yml",
@@ -2348,6 +2409,93 @@ public sealed class PackageArtifactValidationTests : IDisposable
             () => PackageArtifactManifestPlanValidator.Validate(plan, manifest, _repositoryRoot));
 
         Assert.Contains("does not match package plan", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<(PackageSmokeInstallReport Report, RecordingExternalCommandRunner CommandRunner)> RunToolOnlySmokeWorkflowAsync(
+        params object[] commandResults)
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Web.
+                includes: Web.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                classification: public
+                publish_decision: publish
+                order: 20
+                use_when: Tool.
+                includes: CLI command.
+                does_not_include: Runtime packages.
+                start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
+                tool_command_name: appsurface
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", "<Project />");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/README.md", "# CLI");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var webPackagePath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Web"));
+        var cliPackagePath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(webPackagePath, "web", Encoding.UTF8);
+        await File.WriteAllTextAsync(cliPackagePath, "cli", Encoding.UTF8);
+        var manifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
+        await new PackageArtifactManifestWriter().WriteAsync(
+            new PackageArtifactValidationReport(
+                PackageVersion,
+                [
+                    new PackageArtifactValidationReportEntry(
+                        "ForgeTrust.AppSurface.Web",
+                        "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                        PackagePublishDecision.Publish,
+                        [],
+                        webPackagePath),
+                    new PackageArtifactValidationReportEntry(
+                        "ForgeTrust.AppSurface.Cli",
+                        "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                        PackagePublishDecision.Publish,
+                        [],
+                        cliPackagePath,
+                        IsTool: true,
+                        ToolCommandName: "appsurface")
+                ]),
+            artifactDirectory,
+            manifestPath,
+            CancellationToken.None);
+        var commandRunner = new RecordingExternalCommandRunner(commandResults);
+        var workflow = new PackageSmokeInstallWorkflow(
+            new PackageArtifactManifestReader(),
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                    "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                    "ForgeTrust.AppSurface.Web"),
+                ["Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"] = CreateMetadata(
+                    "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                    "ForgeTrust.AppSurface.Cli",
+                    isTool: true)
+            }),
+            commandRunner,
+            new PackageSmokeInstallReportRenderer(),
+            (_, _) => Task.CompletedTask);
+        var workDirectory = CombineSafeChildPath(_repositoryRoot, "smoke");
+        var report = await workflow.RunAsync(
+            new PackageSmokeInstallRequest(
+                _repositoryRoot,
+                ManifestPath,
+                manifestPath,
+                workDirectory,
+                CombineSafeChildPath(workDirectory, "smoke.md"),
+                "https://api.nuget.org/v3/index.json"),
+            CancellationToken.None);
+
+        return (report, commandRunner);
     }
 
     private string ManifestPath => Path.Combine(_repositoryRoot, "packages", "package-index.yml");

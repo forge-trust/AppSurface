@@ -765,7 +765,16 @@ internal sealed class PackageSmokeInstallWorkflow
         return new string(value.Select(character => invalidCharacters.Contains(character) ? '_' : character).ToArray());
     }
 
-    private static string ResolveToolShimPath(string toolPath, string commandName)
+    /// <summary>
+    /// Resolves the installed tool shim path after proving the shim name cannot escape the tool directory.
+    /// </summary>
+    /// <param name="toolPath">Directory passed to <c>dotnet tool install --tool-path</c>.</param>
+    /// <param name="commandName">Validated command token from <c>tool_command_name</c>.</param>
+    /// <returns>Full path to the command shim that should be executed.</returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the command token cannot safely be treated as one file name under <paramref name="toolPath" />.
+    /// </exception>
+    internal static string ResolveToolShimPath(string toolPath, string commandName)
     {
         try
         {
@@ -777,11 +786,7 @@ internal sealed class PackageSmokeInstallWorkflow
         }
 
         var shimName = OperatingSystem.IsWindows() ? $"{commandName}.exe" : commandName;
-        if (Path.IsPathRooted(shimName)
-            || !string.Equals(Path.GetFileName(shimName), shimName, StringComparison.Ordinal))
-        {
-            throw new ArgumentException($"Tool shim name '{shimName}' must be a file name, not a path.", nameof(commandName));
-        }
+        if (Path.IsPathRooted(shimName) || !string.Equals(Path.GetFileName(shimName), shimName, StringComparison.Ordinal)) throw new ArgumentException($"Tool shim name '{shimName}' must be a file name, not a path.", nameof(commandName));
 
         return Path.Combine(toolPath, shimName);
     }
