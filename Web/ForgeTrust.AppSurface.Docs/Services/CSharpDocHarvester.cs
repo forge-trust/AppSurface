@@ -16,14 +16,14 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 public class CSharpDocHarvester : IDocHarvester
 {
     private readonly ILogger<CSharpDocHarvester> _logger;
-    private readonly RazorDocsHarvestPathPolicy _pathPolicy;
+    private readonly AppSurfaceDocsHarvestPathPolicy _pathPolicy;
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
 
     /// <summary>
     /// Initializes a new instance of <see cref="CSharpDocHarvester"/> with the provided logger.
     /// </summary>
     public CSharpDocHarvester(ILogger<CSharpDocHarvester> logger)
-        : this(logger, RazorDocsHarvestPathPolicy.CreateDefault())
+        : this(logger, AppSurfaceDocsHarvestPathPolicy.CreateDefault())
     {
     }
 
@@ -32,7 +32,7 @@ public class CSharpDocHarvester : IDocHarvester
     /// </summary>
     internal CSharpDocHarvester(
         ILogger<CSharpDocHarvester> logger,
-        RazorDocsHarvestPathPolicy pathPolicy)
+        AppSurfaceDocsHarvestPathPolicy pathPolicy)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(pathPolicy);
@@ -63,7 +63,7 @@ public class CSharpDocHarvester : IDocHarvester
 
             var relativePath = Path.GetRelativePath(rootPath, file)
                 .Replace('\\', '/'); // Normalize to forward slashes for URLs
-            if (!_pathPolicy.ShouldIncludeFilePath(relativePath, RazorDocsHarvestSourceKind.CSharp))
+            if (!_pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.CSharp))
             {
                 continue;
             }
@@ -286,7 +286,7 @@ public class CSharpDocHarvester : IDocHarvester
     {
         foreach (var file in _pathPolicy.EnumerateCandidateFiles(
                      rootPath,
-                     RazorDocsHarvestSourceKind.CSharp,
+                     AppSurfaceDocsHarvestSourceKind.CSharp,
                      "*.cs",
                      cancellationToken))
         {
@@ -343,7 +343,7 @@ public class CSharpDocHarvester : IDocHarvester
 
     private static string CreateSymbolSourcePlaceholder(string anchorId)
     {
-        return $@"<span data-razordocs-symbol-source=""{WebUtility.HtmlEncode(anchorId)}""></span>";
+        return $@"<span data-appsurfacedocs-symbol-source=""{WebUtility.HtmlEncode(anchorId)}""></span>";
     }
 
     private static void AddSymbolSourceProvenance(

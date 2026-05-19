@@ -1,11 +1,14 @@
 @using System.Text.Json
-@inject ForgeTrust.AppSurface.Docs.RazorDocsAssetPathResolver AssetPathResolver
-@inject ForgeTrust.AppSurface.Docs.RazorDocsAssetVersioner AssetVersioner
+@inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetPathResolver AssetPathResolver
+@inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetVersioner AssetVersioner
+@inject ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsIdentityResolver IdentityResolver
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
     var stylesheetPath = AssetVersioner.AppendVersion(AssetPathResolver.StylesheetPath, "css/site.gen.css");
+    var docsIdentity = IdentityResolver.Identity;
     var docsRoutes = DocsUrlBuilder.Routes;
-    var docsHomeUrl = Url.PathBaseAware(docsRoutes.Home);
+    var docsRootUrl = Url.PathBaseAware(docsRoutes.Home);
+    var docsHomeUrl = Url.PathBaseAware(docsIdentity.HomeHref);
     var docsSearchUrl = Url.PathBaseAware(docsRoutes.Search);
     var docsSearchIndexUrl = Url.PathBaseAware(docsRoutes.SearchIndex);
     var docsSearchStylesheetUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "search.css"));
@@ -15,7 +18,7 @@
     var docsClientConfigJson = JsonSerializer.Serialize(
         new
         {
-            docsRootPath = docsHomeUrl,
+            docsRootPath = docsRootUrl,
             docsSearchUrl,
             docsSearchIndexUrl,
             miniSearchUrl = docsMiniSearchUrl
@@ -30,10 +33,17 @@
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>@ViewData["Title"] - AppSurface</title>
-    <link rel="icon" type="image/svg+xml" href="@docsBrandIconUrl" />
+    <title>@ViewData["Title"] - @docsIdentity.DisplayName</title>
+    @if (docsIdentity.Favicons.Count == 0)
+    {
+        <link rel="icon" type="image/svg+xml" href="@docsBrandIconUrl" />
+    }
     <link rel="stylesheet" href="@stylesheetPath" asp-append-version="false" />
     <link rel="stylesheet" href="@docsSearchStylesheetUrl" asp-append-version="false" />
+    @foreach (var favicon in docsIdentity.Favicons)
+    {
+        <link rel="icon" type="@favicon.Type" href="@Url.PathBaseAware(favicon.Path)" />
+    }
     @if (isSearchPage)
     {
         <link rel="preload" href="@docsSearchIndexUrl" as="fetch" crossorigin="use-credentials" />
@@ -43,7 +53,7 @@
     {
         <script src="@docsMiniSearchUrl" defer data-rw-search-runtime="minisearch" asp-append-version="false"></script>
     }
-    <script>window.__razorDocsConfig = @Html.Raw(docsClientConfigJson);</script>
+    <script>window.__appSurfaceDocsConfig = @Html.Raw(docsClientConfigJson);</script>
     <script src="@docsSearchClientUrl" defer asp-append-version="false"></script>
 </head>
 <body class="h-full flex flex-col text-slate-200 overflow-hidden">
@@ -63,8 +73,15 @@
            aria-hidden="false">
         <div class="docs-sidebar-header flex items-center justify-between p-4 border-b border-[#1b2a43] md:hidden">
             <a href="@docsHomeUrl" class="docs-brand">
-                <img class="docs-brand-mark docs-brand-mark--sm" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
-                <span class="docs-wordmark text-xl">App<span class="docs-wordmark-highlight">Surface</span></span>
+                @if (docsIdentity.Logo is not null)
+                {
+                    <img class="docs-brand-mark docs-brand-mark--sm" src="@Url.PathBaseAware(docsIdentity.Logo.Path)" alt="" aria-hidden="true" />
+                }
+                else
+                {
+                    <img class="docs-brand-mark docs-brand-mark--sm" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
+                }
+                <span class="docs-wordmark text-xl">@docsIdentity.DisplayName</span>
             </a>
             <button id="docs-sidebar-close"
                     type="button"
@@ -74,9 +91,16 @@
         </div>
         <div class="hidden md:block p-6">
             <a href="@docsHomeUrl" class="docs-brand">
-                <img class="docs-brand-mark" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
+                @if (docsIdentity.Logo is not null)
+                {
+                    <img class="docs-brand-mark" src="@Url.PathBaseAware(docsIdentity.Logo.Path)" alt="" aria-hidden="true" />
+                }
+                else
+                {
+                    <img class="docs-brand-mark" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
+                }
                 <span class="min-w-0">
-                    <span class="docs-wordmark block text-2xl">App<span class="docs-wordmark-highlight">Surface</span></span>
+                    <span class="docs-wordmark block text-2xl">@docsIdentity.DisplayName</span>
                 </span>
             </a>
         </div>
@@ -120,8 +144,15 @@
                 </svg>
             </button>
             <a href="@docsHomeUrl" class="docs-brand min-w-0">
-                <img class="docs-brand-mark docs-brand-mark--sm" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
-                <span class="docs-wordmark truncate text-lg">App<span class="docs-wordmark-highlight">Surface</span></span>
+                @if (docsIdentity.Logo is not null)
+                {
+                    <img class="docs-brand-mark docs-brand-mark--sm" src="@Url.PathBaseAware(docsIdentity.Logo.Path)" alt="" aria-hidden="true" />
+                }
+                else
+                {
+                    <img class="docs-brand-mark docs-brand-mark--sm" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
+                }
+                <span class="docs-wordmark truncate text-lg">@docsIdentity.DisplayName</span>
             </a>
             <a href="@docsSearchUrl" class="ml-auto inline-flex items-center gap-2 rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-3 py-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-[#bfdbfe] hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
                 <span>Search</span>

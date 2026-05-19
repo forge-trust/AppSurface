@@ -25,17 +25,17 @@ public sealed class RepositoryReadmePolicyTests
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         using var provider = CreatePolicyProvider(repoRoot);
-        var policy = provider.GetRequiredService<RazorDocsHarvestPathPolicy>();
+        var policy = provider.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>();
 
-        Assert.True(policy.ShouldIncludeFilePath("README.md", RazorDocsHarvestSourceKind.Markdown));
-        Assert.True(policy.ShouldIncludeFilePath("LICENSE", RazorDocsHarvestSourceKind.Markdown));
-        Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/README.md", RazorDocsHarvestSourceKind.Markdown));
-        Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/generated/README.md", RazorDocsHarvestSourceKind.Markdown));
-        Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/TestResults/README.md", RazorDocsHarvestSourceKind.Markdown));
-        Assert.False(policy.ShouldIncludeFilePath("unpublished/scratch/README.md", RazorDocsHarvestSourceKind.Markdown));
-        Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/RazorDocsOptions.cs", RazorDocsHarvestSourceKind.CSharp));
-        Assert.False(policy.ShouldIncludeFilePath("examples/web-app/Program.cs", RazorDocsHarvestSourceKind.CSharp));
-        Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Web.Tests/Fixture.cs", RazorDocsHarvestSourceKind.CSharp));
+        Assert.True(policy.ShouldIncludeFilePath("README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(policy.ShouldIncludeFilePath("LICENSE", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/generated/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/TestResults/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.False(policy.ShouldIncludeFilePath("unpublished/scratch/README.md", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/AppSurfaceDocsOptions.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
+        Assert.False(policy.ShouldIncludeFilePath("examples/web-app/Program.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
+        Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Web.Tests/Fixture.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
     }
 
     [Fact]
@@ -73,12 +73,12 @@ public sealed class RepositoryReadmePolicyTests
     private static IReadOnlyList<string> EnumerateAuthoredReadmePaths(string repoRoot)
     {
         using var provider = CreatePolicyProvider(repoRoot);
-        var policy = provider.GetRequiredService<RazorDocsHarvestPathPolicy>();
+        var policy = provider.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>();
 
         return Directory
             .EnumerateFiles(repoRoot, "README.md", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(repoRoot, path).Replace('\\', '/'))
-            .Where(path => policy.ShouldIncludeFilePath(path, RazorDocsHarvestSourceKind.Markdown))
+            .Where(path => policy.ShouldIncludeFilePath(path, AppSurfaceDocsHarvestSourceKind.Markdown))
             .ToArray();
     }
 
@@ -95,7 +95,7 @@ public sealed class RepositoryReadmePolicyTests
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(configuration);
         services.AddLogging();
-        services.AddRazorDocs();
+        services.AddAppSurfaceDocs();
 
         return services.BuildServiceProvider();
     }

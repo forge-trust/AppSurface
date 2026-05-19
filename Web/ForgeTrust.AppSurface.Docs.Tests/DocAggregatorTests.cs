@@ -15,10 +15,10 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 public class DocAggregatorTests : IDisposable
 {
     private readonly IDocHarvester _harvesterFake;
-    private readonly RazorDocsOptions _options;
+    private readonly AppSurfaceDocsOptions _options;
     private readonly IWebHostEnvironment _envFake;
     private readonly ILogger<DocAggregator> _loggerFake;
-    private readonly IRazorDocsHtmlSanitizer _sanitizerFake;
+    private readonly IAppSurfaceDocsHtmlSanitizer _sanitizerFake;
     private readonly IMemoryCache _cache;
     private readonly IMemo _memo;
     private readonly DocAggregator _aggregator;
@@ -26,10 +26,10 @@ public class DocAggregatorTests : IDisposable
     public DocAggregatorTests()
     {
         _harvesterFake = A.Fake<IDocHarvester>();
-        _options = new RazorDocsOptions();
+        _options = new AppSurfaceDocsOptions();
         _envFake = A.Fake<IWebHostEnvironment>();
         _loggerFake = A.Fake<ILogger<DocAggregator>>();
-        _sanitizerFake = A.Fake<IRazorDocsHtmlSanitizer>();
+        _sanitizerFake = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
         _cache = new MemoryCache(new MemoryCacheOptions());
         _memo = new Memo(_cache);
 
@@ -104,10 +104,10 @@ public class DocAggregatorTests : IDisposable
         using var memo = new Memo(cache);
         var aggregator = new DocAggregator(
             [harvester],
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                CacheExpirationMinutes = RazorDocsOptions.MinCacheExpirationMinutes,
-                Source = new RazorDocsSourceOptions
+                CacheExpirationMinutes = AppSurfaceDocsOptions.MinCacheExpirationMinutes,
+                Source = new AppSurfaceDocsSourceOptions
                 {
                     RepositoryRoot = Path.GetTempPath()
                 }
@@ -157,7 +157,7 @@ public class DocAggregatorTests : IDisposable
                 new DocNode(
                     "Calculator",
                     "Namespaces/Test",
-                    """<h2>Calculator</h2><span data-razordocs-symbol-source="Test-Calculator"></span>""",
+                    """<h2>Calculator</h2><span data-appsurfacedocs-symbol-source="Test-Calculator"></span>""",
                     SymbolSourceProvenance:
                     [
                         new DocSymbolSourceProvenance
@@ -176,13 +176,13 @@ public class DocAggregatorTests : IDisposable
                     Assert.Contains("href=\"https://example.com/blob/abc123/src/Calculator.cs#L12\"", input);
                     Assert.Contains("doc-symbol-source-link", input);
                     Assert.Contains("aria-label=\"View source\"", input);
-                    Assert.DoesNotContain("data-razordocs-symbol-source", input);
+                    Assert.DoesNotContain("data-appsurfacedocs-symbol-source", input);
                     return input;
                 });
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
@@ -196,7 +196,7 @@ public class DocAggregatorTests : IDisposable
         Assert.Contains("href=\"https://example.com/blob/abc123/src/Calculator.cs#L12\"", result.Content);
         Assert.Contains("aria-label=\"View source\"", result.Content);
         Assert.Contains(">Source</a>", result.Content);
-        Assert.DoesNotContain("data-razordocs-symbol-source", result.Content);
+        Assert.DoesNotContain("data-appsurfacedocs-symbol-source", result.Content);
     }
 
     [Fact]
@@ -209,7 +209,7 @@ public class DocAggregatorTests : IDisposable
                 new DocNode(
                     "Calculator",
                     "Namespaces/Test",
-                    """<h2>Calculator</h2><span data-razordocs-symbol-source="Test-Calculator"></span>""",
+                    """<h2>Calculator</h2><span data-appsurfacedocs-symbol-source="Test-Calculator"></span>""",
                     SymbolSourceProvenance:
                     [
                         new DocSymbolSourceProvenance
@@ -223,7 +223,7 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
@@ -236,7 +236,7 @@ public class DocAggregatorTests : IDisposable
         Assert.Contains("href=\"https://example.com/blob/main/src/Calculator.cs#L12\"", result.Content);
         Assert.Contains("aria-label=\"View source\"", result.Content);
         Assert.Contains(">Source</a>", result.Content);
-        Assert.DoesNotContain("data-razordocs-symbol-source", result.Content);
+        Assert.DoesNotContain("data-appsurfacedocs-symbol-source", result.Content);
     }
 
     [Fact]
@@ -250,10 +250,10 @@ public class DocAggregatorTests : IDisposable
                     "Calculator",
                     "Namespaces/Test",
                     """
-                    <span data-razordocs-symbol-source="Unsafe"></span>
-                    <span data-razordocs-symbol-source="Duplicate"></span>
-                    <span data-razordocs-symbol-source="Duplicate"></span>
-                    <span data-razordocs-symbol-source="Missing"></span>
+                    <span data-appsurfacedocs-symbol-source="Unsafe"></span>
+                    <span data-appsurfacedocs-symbol-source="Duplicate"></span>
+                    <span data-appsurfacedocs-symbol-source="Duplicate"></span>
+                    <span data-appsurfacedocs-symbol-source="Missing"></span>
                     """,
                     SymbolSourceProvenance:
                     [
@@ -274,7 +274,7 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 SymbolSourceUrlTemplate = "javascript:{path}#L{line}"
@@ -284,7 +284,7 @@ public class DocAggregatorTests : IDisposable
         var result = Assert.Single((await aggregator.GetDocsAsync()).ToList());
 
         Assert.DoesNotContain("doc-symbol-source-link", result.Content);
-        Assert.DoesNotContain("data-razordocs-symbol-source", result.Content);
+        Assert.DoesNotContain("data-appsurfacedocs-symbol-source", result.Content);
     }
 
     [Fact]
@@ -297,7 +297,7 @@ public class DocAggregatorTests : IDisposable
                 new DocNode(
                     "Calculator",
                     "Namespaces/Test",
-                    """<span data-razordocs-symbol-source="Duplicate"></span>""",
+                    """<span data-appsurfacedocs-symbol-source="Duplicate"></span>""",
                     SymbolSourceProvenance:
                     [
                         new DocSymbolSourceProvenance
@@ -329,7 +329,7 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 SourceRef = "abc123",
@@ -343,7 +343,7 @@ public class DocAggregatorTests : IDisposable
         Assert.DoesNotContain("src/Duplicate.cs", result.Content);
         Assert.DoesNotContain("DuplicateReplacement", result.Content);
         Assert.DoesNotContain("Orphan", result.Content);
-        Assert.DoesNotContain("data-razordocs-symbol-source", result.Content);
+        Assert.DoesNotContain("data-appsurfacedocs-symbol-source", result.Content);
     }
 
     [Fact]
@@ -356,7 +356,7 @@ public class DocAggregatorTests : IDisposable
                 new DocNode(
                     "Calculator",
                     "Namespaces/Test",
-                    """<span data-razordocs-symbol-source="Calculator"></span>""",
+                    """<span data-appsurfacedocs-symbol-source="Calculator"></span>""",
                     SymbolSourceProvenance:
                     [
                         new DocSymbolSourceProvenance
@@ -370,7 +370,7 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 SourceRef = "abc123",
@@ -381,7 +381,7 @@ public class DocAggregatorTests : IDisposable
         var result = Assert.Single((await aggregator.GetDocsAsync()).ToList());
 
         Assert.DoesNotContain("doc-symbol-source-link", result.Content);
-        Assert.DoesNotContain("data-razordocs-symbol-source", result.Content);
+        Assert.DoesNotContain("data-appsurfacedocs-symbol-source", result.Content);
     }
 
     [Fact]
@@ -394,7 +394,7 @@ public class DocAggregatorTests : IDisposable
                 new DocNode(
                     "Calculator",
                     "Namespaces/Test",
-                    """<span data-razordocs-symbol-source="Calculator"></span>""",
+                    """<span data-appsurfacedocs-symbol-source="Calculator"></span>""",
                     SymbolSourceProvenance:
                     [
                         new DocSymbolSourceProvenance
@@ -408,7 +408,7 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 SymbolSourceUrlTemplate = "https://example.com/blob/{ref}/{path}#L{line}"
@@ -418,7 +418,7 @@ public class DocAggregatorTests : IDisposable
         var result = Assert.Single((await aggregator.GetDocsAsync()).ToList());
 
         Assert.DoesNotContain("doc-symbol-source-link", result.Content);
-        Assert.DoesNotContain("data-razordocs-symbol-source", result.Content);
+        Assert.DoesNotContain("data-appsurfacedocs-symbol-source", result.Content);
     }
 
     [Fact]
@@ -431,7 +431,7 @@ public class DocAggregatorTests : IDisposable
                 new DocNode(
                     "Calculator",
                     "Namespaces/Test",
-                    "<span data-razordocs-symbol-source=\"Calculator\"></span>",
+                    "<span data-appsurfacedocs-symbol-source=\"Calculator\"></span>",
                     SymbolSourceProvenance:
                     [
                         new DocSymbolSourceProvenance
@@ -445,7 +445,7 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = false,
                 SourceRef = "abc123",
@@ -456,7 +456,7 @@ public class DocAggregatorTests : IDisposable
         var result = Assert.Single((await aggregator.GetDocsAsync()).ToList());
 
         Assert.DoesNotContain("doc-symbol-source-link", result.Content);
-        Assert.DoesNotContain("data-razordocs-symbol-source", result.Content);
+        Assert.DoesNotContain("data-appsurfacedocs-symbol-source", result.Content);
     }
 
     [Fact]
@@ -566,16 +566,16 @@ public class DocAggregatorTests : IDisposable
                 new MarkdownHarvester(markdownLogger),
                 new CSharpDocHarvester(csharpLogger)
             ],
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Source = new RazorDocsSourceOptions
+                Source = new AppSurfaceDocsSourceOptions
                 {
                     RepositoryRoot = repositoryRoot
                 }
             },
             localEnv,
             _memo,
-            new RazorDocsHtmlSanitizer(),
+            new AppSurfaceDocsHtmlSanitizer(),
             _loggerFake);
 
         var chooser = await aggregator.GetDocByPathAsync("packages/README.md");
@@ -657,7 +657,7 @@ public class DocAggregatorTests : IDisposable
         // Arrange
         var aggregator = new DocAggregator(
             Enumerable.Empty<IDocHarvester>(),
-            new RazorDocsOptions(),
+            new AppSurfaceDocsOptions(),
             _envFake,
             _memo,
             _sanitizerFake,
@@ -708,9 +708,9 @@ public class DocAggregatorTests : IDisposable
     {
         // Arrange
         var configuredRoot = Path.Combine(Path.GetTempPath(), "repo-root");
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Source = new RazorDocsSourceOptions { RepositoryRoot = $"  {configuredRoot}  " }
+            Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = $"  {configuredRoot}  " }
         };
         string? capturedRoot = null;
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
@@ -1301,9 +1301,9 @@ public class DocAggregatorTests : IDisposable
         using var memo = new Memo(cache);
         var aggregator = new DocAggregator(
             [_harvesterFake],
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "/docs/next"
                 }
@@ -1349,14 +1349,14 @@ public class DocAggregatorTests : IDisposable
         using var memo = new Memo(cache);
         var aggregator = new DocAggregator(
             [_harvesterFake],
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     RouteRootPath = "/foo/bar",
                     DocsRootPath = "/foo/bar/next"
                 },
-                Versioning = new RazorDocsVersioningOptions
+                Versioning = new AppSurfaceDocsVersioningOptions
                 {
                     Enabled = true
                 }
@@ -1417,13 +1417,13 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (sourcePath, _) =>
             {
@@ -1454,13 +1454,13 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = false,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (_, _) =>
             {
@@ -1488,10 +1488,10 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (sourcePath, _) =>
             {
@@ -1519,13 +1519,13 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (_, _) => Task.FromResult<DateTimeOffset?>(null));
 
@@ -1559,13 +1559,13 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.None
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.None
             },
             resolveGitLastUpdatedUtcAsync: null);
 
@@ -1589,18 +1589,18 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = new DocAggregator(
             [harvester],
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Source = new RazorDocsSourceOptions
+                Source = new AppSurfaceDocsSourceOptions
                 {
                     RepositoryRoot = Path.GetTempPath()
                 },
-                Contributor = new RazorDocsContributorOptions
+                Contributor = new AppSurfaceDocsContributorOptions
                 {
                     Enabled = true,
                     DefaultBranch = "main",
                     SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
-                    LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                    LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
                 }
             },
             _envFake,
@@ -1632,13 +1632,13 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (_, _) =>
             {
@@ -1672,13 +1672,13 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.None
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.None
             },
             resolveGitLastUpdatedUtcAsync: null);
 
@@ -1716,12 +1716,12 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (_, _) =>
             {
@@ -1762,12 +1762,12 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (_, _) =>
             {
@@ -1794,12 +1794,12 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             async (_, cancellationToken) =>
             {
@@ -1849,12 +1849,12 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             async (_, cancellationToken) =>
             {
@@ -1891,12 +1891,12 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             async (_, cancellationToken) =>
             {
@@ -1943,10 +1943,10 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
-                LastUpdatedMode = RazorDocsLastUpdatedMode.None
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.None
             },
             resolveGitLastUpdatedUtcAsync: null);
 
@@ -1981,10 +1981,10 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
-                LastUpdatedMode = RazorDocsLastUpdatedMode.None
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.None
             },
             resolveGitLastUpdatedUtcAsync: null);
 
@@ -2019,10 +2019,10 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
-                LastUpdatedMode = RazorDocsLastUpdatedMode.None
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.None
             },
             resolveGitLastUpdatedUtcAsync: null);
 
@@ -2057,10 +2057,10 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
-                LastUpdatedMode = RazorDocsLastUpdatedMode.None
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.None
             },
             resolveGitLastUpdatedUtcAsync: null);
 
@@ -2094,10 +2094,10 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
-                LastUpdatedMode = RazorDocsLastUpdatedMode.None
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.None
             },
             resolveGitLastUpdatedUtcAsync: null);
 
@@ -2134,13 +2134,13 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (_, _) =>
             {
@@ -2182,13 +2182,13 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (_, _) =>
             {
@@ -2230,13 +2230,13 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (_, _) =>
             {
@@ -2278,13 +2278,13 @@ public class DocAggregatorTests : IDisposable
         var resolverCalls = 0;
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.Git
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.Git
             },
             (_, _) =>
             {
@@ -2313,13 +2313,13 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "feature/issue-143",
                 SourceUrlTemplate = "https://example.com/blob/{branch}/{path}",
                 EditUrlTemplate = "https://example.com/edit/{branch}/{path}",
-                LastUpdatedMode = RazorDocsLastUpdatedMode.None
+                LastUpdatedMode = AppSurfaceDocsLastUpdatedMode.None
             },
             resolveGitLastUpdatedUtcAsync: null);
 
@@ -2531,9 +2531,9 @@ public class DocAggregatorTests : IDisposable
 
         using var cache = new MemoryCache(new MemoryCacheOptions());
         using var memo = new Memo(cache);
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/docs/next"
             }
@@ -2677,6 +2677,32 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldNotIndexCodeLanguageChrome()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Guide",
+                "guides/guide.md",
+                """
+                <p>Run:</p>
+                <pre class="doc-code doc-code--highlighted doc-code--language-bash language-bash" data-doc-code-language="Bash"><code>dotnet run</code></pre>
+                """)
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+
+        var indexedDocument = Assert.Single(payload.Documents);
+        Assert.Equal("Run: dotnet run", indexedDocument.BodyText);
+        Assert.Equal("Run: dotnet run", indexedDocument.Snippet);
+        Assert.DoesNotContain("Bash dotnet", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bash dotnet", indexedDocument.Snippet, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bash", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bash", indexedDocument.Snippet, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldOmitGeneratedSymbolSourceLinkText()
     {
         var harvester = A.Fake<IDocHarvester>();
@@ -2686,7 +2712,7 @@ public class DocAggregatorTests : IDisposable
                 new DocNode(
                     "Calculator",
                     "Namespaces/Test",
-                    """<p>Calculator behavior.</p><span data-razordocs-symbol-source="Test-Calculator"></span>""",
+                    """<p>Calculator behavior.</p><span data-appsurfacedocs-symbol-source="Test-Calculator"></span>""",
                     SymbolSourceProvenance:
                     [
                         new DocSymbolSourceProvenance
@@ -2700,13 +2726,13 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = new DocAggregator(
             [harvester],
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Source = new RazorDocsSourceOptions
+                Source = new AppSurfaceDocsSourceOptions
                 {
                     RepositoryRoot = Path.GetTempPath()
                 },
-                Contributor = new RazorDocsContributorOptions
+                Contributor = new AppSurfaceDocsContributorOptions
                 {
                     Enabled = true,
                     DefaultBranch = "main",
@@ -2716,7 +2742,7 @@ public class DocAggregatorTests : IDisposable
             },
             _envFake,
             _memo,
-            new RazorDocsHtmlSanitizer(),
+            new AppSurfaceDocsHtmlSanitizer(),
             _loggerFake,
             resolveGitLastUpdatedUtcAsync: null);
 
@@ -2789,7 +2815,7 @@ public class DocAggregatorTests : IDisposable
 
         var sharedEnv = A.Fake<IWebHostEnvironment>();
         A.CallTo(() => sharedEnv.ContentRootPath).Returns(Path.GetTempPath());
-        var sharedSanitizer = A.Fake<IRazorDocsHtmlSanitizer>();
+        var sharedSanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
         A.CallTo(() => sharedSanitizer.Sanitize(A<string>._))
             .ReturnsLazily((string input) => input);
         var sharedLogger = A.Fake<ILogger<DocAggregator>>();
@@ -2801,9 +2827,9 @@ public class DocAggregatorTests : IDisposable
         A.CallTo(() => harvesterB.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns(new[] { new DocNode("DocB", "b", "content") });
 
-        var sharedOptions = new RazorDocsOptions
+        var sharedOptions = new AppSurfaceDocsOptions
         {
-            Source = new RazorDocsSourceOptions { RepositoryRoot = Path.GetTempPath() }
+            Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = Path.GetTempPath() }
         };
 
         var aggregatorA = new DocAggregator(
@@ -3047,12 +3073,12 @@ public class DocAggregatorTests : IDisposable
         Assert.DoesNotContain(
             firstHealth.Diagnostics.SelectMany(diagnostic => new[] { diagnostic.Problem, diagnostic.Cause, diagnostic.Fix }),
             value => value.Contains("Harvester boom", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(1, CountLogCalls(_loggerFake, LogLevel.Critical, "All RazorDocs harvesters failed"));
+        Assert.Equal(1, CountLogCalls(_loggerFake, LogLevel.Critical, "All AppSurface Docs harvesters failed"));
 
         aggregator.InvalidateCache();
         _ = await aggregator.GetHarvestHealthAsync();
 
-        Assert.Equal(2, CountLogCalls(_loggerFake, LogLevel.Critical, "All RazorDocs harvesters failed"));
+        Assert.Equal(2, CountLogCalls(_loggerFake, LogLevel.Critical, "All AppSurface Docs harvesters failed"));
     }
 
     [Fact]
@@ -3204,9 +3230,9 @@ public class DocAggregatorTests : IDisposable
     public async Task Constructor_ShouldPreferConfiguredRoot_OverEnvironmentFallback()
     {
         var configuredRoot = Path.Combine(Path.GetTempPath(), "configured-root");
-        var localOptions = new RazorDocsOptions
+        var localOptions = new AppSurfaceDocsOptions
         {
-            Source = new RazorDocsSourceOptions { RepositoryRoot = configuredRoot }
+            Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = configuredRoot }
         };
         var localEnv = A.Fake<IWebHostEnvironment>();
         A.CallTo(() => localEnv.ContentRootPath).Returns("/definitely/not/used");
@@ -3442,7 +3468,7 @@ public class DocAggregatorTests : IDisposable
 
         var aggregator = CreateContributorAggregator(
             harvester,
-            new RazorDocsContributorOptions
+            new AppSurfaceDocsContributorOptions
             {
                 Enabled = true,
                 DefaultBranch = "main",
@@ -3712,7 +3738,7 @@ public class DocAggregatorTests : IDisposable
     public async Task Constructor_ShouldFallbackToDiscoveredRepositoryRoot_WhenSourceRootIsMissing()
     {
         // Arrange
-        var localOptions = new RazorDocsOptions();
+        var localOptions = new AppSurfaceDocsOptions();
         var localEnv = A.Fake<IWebHostEnvironment>();
         var contentRoot = Path.Combine(Path.GetTempPath(), "repo-fallback-root");
         A.CallTo(() => localEnv.ContentRootPath).Returns(contentRoot);
@@ -3739,9 +3765,9 @@ public class DocAggregatorTests : IDisposable
     [Fact]
     public void Constructor_ShouldThrow_WhenConfiguredRepositoryRootIsWhitespace()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Source = new RazorDocsSourceOptions { RepositoryRoot = "   " }
+            Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = "   " }
         };
 
         var ex = Assert.Throws<ArgumentException>(
@@ -3753,7 +3779,7 @@ public class DocAggregatorTests : IDisposable
                 _sanitizerFake,
                 _loggerFake));
 
-        Assert.Equal(nameof(RazorDocsSourceOptions.RepositoryRoot), ex.ParamName);
+        Assert.Equal(nameof(AppSurfaceDocsSourceOptions.RepositoryRoot), ex.ParamName);
         Assert.Contains("whitespace", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -3764,7 +3790,7 @@ public class DocAggregatorTests : IDisposable
     [InlineData(double.MaxValue)]
     public void Constructor_ShouldThrow_WhenCacheExpirationIsInvalid(double cacheExpirationMinutes)
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
             CacheExpirationMinutes = cacheExpirationMinutes
         };
@@ -3778,16 +3804,16 @@ public class DocAggregatorTests : IDisposable
                 _sanitizerFake,
                 _loggerFake));
 
-        Assert.Equal(nameof(RazorDocsOptions.CacheExpirationMinutes), ex.ParamName);
+        Assert.Equal(nameof(AppSurfaceDocsOptions.CacheExpirationMinutes), ex.ParamName);
     }
 
     [Fact]
     public void Constructor_ShouldThrow_WhenBundleModeIsRequestedBeforeItIsImplemented()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Mode = RazorDocsMode.Bundle,
-            Bundle = new RazorDocsBundleOptions { Path = "/tmp/docs.bundle.json" }
+            Mode = AppSurfaceDocsMode.Bundle,
+            Bundle = new AppSurfaceDocsBundleOptions { Path = "/tmp/docs.bundle.json" }
         };
 
         var ex = Assert.Throws<NotSupportedException>(
@@ -3805,9 +3831,9 @@ public class DocAggregatorTests : IDisposable
     [Fact]
     public void Constructor_ShouldThrow_WhenModeIsUnsupported()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Mode = (RazorDocsMode)999
+            Mode = (AppSurfaceDocsMode)999
         };
 
         var ex = Assert.Throws<NotSupportedException>(
@@ -3819,13 +3845,13 @@ public class DocAggregatorTests : IDisposable
                 _sanitizerFake,
                 _loggerFake));
 
-        Assert.Contains("Unsupported RazorDocs mode", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Unsupported AppSurface Docs mode", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void Constructor_ShouldThrow_WhenSourceOptionsAreNullInSourceMode()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
             Source = null!
         };
@@ -3924,16 +3950,16 @@ public class DocAggregatorTests : IDisposable
 
     private DocAggregator CreateContributorAggregator(
         IDocHarvester harvester,
-        RazorDocsContributorOptions contributorOptions,
+        AppSurfaceDocsContributorOptions contributorOptions,
         Func<string, CancellationToken, Task<DateTimeOffset?>>? resolveGitLastUpdatedUtcAsync,
         TimeSpan? contributorFreshnessTimeout = null,
         Func<DateTimeOffset>? utcNow = null)
     {
         return new DocAggregator(
             [harvester],
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Source = new RazorDocsSourceOptions
+                Source = new AppSurfaceDocsSourceOptions
                 {
                     RepositoryRoot = Path.GetTempPath()
                 },
@@ -3957,9 +3983,9 @@ public class DocAggregatorTests : IDisposable
     {
         return new DocAggregator(
             harvesters,
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Source = new RazorDocsSourceOptions
+                Source = new AppSurfaceDocsSourceOptions
                 {
                     RepositoryRoot = Path.GetTempPath()
                 }

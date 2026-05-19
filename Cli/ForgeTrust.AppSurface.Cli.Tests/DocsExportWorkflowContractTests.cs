@@ -19,7 +19,7 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Contains("main", pullRequestBranches);
 
         var jobs = GetMapping(root, "jobs");
-        var exportJob = GetMapping(jobs, "export-razordocs");
+        var exportJob = GetMapping(jobs, "export-appsurface-docs");
 
         Assert.DoesNotContain(exportJob.Children.Keys.OfType<YamlScalarNode>(), key => key.Value == "if");
 
@@ -30,31 +30,31 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal("actions/checkout@v5", GetScalar(checkout, "uses"));
         Assert.Equal("0", GetScalar(GetMapping(checkout, "with"), "fetch-depth"));
 
-        var exportStep = FindStep(steps, "Export RazorDocs static site with CDN validation");
+        var exportStep = FindStep(steps, "Export AppSurface Docs static site with CDN validation");
         var exportEnv = GetMapping(exportStep, "env");
-        Assert.Contains("RazorDocs__Contributor__DefaultBranch", ScalarKeys(exportEnv));
-        Assert.Contains("RazorDocs__Contributor__SourceRef", ScalarKeys(exportEnv));
-        Assert.Contains("RazorDocs__Contributor__SourceUrlTemplate", ScalarKeys(exportEnv));
-        Assert.Contains("RazorDocs__Contributor__SymbolSourceUrlTemplate", ScalarKeys(exportEnv));
-        Assert.Contains("RazorDocs__Contributor__EditUrlTemplate", ScalarKeys(exportEnv));
-        Assert.Contains("RazorDocs__Contributor__LastUpdatedMode", ScalarKeys(exportEnv));
+        Assert.Contains("AppSurfaceDocs__Contributor__DefaultBranch", ScalarKeys(exportEnv));
+        Assert.Contains("AppSurfaceDocs__Contributor__SourceRef", ScalarKeys(exportEnv));
+        Assert.Contains("AppSurfaceDocs__Contributor__SourceUrlTemplate", ScalarKeys(exportEnv));
+        Assert.Contains("AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate", ScalarKeys(exportEnv));
+        Assert.Contains("AppSurfaceDocs__Contributor__EditUrlTemplate", ScalarKeys(exportEnv));
+        Assert.Contains("AppSurfaceDocs__Contributor__LastUpdatedMode", ScalarKeys(exportEnv));
 
         var exportRun = GetScalar(exportStep, "run");
-        Assert.Contains("printf '%s\\n' '/' '/docs' > \"$RUNNER_TEMP/razordocs-seeds.txt\"", exportRun, StringComparison.Ordinal);
+        Assert.Contains("printf '%s\\n' '/' '/docs' > \"$RUNNER_TEMP/appsurface-docs-seeds.txt\"", exportRun, StringComparison.Ordinal);
         Assert.Contains("dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", exportRun, StringComparison.Ordinal);
         Assert.Contains("docs export", exportRun, StringComparison.Ordinal);
         Assert.Contains("--repo .", exportRun, StringComparison.Ordinal);
         Assert.Contains("--mode cdn", exportRun, StringComparison.Ordinal);
         Assert.Contains("--strict", exportRun, StringComparison.Ordinal);
-        Assert.Contains("--seeds \"$RUNNER_TEMP/razordocs-seeds.txt\"", exportRun, StringComparison.Ordinal);
-        Assert.Contains("--output \"$RUNNER_TEMP/razordocs-pages\"", exportRun, StringComparison.Ordinal);
+        Assert.Contains("--seeds \"$RUNNER_TEMP/appsurface-docs-seeds.txt\"", exportRun, StringComparison.Ordinal);
+        Assert.Contains("--output \"$RUNNER_TEMP/appsurface-docs-pages\"", exportRun, StringComparison.Ordinal);
 
         var uploadStep = FindStep(steps, "Upload Pages artifact");
         Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(uploadStep, "if"));
         Assert.Equal("actions/upload-pages-artifact@v4", GetScalar(uploadStep, "uses"));
-        Assert.Equal("${{ runner.temp }}/razordocs-pages", GetScalar(GetMapping(uploadStep, "with"), "path"));
+        Assert.Equal("${{ runner.temp }}/appsurface-docs-pages", GetScalar(GetMapping(uploadStep, "with"), "path"));
 
-        var deployJob = GetMapping(jobs, "deploy-razordocs");
+        var deployJob = GetMapping(jobs, "deploy-appsurface-docs");
         Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(deployJob, "if"));
     }
 

@@ -1,6 +1,6 @@
 # Release contract maintainer notes
 
-This file lives under `.github/` on purpose so RazorDocs does not publish it as public documentation.
+This file lives under `.github/` on purpose so AppSurface Docs does not publish it as public documentation.
 
 ## `no-unreleased-entry` label
 
@@ -20,11 +20,12 @@ The current workflow establishes the contracts that future release automation wi
 - one public unreleased proof artifact
 - tagged release notes plus a compact changelog
 - verified prerelease `.nupkg` artifacts from the manifest-backed package artifact workflow
-- packageable CLI artifacts such as `ForgeTrust.RazorWire.Cli`
+- publishable .NET tool artifacts such as `ForgeTrust.AppSurface.Cli`
 
-Until that automation lands, package docs that show `dnx`, `dotnet tool execute`,
-or `dotnet tool install` assume either a manually published package source or an
-explicit local package source.
+CLI docs that show `dnx`, `dotnet tool execute`, or `dotnet tool install` assume
+either a NuGet-published prerelease package or an explicit local package source.
+`ForgeTrust.AppSurface.Cli` is the public `appsurface` tool; RazorWire-specific
+export workflows remain deferred to the separate `razorwire` tool.
 
 Tracked follow-up: #161, "Automate coordinated monorepo releases from the public release contract".
 
@@ -49,9 +50,10 @@ dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurf
 The verifier restores and builds the solution once, packs manifest-selected packages
 with `--no-restore --no-build`, inspects each `.nupkg`, and writes a markdown report.
 It checks package metadata, expected same-version dependencies, first-party DLL
-informational versions, and Tailwind runtime binary payloads. It intentionally
-rejects stable versions and SemVer build metadata because this path is for
-prerelease package identity that NuGet will preserve exactly.
+informational versions, .NET tool command settings, and Tailwind runtime binary
+payloads. It intentionally rejects stable versions and SemVer build metadata
+because this path is for prerelease package identity that NuGet will preserve
+exactly.
 
 Tracked follow-up for actual publishing: #253, "Add protected NuGet prerelease publish workflow after rename pass".
 
@@ -111,8 +113,12 @@ dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurf
 `verify-packages` writes both the markdown validation report and
 `package-artifact-manifest.json`. The JSON manifest records the prerelease version,
 manifest order, package id, project path, publish decision, artifact file name, tool
-flag, and SHA-512 hash for every `publish` and `support_publish` package selected
-from `packages/package-index.yml`.
+flag, declared tool command name for .NET tools, and SHA-512 hash for every
+`publish` and `support_publish` package selected from `packages/package-index.yml`.
+The `tool_command_name` value must be one file-name-safe command token, not a
+path: no whitespace, path separators, reserved `.`/`..` segments, control
+characters, trailing periods, Windows reserved device names or dotted aliases,
+or Windows-invalid file-name characters.
 
 The protected publish job downloads that exact artifact bundle and runs:
 
@@ -149,8 +155,11 @@ Fix the defect in source, create the next prerelease tag, and let the workflow
 publish the next package family.
 
 After publishing, the workflow runs `smoke-install` from a fresh NuGet configuration
-that clears inherited sources and points only at nuget.org. It restores every direct
-`publish` package from `packages/package-index.yml` with a shared fresh
-`NUGET_PACKAGES` directory, isolated `DOTNET_CLI_HOME`, and retry/backoff for NuGet
-indexing delay. Tool packages, when they become publishable, use an isolated
-`dotnet tool install --tool-path` smoke path instead of a project restore.
+that clears inherited sources and points only at nuget.org. It restores every
+direct non-tool `publish` package from `packages/package-index.yml` with a shared
+fresh `NUGET_PACKAGES` directory, isolated `DOTNET_CLI_HOME`, and retry/backoff
+for NuGet indexing delay. Tool packages install with
+`dotnet tool install --tool-path`, then the workflow resolves the declared
+`tool_command_name` shim and runs `<command> --help`. The smoke step fails if the
+installed command exits non-zero or if help output does not identify the command
+users are expected to type.

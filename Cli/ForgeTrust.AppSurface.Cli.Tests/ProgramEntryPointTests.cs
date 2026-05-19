@@ -23,6 +23,8 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("usage", result.AllText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"{AppSurfaceCliApp.ToolCommandName} [command]", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet ForgeTrust.AppSurface.Cli.dll", result.AllText, StringComparison.Ordinal);
         Assert.Contains("docs", result.AllText, StringComparison.Ordinal);
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
@@ -35,7 +37,7 @@ public sealed class ProgramEntryPointTests
         var result = await InvokeEntryPointAsync(["docs", "--help"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("Preview RazorDocs for a repository.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Preview AppSurface Docs for a repository.", result.AllText, StringComparison.Ordinal);
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--repo", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
@@ -45,10 +47,10 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task DocsCommand_Should_Forward_RazorDocs_Host_Arguments()
+    public async Task DocsCommand_Should_Forward_AppSurfaceDocs_Host_Arguments()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             [
@@ -64,15 +66,15 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotNull(runner.Args);
-        Assert.Contains("--RazorDocs:Source:RepositoryRoot", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Source:RepositoryRoot", runner.Args);
         Assert.Contains(repository.Path, runner.Args);
         Assert.Contains("--urls", runner.Args);
         Assert.Contains("http://127.0.0.1:5189", runner.Args);
-        Assert.Contains("--RazorDocs:Harvest:FailOnFailure", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Harvest:FailOnFailure", runner.Args);
         Assert.Contains("true", runner.Args);
-        Assert.Contains("--RazorDocs:Routing:RouteRootPath", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Routing:RouteRootPath", runner.Args);
         Assert.Contains("/reference", runner.Args);
-        Assert.Contains("--RazorDocs:Routing:DocsRootPath", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Routing:DocsRootPath", runner.Args);
         Assert.Contains("/reference/next", runner.Args);
         Assert.Contains("--environment", runner.Args);
         Assert.Contains("Development", runner.Args);
@@ -80,10 +82,10 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task DocsPreviewAlias_Should_Forward_RazorDocs_Host_Arguments()
+    public async Task DocsPreviewAlias_Should_Forward_AppSurfaceDocs_Host_Arguments()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "preview", "--repo", repository.Path, "--port", "5189"],
@@ -91,7 +93,7 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.NotNull(runner.Args);
-        Assert.Contains("--RazorDocs:Source:RepositoryRoot", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Source:RepositoryRoot", runner.Args);
         Assert.Contains(repository.Path, runner.Args);
         Assert.Contains("--port", runner.Args);
         Assert.Contains("5189", runner.Args);
@@ -102,7 +104,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Default_ToDevelopmentEnvironment_ForLocalPreview()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", repository.Path],
@@ -121,7 +123,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Preserve_Explicit_Environment()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", repository.Path, "--environment", "Production"],
@@ -140,7 +142,7 @@ public sealed class ProgramEntryPointTests
         using var callerDirectory = TempDirectory.Create("appsurface-docs-caller-");
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
         var previousDirectory = Directory.GetCurrentDirectory();
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         try
         {
@@ -168,7 +170,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Allow_Disabling_Startup_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", repository.Path, "--startup-timeout-seconds", "0"],
@@ -182,7 +184,7 @@ public sealed class ProgramEntryPointTests
     [Fact]
     public async Task DocsCommand_Should_Reject_Blank_RepositoryRoot()
     {
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", " "],
@@ -200,7 +202,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Reject_Invalid_Startup_Timeout(string timeout)
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", repository.Path, "--startup-timeout-seconds", timeout],
@@ -218,7 +220,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Reject_Oversized_Startup_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", repository.Path, "--startup-timeout-seconds", "1E+300"],
@@ -239,7 +241,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Reject_Invalid_Port(string port)
     {
         using var repository = TempDirectory.Create("appsurface-docs-repo-");
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", repository.Path, "--port", port],
@@ -254,7 +256,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsCommand_Should_Reject_Missing_RepositoryRoot()
     {
         var missingRepository = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
-        var runner = new CapturingRazorDocsHostRunner();
+        var runner = new CapturingAppSurfaceDocsHostRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "--repo", missingRepository],
@@ -271,7 +273,7 @@ public sealed class ProgramEntryPointTests
         var result = await InvokeEntryPointAsync(["docs", "export", "--help"]);
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("Export RazorDocs for a repository to static files.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Export AppSurface Docs for a repository to static files.", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--output", result.AllText, StringComparison.Ordinal);
         Assert.Contains("dist/docs", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--mode", result.AllText, StringComparison.Ordinal);
@@ -288,7 +290,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsExportCommand_Should_Default_Output_Environment_Mode_And_Derived_Seeds()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
-        var runner = new CapturingRazorDocsExportRunner();
+        var runner = new CapturingAppSurfaceDocsExportRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "export", "--repo", repository.Path],
@@ -317,7 +319,7 @@ public sealed class ProgramEntryPointTests
         using var output = TempDirectory.Create("appsurface-docs-output-");
         var seedFile = System.IO.Path.Join(repository.Path, "seeds.txt");
         await File.WriteAllLinesAsync(seedFile, ["/", "/reference/next"]);
-        var runner = new CapturingRazorDocsExportRunner();
+        var runner = new CapturingAppSurfaceDocsExportRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             [
@@ -343,13 +345,13 @@ public sealed class ProgramEntryPointTests
         Assert.Null(args.InitialSeedRoutes);
         Assert.Equal("http://127.0.0.1:0", args.RequestedBaseUrl);
         Assert.Equal("Development", args.HostArgs.EnvironmentName);
-        Assert.Contains("--RazorDocs:Source:RepositoryRoot", args.HostArgs.Args);
+        Assert.Contains("--AppSurfaceDocs:Source:RepositoryRoot", args.HostArgs.Args);
         Assert.Contains(repository.Path, args.HostArgs.Args);
-        Assert.Contains("--RazorDocs:Harvest:FailOnFailure", args.HostArgs.Args);
+        Assert.Contains("--AppSurfaceDocs:Harvest:FailOnFailure", args.HostArgs.Args);
         Assert.Contains("true", args.HostArgs.Args);
-        Assert.Contains("--RazorDocs:Routing:RouteRootPath", args.HostArgs.Args);
+        Assert.Contains("--AppSurfaceDocs:Routing:RouteRootPath", args.HostArgs.Args);
         Assert.Contains("/reference", args.HostArgs.Args);
-        Assert.Contains("--RazorDocs:Routing:DocsRootPath", args.HostArgs.Args);
+        Assert.Contains("--AppSurfaceDocs:Routing:DocsRootPath", args.HostArgs.Args);
         Assert.Contains("/reference/next", args.HostArgs.Args);
         Assert.Equal(TimeSpan.FromSeconds(2), args.HostArgs.StartupTimeout);
     }
@@ -358,7 +360,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsExportCommand_Should_Derive_Default_Seed_From_Custom_DocsRoot()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
-        var runner = new CapturingRazorDocsExportRunner();
+        var runner = new CapturingAppSurfaceDocsExportRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "export", "--repo", repository.Path, "--route-root", "/foo/bar", "--docs-root", "/foo/bar/next"],
@@ -374,7 +376,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsExportCommand_Should_Reject_Blank_Output()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
-        var runner = new CapturingRazorDocsExportRunner();
+        var runner = new CapturingAppSurfaceDocsExportRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "export", "--repo", repository.Path, "--output", " "],
@@ -391,7 +393,7 @@ public sealed class ProgramEntryPointTests
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         var outputFile = System.IO.Path.Join(repository.Path, "docs.html");
         await File.WriteAllTextAsync(outputFile, "not a directory");
-        var runner = new CapturingRazorDocsExportRunner();
+        var runner = new CapturingAppSurfaceDocsExportRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "export", "--repo", repository.Path, "--output", outputFile],
@@ -410,7 +412,7 @@ public sealed class ProgramEntryPointTests
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         var missingSeedFile = System.IO.Path.Join(repository.Path, "missing-seeds.txt");
-        var runner = new CapturingRazorDocsExportRunner();
+        var runner = new CapturingAppSurfaceDocsExportRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "export", "--repo", repository.Path, "--seeds", missingSeedFile],
@@ -425,7 +427,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsExportCommand_Should_Reject_Seeds_Short_Alias()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
-        var runner = new CapturingRazorDocsExportRunner();
+        var runner = new CapturingAppSurfaceDocsExportRunner();
 
         var result = await InvokeProgramEntryPointAsync(
             ["docs", "export", "--repo", repository.Path, "-s", "seeds.txt"],
@@ -440,7 +442,7 @@ public sealed class ProgramEntryPointTests
     public async Task DocsExportCommand_Should_Translate_Export_Validation_Failures()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
-        var runner = new CapturingRazorDocsExportRunner
+        var runner = new CapturingAppSurfaceDocsExportRunner
         {
             Exception = new ExportValidationException(
                 [new ExportDiagnostic("RWEXPORT004", "Managed URL could not be rewritten.", "/docs")])
@@ -460,9 +462,9 @@ public sealed class ProgramEntryPointTests
     public async Task DocsExportCommand_Should_Translate_Startup_Timeout_Failures()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
-        var runner = new CapturingRazorDocsExportRunner
+        var runner = new CapturingAppSurfaceDocsExportRunner
         {
-            Exception = new TimeoutException("RazorDocs export host did not start within 10 seconds.")
+            Exception = new TimeoutException("AppSurface Docs export host did not start within 10 seconds.")
         };
 
         var result = await InvokeProgramEntryPointAsync(
@@ -470,72 +472,72 @@ public sealed class ProgramEntryPointTests
             options => RegisterRunner(options, runner));
 
         Assert.NotEqual(0, result.ExitCode);
-        Assert.Contains("RazorDocs export host did not start within 10 seconds.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("AppSurface Docs export host did not start within 10 seconds.", result.AllText, StringComparison.Ordinal);
         Assert.NotNull(runner.Args);
     }
 
     [Fact]
-    public void RazorDocsInProcessExportRunner_Should_Resolve_Single_Bound_BaseUrl()
+    public void AppSurfaceDocsInProcessExportRunner_Should_Resolve_Single_Bound_BaseUrl()
     {
-        var result = RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://127.0.0.1:51234"]);
+        var result = AppSurfaceDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://127.0.0.1:51234"]);
 
         Assert.Equal("http://127.0.0.1:51234", result);
     }
 
     [Fact]
-    public void RazorDocsInProcessExportRunner_Should_Resolve_Localhost_Bound_BaseUrl()
+    public void AppSurfaceDocsInProcessExportRunner_Should_Resolve_Localhost_Bound_BaseUrl()
     {
-        var result = RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://localhost:51234"]);
+        var result = AppSurfaceDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://localhost:51234"]);
 
         Assert.Equal("http://localhost:51234", result);
     }
 
     [Fact]
-    public void RazorDocsInProcessExportRunner_Should_Reject_Missing_Bound_BaseUrl()
+    public void AppSurfaceDocsInProcessExportRunner_Should_Reject_Missing_Bound_BaseUrl()
     {
         var ex = Assert.Throws<InvalidOperationException>(
-            () => RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(Array.Empty<string>()));
+            () => AppSurfaceDocsInProcessExportRunner.ResolveBoundBaseUrl(Array.Empty<string>()));
 
         Assert.Contains("did not publish a listening URL", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RazorDocsInProcessExportRunner_Should_Reject_Multiple_Bound_BaseUrls()
+    public void AppSurfaceDocsInProcessExportRunner_Should_Reject_Multiple_Bound_BaseUrls()
     {
         var ex = Assert.Throws<InvalidOperationException>(
-            () => RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://127.0.0.1:1", "http://127.0.0.1:2"]));
+            () => AppSurfaceDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://127.0.0.1:1", "http://127.0.0.1:2"]));
 
         Assert.Contains("published 2 listening URLs", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RazorDocsInProcessExportRunner_Should_Reject_Invalid_Bound_BaseUrl()
+    public void AppSurfaceDocsInProcessExportRunner_Should_Reject_Invalid_Bound_BaseUrl()
     {
         var ex = Assert.Throws<InvalidOperationException>(
-            () => RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(["not-a-url"]));
+            () => AppSurfaceDocsInProcessExportRunner.ResolveBoundBaseUrl(["not-a-url"]));
 
         Assert.Contains("did not publish a valid listening URL", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void RazorDocsInProcessExportRunner_Should_Reject_NonLoopback_Bound_BaseUrl()
+    public void AppSurfaceDocsInProcessExportRunner_Should_Reject_NonLoopback_Bound_BaseUrl()
     {
         var ex = Assert.Throws<InvalidOperationException>(
-            () => RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://0.0.0.0:51234"]));
+            () => AppSurfaceDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://0.0.0.0:51234"]));
 
         Assert.Contains("published non-loopback URL", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task RazorDocsInProcessExportRunner_Should_Export_When_Startup_Timeout_Is_Disabled()
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_Export_When_Startup_Timeout_Is_Disabled()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         using var output = TempDirectory.Create("appsurface-docs-export-output-");
         var exporter = new CapturingStaticExporter();
         var host = new TrackingHost("http://127.0.0.1:61234");
         var hostStarter = new ImmediateExportHostStarter(host);
-        var runner = new RazorDocsInProcessExportRunner(
-            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            NullLogger<AppSurfaceDocsInProcessExportRunner>.Instance,
             exporter,
             hostStarter);
 
@@ -552,7 +554,7 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task RazorDocsInProcessExportRunner_Should_RunHost_And_Export_FromRepositoryRoot()
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_RunHost_And_Export_FromRepositoryRoot()
     {
         using var callerDirectory = TempDirectory.Create("appsurface-docs-export-caller-");
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
@@ -560,8 +562,8 @@ public sealed class ProgramEntryPointTests
         var previousDirectory = Directory.GetCurrentDirectory();
         var exporter = new CapturingStaticExporter();
         var hostStarter = new ImmediateExportHostStarter(new TrackingHost());
-        var runner = new RazorDocsInProcessExportRunner(
-            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            NullLogger<AppSurfaceDocsInProcessExportRunner>.Instance,
             exporter,
             hostStarter);
 
@@ -588,13 +590,13 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task RazorDocsInProcessExportRunner_Should_Translate_Startup_Cancellation_To_Startup_Timeout()
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_Translate_Startup_Cancellation_To_Startup_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         using var output = TempDirectory.Create("appsurface-docs-export-output-");
         var exporter = new CapturingStaticExporter();
-        var runner = new RazorDocsInProcessExportRunner(
-            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            NullLogger<AppSurfaceDocsInProcessExportRunner>.Instance,
             exporter,
             new CancelingExportHostStarter());
 
@@ -603,21 +605,21 @@ public sealed class ProgramEntryPointTests
                 CreateExportArgs(repository.Path, output.Path, TimeSpan.FromSeconds(30)),
                 CancellationToken.None));
 
-        Assert.Contains("RazorDocs export host did not start within 30 seconds.", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("AppSurface Docs export host did not start within 30 seconds.", ex.Message, StringComparison.Ordinal);
         Assert.IsType<OperationCanceledException>(ex.InnerException);
         Assert.Null(exporter.Context);
     }
 
     [Fact]
-    public async Task RazorDocsInProcessExportRunner_Should_Preserve_External_Cancellation_During_Startup()
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_Preserve_External_Cancellation_During_Startup()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         using var output = TempDirectory.Create("appsurface-docs-export-output-");
         using var cts = new CancellationTokenSource();
         var exporter = new CapturingStaticExporter();
         var hostStarter = new ControllableExportHostStarter();
-        var runner = new RazorDocsInProcessExportRunner(
-            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            NullLogger<AppSurfaceDocsInProcessExportRunner>.Instance,
             exporter,
             hostStarter);
 
@@ -649,7 +651,7 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task RazorDocsInProcessExportRunner_Should_Log_When_Late_Startup_Faults_After_External_Cancellation()
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_Log_When_Late_Startup_Faults_After_External_Cancellation()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         using var output = TempDirectory.Create("appsurface-docs-export-output-");
@@ -661,8 +663,8 @@ public sealed class ProgramEntryPointTests
             builder.AddProvider(loggerProvider);
         });
         var hostStarter = new ControllableExportHostStarter();
-        var runner = new RazorDocsInProcessExportRunner(
-            loggerFactory.CreateLogger<RazorDocsInProcessExportRunner>(),
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsInProcessExportRunner>(),
             new CapturingStaticExporter(),
             hostStarter);
 
@@ -682,7 +684,7 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task RazorDocsInProcessExportRunner_Should_Log_When_Late_Startup_Faults_After_Timeout()
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_Log_When_Late_Startup_Faults_After_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         using var output = TempDirectory.Create("appsurface-docs-export-output-");
@@ -693,8 +695,8 @@ public sealed class ProgramEntryPointTests
             builder.AddProvider(loggerProvider);
         });
         var hostStarter = new ControllableExportHostStarter();
-        var runner = new RazorDocsInProcessExportRunner(
-            loggerFactory.CreateLogger<RazorDocsInProcessExportRunner>(),
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsInProcessExportRunner>(),
             new CapturingStaticExporter(),
             hostStarter);
 
@@ -712,15 +714,15 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task RazorDocsInProcessExportRunner_Should_Log_And_Dispose_When_Host_Stop_Fails()
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_Log_And_Dispose_When_Host_Stop_Fails()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         using var output = TempDirectory.Create("appsurface-docs-export-output-");
         var loggerProvider = new InMemoryLoggerProvider();
         using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
         var host = new TrackingHost("http://127.0.0.1:61235", throwOnStop: true);
-        var runner = new RazorDocsInProcessExportRunner(
-            loggerFactory.CreateLogger<RazorDocsInProcessExportRunner>(),
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsInProcessExportRunner>(),
             new CapturingStaticExporter(),
             new ImmediateExportHostStarter(host));
 
@@ -730,29 +732,29 @@ public sealed class ProgramEntryPointTests
         Assert.True(host.DisposeCalled);
         Assert.Contains(
             loggerProvider.GetMessages(),
-            message => message.Contains("RazorDocs export host failed during shutdown.", StringComparison.Ordinal));
+            message => message.Contains("AppSurface Docs export host failed during shutdown.", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task RazorDocsInProcessExportRunner_Should_Not_Translate_Exporter_Cancellation_To_Startup_Timeout()
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_Not_Translate_Exporter_Cancellation_To_Startup_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         using var output = TempDirectory.Create("appsurface-docs-export-output-");
         var exporter = new CancelingStaticExporter();
-        var runner = new RazorDocsInProcessExportRunner(
-            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            NullLogger<AppSurfaceDocsInProcessExportRunner>.Instance,
             exporter);
-        var hostArgs = new RazorDocsHostArgs(
+        var hostArgs = new AppSurfaceDocsHostArgs(
             repository.Path,
             [
-                "--RazorDocs:Source:RepositoryRoot",
+                "--AppSurfaceDocs:Source:RepositoryRoot",
                 repository.Path,
                 "--environment",
                 "Production"
             ],
             TimeSpan.FromSeconds(30),
             "Production");
-        var exportArgs = new RazorDocsExportArgs(
+        var exportArgs = new AppSurfaceDocsExportArgs(
             hostArgs,
             output.Path,
             SeedRoutesPath: null,
@@ -768,27 +770,27 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task RazorDocsInProcessExportRunner_Should_Timeout_When_Host_Build_Does_Not_Complete()
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_Timeout_When_Host_Build_Does_Not_Complete()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         using var output = TempDirectory.Create("appsurface-docs-export-output-");
         var exporter = new CapturingStaticExporter();
         var hostStarter = new ControllableExportHostStarter();
-        var runner = new RazorDocsInProcessExportRunner(
-            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            NullLogger<AppSurfaceDocsInProcessExportRunner>.Instance,
             exporter,
             hostStarter);
-        var hostArgs = new RazorDocsHostArgs(
+        var hostArgs = new AppSurfaceDocsHostArgs(
             repository.Path,
             [
-                "--RazorDocs:Source:RepositoryRoot",
+                "--AppSurfaceDocs:Source:RepositoryRoot",
                 repository.Path,
                 "--environment",
                 "Production"
             ],
             TimeSpan.FromMilliseconds(50),
             "Production");
-        var exportArgs = new RazorDocsExportArgs(
+        var exportArgs = new AppSurfaceDocsExportArgs(
             hostArgs,
             output.Path,
             SeedRoutesPath: null,
@@ -805,7 +807,7 @@ public sealed class ProgramEntryPointTests
             Assert.Same(exportTask, completedTask);
             var ex = await Assert.ThrowsAsync<TimeoutException>(() => exportTask);
 
-            Assert.Contains("RazorDocs export host did not start within 0.05 seconds.", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("AppSurface Docs export host did not start within 0.05 seconds.", ex.Message, StringComparison.Ordinal);
             Assert.True(hostStarter.StartupToken.IsCancellationRequested);
             Assert.Null(exporter.Context);
 
@@ -948,25 +950,25 @@ public sealed class ProgramEntryPointTests
         });
     }
 
-    private static void RegisterRunner(ConsoleOptions options, CapturingRazorDocsHostRunner runner)
+    private static void RegisterRunner(ConsoleOptions options, CapturingAppSurfaceDocsHostRunner runner)
     {
-        options.CustomRegistrations.Add(services => services.AddSingleton<IRazorDocsHostRunner>(runner));
+        options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsHostRunner>(runner));
     }
 
-    private static void RegisterRunner(ConsoleOptions options, CapturingRazorDocsExportRunner runner)
+    private static void RegisterRunner(ConsoleOptions options, CapturingAppSurfaceDocsExportRunner runner)
     {
-        options.CustomRegistrations.Add(services => services.AddSingleton<IRazorDocsExportRunner>(runner));
+        options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsExportRunner>(runner));
     }
 
-    private static RazorDocsExportArgs CreateExportArgs(
+    private static AppSurfaceDocsExportArgs CreateExportArgs(
         string repositoryPath,
         string outputPath,
         TimeSpan? startupTimeout)
     {
-        var hostArgs = new RazorDocsHostArgs(
+        var hostArgs = new AppSurfaceDocsHostArgs(
             repositoryPath,
             [
-                "--RazorDocs:Source:RepositoryRoot",
+                "--AppSurfaceDocs:Source:RepositoryRoot",
                 repositoryPath,
                 "--environment",
                 "Production"
@@ -974,7 +976,7 @@ public sealed class ProgramEntryPointTests
             startupTimeout,
             "Production");
 
-        return new RazorDocsExportArgs(
+        return new AppSurfaceDocsExportArgs(
             hostArgs,
             outputPath,
             SeedRoutesPath: null,
@@ -1034,7 +1036,7 @@ public sealed class ProgramEntryPointTests
                 });
     }
 
-    private sealed class CapturingRazorDocsHostRunner : IRazorDocsHostRunner
+    private sealed class CapturingAppSurfaceDocsHostRunner : IAppSurfaceDocsHostRunner
     {
         public string[]? Args { get; private set; }
 
@@ -1051,13 +1053,13 @@ public sealed class ProgramEntryPointTests
         }
     }
 
-    private sealed class CapturingRazorDocsExportRunner : IRazorDocsExportRunner
+    private sealed class CapturingAppSurfaceDocsExportRunner : IAppSurfaceDocsExportRunner
     {
-        public RazorDocsExportArgs? Args { get; private set; }
+        public AppSurfaceDocsExportArgs? Args { get; private set; }
 
         public Exception? Exception { get; init; }
 
-        public Task ExportAsync(RazorDocsExportArgs args, CancellationToken cancellationToken)
+        public Task ExportAsync(AppSurfaceDocsExportArgs args, CancellationToken cancellationToken)
         {
             Args = args;
             if (Exception is not null)
@@ -1094,7 +1096,7 @@ public sealed class ProgramEntryPointTests
         }
     }
 
-    private sealed class ImmediateExportHostStarter(IHost host) : IRazorDocsExportHostStarter
+    private sealed class ImmediateExportHostStarter(IHost host) : IAppSurfaceDocsExportHostStarter
     {
         public string? EnvironmentName { get; private set; }
 
@@ -1103,7 +1105,7 @@ public sealed class ProgramEntryPointTests
         public string? WorkingDirectoryDuringStart { get; private set; }
 
         public Task<IHost> BuildAndStartAsync(
-            RazorDocsExportArgs args,
+            AppSurfaceDocsExportArgs args,
             string environmentName,
             CancellationToken cancellationToken)
         {
@@ -1114,10 +1116,10 @@ public sealed class ProgramEntryPointTests
         }
     }
 
-    private sealed class CancelingExportHostStarter : IRazorDocsExportHostStarter
+    private sealed class CancelingExportHostStarter : IAppSurfaceDocsExportHostStarter
     {
         public Task<IHost> BuildAndStartAsync(
-            RazorDocsExportArgs args,
+            AppSurfaceDocsExportArgs args,
             string environmentName,
             CancellationToken cancellationToken)
         {
@@ -1125,7 +1127,7 @@ public sealed class ProgramEntryPointTests
         }
     }
 
-    private sealed class ControllableExportHostStarter : IRazorDocsExportHostStarter
+    private sealed class ControllableExportHostStarter : IAppSurfaceDocsExportHostStarter
     {
         private readonly TaskCompletionSource<IHost> _hostCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<object?> _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1135,7 +1137,7 @@ public sealed class ProgramEntryPointTests
         public CancellationToken StartupToken { get; private set; }
 
         public Task<IHost> BuildAndStartAsync(
-            RazorDocsExportArgs args,
+            AppSurfaceDocsExportArgs args,
             string environmentName,
             CancellationToken cancellationToken)
         {

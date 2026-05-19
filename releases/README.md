@@ -6,7 +6,7 @@ AppSurface now treats release notes as a product surface instead of a post-ship 
 2. How risky is it to adopt?
 3. Where will the final tagged story live once a version ships?
 
-It also acts as a concrete RazorDocs example for teams that want stronger release notes in their own products.
+It also acts as a concrete AppSurface Docs example for teams that want stronger release notes in their own products.
 
 ## Start here
 

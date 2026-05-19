@@ -35,7 +35,7 @@ This approach aims to:
 - Use `IMemo` for application and service-layer caching (for example, web modules and domain services).
 - Use direct `IMemoryCache` only inside caching infrastructure (the `ForgeTrust.AppSurface.Caching` package) or framework integration points where `IMemo` cannot be injected.
 - If a module depends on `AppSurfaceCachingModule`, do not call `AddMemoryCache()` again in that module.
-- Prefer one cache boundary per data snapshot. In RazorDocs, `DocAggregator` owns both docs aggregation and search-index payload caching so downstream controllers consume one shared snapshot.
+- Prefer one cache boundary per data snapshot. In AppSurface Docs, `DocAggregator` owns both docs aggregation and search-index payload caching so downstream controllers consume one shared snapshot.
 
 
 ## Project Structure
@@ -58,12 +58,12 @@ This approach aims to:
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation using `AddEndpointsApiExplorer` and `WithOpenApi`.
 - [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
 - [**ForgeTrust.AppSurface.Docs**](./Web/ForgeTrust.AppSurface.Docs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, and optional published-version archive surfaces.
-- [**ForgeTrust.AppSurface.Docs.Standalone**](./Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) – Thin export host for exporting or serving RazorDocs as an application.
+- [**ForgeTrust.AppSurface.Docs.Standalone**](./Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) – Thin export host for exporting or serving AppSurface Docs as an application.
 - [**ForgeTrust.AppSurface.Web.Scalar**](./Web/ForgeTrust.AppSurface.Web.Scalar/README.md) – Optional module that serves the Scalar API reference UI and depends on the OpenAPI module.
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including `appsurface docs` preview and `appsurface docs export` static RazorDocs export workflows.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including `appsurface docs` preview and `appsurface docs export` static AppSurface Docs export workflows.
 
 ### [Dependency](./Dependency/README.md)
 
