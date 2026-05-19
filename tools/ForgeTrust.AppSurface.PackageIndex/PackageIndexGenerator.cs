@@ -293,6 +293,16 @@ internal sealed class PackageIndexGenerator
         ValidatePublishContract(entry, knownPackageIds);
     }
 
+    /// <summary>
+    /// Validates the manifest command-name contract against project metadata for one package row.
+    /// </summary>
+    /// <param name="entry">Manifest row that may declare <c>tool_command_name</c> and a publish decision.</param>
+    /// <param name="metadata">Evaluated project metadata that reports whether the project packs as a .NET tool.</param>
+    /// <exception cref="PackageIndexException">
+    /// Thrown when a tool selected for <see cref="PackagePublishDecision.Publish"/> or
+    /// <see cref="PackagePublishDecision.SupportPublish"/> omits or mis-shapes <c>tool_command_name</c>, or when a
+    /// non-tool project declares a command name despite not setting <c>PackAsTool=true</c>.
+    /// </exception>
     private static void ValidateToolCommandName(PackageManifestEntry entry, PackageProjectMetadata metadata)
     {
         if (metadata.IsTool
