@@ -296,16 +296,23 @@ internal sealed class PackageIndexGenerator
     {
         if (string.IsNullOrWhiteSpace(commandName))
         {
-            throw new PackageIndexException($"Tool command name for '{projectPath}' must be provided.");
+            throw new PackageIndexException($"Tool command name ('tool_command_name') for '{projectPath}' must be provided.");
         }
 
-        if (commandName.Any(char.IsWhiteSpace)
-            || commandName.Contains('/', StringComparison.Ordinal)
-            || commandName.Contains('\\', StringComparison.Ordinal))
+        if (string.Equals(commandName, ".", StringComparison.Ordinal)
+            || string.Equals(commandName, "..", StringComparison.Ordinal)
+            || commandName.Any(IsInvalidToolCommandNameCharacter))
         {
             throw new PackageIndexException(
-                $"Tool command name for '{projectPath}' is invalid: '{commandName}'. Tool command names must not contain whitespace or path separators.");
+                $"Tool command name ('tool_command_name') for '{projectPath}' is invalid: '{commandName}'. Tool command names must not be reserved path segments or contain whitespace, path separators, control characters, or characters invalid in file names.");
         }
+    }
+
+    private static bool IsInvalidToolCommandNameCharacter(char value)
+    {
+        return char.IsWhiteSpace(value)
+            || char.IsControl(value)
+            || value is '/' or '\\' or '<' or '>' or ':' or '"' or '|' or '?' or '*';
     }
 
     private static void ValidatePublishContract(PackageManifestEntry entry, IReadOnlySet<string> knownPackageIds)
@@ -519,7 +526,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine($"- Edit `packages/package-index.yml` when the public package story changes.");
         builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
-        builder.AppendLine("- Keep `tool_command_name` aligned with each public .NET tool project's `ToolCommandName` so package validation and post-publish smoke tests run the command users will type.");
+        builder.AppendLine("- Keep `tool_command_name` aligned with each public .NET tool project's `ToolCommandName` so package validation and post-publish smoke tests run the command users will type. The value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, control characters, or Windows-invalid file-name characters.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications or package READMEs.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, or Tailwind runtime payloads.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");

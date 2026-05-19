@@ -32,6 +32,12 @@ dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
 dotnet tool run appsurface docs --repo .
 ```
 
+Update the repo-scoped tool version with:
+
+```bash
+dotnet tool update ForgeTrust.AppSurface.Cli --prerelease
+```
+
 ## Commands
 
 ### `appsurface docs`

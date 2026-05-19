@@ -139,11 +139,9 @@ internal sealed class PackagePublishPlanResolver
                         $"Tool manifest entry '{entry.Manifest.Project}' must not define expected package dependencies because .NET tool packages embed their project references.");
                 }
 
-                if (string.IsNullOrWhiteSpace(entry.Manifest.ToolCommandName))
-                {
-                    throw new PackageIndexException(
-                        $"Tool manifest entry '{entry.Manifest.Project}' must define 'tool_command_name'.");
-                }
+                PackageIndexGenerator.ValidateToolCommandNameValue(
+                    entry.Manifest.Project,
+                    entry.Manifest.ToolCommandName ?? string.Empty);
 
                 continue;
             }

@@ -1234,6 +1234,139 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task RunPackageGateAsync_ThrowsWhenPublicToolCommandNameIsMissing()
+    {
+        await WritePublicToolRepoAsync(toolCommandName: null);
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"] = CreateMetadata(
+                "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                "ForgeTrust.AppSurface.Cli",
+                isTool: true,
+                outputType: "Exe")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.RunPackageGateAsync(CreateRequest()));
+
+        Assert.Contains("tool_command_name", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunPackageGateAsync_ThrowsWhenNonToolDefinesToolCommandName()
+    {
+        await WritePublicToolRepoAsync("appsurface");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"] = CreateMetadata(
+                "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                "ForgeTrust.AppSurface.Cli",
+                outputType: "Exe")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.RunPackageGateAsync(CreateRequest()));
+
+        Assert.Contains("tool_command_name", error.Message, StringComparison.Ordinal);
+        Assert.Contains("PackAsTool=true", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("app surface")]
+    [InlineData("../appsurface")]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData("app:surface")]
+    public async Task RunPackageGateAsync_ThrowsWhenToolCommandNameIsInvalid(string toolCommandName)
+    {
+        await WritePublicToolRepoAsync(toolCommandName);
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"] = CreateMetadata(
+                "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                "ForgeTrust.AppSurface.Cli",
+                isTool: true,
+                outputType: "Exe")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.RunPackageGateAsync(CreateRequest()));
+
+        Assert.Contains("tool_command_name", error.Message, StringComparison.Ordinal);
+        Assert.Contains("invalid", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(toolCommandName, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateToolCommandNameValue_ThrowsWhenCommandNameIsMissing()
+    {
+        var error = Assert.Throws<PackageIndexException>(
+            () => PackageIndexGenerator.ValidateToolCommandNameValue("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", string.Empty));
+
+        Assert.Contains("tool_command_name", error.Message, StringComparison.Ordinal);
+        Assert.Contains("must be provided", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunPackageGateAsync_AllowsExcludedToolCommandNameWhenValid()
+    {
+        await WriteProgramRepoAsync();
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                order: 10
+                use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
+                includes: Base web startup.
+                does_not_include: OpenAPI.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                classification: excluded
+                publish_decision: do_not_publish
+                publish_reason: Internal repository tool is not published.
+                release_status: excluded
+                commercial_status: not_applicable
+                release_notes_path: releases/unreleased.md
+                order: 20
+                note: Internal tool.
+                tool_command_name: appsurface
+            """);
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", "<Project />");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"] = CreateMetadata(
+                "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                "ForgeTrust.AppSurface.Cli",
+                isTool: true,
+                outputType: "Exe")
+        });
+
+        var report = await generator.RunPackageGateAsync(CreateRequest());
+
+        Assert.Equal(2, report.PackageCount);
+    }
+
+    [Fact]
     public async Task RunPackageGateAsync_ThrowsWhenPublicToolIsNotExecutable()
     {
         await WriteProgramRepoAsync();
@@ -1978,6 +2111,45 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             """
             # path|term|yyyy-mm-dd|reason
             """);
+    }
+
+    private async Task WritePublicToolRepoAsync(string? toolCommandName)
+    {
+        var toolCommandYaml = toolCommandName is null
+            ? string.Empty
+            : $"    tool_command_name: '{toolCommandName}'";
+
+        await WriteProgramRepoAsync();
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            $$"""
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                order: 10
+                use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
+                includes: Base web startup.
+                does_not_include: OpenAPI.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                classification: public
+                publish_decision: publish
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                order: 20
+                use_when: Install this when you want repository-level AppSurface tooling.
+                includes: The `appsurface` .NET tool command.
+                does_not_include: App runtime packages.
+                start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
+            {{toolCommandYaml}}
+            """);
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", "<Project />");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/README.md", "# AppSurface CLI");
     }
 
     private async Task WriteFileAsync(string relativePath, string content)
