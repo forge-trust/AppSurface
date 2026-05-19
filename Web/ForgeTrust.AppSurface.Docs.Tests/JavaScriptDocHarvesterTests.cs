@@ -466,7 +466,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              */
             function publicApi() {}
             """);
-        var unreadableDirectory = Path.Combine(_testRoot, "src", "unreadable");
+        var unreadableDirectory = Path.Join(_testRoot, "src", "unreadable");
         Directory.CreateDirectory(unreadableDirectory);
         File.SetUnixFileMode(unreadableDirectory, UnixFileMode.None);
         var harvester = CreateHarvester(CreateEnabledOptions("src/**/*.js"));
@@ -504,8 +504,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              */
             function publicApi() {}
             """);
-        var sourceDirectory = Path.Combine(_testRoot, "src");
-        Directory.CreateSymbolicLink(Path.Combine(sourceDirectory, "loop"), sourceDirectory);
+        var sourceDirectory = Path.Join(_testRoot, "src");
+        Directory.CreateSymbolicLink(Path.Join(sourceDirectory, "loop"), sourceDirectory);
         var harvester = CreateHarvester(CreateEnabledOptions("src/**/*.js"));
 
         var docs = await harvester.HarvestAsync(_testRoot);
