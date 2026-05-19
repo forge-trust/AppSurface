@@ -483,6 +483,14 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public void RazorDocsInProcessExportRunner_Should_Resolve_Localhost_Bound_BaseUrl()
+    {
+        var result = RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://localhost:51234"]);
+
+        Assert.Equal("http://localhost:51234", result);
+    }
+
+    [Fact]
     public void RazorDocsInProcessExportRunner_Should_Reject_Missing_Bound_BaseUrl()
     {
         var ex = Assert.Throws<InvalidOperationException>(
@@ -510,6 +518,15 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public void RazorDocsInProcessExportRunner_Should_Reject_NonLoopback_Bound_BaseUrl()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => RazorDocsInProcessExportRunner.ResolveBoundBaseUrl(["http://0.0.0.0:51234"]));
+
+        Assert.Contains("published non-loopback URL", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RazorDocsInProcessExportRunner_Should_Export_When_Startup_Timeout_Is_Disabled()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
@@ -532,6 +549,42 @@ public sealed class ProgramEntryPointTests
         Assert.False(hostStarter.StartupToken.CanBeCanceled);
         Assert.True(host.StopCalled);
         Assert.True(host.DisposeCalled);
+    }
+
+    [Fact]
+    public async Task RazorDocsInProcessExportRunner_Should_RunHost_And_Export_FromRepositoryRoot()
+    {
+        using var callerDirectory = TempDirectory.Create("appsurface-docs-export-caller-");
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        var previousDirectory = Directory.GetCurrentDirectory();
+        var exporter = new CapturingStaticExporter();
+        var hostStarter = new ImmediateExportHostStarter(new TrackingHost());
+        var runner = new RazorDocsInProcessExportRunner(
+            NullLogger<RazorDocsInProcessExportRunner>.Instance,
+            exporter,
+            hostStarter);
+
+        try
+        {
+            Directory.SetCurrentDirectory(callerDirectory.Path);
+
+            await runner.ExportAsync(CreateExportArgs(repository.Path, output.Path, startupTimeout: null), CancellationToken.None);
+
+            Assert.Equal(
+                NormalizeDirectoryForComparison(repository.Path),
+                NormalizeDirectoryForComparison(hostStarter.WorkingDirectoryDuringStart));
+            Assert.Equal(
+                NormalizeDirectoryForComparison(repository.Path),
+                NormalizeDirectoryForComparison(exporter.WorkingDirectoryDuringExport));
+            Assert.Equal(
+                NormalizeDirectoryForComparison(callerDirectory.Path),
+                NormalizeDirectoryForComparison(Directory.GetCurrentDirectory()));
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previousDirectory);
+        }
     }
 
     [Fact]
@@ -1031,9 +1084,12 @@ public sealed class ProgramEntryPointTests
     {
         public ExportContext? Context { get; private set; }
 
+        public string? WorkingDirectoryDuringExport { get; private set; }
+
         public Task ExportAsync(ExportContext context, CancellationToken cancellationToken)
         {
             Context = context;
+            WorkingDirectoryDuringExport = Directory.GetCurrentDirectory();
             return Task.CompletedTask;
         }
     }
@@ -1044,6 +1100,8 @@ public sealed class ProgramEntryPointTests
 
         public CancellationToken StartupToken { get; private set; }
 
+        public string? WorkingDirectoryDuringStart { get; private set; }
+
         public Task<IHost> BuildAndStartAsync(
             RazorDocsExportArgs args,
             string environmentName,
@@ -1051,6 +1109,7 @@ public sealed class ProgramEntryPointTests
         {
             EnvironmentName = environmentName;
             StartupToken = cancellationToken;
+            WorkingDirectoryDuringStart = Directory.GetCurrentDirectory();
             return Task.FromResult(host);
         }
     }

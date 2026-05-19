@@ -479,10 +479,10 @@ internal abstract class RazorDocsRepositoryCommand
     /// Restores the previous process current directory when disposed.
     /// </summary>
     /// <remarks>
-    /// The standalone host resolves some relative paths from the current directory, so preview temporarily scopes it to
-    /// the repository root while the host runner executes.
+    /// The standalone host resolves some relative paths from the current directory, so preview and export temporarily
+    /// scope it to the repository root while the host runs.
     /// </remarks>
-    protected sealed class CurrentDirectoryScope : IDisposable
+    internal sealed class CurrentDirectoryScope : IDisposable
     {
         private readonly string _previousDirectory;
 
@@ -683,6 +683,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
 
         var environmentName = args.HostArgs.EnvironmentName ?? Environments.Production;
         IHost? host = null;
+        using var currentDirectory = RazorDocsRepositoryCommand.CurrentDirectoryScope.ChangeTo(args.HostArgs.RepositoryRoot);
 
         try
         {
@@ -714,7 +715,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
     /// </summary>
     /// <param name="host">Started host that exposes Kestrel server addresses.</param>
     /// <returns>The scheme and authority used by the export crawler.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the host does not publish exactly one valid URL.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the host does not publish exactly one valid loopback URL.</exception>
     internal static string ResolveBoundBaseUrl(IHost host)
     {
         ArgumentNullException.ThrowIfNull(host);
@@ -733,7 +734,7 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
     /// </summary>
     /// <param name="addresses">Published server addresses.</param>
     /// <returns>The absolute URL authority to crawl.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when no URL, multiple URLs, or an invalid URL is published.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when no URL, multiple URLs, an invalid URL, or a non-loopback URL is published.</exception>
     internal static string ResolveBoundBaseUrl(ICollection<string>? addresses)
     {
         if (addresses is null || addresses.Count == 0)
@@ -750,6 +751,12 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         if (!Uri.TryCreate(baseAddress, UriKind.Absolute, out var uri))
         {
             throw new InvalidOperationException($"RazorDocs export host did not publish a valid listening URL. Value: '{baseAddress}'.");
+        }
+
+        if (!uri.IsLoopback)
+        {
+            throw new InvalidOperationException(
+                $"RazorDocs export host published non-loopback URL '{baseAddress}'; expected a single loopback listener.");
         }
 
         return uri.GetLeftPart(UriPartial.Authority);
