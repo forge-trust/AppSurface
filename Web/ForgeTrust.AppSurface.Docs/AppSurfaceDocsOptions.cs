@@ -184,18 +184,36 @@ public sealed class AppSurfaceDocsLogoOptions
 public sealed class AppSurfaceDocsFaviconOptions
 {
     /// <summary>
-    /// Gets or sets an SVG favicon path.
+    /// Gets or sets an SVG favicon path. Values must be browser-safe app-root paths, such as
+    /// <c>/docs/favicon.svg</c>, or application-relative paths, such as <c>~/docs/favicon.svg</c>.
     /// </summary>
+    /// <remarks>
+    /// Remote URLs, protocol-relative URLs, query strings, fragments, backslashes, and traversal segments are rejected
+    /// during options validation. Null or blank values omit the custom SVG favicon; the layout renders the built-in
+    /// AppSurface Docs SVG favicon only when no custom favicon path is configured.
+    /// </remarks>
     public string? SvgPath { get; set; }
 
     /// <summary>
-    /// Gets or sets an ICO favicon path.
+    /// Gets or sets an ICO favicon path. Values must be browser-safe app-root paths, such as
+    /// <c>/favicon.ico</c>, or application-relative paths, such as <c>~/favicon.ico</c>.
     /// </summary>
+    /// <remarks>
+    /// Remote URLs, protocol-relative URLs, query strings, fragments, backslashes, and traversal segments are rejected
+    /// during options validation. Null or blank values omit the custom ICO favicon; the layout renders the built-in
+    /// AppSurface Docs SVG favicon only when no custom favicon path is configured.
+    /// </remarks>
     public string? IcoPath { get; set; }
 
     /// <summary>
-    /// Gets or sets a PNG favicon path.
+    /// Gets or sets a PNG favicon path. Values must be browser-safe app-root paths, such as
+    /// <c>/docs/favicon.png</c>, or application-relative paths, such as <c>~/docs/favicon.png</c>.
     /// </summary>
+    /// <remarks>
+    /// Remote URLs, protocol-relative URLs, query strings, fragments, backslashes, and traversal segments are rejected
+    /// during options validation. Null or blank values omit the custom PNG favicon; the layout renders the built-in
+    /// AppSurface Docs SVG favicon only when no custom favicon path is configured.
+    /// </remarks>
     public string? PngPath { get; set; }
 }
 

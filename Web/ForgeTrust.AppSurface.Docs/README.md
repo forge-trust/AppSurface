@@ -611,7 +611,6 @@ Pitfalls:
   - `/` is supported for single-purpose unversioned docs hosts.
   - The path must be app-relative, must not end with `/` except for `/`, and cannot contain query or fragment segments.
   - When versioning is on, it cannot equal the route root and cannot use the route root's reserved archive or exact-version children, such as `/foo/bar/versions`, `/foo/bar/v`, or `/foo/bar/v/1.2.3`.
-- `AppSurfaceDocs:Versioning:Enabled`
 - `AppSurfaceDocs:Localization:Enabled`
   - Defaults to `false`.
   - When `false`, AppSurface Docs keeps existing routes, visible UI, and search payload behavior.
@@ -969,7 +968,7 @@ browsable without making readers scan hundreds of symbols before they intentiona
 
 Configure `AppSurfaceDocs:Sidebar:NamespacePrefixes` when a host wants package names shortened in that rail. For example,
 `ForgeTrust.AppSurface.` turns `ForgeTrust.AppSurface.Docs.Services` into a `Web` family heading with
-`AppSurface Docs.Services` as the namespace link label.
+`Docs.Services` as the namespace link label.
 
 ### Section routes and landing docs
 

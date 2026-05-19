@@ -87,7 +87,7 @@ public class ExportContext
     internal Dictionary<string, string> ArtifactUrls { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Gets generated AppSurfaceDocs partial artifact URLs keyed by their source full-page route.
+    /// Gets generated AppSurface Docs partial artifact URLs keyed by their source full-page route.
     /// </summary>
     internal Dictionary<string, string> PartialArtifactUrls { get; } = new(StringComparer.Ordinal);
 

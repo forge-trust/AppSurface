@@ -71,7 +71,14 @@ internal static class AppSurfaceDocsIdentityPath
         var trimmed = value.Trim();
         if (trimmed.StartsWith("~/", StringComparison.Ordinal))
         {
-            if (IsValidPathTail(trimmed[2..], out error))
+            var pathTail = trimmed[2..];
+            if (pathTail.StartsWith("/", StringComparison.Ordinal))
+            {
+                error = "must not be protocol-relative.";
+                return false;
+            }
+
+            if (IsValidPathTail(pathTail, out error))
             {
                 normalizedPath = trimmed;
                 return true;

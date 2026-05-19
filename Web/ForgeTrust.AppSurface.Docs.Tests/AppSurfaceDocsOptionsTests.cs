@@ -483,7 +483,9 @@ public sealed class AppSurfaceDocsOptionsTests
         var ex = Assert.Throws<OptionsValidationException>(
             () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
 
-        Assert.NotEmpty(ex.Failures);
+        Assert.Contains(
+            ex.Failures,
+            failure => failure.Contains(":RoutePrefix", StringComparison.Ordinal));
     }
 
     [Fact]

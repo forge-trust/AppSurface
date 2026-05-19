@@ -136,6 +136,7 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("type=\"image/x-icon\"", html);
         Assert.Contains("href=\"/some-base/brand/favicon.png\"", html);
         Assert.Contains("type=\"image/png\"", html);
+        Assert.DoesNotContain("href=\"/some-base/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg\"", html);
         Assert.Contains("\"docsRootPath\":\"/some-base/docs\"", html);
     }
 

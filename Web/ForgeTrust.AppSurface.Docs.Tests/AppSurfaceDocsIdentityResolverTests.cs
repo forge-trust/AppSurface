@@ -97,6 +97,7 @@ public sealed class AppSurfaceDocsIdentityResolverTests
     [Theory]
     [InlineData("~/brand/logo.svg", true, "~/brand/logo.svg", "")]
     [InlineData("/", true, "/", "")]
+    [InlineData("~//cdn.example/logo.svg", false, null, "protocol-relative")]
     [InlineData("~/https://example.test/logo.svg", false, null, "remote URL")]
     [InlineData("/data:image/svg+xml;base64,PHN2Zy8+", false, null, "remote URL")]
     public void IdentityPath_ShouldNormalizeOrRejectBrowserPaths(
