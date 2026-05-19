@@ -284,6 +284,7 @@ public class RazorDocsWebModule : IAppSurfaceWebModule
                              ?? new DocsUrlBuilder(docsOptions);
         MapEmbeddedAssetFallback(endpoints, RazorDocsPackagedStylesheetPath, "css/site.gen.css");
         MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/search.css", "docs/search.css");
+        MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/appsurface-docs-icon.svg", "docs/appsurface-docs-icon.svg");
         MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/minisearch.min.js", "docs/minisearch.min.js");
         MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/search-client.js", "docs/search-client.js");
         MapEmbeddedAssetFallback(endpoints, $"{RazorDocsStaticAssetBasePath}/outline-client.js", "docs/outline-client.js");

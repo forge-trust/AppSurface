@@ -1086,6 +1086,14 @@ public class RazorDocsWebModuleRegressionTests
                 await packagedSearchCssResponse.Content.ReadAsStringAsync(),
                 StringComparison.Ordinal);
 
+            using var brandIconResponse = await client.GetAsync($"{PackagedAssetBasePath}/appsurface-docs-icon.svg");
+            Assert.Equal(HttpStatusCode.OK, brandIconResponse.StatusCode);
+            Assert.Equal("image/svg+xml", brandIconResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains(
+                "<svg",
+                await brandIconResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
             using var miniSearchResponse = await client.GetAsync($"{PackagedAssetBasePath}/minisearch.min.js");
             Assert.Equal(HttpStatusCode.OK, miniSearchResponse.StatusCode);
             Assert.Equal("text/javascript", miniSearchResponse.Content.Headers.ContentType?.MediaType);
