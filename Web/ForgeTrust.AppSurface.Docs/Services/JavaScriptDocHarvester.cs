@@ -747,15 +747,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static void AppendSignature(StringBuilder builder, JavaScriptApiItem item)
     {
-        var signature = item.Kind switch
-        {
-            JavaScriptApiKind.Event => item.Name,
-            JavaScriptApiKind.Function => $"{item.Name}({string.Join(", ", item.Parameters.Select(parameter => parameter.Name))})",
-            JavaScriptApiKind.Constant => item.Name,
-            JavaScriptApiKind.Global => item.Name,
-            JavaScriptApiKind.Typedef => item.Name,
-            _ => item.Name
-        };
+        var signature = item.Kind == JavaScriptApiKind.Function
+            ? $"{item.Name}({string.Join(", ", item.Parameters.Select(parameter => parameter.Name))})"
+            : item.Name;
 
         builder.Append("<pre><code class=\"language-js\">");
         builder.Append(WebUtility.HtmlEncode(signature));
@@ -1293,41 +1287,17 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static string BuildAnchorPrefix(JavaScriptApiKind kind)
     {
-        return kind switch
-        {
-            JavaScriptApiKind.Event => "event",
-            JavaScriptApiKind.Function => "function",
-            JavaScriptApiKind.Constant => "constant",
-            JavaScriptApiKind.Global => "global",
-            JavaScriptApiKind.Typedef => "typedef",
-            _ => "item"
-        };
+        return kind.ToString().ToLowerInvariant();
     }
 
     private static string GetKindLabel(JavaScriptApiKind kind)
     {
-        return kind switch
-        {
-            JavaScriptApiKind.Event => "JavaScript Event",
-            JavaScriptApiKind.Function => "JavaScript Function",
-            JavaScriptApiKind.Constant => "JavaScript Constant",
-            JavaScriptApiKind.Global => "JavaScript Global",
-            JavaScriptApiKind.Typedef => "JavaScript Typedef",
-            _ => "JavaScript API"
-        };
+        return $"JavaScript {kind}";
     }
 
     private static string GetPageType(JavaScriptApiKind kind)
     {
-        return kind switch
-        {
-            JavaScriptApiKind.Event => "javascript-event",
-            JavaScriptApiKind.Function => "javascript-function",
-            JavaScriptApiKind.Constant => "javascript-constant",
-            JavaScriptApiKind.Global => "javascript-global",
-            JavaScriptApiKind.Typedef => "javascript-typedef",
-            _ => "javascript-api"
-        };
+        return $"javascript-{BuildAnchorPrefix(kind)}";
     }
 
     private static DocHarvestDiagnostic MalformedDoclet(string relativePath, int line, string cause)
