@@ -1453,6 +1453,79 @@ body {
     color: var(--docs-color-accent-strong);
 }
 
+.docs-content .doc-namespace-entry-points {
+    margin: 0 0 1.4rem;
+    padding: 0.95rem 0 0;
+    border-top: 1px solid var(--docs-color-border-muted);
+    border-bottom: 1px solid var(--docs-color-border-muted);
+}
+
+.docs-content .doc-namespace-entry-points h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--docs-color-text-strong);
+}
+
+.docs-content .doc-namespace-entry-points ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.docs-content .doc-namespace-entry-point {
+    min-width: 0;
+    border-top: 1px solid var(--docs-color-border-muted);
+}
+
+.docs-content .doc-namespace-entry-point > a,
+.docs-content .doc-namespace-entry-point--unresolved,
+.docs-content .doc-namespace-entry-point--text {
+    display: block;
+    min-height: 44px;
+    padding: 0.85rem 0.8rem 0.85rem 0;
+    text-decoration: none;
+}
+
+.docs-content .doc-namespace-entry-point > a:focus-visible {
+    outline: 2px solid var(--docs-color-accent);
+    outline-offset: 3px;
+}
+
+.docs-content .doc-namespace-entry-point > a:hover .doc-namespace-entry-point-label code {
+    color: var(--docs-color-accent-strong);
+}
+
+.docs-content .doc-namespace-entry-point-label,
+.docs-content .doc-namespace-entry-point-summary,
+.docs-content .doc-namespace-entry-point-status {
+    display: block;
+}
+
+.docs-content .doc-namespace-entry-point-label code {
+    overflow-wrap: anywhere;
+    color: var(--docs-color-link);
+}
+
+.docs-content .doc-namespace-entry-point--unresolved .doc-namespace-entry-point-label code {
+    color: var(--docs-color-text-default);
+}
+
+.docs-content .doc-namespace-entry-point-summary {
+    margin-top: 0.3rem;
+    color: var(--docs-color-text-subtle);
+}
+
+.docs-content .doc-namespace-entry-point-status {
+    margin-top: 0.35rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--docs-color-text-muted);
+}
+
 .docs-content .doc-remarks > p {
     color: var(--docs-color-text-subtle);
 }

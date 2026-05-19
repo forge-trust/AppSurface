@@ -63,6 +63,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.routes.invalid_canonical_slug", DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug);
         Assert.Equal("appsurfacedocs.routes.invalid_redirect_alias", DocHarvestDiagnosticCodes.DocInvalidRedirectAlias);
         Assert.Equal("appsurfacedocs.routes.lossy_slug_normalization", DocHarvestDiagnosticCodes.DocLossySlugNormalization);
+        Assert.Equal("appsurfacedocs.namespace.entry_point_target_unresolved", DocHarvestDiagnosticCodes.NamespaceEntryPointTargetUnresolved);
         Assert.Equal("appsurfacedocs.localization.unsupported_locale", DocHarvestDiagnosticCodes.LocalizationUnsupportedLocale);
         Assert.Equal("appsurfacedocs.localization.missing_base", DocHarvestDiagnosticCodes.LocalizationMissingBase);
         Assert.Equal("appsurfacedocs.localization.duplicate_variant", DocHarvestDiagnosticCodes.LocalizationDuplicateVariant);

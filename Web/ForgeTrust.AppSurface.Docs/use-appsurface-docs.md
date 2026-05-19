@@ -133,6 +133,7 @@ Start with pages that answer adoption questions before you tune visuals:
 - `examples/.../README.md` for exportable proof paths.
 - `releases/README.md`, `CHANGELOG.md`, or upgrade-policy pages when release risk matters.
 - Troubleshooting pages for the failure modes your users actually hit.
+- Namespace README files under a docs-owned namespace folder, such as `Docs/ForgeTrust.RazorWire/README.md`, when generated API reference needs human orientation above the symbol list.
 
 Use sidecar metadata for portability-sensitive files such as README pages:
 
@@ -163,6 +164,23 @@ aliases:
   - missing results
 ---
 ```
+
+For namespace API pages, keep the README as normal Markdown and put entry-point metadata in the sidecar:
+
+```yaml
+# Docs/ForgeTrust.RazorWire/README.md.yml
+title: ForgeTrust.RazorWire
+summary: Start here for registration, endpoint mapping, and options.
+entry_points:
+  - label: AddRazorWire(...)
+    summary: Register RazorWire services and package-owned options.
+    target: ForgeTrust-RazorWire-RazorWireServiceCollectionExtensions-AddRazorWire-method-group
+  - label: RazorWireOptions
+    summary: Configure stream paths, caching policy names, and form behavior.
+    target: ForgeTrust-RazorWire-RazorWireOptions
+```
+
+The README is consumed into `Namespaces/{Dotted.Namespace}` and removed as a standalone page. Copied source-shaped README URLs redirect to the namespace page. Entry-point `target` values are generated anchors on that namespace page; stale targets render as unlinked rows and produce harvest-health warnings instead of breaking the docs site.
 
 ## Curate the landing page
 

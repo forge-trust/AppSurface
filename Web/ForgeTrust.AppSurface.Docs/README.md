@@ -983,13 +983,44 @@ Negative examples:
 ### Merge behavior
 
 - The generated namespace page keeps its `Namespaces/{Dotted.Namespace}` route.
-- README HTML is inserted into the namespace page as the namespace intro.
+- Child namespace links render first when the generated page has them, then README HTML is inserted as the namespace intro, then any `Common entry points` panel renders before generated type and member detail.
 - A leading README H1 is suppressed during merge because the namespace page shell already renders the page H1.
 - The standalone README node is removed after a successful merge so readers do not see duplicate pages.
-- README metadata can override the namespace page metadata, but derived Markdown defaults are ignored when they would accidentally replace API-reference classification.
+- README metadata can override the namespace page metadata only when the field is meaningful for the merged namespace page. Authored `title`, `summary`, `aliases`, `keywords`, `related_pages`, `breadcrumbs`, contributor provenance, and `entry_points` transfer. Derived Markdown defaults, README visibility flags, canonical slugs, authored redirect aliases, trust metadata, localization metadata, section landing metadata, sequence metadata, and featured-page groups do not transfer.
 - README-relative links are resolved from the README source path before the standalone README page is removed.
-- Links that target the removed README page itself are not rewritten to a published page. Avoid self-links such as `./README.md` inside namespace intros because the standalone README route disappears after merge.
+- Source-shaped requests for the consumed README path redirect to the generated namespace page, including paths such as `docs/ForgeTrust.AppSurface.Web/README.md` and `docs/ForgeTrust.AppSurface.Web/README`.
 - Contributor provenance points at the README source, while symbol-level source links still point at the generated API declarations.
+
+### Common entry points
+
+Namespace README metadata can define a compact `Common entry points` panel. Prefer sidecar YAML so the README stays clean in source control:
+
+```yaml
+# docs/ForgeTrust.RazorWire/README.md.yml
+title: ForgeTrust.RazorWire
+summary: Start here for RazorWire registration, endpoint mapping, options, and stream-result entry points.
+entry_points:
+  - label: AddRazorWire(...)
+    summary: Register RazorWire services and package-owned options.
+    target: ForgeTrust-RazorWire-RazorWireServiceCollectionExtensions-AddRazorWire-method-group
+    keywords:
+      - register RazorWire
+      - services
+  - label: RazorWireOptions
+    summary: Configure package behavior without replacing the rendering pipeline.
+    target: ForgeTrust-RazorWire-RazorWireOptions
+```
+
+Entry-point fields:
+
+- `label` is required, decoded, trimmed, and limited to 80 characters.
+- `summary` is optional, decoded, trimmed, and limited to 220 characters.
+- `target` is an anchor ID from the generated namespace page. Authors may include one leading `#`; AppSurface Docs stores it without the hash and allows only letters, digits, `_`, `-`, `.`, and `:`.
+- `href` is an escape hatch used only when `target` is absent or invalid. It must be a fragment such as `#anchor` or an app-relative docs URL under `/docs/`.
+- `keywords` are distinct search terms, up to 20 values of 80 characters each.
+- `order` is an optional non-negative integer. Ordered entries render first, then unordered entries keep author order.
+
+When `target` resolves, the whole editorial row is one real anchor to the generated API section. When `target` is valid but stale, the row renders as unlinked text with `Target unavailable`, AppSurface Docs logs a warning, and harvest health includes `DocHarvestDiagnosticCodes.NamespaceEntryPointTargetUnresolved`. A stale entry point does not fail the docs site.
 
 ### Decision guidance
 
@@ -1004,8 +1035,8 @@ Future dual-use package and namespace docs should use an explicit opt-in contrac
 - Do not move package READMEs under package folders expecting them to merge into namespace pages.
 - Do not rely on the final folder name alone. A path needs a docs-owned prefix before the namespace directory.
 - Do not expect a README to create a namespace API page. It only merges into a namespace page produced by the C# harvester.
-- Do not include README self-links such as `./README.md` in a namespace intro. Link to surviving guide pages, generated namespace anchors, or package docs instead.
-- Do not use namespace README merging as a general redirect or alias mechanism. Use explicit metadata and link authoring for those behaviors.
+- Do not use entry points as a full symbol resolver. V1 targets generated anchor IDs on the same namespace page.
+- Do not rely on `hide_from_search` or `hide_from_public_nav` in a consumed namespace README to hide the namespace page. Those flags apply to the standalone README node and are dropped during transfer.
 
 ## Usage
 
@@ -1278,7 +1309,10 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `publicSection` for the normalized built-in section slug when the page is publicly visible
 - `publicSectionLabel` for the reader-facing section label
 - `isSectionLanding` for authored section landing entry points
+- `entryPoints` for namespace README entry-point labels, summaries, targets, hrefs, and keywords when a README is consumed into a generated namespace page
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
+
+Search runtime note: the current bundled `minisearch.min.js` asset is a small AppSurface-owned shim that primarily scores `title`, `headings`, and `bodyText`. Entry-point terms are emitted in the payload and duplicated into namespace `bodyText`, but full field-specific scoring for `entryPoints`, `aliases`, `keywords`, and `summary` is tracked separately in GitHub issue #331.
 
 When authored metadata uses `release-note` or `release-notes`, AppSurface Docs keeps the raw `pageType` metadata value in the payload but emits `pageTypeLabel = "Release"` and `pageTypeVariant = "release"` so built-in and custom clients can present release pages consistently.
 

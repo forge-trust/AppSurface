@@ -148,9 +148,11 @@ internal static class MarkdownFrontMatterParser
                 document.FeaturedPageGroups,
                 document.FeaturedPages,
                 diagnostics),
+            EntryPoints = NormalizeEntryPoints(document.EntryPoints, diagnostics),
             Trust = NormalizeTrust(document.Trust),
             Contributor = NormalizeContributor(document.Contributor),
             Localization = NormalizeLocalization(document, diagnostics),
+            TitleIsDerived = document.Title is not null ? false : null,
             PageTypeIsDerived = document.PageType is not null ? false : null,
             AudienceIsDerived = document.Audience is not null ? false : null,
             ComponentIsDerived = document.Component is not null ? false : null,
@@ -368,6 +370,220 @@ internal static class MarkdownFrontMatterParser
         }
 
         return normalizedGroups;
+    }
+
+    private static IReadOnlyList<DocNamespaceEntryPoint>? NormalizeEntryPoints(
+        List<FrontMatterNamespaceEntryPoint?>? entries,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        if (entries is null)
+        {
+            return null;
+        }
+
+        var normalizedEntries = new List<DocNamespaceEntryPoint>();
+        var labelsByTarget = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < entries.Count; index++)
+        {
+            var entry = entries[index];
+            var fieldPath = $"entry_points[{index}]";
+            if (entry is null)
+            {
+                diagnostics.Add(
+                    new AppSurfaceDocsMetadataDiagnostic(
+                        "null-namespace-entry-point",
+                        fieldPath,
+                        "A namespace entry-point entry is null.",
+                        "Null list items cannot render in the Common entry points panel.",
+                        "Remove the empty list item or replace it with an entry-point object."));
+                continue;
+            }
+
+            var label = NormalizeDecoded(entry.Label);
+            if (label is null || label.Length > 80)
+            {
+                diagnostics.Add(
+                    new AppSurfaceDocsMetadataDiagnostic(
+                        "invalid-namespace-entry-point-label",
+                        $"{fieldPath}.label",
+                        "A namespace entry point has no usable label.",
+                        "Entry-point labels must be non-empty plain text no longer than 80 characters after HTML decoding.",
+                        "Add a concise label such as AddRazorWire(...) or remove the entry."));
+                continue;
+            }
+
+            var summary = NormalizeDecoded(entry.Summary);
+            if (summary?.Length > 220)
+            {
+                diagnostics.Add(
+                    new AppSurfaceDocsMetadataDiagnostic(
+                        "invalid-namespace-entry-point-summary",
+                        $"{fieldPath}.summary",
+                        "A namespace entry-point summary is too long.",
+                        "Entry-point summaries must be 220 characters or fewer so the panel stays scannable.",
+                        "Shorten the summary or move the detail into the README prose."));
+                summary = null;
+            }
+
+            var target = NormalizeEntryPointTarget(entry.Target, fieldPath, diagnostics);
+            var href = NormalizeEntryPointHref(entry.Href, target, fieldPath, diagnostics);
+            var keywords = NormalizeEntryPointKeywords(entry.Keywords, fieldPath, diagnostics);
+            var order = entry.Order;
+            if (order < 0)
+            {
+                diagnostics.Add(
+                    new AppSurfaceDocsMetadataDiagnostic(
+                        "invalid-namespace-entry-point-order",
+                        $"{fieldPath}.order",
+                        "A namespace entry-point order is negative.",
+                        "Entry-point order values must be zero or greater.",
+                        "Use a non-negative order value or remove the field."));
+                order = null;
+            }
+
+            var duplicateKey = $"{label}\n{target ?? href ?? string.Empty}";
+            if (!labelsByTarget.Add(duplicateKey))
+            {
+                diagnostics.Add(
+                    new AppSurfaceDocsMetadataDiagnostic(
+                        "duplicate-namespace-entry-point",
+                        fieldPath,
+                        "A namespace entry point duplicates an earlier label and destination.",
+                        "Duplicate labels are only useful when they point at different targets.",
+                        "Remove the duplicate entry or point it at a different generated anchor."));
+                continue;
+            }
+
+            normalizedEntries.Add(
+                new DocNamespaceEntryPoint
+                {
+                    Label = label,
+                    Summary = summary,
+                    Target = target,
+                    Href = href,
+                    Keywords = keywords,
+                    Order = order,
+                    SourceIndex = index
+                });
+        }
+
+        return normalizedEntries.Count == 0 ? null : normalizedEntries;
+    }
+
+    private static string? NormalizeDecoded(string? value)
+    {
+        var normalized = Normalize(value);
+        return normalized is null ? null : System.Net.WebUtility.HtmlDecode(normalized).Trim();
+    }
+
+    private static string? NormalizeEntryPointTarget(
+        string? rawTarget,
+        string fieldPath,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        var target = NormalizeDecoded(rawTarget);
+        if (target is null)
+        {
+            return null;
+        }
+
+        if (target.StartsWith('#'))
+        {
+            target = target[1..].Trim();
+        }
+
+        if (target.Length == 0)
+        {
+            return null;
+        }
+
+        if (!target.All(IsValidEntryPointTargetCharacter))
+        {
+            diagnostics.Add(
+                new AppSurfaceDocsMetadataDiagnostic(
+                    "invalid-namespace-entry-point-target",
+                    $"{fieldPath}.target",
+                    "A namespace entry-point target contains unsupported characters.",
+                    "Targets must be generated namespace-page anchor IDs containing only letters, digits, underscores, hyphens, periods, or colons.",
+                    "Use the generated anchor ID without a leading #, or remove target and use a valid href escape hatch."));
+            return null;
+        }
+
+        return target;
+    }
+
+    private static bool IsValidEntryPointTargetCharacter(char ch)
+    {
+        return char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '.' or ':';
+    }
+
+    private static string? NormalizeEntryPointHref(
+        string? rawHref,
+        string? target,
+        string fieldPath,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        var href = NormalizeDecoded(rawHref);
+        if (href is null)
+        {
+            return null;
+        }
+
+        if (target is not null)
+        {
+            return null;
+        }
+
+        var valid = href.StartsWith('#') && href.Length > 1 && !href.StartsWith("##", StringComparison.Ordinal)
+                    || href.StartsWith("/docs/", StringComparison.OrdinalIgnoreCase);
+        if (valid
+            && !href.Contains('?', StringComparison.Ordinal)
+            && !href.Any(char.IsWhiteSpace))
+        {
+            return href;
+        }
+
+        diagnostics.Add(
+            new AppSurfaceDocsMetadataDiagnostic(
+                "invalid-namespace-entry-point-href",
+                $"{fieldPath}.href",
+                "A namespace entry-point href is not supported.",
+                "Entry-point href values must be a fragment such as #anchor or an app-relative docs URL under /docs/.",
+                "Use a generated target anchor when possible, or replace href with a valid /docs/... URL."));
+        return null;
+    }
+
+    private static IReadOnlyList<string>? NormalizeEntryPointKeywords(
+        List<string>? values,
+        string fieldPath,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        if (values is null)
+        {
+            return null;
+        }
+
+        var normalized = values
+            .Select(NormalizeDecoded)
+            .Where(value => value is not null)
+            .Cast<string>()
+            .Where(value => value.Length <= 80)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToArray();
+
+        if (values.Any(value => NormalizeDecoded(value)?.Length > 80))
+        {
+            diagnostics.Add(
+                new AppSurfaceDocsMetadataDiagnostic(
+                    "invalid-namespace-entry-point-keyword",
+                    $"{fieldPath}.keywords",
+                    "One or more namespace entry-point keywords are too long.",
+                    "Entry-point keywords must be 80 characters or fewer.",
+                    "Shorten long keywords so they stay useful as search terms."));
+        }
+
+        return normalized.Length == 0 ? null : normalized;
     }
 
     private static string NormalizeIntent(string label)
@@ -625,6 +841,8 @@ internal static class MarkdownFrontMatterParser
 
         public List<FrontMatterFeaturedPageDefinition?>? FeaturedPages { get; init; }
 
+        public List<FrontMatterNamespaceEntryPoint?>? EntryPoints { get; init; }
+
         public FrontMatterTrustDocument? Trust { get; init; }
 
         public FrontMatterContributorDocument? Contributor { get; init; }
@@ -638,6 +856,21 @@ internal static class MarkdownFrontMatterParser
         public string? LocalizedTitle { get; init; }
 
         public string? LocaleFallback { get; init; }
+    }
+
+    private sealed class FrontMatterNamespaceEntryPoint
+    {
+        public string? Label { get; init; }
+
+        public string? Summary { get; init; }
+
+        public string? Target { get; init; }
+
+        public string? Href { get; init; }
+
+        public List<string>? Keywords { get; init; }
+
+        public int? Order { get; init; }
     }
 
     private sealed class FrontMatterFeaturedPageDefinition

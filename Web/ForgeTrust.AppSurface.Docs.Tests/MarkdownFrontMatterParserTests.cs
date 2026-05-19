@@ -215,6 +215,74 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void ExtractWithDiagnostics_ShouldParseNamespaceEntryPoints()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: AddRazorWire(...)
+                summary: Register RazorWire services.
+                target: "#ForgeTrust-RazorWire-AddRazorWire"
+                keywords:
+                  - register RazorWire
+                  - services
+                order: 10
+              - label: API guide
+                href: /docs/guides/api
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Collection(
+            result.Metadata!.EntryPoints!,
+            first =>
+            {
+                Assert.Equal("AddRazorWire(...)", first.Label);
+                Assert.Equal("Register RazorWire services.", first.Summary);
+                Assert.Equal("ForgeTrust-RazorWire-AddRazorWire", first.Target);
+                Assert.Null(first.Href);
+                Assert.Equal(["register RazorWire", "services"], first.Keywords);
+                Assert.Equal(10, first.Order);
+            },
+            second =>
+            {
+                Assert.Equal("API guide", second.Label);
+                Assert.Null(second.Target);
+                Assert.Equal("/docs/guides/api", second.Href);
+            });
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldSkipInvalidNamespaceEntryPoints_AndKeepUsableRows()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - summary: Missing label
+              - label: Good
+                target: "../bad"
+                href: "#fallback"
+                keywords:
+                  - useful
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("Good", entry.Label);
+        Assert.Null(entry.Target);
+        Assert.Equal("#fallback", entry.Href);
+        Assert.Equal(["useful"], entry.Keywords);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-label");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-target");
+    }
+
+    [Fact]
     public void Extract_ShouldIgnoreNullFeaturedPageGroupPageEntries()
     {
         var markdown = """
