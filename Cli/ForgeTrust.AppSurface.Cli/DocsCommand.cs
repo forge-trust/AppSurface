@@ -714,10 +714,10 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
             return await _hostStarter.BuildAndStartAsync(args, environmentName, cancellationToken);
         }
 
-        var startCts = CreateStartupTimeout(startupTimeout.Value, cancellationToken);
-        CancellationTokenSource? startupTimeoutCts = startCts;
+        using var startupTimeoutCts = CreateStartupTimeout(startupTimeout.Value, cancellationToken);
+        var startupToken = startupTimeoutCts.Token;
         var startTask = Task.Run(
-            () => _hostStarter.BuildAndStartAsync(args, environmentName, startCts.Token),
+            () => _hostStarter.BuildAndStartAsync(args, environmentName, startupToken),
             CancellationToken.None);
 
         try
@@ -731,9 +731,8 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
                     return await startTask;
                 }
 
-                await startCts.CancelAsync();
-                ObserveTimedOutStartupTask(startTask, startCts);
-                startupTimeoutCts = null;
+                await startupTimeoutCts.CancelAsync();
+                ObserveTimedOutStartupTask(startTask, startupTimeoutCts.Transfer());
                 throw CreateStartupTimeoutException(startupTimeout.Value, innerException: null);
             }
 
@@ -745,21 +744,16 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         }
         catch (OperationCanceledException)
         {
-            ObserveTimedOutStartupTask(startTask, startCts);
-            startupTimeoutCts = null;
+            ObserveTimedOutStartupTask(startTask, startupTimeoutCts.Transfer());
             throw;
-        }
-        finally
-        {
-            startupTimeoutCts?.Dispose();
         }
     }
 
-    private static CancellationTokenSource CreateStartupTimeout(TimeSpan startupTimeout, CancellationToken cancellationToken)
+    private static StartupTimeoutCancellationLease CreateStartupTimeout(TimeSpan startupTimeout, CancellationToken cancellationToken)
     {
         var startupTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         startupTimeoutCts.CancelAfter(startupTimeout);
-        return startupTimeoutCts;
+        return new StartupTimeoutCancellationLease(startupTimeoutCts);
     }
 
     private void ObserveTimedOutStartupTask(Task<IHost> startTask, CancellationTokenSource startupTimeoutCts)
@@ -769,6 +763,8 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
 
     private async Task ObserveTimedOutStartupTaskAsync(Task<IHost> startTask, CancellationTokenSource startupTimeoutCts)
     {
+        using var cts = startupTimeoutCts;
+
         try
         {
             var startedHost = await startTask.ConfigureAwait(false);
@@ -777,10 +773,6 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         catch (Exception ex) when (IsNonFatalException(ex))
         {
             _logger.LogDebug(ex, "RazorDocs export host startup task completed after the startup timeout.");
-        }
-        finally
-        {
-            startupTimeoutCts.Dispose();
         }
     }
 
@@ -814,6 +806,36 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
             and not CannotUnloadAppDomainException
             and not InvalidProgramException
             and not ThreadAbortException;
+    }
+
+    private sealed class StartupTimeoutCancellationLease : IDisposable
+    {
+        private CancellationTokenSource? _source;
+
+        public StartupTimeoutCancellationLease(CancellationTokenSource source)
+        {
+            ArgumentNullException.ThrowIfNull(source);
+            _source = source;
+        }
+
+        public CancellationToken Token => (_source ?? throw new ObjectDisposedException(nameof(StartupTimeoutCancellationLease))).Token;
+
+        public Task CancelAsync()
+        {
+            return (_source ?? throw new ObjectDisposedException(nameof(StartupTimeoutCancellationLease))).CancelAsync();
+        }
+
+        public CancellationTokenSource Transfer()
+        {
+            var source = _source ?? throw new ObjectDisposedException(nameof(StartupTimeoutCancellationLease));
+            _source = null;
+            return source;
+        }
+
+        public void Dispose()
+        {
+            _source?.Dispose();
+        }
     }
 
 }
