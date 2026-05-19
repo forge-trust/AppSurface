@@ -135,7 +135,10 @@
         }
       },
       "forgetrust.appsurface.core": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "CliWrap": "[3.10.1, )"
+        }
       },
       "forgetrust.appsurface.web.tailwind": {
         "type": "Project",

@@ -380,6 +380,7 @@
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
+          "CliWrap": "[3.10.1, )",
           "Microsoft.Extensions.Hosting": "[9.0.6, )",
           "Microsoft.Extensions.Logging.Console": "[9.0.6, )"
         }

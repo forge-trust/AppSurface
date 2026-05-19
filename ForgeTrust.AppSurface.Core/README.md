@@ -16,6 +16,7 @@ The Core library is designed to be lightweight and implementation-agnostic. It p
 - **`ConsoleOutputMode`**: Shared core enum that lets console-oriented packages describe whether command output should remain host-centric or command-first.
 - **`AppSurfaceStartup`**: The base class that orchestrates the host building and service registration process.
 - **`AppSurfaceStartup.RegisterDependencies`**: A protected seam for specialized startup types that need the module graph prepared before they build the Generic Host.
+- **`ProcessUtils`**: The AppSurface-owned process execution surface for framework code that needs to capture stdout and stderr, non-throwing non-zero exit codes, cancellation-aware execution, and optional line-by-line logging.
 
 ## Application labels and host identity
 
@@ -61,6 +62,30 @@ Pitfalls:
 - Do not create a static `LoggerFactory` inside a utility. That couples Core to a console/logging policy the host did not choose.
 - Do not throw only because a fallback warning was logged. Keep the documented return behavior unless the input contract itself is invalid.
 - Do not swallow cleanup failures silently when a logger is available. Log them at `Debug` when they are intentionally suppressed to preserve the primary exception or cancellation path.
+
+## Process execution utilities
+
+`ProcessUtils.ExecuteProcessAsync(...)` runs an external command through CliWrap and returns a `CommandResult` containing `ExitCode`, `Stdout`, and `Stderr`. It is not a general replacement for CliWrap; it is the opinionated AppSurface process boundary for framework features that need consistent command result semantics.
+
+Use `ProcessUtils` when AppSurface framework code needs this shared process policy:
+
+- arguments are passed as an ordered `IReadOnlyList<string>` and are escaped by CliWrap rather than concatenated into a shell command;
+- `workingDirectory` is applied to the launched process;
+- parent environment variables are inherited by default;
+- stdout and stderr are captured separately;
+- non-zero exit codes are returned in `CommandResult.ExitCode` instead of throwing;
+- startup failures and cancellation still surface as exceptions;
+- `streamOutput: true` logs completed stdout lines at `Information` and completed stderr lines at `Error` unless `stderrLogLevelSelector` remaps a specific stderr line.
+
+Use CliWrap directly for application code or package code that needs command-specific composition, such as custom environment variable overrides, stdin piping, process pipelines, credentials, resource policies, timeouts that are not modeled as cancellation tokens, or event-stream handling. When the same advanced behavior becomes a repeated AppSurface framework concern, add it deliberately to `ProcessUtils` instead of reimplementing it at each call site.
+
+Pitfalls:
+
+- `Stdout` and `Stderr` are separate buffers, not a merged chronological transcript. If exact cross-stream ordering matters, use CliWrap directly and preserve the event stream yourself.
+- `streamOutput: true` still captures the full text for both streams. It is for real-time logging, not for reducing memory usage on unbounded output.
+- Cancellation is the timeout mechanism for this wrapper. Pass a `CancellationToken` from a `CancellationTokenSource` with the timeout policy you want.
+- Logger and `stderrLogLevelSelector` exceptions are not swallowed. A caller should treat those failures as execution failures because the returned output may be incomplete.
+- Keep `ProcessUtils` focused on AppSurface framework policy. Do not add one-off knobs that only one consumer needs; use CliWrap directly at that call site.
 
 ## Usage
 
