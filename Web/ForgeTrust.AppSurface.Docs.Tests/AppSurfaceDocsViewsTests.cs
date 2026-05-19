@@ -130,7 +130,7 @@ public class AppSurfaceDocsViewsTests
 
         Assert.Contains("<title>Documentation Index - Acme Docs</title>", html);
         Assert.Contains(
-            "<span class=\"docs-wordmark block text-2xl\" style=\"--docs-brand-wordmark-highlight-color:#38bdf8\">Acme <span class=\"docs-wordmark-highlight\">Docs</span></span>",
+            "<span class=\"docs-wordmark block text-lg\" style=\"--docs-brand-wordmark-highlight-color:#38bdf8\">Acme <span class=\"docs-wordmark-highlight\">Docs</span></span>",
             html);
         Assert.Contains("href=\"/some-base/reference\"", html);
         Assert.Contains("src=\"/some-base/brand/logo.svg\"", html);
