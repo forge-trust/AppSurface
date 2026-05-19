@@ -46,7 +46,7 @@ public sealed class AppSurfaceDocsIdentityResolver
         AddFavicon(favicons, faviconOptions.IcoPath, "image/x-icon");
         AddFavicon(favicons, faviconOptions.PngPath, "image/png");
 
-        return new AppSurfaceDocsResolvedIdentity(displayName, homeHref, logo, favicons);
+        return new AppSurfaceDocsResolvedIdentity(displayName, homeHref, logo, favicons.AsReadOnly());
     }
 
     private static void AddFavicon(List<AppSurfaceDocsResolvedFavicon> favicons, string? path, string type)

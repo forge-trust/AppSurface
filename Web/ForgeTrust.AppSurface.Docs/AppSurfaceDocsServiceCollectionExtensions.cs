@@ -67,6 +67,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// </remarks>
     public static IServiceCollection AddAppSurfaceDocs(this IServiceCollection services)
     {
+        ArgumentNullException.ThrowIfNull(services);
+
         services.AddOptions<AppSurfaceDocsOptions>()
             .BindConfiguration(AppSurfaceDocsOptions.SectionName)
             .PostConfigure(

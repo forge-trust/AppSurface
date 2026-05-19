@@ -504,7 +504,6 @@ public sealed class AppSurfaceDocsVersioningOptions
 }
 
 /// <summary>
-/// Validates <see cref="AppSurfaceDocsOptions"/> and rejects unsupported or ambiguous startup configurations.
 /// Localization settings for the live AppSurface Docs source-backed documentation surface.
 /// </summary>
 /// <remarks>

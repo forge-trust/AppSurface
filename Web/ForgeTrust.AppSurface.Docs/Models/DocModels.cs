@@ -750,7 +750,8 @@ public sealed record DocHarvestDiagnostic(
 /// </summary>
 /// <remarks>
 /// Use these constants when testing or branching on <see cref="DocHarvestDiagnostic.Code"/> values. The string values are
-/// public compatibility contracts and must not be changed once released.
+/// public compatibility contracts and must not be changed after the first AppSurface Docs release. The prerelease
+/// rebrand intentionally uses the <c>appsurfacedocs.*</c> prefix before those wire values become externally stable.
 /// </remarks>
 public static class DocHarvestDiagnosticCodes
 {

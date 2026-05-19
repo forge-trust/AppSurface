@@ -12,6 +12,11 @@ internal static class AppSurfaceDocsIdentityPath
 {
     private static readonly char[] QueryOrFragmentChars = ['?', '#'];
 
+    /// <summary>
+    /// Trims a text option value and treats blank text as omitted.
+    /// </summary>
+    /// <param name="value">Raw configured text value.</param>
+    /// <returns>The trimmed text, or <see langword="null"/> when the value is null, empty, or whitespace.</returns>
     public static string? NormalizeTextOrNull(string? value)
     {
         return string.IsNullOrWhiteSpace(value)
@@ -19,11 +24,23 @@ internal static class AppSurfaceDocsIdentityPath
             : value.Trim();
     }
 
+    /// <summary>
+    /// Resolves the visible AppSurface Docs display name.
+    /// </summary>
+    /// <param name="displayName">Configured display name.</param>
+    /// <returns>The trimmed display name, or <see cref="AppSurfaceDocsIdentityOptions.DefaultDisplayName"/> when blank.</returns>
     public static string NormalizeDisplayName(string? displayName)
     {
         return NormalizeTextOrNull(displayName) ?? AppSurfaceDocsIdentityOptions.DefaultDisplayName;
     }
 
+    /// <summary>
+    /// Normalizes a browser path when it is valid and preserves invalid non-blank text for later validation errors.
+    /// </summary>
+    /// <param name="value">Configured app-root or application-relative browser path.</param>
+    /// <returns>
+    /// A normalized path when valid, the trimmed original value when invalid, or <see langword="null"/> when blank.
+    /// </returns>
     public static string? NormalizeBrowserPathOrNull(string? value)
     {
         return TryNormalizeBrowserPath(value, out var normalizedPath, out _)
@@ -31,6 +48,16 @@ internal static class AppSurfaceDocsIdentityPath
             : NormalizeTextOrNull(value);
     }
 
+    /// <summary>
+    /// Validates and normalizes an app-root or application-relative browser path.
+    /// </summary>
+    /// <param name="value">Configured path value.</param>
+    /// <param name="normalizedPath">Normalized path when the value is valid or blank; otherwise <see langword="null"/>.</param>
+    /// <param name="error">Validation error message when invalid; otherwise an empty string.</param>
+    /// <returns>
+    /// <see langword="true"/> when the value is blank, starts with <c>/</c>, or starts with <c>~/</c> and does not
+    /// contain remote URL, data URL, query string, fragment, backslash, or traversal segments; otherwise <see langword="false"/>.
+    /// </returns>
     public static bool TryNormalizeBrowserPath(string? value, out string? normalizedPath, out string error)
     {
         normalizedPath = null;

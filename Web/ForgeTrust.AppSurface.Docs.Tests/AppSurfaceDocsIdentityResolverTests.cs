@@ -53,6 +53,28 @@ public sealed class AppSurfaceDocsIdentityResolverTests
     }
 
     [Fact]
+    public void Identity_ShouldExposeReadOnlyFavicons()
+    {
+        var resolver = new AppSurfaceDocsIdentityResolver(
+            new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    Favicon = new AppSurfaceDocsFaviconOptions
+                    {
+                        SvgPath = "/brand/favicon.svg"
+                    }
+                }
+            },
+            new DocsUrlBuilder(new AppSurfaceDocsOptions()));
+
+        var faviconList = Assert.IsAssignableFrom<IList<AppSurfaceDocsResolvedFavicon>>(resolver.Identity.Favicons);
+        Assert.True(faviconList.IsReadOnly);
+        Assert.Throws<NotSupportedException>(
+            () => faviconList.Add(new AppSurfaceDocsResolvedFavicon("/other.svg", "image/svg+xml")));
+    }
+
+    [Fact]
     public void Identity_ShouldTolerateNullNestedOptions_WhenConstructedDirectly()
     {
         var resolver = new AppSurfaceDocsIdentityResolver(

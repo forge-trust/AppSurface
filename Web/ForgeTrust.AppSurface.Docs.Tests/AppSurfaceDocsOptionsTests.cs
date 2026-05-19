@@ -72,6 +72,14 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceDocs_ShouldRejectNullServiceCollection()
+    {
+        IServiceCollection services = null!;
+
+        Assert.Throws<ArgumentNullException>(() => services.AddAppSurfaceDocs());
+    }
+
+    [Fact]
     public void AddAppSurfaceDocs_ShouldIgnoreLegacyTopLevelRepositoryRootSetting()
     {
         var services = new ServiceCollection();
