@@ -373,6 +373,7 @@
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
+          "CliWrap": "[3.10.1, )",
           "Microsoft.Extensions.Hosting": "[9.0.6, )",
           "Microsoft.Extensions.Logging.Console": "[9.0.6, )"
         }
@@ -382,7 +383,7 @@
         "dependencies": {
           "Autofac": "[8.0.0, )",
           "Autofac.Extensions.DependencyInjection": "[9.0.0, )",
-          "ForgeTrust.AppSurface.Core": "[1.0.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
       "Autofac.Extensions.DependencyInjection": {
@@ -394,6 +395,12 @@
           "Autofac": "8.0.0",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.0"
         }
+      },
+      "CliWrap": {
+        "type": "CentralTransitive",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
       "Microsoft.Extensions.Hosting": {
         "type": "CentralTransitive",
