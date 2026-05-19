@@ -982,7 +982,7 @@ public class DocAggregator
         {
             return diagnosticProvider.GetHarvestDiagnostics() ?? [];
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!IsFatalException(ex))
         {
             logger.LogWarning(
                 ex,
@@ -990,6 +990,17 @@ public class DocAggregator
                 harvesterType);
             return [];
         }
+    }
+
+    private static bool IsFatalException(Exception exception)
+    {
+        return exception is OutOfMemoryException
+            or StackOverflowException
+            or AccessViolationException
+            or AppDomainUnloadedException
+            or BadImageFormatException
+            or CannotUnloadAppDomainException
+            or InvalidProgramException;
     }
 
     private static HarvesterRunResult CreateTimedOutHarvesterRunResult(string harvesterType)

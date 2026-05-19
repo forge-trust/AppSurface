@@ -857,12 +857,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         {
             cancellationToken.ThrowIfCancellationRequested();
             var current = pending.Pop();
-            foreach (var file in EnumerateFilesSafely(current))
+            foreach (var file in EnumerateFilesSafely(current).Where(yielded.Add))
             {
-                if (yielded.Add(file))
-                {
-                    yield return file;
-                }
+                yield return file;
             }
 
             foreach (var directory in EnumerateDirectoriesSafely(current))
@@ -893,10 +890,22 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 continue;
             }
 
-            var staticRoot = GetStaticIncludeRoot(NormalizeRelativePath(pattern.Trim()));
-            var candidate = staticRoot.Length == 0
+            var trimmedPattern = pattern.Trim();
+            if (Path.IsPathRooted(trimmedPattern))
+            {
+                continue;
+            }
+
+            var staticRoot = GetStaticIncludeRoot(NormalizeRelativePath(trimmedPattern));
+            var localStaticRoot = staticRoot.Replace('/', Path.DirectorySeparatorChar);
+            if (localStaticRoot.Length > 0 && Path.IsPathRooted(localStaticRoot))
+            {
+                continue;
+            }
+
+            var candidate = localStaticRoot.Length == 0
                 ? fullRoot
-                : Path.GetFullPath(Path.Combine(fullRoot, staticRoot.Replace('/', Path.DirectorySeparatorChar)));
+                : Path.GetFullPath(Path.Join(fullRoot, localStaticRoot));
             if (!IsUnderRoot(fullRoot, candidate) || !yielded.Add(candidate))
             {
                 continue;

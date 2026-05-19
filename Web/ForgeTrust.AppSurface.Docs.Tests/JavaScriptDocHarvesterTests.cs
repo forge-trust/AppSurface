@@ -359,10 +359,10 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             return;
         }
 
-        var directory = Path.Combine(_testRoot, "src");
+        var directory = Path.Join(_testRoot, "src");
         Directory.CreateDirectory(directory);
-        var linkPath = Path.Combine(directory, "missing.js");
-        File.CreateSymbolicLink(linkPath, Path.Combine(directory, "target-does-not-exist.js"));
+        var linkPath = Path.Join(directory, "missing.js");
+        File.CreateSymbolicLink(linkPath, Path.Join(directory, "target-does-not-exist.js"));
         var harvester = CreateHarvester(CreateEnabledOptions("src/missing.js"));
 
         var docs = await harvester.HarvestAsync(_testRoot);
@@ -413,6 +413,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var harvester = CreateHarvester(CreateEnabledOptions(
             "",
             " ",
+            Path.Join(_testRoot, "ignored", "public-api.js"),
             "../outside.js",
             "src/public-api.js",
             "src/public-api.js"));
