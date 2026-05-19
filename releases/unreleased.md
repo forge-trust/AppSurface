@@ -39,7 +39,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 ### Console and CLI polish
 
 - AppSurface console apps can now opt into a command-first output contract so public CLI help and validation flows stay quiet instead of printing Generic Host lifecycle chatter.
-- AppSurface now plans two public CLI tools: `appsurface` for repository-level AppSurface workflows, starting with `appsurface docs` for AppSurface Docs preview and `appsurface docs export` for repo-owned AppSurface Docs static export, and `razorwire` for RazorWire-specific export workflows.
+- AppSurface now publishes the public `appsurface` .NET tool for repository-level workflows, starting with `appsurface docs` for AppSurface Docs preview and `appsurface docs export` for repo-owned AppSurface Docs static export. RazorWire-specific export workflows remain owned by the separate `razorwire` tool.
 - RazorWire CLI now uses that contract for `--help`, `export --help`, invalid option output, and missing-source validation while still preserving command-owned export progress logs.
 - RazorWire CLI now names export seed-route files with `-r|--seeds`, matching the seed terminology used throughout the exporter and docs.
 - The shared console startup seam now exposes `ConsoleOptions` and `ConsoleOutputMode`, so future public AppSurface CLIs can adopt the same behavior without forking startup logic.
@@ -136,6 +136,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs legacy asset redirects now validate app-relative redirect targets before preserving cache-busting query strings, closing an open-redirect path while keeping virtual-path deployments and packaged asset fallbacks working.
 - AppSurface Docs authored Markdown pages now use a dedicated prose treatment with a shorter line length, stronger paragraph rhythm, readable lists, clearer links, blockquotes, and inline code while generated API pages keep the wider reference layout.
 - AppSurface Docs fenced Markdown code blocks now render server-side syntax highlighting through TextMateSharp with AppSurface Docs-owned token classes, language badges, and escaped plaintext fallback when a language is unknown, unsupported, oversized, or cannot be tokenized safely.
+- AppSurface Docs code-fence language badges now render as package-owned chrome instead of inline copied text, keeping search indexing and clipboard behavior focused on the authored code body while preserving visible language labels.
 - AppSurface Docs search now keeps failure recovery markup out of the active search shell until the index actually fails to load, so successful searches no longer expose hidden failure copy to text extraction tools.
 - AppSurface Docs search now opens as a richer workspace with representative starter rows, filter-first browsing, stronger no-results recovery, and normalized release badge aliases.
 - AppSurface Docs harvesting now excludes test-project docs and generated example-app API reference from the docs surface while keeping authored example README walkthroughs public.

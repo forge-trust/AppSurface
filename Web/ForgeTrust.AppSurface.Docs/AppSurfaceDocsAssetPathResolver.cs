@@ -35,12 +35,13 @@ internal sealed class AppSurfaceDocsAssetPathResolver
     /// </summary>
     /// <remarks>
     /// The value resolves to <see cref="PackagedBrandIconPath"/>, the bundled static-web-assets location
-    /// <c>~/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg</c>. Razor views should use this
-    /// property when referencing the AppSurface brand mark served by the docs host so the packaged asset path is
-    /// maintained in one place instead of being repeated in layout markup. The returned path is application-relative;
-    /// callers that render under a path base should pass it through URL helpers such as <c>Url.Content</c>, and hosts
-    /// that rewrite assets through a CDN or a non-standard static-web-assets layout should use their explicit asset URL
-    /// instead.
+    /// <c>~/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg</c>. AppSurface Docs also maps this URL
+    /// to an embedded-resource fallback when static web asset manifests are unavailable, which keeps packaged .NET tool
+    /// hosts self-contained. Razor views should use this property when referencing the AppSurface brand mark served by
+    /// the docs host so the packaged asset path is maintained in one place instead of being repeated in layout markup.
+    /// The returned path is application-relative; callers that render under a path base should pass it through URL
+    /// helpers such as <c>Url.Content</c>, and hosts that rewrite assets through a CDN or a non-standard
+    /// static-web-assets layout should use their explicit asset URL instead.
     /// </remarks>
     public string BrandIconPath => PackagedBrandIconPath;
 

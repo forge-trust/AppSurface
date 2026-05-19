@@ -320,9 +320,9 @@ internal sealed class TextMateSharpAppSurfaceDocsCodeHighlighter : IAppSurfaceDo
             .Append(language.NormalizedLanguage)
             .Append(" language-")
             .Append(language.ClassLanguage)
-            .Append("\"><span class=\"doc-code__language\">")
+            .Append("\" data-doc-code-language=\"")
             .Append(WebUtility.HtmlEncode(language.Label))
-            .Append("</span><code>");
+            .Append("\"><code>");
     }
 
     private static void AppendWrapperClose(StringBuilder builder)

@@ -68,7 +68,8 @@ internal sealed class PackagePublishPlanResolver
                     entry.Metadata.PackageId,
                     entry.Manifest.PublishDecision!.Value,
                     entry.Manifest.ExpectedDependencyPackageIds.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
-                    entry.Metadata.IsTool))
+                    entry.Metadata.IsTool,
+                    entry.Manifest.ToolCommandName ?? string.Empty))
                 .ToArray());
     }
 
@@ -138,6 +139,10 @@ internal sealed class PackagePublishPlanResolver
                         $"Tool manifest entry '{entry.Manifest.Project}' must not define expected package dependencies because .NET tool packages embed their project references.");
                 }
 
+                PackageIndexGenerator.ValidateToolCommandNameValue(
+                    entry.Manifest.Project,
+                    entry.Manifest.ToolCommandName ?? string.Empty);
+
                 continue;
             }
 
@@ -187,9 +192,14 @@ internal sealed record PackagePublishPlan(IReadOnlyList<PackagePublishPlanEntry>
 /// <param name="Decision">Publish decision from the manifest.</param>
 /// <param name="ExpectedDependencyPackageIds">Expected same-version package dependencies.</param>
 /// <param name="IsTool">Whether the package is a .NET tool package.</param>
+/// <param name="ToolCommandName">
+/// Validated command shim token from <c>tool_command_name</c>. It is empty for non-tool packages and required for tool
+/// packages so the pack/publish workflow can carry the exact command name into artifact validation and smoke tests.
+/// </param>
 internal sealed record PackagePublishPlanEntry(
     string ProjectPath,
     string PackageId,
     PackagePublishDecision Decision,
     IReadOnlyList<string> ExpectedDependencyPackageIds,
-    bool IsTool);
+    bool IsTool,
+    string ToolCommandName = "");

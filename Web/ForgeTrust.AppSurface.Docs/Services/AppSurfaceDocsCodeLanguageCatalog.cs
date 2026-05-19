@@ -18,6 +18,8 @@ internal sealed class AppSurfaceDocsCodeLanguageCatalog
         ["cshtml"] = Known("razor", "razor", "Razor", "razor"),
         ["xml"] = Known("xml", "xml", "XML", "xml"),
         ["json"] = Known("json", "json", "JSON", "json"),
+        ["yaml"] = Known("yaml", "yaml", "YAML", "yaml"),
+        ["yml"] = Known("yaml", "yaml", "YAML", "yaml"),
         ["bash"] = Known("bash", "bash", "Bash", "shellscript"),
         ["sh"] = Known("bash", "bash", "Bash", "shellscript"),
         ["shell"] = Known("bash", "bash", "Bash", "shellscript"),
@@ -30,6 +32,8 @@ internal sealed class AppSurfaceDocsCodeLanguageCatalog
         ["diff"] = Known("diff", "diff", "Diff", "diff"),
         ["txt"] = Plain("plaintext", "plaintext", "Plain text", isKnown: true),
         ["text"] = Plain("plaintext", "plaintext", "Plain text", isKnown: true),
+        ["plain"] = Plain("plaintext", "plaintext", "Plain text", isKnown: true),
+        ["text/plain"] = Plain("plaintext", "plaintext", "Plain text", isKnown: true),
         ["plaintext"] = Plain("plaintext", "plaintext", "Plain text", isKnown: true),
     };
 

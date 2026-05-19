@@ -11,6 +11,34 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 
 `appsurface docs` runs the same AppSurface Docs standalone host used by CI and integration tests. It forwards AppSurface Docs configuration into that host instead of duplicating harvesting, routing, static web asset, or MVC setup in the CLI. `appsurface docs export` starts that same host in-process, binds an internal loopback listener, and delegates static crawling plus CDN validation to the RazorWire export engine.
 
+## Install
+
+Install the published tool from NuGet:
+
+```bash
+dotnet tool install --global ForgeTrust.AppSurface.Cli --prerelease
+```
+
+Update an existing global install with the same package id:
+
+```bash
+dotnet tool update --global ForgeTrust.AppSurface.Cli --prerelease
+```
+
+Use a local tool manifest when you want the command version pinned per repository:
+
+```bash
+dotnet new tool-manifest
+dotnet tool install ForgeTrust.AppSurface.Cli --prerelease
+dotnet tool run appsurface docs --repo .
+```
+
+Update the repo-scoped tool version with:
+
+```bash
+dotnet tool update ForgeTrust.AppSurface.Cli --prerelease
+```
+
 ## Commands
 
 ### `appsurface docs`
@@ -35,6 +63,8 @@ Options:
 `appsurface docs preview` is an alias for the same behavior, kept so the old deferred shape maps cleanly to the new AppSurface command family.
 
 When no endpoint is configured, the command runs the host in `Development` from the selected repository root and lets AppSurface Web choose the stable localhost port for that repository or worktree. Use the startup log as the source of truth for the selected URL. Pass `--port`, `--urls`, `--environment Production`, or endpoint settings such as `ASPNETCORE_URLS`, HTTP/HTTPS ports, or Kestrel endpoints when you intentionally want to bypass that local preview default.
+
+Packaged .NET tools usually do not carry ASP.NET Core static web asset manifests. The AppSurface CLI disables static web asset manifest loading for the preview host and relies on AppSurface Docs and RazorWire embedded asset fallbacks instead, so a global or local tool install stays self-contained.
 
 ### `appsurface docs export`
 
