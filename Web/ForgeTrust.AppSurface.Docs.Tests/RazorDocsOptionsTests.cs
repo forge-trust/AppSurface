@@ -1213,6 +1213,43 @@ public sealed class RazorDocsOptionsTests
     }
 
     [Fact]
+    public void Validator_ShouldRejectNullHarvestPathContainersAndCollections()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Harvest = new RazorDocsHarvestOptions
+            {
+                Paths = new RazorDocsHarvestPathOptions
+                {
+                    IncludeGlobs = null!,
+                    ExcludeGlobs = null!,
+                    DefaultExclusions = new RazorDocsHarvestDefaultExclusionOptions
+                    {
+                        DisabledGroups = null!,
+                        AllowGlobs = null!
+                    }
+                },
+                Markdown = null!,
+                CSharp = new RazorDocsCSharpHarvestOptions
+                {
+                    DefaultExclusions = null!
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Harvest:Paths:IncludeGlobs must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Harvest:Paths:ExcludeGlobs must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Harvest:Paths:DefaultExclusions:DisabledGroups must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Harvest:Paths:DefaultExclusions:AllowGlobs must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Harvest:Markdown must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("RazorDocs:Harvest:CSharp:DefaultExclusions must not be null.", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Validator_ShouldRejectNumericDefaultExclusionGroups()
     {
         var validator = new RazorDocsOptionsValidator();

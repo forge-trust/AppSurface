@@ -124,6 +124,18 @@ public class RazorDocsWebModuleTests
     }
 
     [Fact]
+    public void AddRazorDocs_WhenCalledTwiceShouldNotRegisterDuplicateDefaultHarvesters()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+
+        services.AddRazorDocs();
+        services.AddRazorDocs();
+
+        Assert.Equal(2, services.Count(service => service.ServiceType == typeof(IDocHarvester)));
+    }
+
+    [Fact]
     public void ConfigureServices_ShouldUseDedicatedRazorDocsSanitizer_WhenAmbientSanitizerExists()
     {
         var rootModuleFake = A.Fake<IAppSurfaceHostModule>();

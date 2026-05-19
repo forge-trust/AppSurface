@@ -144,6 +144,27 @@ public sealed class RazorDocsHarvestPathPolicyTests
     }
 
     [Fact]
+    public void Evaluate_AppliesSourceSpecificExcludesAfterGlobalAllows()
+    {
+        var policy = CreatePolicy(
+            options =>
+            {
+                options.Harvest.Paths.IncludeGlobs = ["docs/**"];
+                options.Harvest.Markdown.ExcludeGlobs = ["docs/private/**"];
+            });
+
+        var decision = policy.Evaluate("docs/private/README.md", RazorDocsHarvestSourceKind.Markdown);
+
+        AssertDecision(decision, included: false, RazorDocsHarvestPathDecisionCode.ExcludedBySourceExclude);
+        Assert.Contains(
+            decision.Trace,
+            trace => trace.Code == RazorDocsHarvestPathDecisionCode.ExcludedBySourceExclude
+                     && trace.Scope == "Markdown"
+                     && trace.Pattern == "docs/private/**"
+                     && trace.Matched);
+    }
+
+    [Fact]
     public void Evaluate_RequiresAllowForEveryMatchedDefaultGroup()
     {
         var onlyHiddenAllowed = CreatePolicy(
@@ -256,14 +277,37 @@ public sealed class RazorDocsHarvestPathPolicyTests
         Assert.True(policy.ShouldPruneDirectory(".github", RazorDocsHarvestSourceKind.CSharp));
     }
 
+    [Fact]
+    public void ShouldPruneDirectory_WhenDirectoryPathIsUnsafeReturnsTrue()
+    {
+        Assert.True(RazorDocsHarvestPathPolicy.CreateDefault().ShouldPruneDirectory("../secret", RazorDocsHarvestSourceKind.Markdown));
+    }
+
+    [Fact]
+    public void Evaluate_WhenSourceKindIsUnknownExcludesAsBaseCandidateMiss()
+    {
+        var decision = RazorDocsHarvestPathPolicy.CreateDefault()
+            .Evaluate("docs/readme.md", (RazorDocsHarvestSourceKind)999);
+
+        AssertDecision(decision, included: false, RazorDocsHarvestPathDecisionCode.ExcludedByBaseCandidate);
+    }
+
+    [Fact]
+    public void ShouldPruneDirectory_WhenSourceKindIsUnknownThrows()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => RazorDocsHarvestPathPolicy.CreateDefault().ShouldPruneDirectory("docs", (RazorDocsHarvestSourceKind)999));
+    }
+
     [Theory]
     [InlineData("BuildOutput", true, "BuildOutput")]
     [InlineData(" buildoutput ", true, "BuildOutput")]
     [InlineData("0", false, "0")]
     [InlineData("42", false, "42")]
     [InlineData("", false, "")]
+    [InlineData(null, false, "")]
     public void DefaultGroupHelpers_AcceptNamesButNotNumericValues(
-        string groupId,
+        string? groupId,
         bool expectedKnown,
         string expectedNormalized)
     {

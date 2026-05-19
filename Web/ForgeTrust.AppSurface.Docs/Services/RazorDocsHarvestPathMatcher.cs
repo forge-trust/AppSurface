@@ -29,15 +29,9 @@ internal sealed class RazorDocsHarvestPathMatcher
         ArgumentNullException.ThrowIfNull(relativeDirectory);
 
         var sentinelPath = $"{relativeDirectory.TrimEnd('/')}/_";
-        foreach (var matcher in _matchers.Where(matcher => matcher.Pattern.EndsWith("/**", StringComparison.Ordinal)))
-        {
-            if (matcher.Matches(sentinelPath))
-            {
-                return matcher.Pattern;
-            }
-        }
-
-        return null;
+        return _matchers
+            .Where(matcher => matcher.Pattern.EndsWith("/**", StringComparison.Ordinal))
+            .FirstOrDefault(matcher => matcher.Matches(sentinelPath))?.Pattern;
     }
 
     private sealed class PatternMatcher

@@ -45,6 +45,14 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_WithLoggerFactoryShouldCreateDefaultHighlighter()
+    {
+        var harvester = new MarkdownHarvester(_loggerFake, NullLoggerFactory.Instance);
+
+        Assert.NotNull(harvester);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldApplyConfiguredHarvestPathPolicy()
     {
         var harvester = new MarkdownHarvester(
@@ -56,16 +64,16 @@ public class MarkdownHarvesterTests : IDisposable
                     options.Harvest.Paths.IncludeGlobs = ["docs/**"];
                     options.Harvest.Markdown.ExcludeGlobs = ["docs/private/**"];
                 }));
-        var docsDir = Path.Combine(_testRoot, "docs");
-        var publicDir = Path.Combine(docsDir, "public");
-        var privateDir = Path.Combine(docsDir, "private");
+        var docsDir = CombineUnder(_testRoot, "docs");
+        var publicDir = CombineUnder(docsDir, "public");
+        var privateDir = CombineUnder(docsDir, "private");
         Directory.CreateDirectory(publicDir);
         Directory.CreateDirectory(privateDir);
-        Directory.CreateDirectory(Path.Combine(_testRoot, "outside"));
-        await File.WriteAllTextAsync(Path.Combine(publicDir, "Included.md"), "# Included");
-        await File.WriteAllTextAsync(Path.Combine(privateDir, "Secret.md"), "# Secret");
-        await File.WriteAllTextAsync(Path.Combine(_testRoot, "outside", "Outside.md"), "# Outside");
-        await File.WriteAllTextAsync(Path.Combine(_testRoot, "LICENSE"), "# License");
+        Directory.CreateDirectory(CombineUnder(_testRoot, "outside"));
+        await File.WriteAllTextAsync(CombineUnder(publicDir, "Included.md"), "# Included");
+        await File.WriteAllTextAsync(CombineUnder(privateDir, "Secret.md"), "# Secret");
+        await File.WriteAllTextAsync(CombineUnder(_testRoot, "outside", "Outside.md"), "# Outside");
+        await File.WriteAllTextAsync(CombineUnder(_testRoot, "LICENSE"), "# License");
 
         var results = (await harvester.HarvestAsync(_testRoot)).ToList();
 
@@ -981,6 +989,15 @@ public class MarkdownHarvesterTests : IDisposable
         return new RazorDocsHarvestPathPolicy(
             options,
             NullLogger<RazorDocsHarvestPathPolicy>.Instance);
+    }
+
+    private static string CombineUnder(
+        string root,
+        params string[] segments)
+    {
+        Assert.All(segments, segment => Assert.False(Path.IsPathRooted(segment)));
+
+        return segments.Aggregate(root, Path.Combine);
     }
 
     private sealed class RecordingCodeHighlighter : IRazorDocsCodeHighlighter

@@ -313,7 +313,7 @@ internal sealed class RazorDocsHarvestPathPolicy
             treatLastSegmentAsDirectory: true)
             .Where(group => !IsDefaultGroupDisabled(group, sourcePolicy));
 
-        foreach (var group in matchedDefaultGroups.Where(group => !HasAnyDefaultGroupAllowPattern(group, sourcePolicy)))
+        if (matchedDefaultGroups.Any(group => !HasAnyDefaultGroupAllowPattern(group, sourcePolicy)))
         {
             return true;
         }
