@@ -3562,6 +3562,100 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDocsAsync_ShouldPreserveNamespaceContributorHideFlag_WhenMergingReadmeContributorMetadata()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Web",
+                "Namespaces/ForgeTrust.Web",
+                "<section class='doc-type'>Type body</section>",
+                Metadata: new DocMetadata
+                {
+                    Contributor = new DocContributorMetadata
+                    {
+                        HideContributorInfo = true
+                    }
+                }),
+            new(
+                "README",
+                "docs/ForgeTrust.Web/README.md",
+                "<p>Namespace intro</p>",
+                Metadata: new DocMetadata
+                {
+                    Contributor = new DocContributorMetadata
+                    {
+                        SourceUrlOverride = "https://example.test/source"
+                    }
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var docs = (await _aggregator.GetDocsAsync()).ToList();
+
+        var namespaceDoc = docs.Single(d => d.Path == "Namespaces/ForgeTrust.Web");
+        Assert.True(namespaceDoc.Metadata?.Contributor?.HideContributorInfo);
+        Assert.Equal("https://example.test/source", namespaceDoc.Metadata?.Contributor?.SourceUrlOverride);
+        Assert.Equal("docs/ForgeTrust.Web/README.md", namespaceDoc.Metadata?.Contributor?.SourcePathOverride);
+    }
+
+    [Fact]
+    public async Task GetDocsAsync_ShouldIgnoreDerivedNamespaceReadmeMetadata_WhenMergingIntoApiPage()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Web",
+                "Namespaces/ForgeTrust.Web",
+                "<section class='doc-type'>Type body</section>",
+                Metadata: new DocMetadata
+                {
+                    Title = "API Web",
+                    PageType = "api-reference",
+                    Audience = "api",
+                    Component = "reference",
+                    NavGroup = "API Reference",
+                    RedirectAliases = ["existing-alias"]
+                }),
+            new(
+                "README",
+                "docs/ForgeTrust.Web/README.md",
+                "<p>Namespace intro</p>",
+                Metadata: new DocMetadata
+                {
+                    Title = "Derived Web",
+                    TitleIsDerived = true,
+                    PageType = "guide",
+                    PageTypeIsDerived = true,
+                    Audience = "reader",
+                    AudienceIsDerived = true,
+                    Component = "docs",
+                    ComponentIsDerived = true,
+                    NavGroup = "How-to Guides",
+                    NavGroupIsDerived = true
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var docs = (await _aggregator.GetDocsAsync()).ToList();
+
+        var namespaceDoc = docs.Single(d => d.Path == "Namespaces/ForgeTrust.Web");
+        Assert.Equal("API Web", namespaceDoc.Metadata?.Title);
+        Assert.Equal("api-reference", namespaceDoc.Metadata?.PageType);
+        Assert.Equal("api", namespaceDoc.Metadata?.Audience);
+        Assert.Equal("reference", namespaceDoc.Metadata?.Component);
+        Assert.Equal("API Reference", namespaceDoc.Metadata?.NavGroup);
+        Assert.Equal(
+            [
+                "docs/ForgeTrust.Web/README.md",
+                "docs/ForgeTrust.Web/README.md.html",
+                "docs/ForgeTrust.Web/README",
+                "existing-alias"
+            ],
+            namespaceDoc.Metadata?.RedirectAliases);
+    }
+
+    [Fact]
     public async Task GetDocsAsync_ShouldRenderNamespaceEntryPoints_AfterIntroAndBeforeGeneratedApiDetail()
     {
         var namespaceContent = "<section class='doc-namespace-groups'><h4>Namespaces</h4></section><section id='ForgeTrust-Web-AddWeb' class='doc-method-group'>Type body</section>";

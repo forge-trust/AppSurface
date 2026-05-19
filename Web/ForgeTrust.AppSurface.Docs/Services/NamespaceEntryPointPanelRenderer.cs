@@ -139,12 +139,9 @@ internal static class NamespaceEntryPointPanelRenderer
     private static HashSet<string> BuildAnchorSet(string content, IReadOnlyList<DocOutlineItem>? outline)
     {
         var anchors = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var outlineItem in outline ?? [])
+        foreach (var outlineItem in (outline ?? []).Where(outlineItem => !string.IsNullOrWhiteSpace(outlineItem.Id)))
         {
-            if (!string.IsNullOrWhiteSpace(outlineItem.Id))
-            {
-                anchors.Add(WebUtility.HtmlDecode(outlineItem.Id.Trim()));
-            }
+            anchors.Add(WebUtility.HtmlDecode(outlineItem.Id.Trim()));
         }
 
         foreach (Match match in AnchorIdRegex.Matches(content))

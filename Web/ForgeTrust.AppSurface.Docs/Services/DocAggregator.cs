@@ -2142,7 +2142,7 @@ public class DocAggregator
                     : MergeNamespaceIntroIntoContent(namespaceNode.Content, readmeNode.Content);
                 var mergedMetadata = DocMetadata.Merge(readmeMetadata, namespaceNode.Metadata);
                 if (namespaceNode.Metadata?.Contributor?.HideContributorInfo == true
-                    && mergedMetadata?.Contributor is not null)
+                    && mergedMetadata is { Contributor: not null })
                 {
                     mergedMetadata = mergedMetadata with
                     {
