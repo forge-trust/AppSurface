@@ -139,7 +139,7 @@ RazorDocs uses the first whitespace-delimited code-fence info token as the langu
 | `js`, `javascript` | `javascript` |
 | `md`, `markdown` | `markdown` |
 | `diff` | `diff` |
-| `txt`, `text`, `plain`, `plaintext` | `plaintext` |
+| `txt`, `text`, `plain`, `text/plain`, `plaintext` | `plaintext` |
 
 Supported normalized languages render highlighted output when the bundled TextMateSharp grammar loads successfully. `plaintext`, unsupported languages, unknown languages, grammar failures, tokenization failures, and blocks above RazorDocs' internal size threshold render as escaped plaintext with the same quiet code-block treatment. A correct plain block is preferred over fake highlighting.
 

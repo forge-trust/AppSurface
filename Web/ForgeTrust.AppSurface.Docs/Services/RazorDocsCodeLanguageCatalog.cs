@@ -33,6 +33,7 @@ internal sealed class RazorDocsCodeLanguageCatalog
         ["txt"] = Plain("plaintext", "plaintext", "Plain text", isKnown: true),
         ["text"] = Plain("plaintext", "plaintext", "Plain text", isKnown: true),
         ["plain"] = Plain("plaintext", "plaintext", "Plain text", isKnown: true),
+        ["text/plain"] = Plain("plaintext", "plaintext", "Plain text", isKnown: true),
         ["plaintext"] = Plain("plaintext", "plaintext", "Plain text", isKnown: true),
     };
 

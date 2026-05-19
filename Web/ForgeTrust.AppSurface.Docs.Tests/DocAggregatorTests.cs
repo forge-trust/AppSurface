@@ -2697,6 +2697,9 @@ public class DocAggregatorTests : IDisposable
         Assert.Equal("Run: dotnet run", indexedDocument.BodyText);
         Assert.Equal("Run: dotnet run", indexedDocument.Snippet);
         Assert.DoesNotContain("Bash dotnet", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bash dotnet", indexedDocument.Snippet, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bash", indexedDocument.BodyText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bash", indexedDocument.Snippet, StringComparison.Ordinal);
     }
 
     [Fact]

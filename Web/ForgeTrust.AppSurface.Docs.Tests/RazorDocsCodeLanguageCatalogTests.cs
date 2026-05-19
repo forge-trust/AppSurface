@@ -19,6 +19,7 @@ public class RazorDocsCodeLanguageCatalogTests
     [InlineData("cshtml", "razor", "razor", "Razor", "razor", false)]
     [InlineData("text", "plaintext", "plaintext", "Plain text", null, true)]
     [InlineData("plain", "plaintext", "plaintext", "Plain text", null, true)]
+    [InlineData("text/plain", "plaintext", "plaintext", "Plain text", null, true)]
     public void Normalize_ShouldMapKnownAliases(
         string input,
         string normalized,
