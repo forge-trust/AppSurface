@@ -18,6 +18,8 @@ public sealed class ProgramEntryPointTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("usage", result.AllText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("appsurface [command]", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet ForgeTrust.AppSurface.Cli.dll", result.AllText, StringComparison.Ordinal);
         Assert.Contains("docs", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);

@@ -132,7 +132,8 @@ internal sealed class PackageArtifactManifestWriter
                 PackagePublishDecisionFormatter.Format(entry.Decision),
                 Path.GetFileName(artifactPath),
                 await PackageHash.ComputeSha512Async(artifactPath, cancellationToken),
-                entry.IsTool));
+                entry.IsTool,
+                entry.ToolCommandName));
         }
 
         var manifest = new PackageArtifactManifest(
@@ -210,6 +211,17 @@ internal sealed class PackageArtifactManifestReader
             RequireManifestValue(manifestPath, entry.PackageId, "decision", entry.Decision);
             RequireManifestValue(manifestPath, entry.PackageId, "artifact_file_name", entry.ArtifactFileName);
             RequireManifestValue(manifestPath, entry.PackageId, "sha512", entry.Sha512);
+            if (entry.IsTool)
+            {
+                RequireManifestValue(manifestPath, entry.PackageId, "tool_command_name", entry.ToolCommandName);
+                PackageIndexGenerator.ValidateToolCommandNameValue(entry.ProjectPath, entry.ToolCommandName);
+            }
+            else if (!string.IsNullOrWhiteSpace(entry.ToolCommandName))
+            {
+                throw new PackageIndexException(
+                    $"Package artifact manifest '{manifestPath}' entry '{entry.PackageId}' defines 'tool_command_name' but is not marked as a tool.");
+            }
+
             if (Path.IsPathRooted(entry.ArtifactFileName)
                 || !string.Equals(Path.GetFileName(entry.ArtifactFileName), entry.ArtifactFileName, StringComparison.Ordinal))
             {
@@ -443,12 +455,13 @@ internal sealed class PackagePrereleasePublishWorkflow
 }
 
 /// <summary>
-/// Restores published public packages from a clean NuGet configuration after publish completes.
+/// Restores published public packages and verifies published .NET tools from a clean NuGet configuration after publish completes.
 /// </summary>
 internal sealed class PackageSmokeInstallWorkflow
 {
     internal const int RestoreTimeoutMilliseconds = 180_000;
     internal const int ToolInstallTimeoutMilliseconds = 180_000;
+    internal const int ToolRunTimeoutMilliseconds = 180_000;
     private static readonly TimeSpan[] RetryDelays =
     [
         TimeSpan.FromSeconds(15),
@@ -478,7 +491,7 @@ internal sealed class PackageSmokeInstallWorkflow
     }
 
     /// <summary>
-    /// Restores each public package from the configured package source in an isolated workspace.
+    /// Restores each public package and runs each public tool command from the configured package source in an isolated workspace.
     /// </summary>
     /// <param name="request">Smoke install request.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -520,7 +533,7 @@ internal sealed class PackageSmokeInstallWorkflow
             ExternalCommandResult result;
             if (entry.ManifestEntry.IsTool)
             {
-                result = await RunToolInstallWithRetryAsync(
+                result = await RunToolSmokeAsync(
                     request,
                     manifest.PackageVersion,
                     entry.ManifestEntry,
@@ -590,7 +603,7 @@ internal sealed class PackageSmokeInstallWorkflow
             cancellationToken);
     }
 
-    private async Task<ExternalCommandResult> RunToolInstallWithRetryAsync(
+    private async Task<ExternalCommandResult> RunToolSmokeAsync(
         PackageSmokeInstallRequest request,
         string packageVersion,
         PackageArtifactManifestEntry entry,
@@ -602,7 +615,7 @@ internal sealed class PackageSmokeInstallWorkflow
     {
         var toolPath = Path.Combine(packageWorkDirectory, "tools");
         Directory.CreateDirectory(toolPath);
-        return await RunWithRetryAsync(
+        var installResult = await RunWithRetryAsync(
             () => _commandRunner.RunAsync(
                 new ExternalCommandRequest(
                     "dotnet",
@@ -626,6 +639,43 @@ internal sealed class PackageSmokeInstallWorkflow
                     CreateSmokeEnvironment(dotnetHomePath, sharedPackagesPath)),
                 cancellationToken),
             cancellationToken);
+
+        if (installResult.ExitCode != 0)
+        {
+            return installResult;
+        }
+
+        var commandResult = await _commandRunner.RunAsync(
+            new ExternalCommandRequest(
+                ResolveToolShimPath(toolPath, entry.ToolCommandName),
+                ["--help"],
+                packageWorkDirectory,
+                "dotnet tool run",
+                $"running '{entry.ToolCommandName} --help'",
+                ToolRunTimeoutMilliseconds,
+                CreateSmokeEnvironment(dotnetHomePath, sharedPackagesPath)),
+            cancellationToken);
+        var combinedResult = CombineCommandResults(installResult, commandResult);
+        if (combinedResult.ExitCode != 0)
+        {
+            return combinedResult;
+        }
+
+        var commandOutput = CombineOutput(commandResult);
+        if (!ContainsToolCommandUsage(commandOutput, entry.ToolCommandName))
+        {
+            return CombineCommandResults(
+                installResult,
+                commandResult with
+                {
+                    ExitCode = 1,
+                    StandardError = CombineText(
+                        commandResult.StandardError,
+                        $"Tool command '{entry.ToolCommandName} --help' completed but did not include the command name in help output.")
+                });
+        }
+
+        return combinedResult;
     }
 
     private async Task<ExternalCommandResult> RunWithRetryAsync(
@@ -713,6 +763,37 @@ internal sealed class PackageSmokeInstallWorkflow
     {
         var invalidCharacters = Path.GetInvalidFileNameChars().ToHashSet();
         return new string(value.Select(character => invalidCharacters.Contains(character) ? '_' : character).ToArray());
+    }
+
+    private static string ResolveToolShimPath(string toolPath, string commandName)
+    {
+        var shimName = OperatingSystem.IsWindows() ? $"{commandName}.exe" : commandName;
+        return Path.Combine(toolPath, shimName);
+    }
+
+    private static bool ContainsToolCommandUsage(string output, string commandName)
+    {
+        return Regex.IsMatch(
+            output,
+            $@"(?im)(^|\s|`){Regex.Escape(commandName)}($|\s|\[|`)",
+            RegexOptions.CultureInvariant);
+    }
+
+    private static ExternalCommandResult CombineCommandResults(
+        ExternalCommandResult first,
+        ExternalCommandResult second)
+    {
+        return new ExternalCommandResult(
+            second.ExitCode,
+            CombineText(first.StandardOutput, second.StandardOutput),
+            CombineText(first.StandardError, second.StandardError));
+    }
+
+    private static string CombineText(string first, string second)
+    {
+        return string.Join(
+            Environment.NewLine,
+            new[] { first.TrimEnd(), second.TrimEnd() }.Where(value => !string.IsNullOrWhiteSpace(value)));
     }
 
     private static string CombineOutput(ExternalCommandResult result)
@@ -837,7 +918,7 @@ internal sealed record PackagePrereleasePublishRequest(
     string ApiKeyEnvironmentVariable);
 
 /// <summary>
-/// Request for the post-publish smoke install workflow.
+/// Request for the post-publish smoke install and tool verification workflow.
 /// </summary>
 /// <param name="RepositoryRoot">Repository root used for path display and validation.</param>
 /// <param name="ManifestPath">Checked-in package manifest path used to revalidate the artifact manifest.</param>
@@ -875,13 +956,15 @@ internal sealed record PackageArtifactManifest(
 /// <param name="ArtifactFileName">Package artifact file name without directory segments.</param>
 /// <param name="Sha512">Lowercase hexadecimal SHA-512 hash of the package artifact.</param>
 /// <param name="IsTool">Whether the artifact is a .NET tool package.</param>
+/// <param name="ToolCommandName">Command shim expected for .NET tool packages.</param>
 internal sealed record PackageArtifactManifestEntry(
     [property: JsonPropertyName("package_id")] string PackageId,
     [property: JsonPropertyName("project_path")] string ProjectPath,
     [property: JsonPropertyName("decision")] string Decision,
     [property: JsonPropertyName("artifact_file_name")] string ArtifactFileName,
     [property: JsonPropertyName("sha512")] string Sha512,
-    [property: JsonPropertyName("is_tool")] bool IsTool);
+    [property: JsonPropertyName("is_tool")] bool IsTool,
+    [property: JsonPropertyName("tool_command_name")] string ToolCommandName = "");
 
 /// <summary>
 /// Publish result for a coordinated prerelease package version.
@@ -923,7 +1006,7 @@ internal enum PackagePublishStatus
 }
 
 /// <summary>
-/// Smoke install result for packages restored after prerelease publishing.
+/// Smoke install result for packages restored and tools verified after prerelease publishing.
 /// </summary>
 /// <param name="PackageVersion">Exact prerelease package version.</param>
 /// <param name="Source">NuGet source URL.</param>
@@ -934,14 +1017,14 @@ internal sealed record PackageSmokeInstallReport(
     IReadOnlyList<PackageSmokeInstallReportEntry> Entries);
 
 /// <summary>
-/// Smoke install outcome for one public package.
+/// Smoke install outcome for one public package or tool.
 /// </summary>
 /// <param name="PackageId">NuGet package id.</param>
 /// <param name="ProjectPath">Repository-relative project path.</param>
 /// <param name="IsTool">Whether the package was installed as a .NET tool.</param>
 /// <param name="Status">Smoke install status.</param>
-/// <param name="ExitCode">Exit code from the final restore or tool install attempt.</param>
-/// <param name="Output">Captured install output.</param>
+/// <param name="ExitCode">Exit code from the final restore or tool command attempt.</param>
+/// <param name="Output">Captured restore, install, or command output.</param>
 internal sealed record PackageSmokeInstallReportEntry(
     string PackageId,
     string ProjectPath,
@@ -1050,7 +1133,8 @@ internal static class PackageArtifactManifestPlanValidator
             if (!string.Equals(planEntry.PackageId, manifestEntry.PackageId, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(planEntry.ProjectPath, manifestEntry.ProjectPath, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(expectedDecision, manifestEntry.Decision, StringComparison.OrdinalIgnoreCase)
-                || planEntry.IsTool != manifestEntry.IsTool)
+                || planEntry.IsTool != manifestEntry.IsTool
+                || !string.Equals(planEntry.ToolCommandName, manifestEntry.ToolCommandName, StringComparison.Ordinal))
             {
                 throw new PackageIndexException(
                     $"Package artifact manifest entry {index + 1} does not match package plan entry '{planEntry.PackageId}'.");

@@ -566,6 +566,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 includes: The `razorwire` .NET tool command and static export workflow.
                 does_not_include: The RazorWire runtime package or coordinated package publishing automation.
                 start_here_path: Web/ForgeTrust.RazorWire.Cli/README.md
+                tool_command_name: razorwire
             """);
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
@@ -591,7 +592,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         var markdown = await generator.GenerateAsync(CreateRequest());
 
         Assert.Contains("| `ForgeTrust.RazorWire.Cli` |", markdown, StringComparison.Ordinal);
-        Assert.Contains("`dotnet tool install --global ForgeTrust.RazorWire.Cli`", markdown, StringComparison.Ordinal);
+        Assert.Contains("`dotnet tool install --global ForgeTrust.RazorWire.Cli --prerelease`", markdown, StringComparison.Ordinal);
         Assert.Contains("Library package rows use `dotnet package add`", markdown, StringComparison.Ordinal);
     }
 
@@ -632,7 +633,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.EndsWith("\n", markdown, StringComparison.Ordinal);
         Assert.Contains("### Support and runtime packages", markdown, StringComparison.Ordinal);
         Assert.Contains("### Docs and proof hosts", markdown, StringComparison.Ordinal);
-        Assert.Contains("dotnet tool install --global ForgeTrust.RazorWire.Cli", markdown, StringComparison.Ordinal);
+        Assert.Contains("dotnet tool install --global ForgeTrust.RazorWire.Cli --prerelease", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1178,6 +1179,110 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Equal(1, report.PackageCount);
         Assert.True(report.ScannedFileCount > 0);
+    }
+
+    [Fact]
+    public async Task RunPackageGateAsync_AllowsPublicToolPackages()
+    {
+        await WriteProgramRepoAsync();
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                order: 10
+                use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
+                includes: Base web startup.
+                does_not_include: OpenAPI.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                classification: public
+                publish_decision: publish
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                order: 20
+                use_when: Install this when you want repository-level AppSurface tooling.
+                includes: The `appsurface` .NET tool command.
+                does_not_include: App runtime packages.
+                start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
+                tool_command_name: appsurface
+            """);
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", "<Project />");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/README.md", "# AppSurface CLI");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"] = CreateMetadata(
+                "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                "ForgeTrust.AppSurface.Cli",
+                isTool: true,
+                outputType: "Exe")
+        });
+
+        var report = await generator.RunPackageGateAsync(CreateRequest());
+
+        Assert.Equal(2, report.PackageCount);
+    }
+
+    [Fact]
+    public async Task RunPackageGateAsync_ThrowsWhenPublicToolIsNotExecutable()
+    {
+        await WriteProgramRepoAsync();
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                classification: public
+                publish_decision: publish
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                order: 10
+                use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
+                includes: Base web startup.
+                does_not_include: OpenAPI.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                classification: public
+                publish_decision: publish
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                order: 20
+                use_when: Install this when you want repository-level AppSurface tooling.
+                includes: The `appsurface` .NET tool command.
+                does_not_include: App runtime packages.
+                start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
+                tool_command_name: appsurface
+            """);
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", "<Project />");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/README.md", "# AppSurface CLI");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"] = CreateMetadata(
+                "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj",
+                "ForgeTrust.AppSurface.Cli",
+                isTool: true,
+                outputType: "Library")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.RunPackageGateAsync(CreateRequest()));
+
+        Assert.Contains("Public .NET tool packages must be executable projects", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1800,6 +1905,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 includes: The `razorwire` .NET tool command and static export workflow.
                 does_not_include: The RazorWire runtime package or coordinated package publishing automation.
                 start_here_path: Web/ForgeTrust.RazorWire.Cli/README.md
+                tool_command_name: razorwire
             """);
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");

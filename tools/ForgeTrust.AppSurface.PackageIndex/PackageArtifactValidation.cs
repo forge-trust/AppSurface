@@ -97,7 +97,8 @@ internal sealed class PackageArtifactValidator
                     entry.Decision,
                     entry.ExpectedDependencyPackageIds,
                     inspected.PackagePath,
-                    entry.IsTool);
+                    entry.IsTool,
+                    entry.IsTool ? entry.ToolCommandName : string.Empty);
             }).ToArray());
     }
 
@@ -140,6 +141,17 @@ internal sealed class PackageArtifactValidator
         if (!expected.IsTool && isDotnetToolPackage)
         {
             throw new PackageIndexException($"Package '{expected.PackageId}' must not declare package type 'DotnetTool'.");
+        }
+
+        if (isDotnetToolPackage && inspected.ToolCommandNames.Count == 0)
+        {
+            throw new PackageIndexException($"Tool package '{expected.PackageId}' must include DotnetToolSettings.xml with at least one command.");
+        }
+
+        if (expected.IsTool && !inspected.ToolCommandNames.Contains(expected.ToolCommandName, StringComparer.Ordinal))
+        {
+            throw new PackageIndexException(
+                $"Tool package '{expected.PackageId}' declares command(s) [{string.Join(", ", inspected.ToolCommandNames)}], expected '{expected.ToolCommandName}'.");
         }
 
         var expectedPayloadPath = GetExpectedPayloadPath(expected.PackageId);
@@ -254,6 +266,7 @@ internal sealed class PackageArtifactValidator
         var entryPaths = archive.Entries
             .Select(entry => NormalizePackagePath(entry.FullName))
             .ToArray();
+        var toolCommandNames = ReadToolCommandNames(archive, packagePath);
 
         var packageId = GetElementValue(metadata, ns, "id");
         var packageVersion = GetElementValue(metadata, ns, "version");
@@ -280,7 +293,52 @@ internal sealed class PackageArtifactValidator
             packageTypes,
             dependencies,
             entryPaths,
-            firstPartyAssemblyVersions);
+            firstPartyAssemblyVersions,
+            toolCommandNames);
+    }
+
+    private static IReadOnlyList<string> ReadToolCommandNames(ZipArchive archive, string packagePath)
+    {
+        var settingsEntries = archive.Entries
+            .Where(entry => string.Equals(Path.GetFileName(entry.FullName), "DotnetToolSettings.xml", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var commandNames = new List<string>();
+        foreach (var settingsEntry in settingsEntries)
+        {
+            XDocument settings;
+            try
+            {
+                using var settingsStream = settingsEntry.Open();
+                settings = XDocument.Load(settingsStream);
+            }
+            catch (Exception ex) when (ex is XmlException or IOException)
+            {
+                throw new PackageIndexException(
+                    $"Package artifact '{packagePath}' contains invalid DotnetToolSettings.xml: {ex.Message}",
+                    ex);
+            }
+
+            var settingsCommands = settings
+                .Descendants()
+                .Where(element => string.Equals(element.Name.LocalName, "Command", StringComparison.Ordinal))
+                .Select(element => element.Attribute("Name")?.Value)
+                .ToArray();
+            foreach (var commandName in settingsCommands)
+            {
+                if (string.IsNullOrWhiteSpace(commandName))
+                {
+                    throw new PackageIndexException(
+                        $"Package artifact '{packagePath}' contains DotnetToolSettings.xml with a command missing the Name attribute.");
+                }
+
+                PackageIndexGenerator.ValidateToolCommandNameValue(packagePath, commandName);
+                commandNames.Add(commandName);
+            }
+        }
+
+        return commandNames
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static string? GetElementValue(XElement metadata, XNamespace ns, string elementName)
@@ -510,13 +568,15 @@ internal sealed record PackageArtifactValidationReport(
 /// <param name="ExpectedDependencyPackageIds">Expected same-version package dependency ids.</param>
 /// <param name="ArtifactPath">Validated <c>.nupkg</c> artifact path.</param>
 /// <param name="IsTool">Whether the package is a .NET tool package.</param>
+/// <param name="ToolCommandName">Command shim validated for .NET tool packages.</param>
 internal sealed record PackageArtifactValidationReportEntry(
     string PackageId,
     string ProjectPath,
     PackagePublishDecision Decision,
     IReadOnlyList<string> ExpectedDependencyPackageIds,
     string ArtifactPath = "",
-    bool IsTool = false);
+    bool IsTool = false,
+    string ToolCommandName = "");
 
 /// <summary>
 /// Metadata and payload facts inspected from one NuGet package artifact.
@@ -534,6 +594,7 @@ internal sealed record PackageArtifactValidationReportEntry(
 /// <param name="Dependencies">Dependency ids mapped to all distinct nuspec versions observed across dependency groups.</param>
 /// <param name="EntryPaths">Normalized archive entry paths contained in the package.</param>
 /// <param name="FirstPartyAssemblyVersions">First-party implementation assemblies and their informational versions.</param>
+/// <param name="ToolCommandNames">Command names declared by any <c>DotnetToolSettings.xml</c> files.</param>
 internal sealed record InspectedPackage(
     string PackagePath,
     string PackageId,
@@ -547,7 +608,8 @@ internal sealed record InspectedPackage(
     IReadOnlyList<string> PackageTypes,
     IReadOnlyDictionary<string, IReadOnlyList<string>> Dependencies,
     IReadOnlyList<string> EntryPaths,
-    IReadOnlyList<InspectedAssemblyVersion> FirstPartyAssemblyVersions);
+    IReadOnlyList<InspectedAssemblyVersion> FirstPartyAssemblyVersions,
+    IReadOnlyList<string> ToolCommandNames);
 
 /// <summary>
 /// Informational version metadata read from a first-party assembly inside a package artifact.

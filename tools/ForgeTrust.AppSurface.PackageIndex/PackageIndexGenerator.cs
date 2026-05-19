@@ -263,7 +263,49 @@ internal sealed class PackageIndexGenerator
             }
         }
 
+        ValidateToolCommandName(entry, metadata);
         ValidatePublishContract(entry, knownPackageIds);
+    }
+
+    private static void ValidateToolCommandName(PackageManifestEntry entry, PackageProjectMetadata metadata)
+    {
+        if (metadata.IsTool
+            && entry.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish)
+        {
+            RequireValue(entry.Project, "tool_command_name", entry.ToolCommandName);
+            ValidateToolCommandNameValue(entry.Project, entry.ToolCommandName!);
+            return;
+        }
+
+        if (metadata.IsTool
+            && !string.IsNullOrWhiteSpace(entry.ToolCommandName))
+        {
+            ValidateToolCommandNameValue(entry.Project, entry.ToolCommandName);
+            return;
+        }
+
+        if (!metadata.IsTool
+            && !string.IsNullOrWhiteSpace(entry.ToolCommandName))
+        {
+            throw new PackageIndexException(
+                $"Manifest entry '{entry.Project}' defines 'tool_command_name' but the project does not report PackAsTool=true.");
+        }
+    }
+
+    internal static void ValidateToolCommandNameValue(string projectPath, string commandName)
+    {
+        if (string.IsNullOrWhiteSpace(commandName))
+        {
+            throw new PackageIndexException($"Tool command name for '{projectPath}' must be provided.");
+        }
+
+        if (commandName.Any(char.IsWhiteSpace)
+            || commandName.Contains('/', StringComparison.Ordinal)
+            || commandName.Contains('\\', StringComparison.Ordinal))
+        {
+            throw new PackageIndexException(
+                $"Tool command name for '{projectPath}' is invalid: '{commandName}'. Tool command names must not contain whitespace or path separators.");
+        }
     }
 
     private static void ValidatePublishContract(PackageManifestEntry entry, IReadOnlySet<string> knownPackageIds)
@@ -477,6 +519,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine($"- Edit `packages/package-index.yml` when the public package story changes.");
         builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
+        builder.AppendLine("- Keep `tool_command_name` aligned with each public .NET tool project's `ToolCommandName` so package validation and post-publish smoke tests run the command users will type.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications or package READMEs.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, or Tailwind runtime payloads.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");
@@ -725,6 +768,15 @@ internal static class PackageGateValidator
         }
 
         if (entry.Manifest.Classification == PackageClassification.Public
+            && entry.Metadata.IsTool
+            && !string.Equals(entry.Metadata.OutputType, "Exe", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new PackageIndexException(
+                $"Manifest entry '{entry.Manifest.Project}' is public and reports PackAsTool=true, but its output type is '{entry.Metadata.OutputType}'. Public .NET tool packages must be executable projects.");
+        }
+
+        if (entry.Manifest.Classification == PackageClassification.Public
+            && !entry.Metadata.IsTool
             && !string.Equals(entry.Metadata.OutputType, "Library", StringComparison.OrdinalIgnoreCase))
         {
             throw new PackageIndexException(
@@ -919,7 +971,7 @@ internal sealed record PackageProjectMetadata(
     /// Gets the primary install command shown in the chooser for this package or tool.
     /// </summary>
     internal string InstallCommand => IsTool
-        ? $"dotnet tool install --global {PackageId}"
+        ? $"dotnet tool install --global {PackageId} --prerelease"
         : $"dotnet package add {PackageId}";
 }
 
@@ -1268,6 +1320,11 @@ internal sealed class PackageManifestEntry
     public string? RecipeSummary { get; init; }
 
     /// <summary>
+    /// Gets the command shim expected from a .NET tool package.
+    /// </summary>
+    public string? ToolCommandName { get; init; }
+
+    /// <summary>
     /// Gets the explanatory note rendered for non-public package rows.
     /// </summary>
     public string? Note { get; init; }
@@ -1304,7 +1361,7 @@ internal sealed class PackageManifestEntry
 internal enum PackageClassification
 {
     /// <summary>
-    /// A direct-install package that appears in the main package matrix.
+    /// A direct-install package or tool that appears in the main package matrix.
     /// </summary>
     Public,
 
@@ -1330,7 +1387,7 @@ internal enum PackageClassification
 internal enum PackagePublishDecision
 {
     /// <summary>
-    /// A public package that should be packed and eventually published as a direct install surface.
+    /// A public package or tool that should be packed and eventually published as a direct install surface.
     /// </summary>
     Publish,
 
@@ -1356,7 +1413,7 @@ internal enum PackageReleaseStatus
     Unknown,
 
     /// <summary>
-    /// Public preview package that can be installed directly by OSS adopters.
+    /// Public preview package or tool that can be installed directly by OSS adopters.
     /// </summary>
     PublicPreview,
 

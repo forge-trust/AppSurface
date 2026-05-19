@@ -20,6 +20,8 @@ namespace ForgeTrust.AppSurface.Cli;
 /// </remarks>
 internal static class AppSurfaceCliApp
 {
+    internal const string ToolCommandName = "appsurface";
+
     /// <summary>
     /// Runs the AppSurface CLI with the provided command-line arguments.
     /// </summary>
@@ -78,7 +80,7 @@ internal static class AppSurfaceCliApp
             .Select(commandType => (ICommand)serviceProvider.GetRequiredService(commandType))
             .ToArray();
         var suggester = serviceProvider.GetRequiredService<IOptionSuggester>();
-        var commandService = new CommandService(commands, context, suggester);
+        var commandService = new CommandService(commands, context, suggester, ToolCommandName);
         var previousServiceProvider = CommandService.PrimaryServiceProvider;
 
         try

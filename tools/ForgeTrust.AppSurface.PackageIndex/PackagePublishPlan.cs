@@ -68,7 +68,8 @@ internal sealed class PackagePublishPlanResolver
                     entry.Metadata.PackageId,
                     entry.Manifest.PublishDecision!.Value,
                     entry.Manifest.ExpectedDependencyPackageIds.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
-                    entry.Metadata.IsTool))
+                    entry.Metadata.IsTool,
+                    entry.Manifest.ToolCommandName ?? string.Empty))
                 .ToArray());
     }
 
@@ -138,6 +139,12 @@ internal sealed class PackagePublishPlanResolver
                         $"Tool manifest entry '{entry.Manifest.Project}' must not define expected package dependencies because .NET tool packages embed their project references.");
                 }
 
+                if (string.IsNullOrWhiteSpace(entry.Manifest.ToolCommandName))
+                {
+                    throw new PackageIndexException(
+                        $"Tool manifest entry '{entry.Manifest.Project}' must define 'tool_command_name'.");
+                }
+
                 continue;
             }
 
@@ -187,9 +194,11 @@ internal sealed record PackagePublishPlan(IReadOnlyList<PackagePublishPlanEntry>
 /// <param name="Decision">Publish decision from the manifest.</param>
 /// <param name="ExpectedDependencyPackageIds">Expected same-version package dependencies.</param>
 /// <param name="IsTool">Whether the package is a .NET tool package.</param>
+/// <param name="ToolCommandName">Command shim expected from a .NET tool package.</param>
 internal sealed record PackagePublishPlanEntry(
     string ProjectPath,
     string PackageId,
     PackagePublishDecision Decision,
     IReadOnlyList<string> ExpectedDependencyPackageIds,
-    bool IsTool);
+    bool IsTool,
+    string ToolCommandName = "");

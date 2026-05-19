@@ -12,6 +12,7 @@ internal class CommandService : CriticalService
 {
     private readonly IEnumerable<ICommand> _commands;
     private readonly StartupContext _context;
+    private readonly string? _executableName;
     private readonly IOptionSuggester _suggester;
 
     public CommandService(
@@ -25,18 +26,21 @@ internal class CommandService : CriticalService
         PrimaryServiceProvider = primaryServiceProvider;
         _commands = commands;
         _context = context;
+        _executableName = null;
         _suggester = suggester;
     }
 
     internal CommandService(
         IEnumerable<ICommand> commands,
         StartupContext context,
-        IOptionSuggester suggester) : base(
+        IOptionSuggester suggester,
+        string? executableName = null) : base(
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CommandService>.Instance,
             new DummyApplicationLifetime())
     {
         _commands = commands;
         _context = context;
+        _executableName = executableName;
         _suggester = suggester;
     }
 
@@ -62,6 +66,11 @@ internal class CommandService : CriticalService
         foreach (var cmd in _commands)
         {
             builder.AddCommand(cmd.GetType());
+        }
+
+        if (!string.IsNullOrWhiteSpace(_executableName))
+        {
+            builder.SetExecutableName(_executableName);
         }
 
         var consoleFromDi = serviceProvider.GetService<IConsole>();
