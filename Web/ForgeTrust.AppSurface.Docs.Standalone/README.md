@@ -57,6 +57,34 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 
 `--strict` is the harvest fail-closed gate. `--mode cdn` is the static artifact validation gate and preserves RazorWire `RWEXPORT00x` diagnostics when managed URLs cannot become CDN-safe files.
 
+## Dogfood Harvest Boundary
+
+The standalone host ships an `appsettings.json` that dogfoods the reusable harvest path policy for this repository. It keeps the live AppSurface docs surface focused on intentional public docs paths such as the root `README.md`, `LICENSE`, package READMEs, web package READMEs, authored docs folders, releases, guides, troubleshooting, and example READMEs. It also excludes host-specific generated and test-result paths:
+
+```json
+{
+  "RazorDocs": {
+    "Harvest": {
+      "Paths": {
+        "IncludeGlobs": [
+          "README.md",
+          "LICENSE",
+          "packages/**/README.md",
+          "Web/**/README.md",
+          "**/*.cs"
+        ],
+        "ExcludeGlobs": [
+          "**/TestResults/**",
+          "**/generated/**"
+        ]
+      }
+    }
+  }
+}
+```
+
+Those excludes are dogfood policy, not package defaults. Reusable RazorDocs defaults still cover build output, hidden directories, test projects, and C# example source for every host. Add or override `RazorDocs:Harvest:Paths`, `RazorDocs:Harvest:Markdown`, or `RazorDocs:Harvest:CSharp` in environment-specific configuration when using this executable for another repository.
+
 ## Local URL Behavior
 
 When you run this host in `Development` without explicit endpoint configuration, AppSurface Web assigns a deterministic localhost-only development URL from the current workspace path. That keeps sibling worktrees from colliding on the same default localhost URL.

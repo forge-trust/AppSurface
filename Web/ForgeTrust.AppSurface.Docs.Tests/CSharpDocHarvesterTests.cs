@@ -5,6 +5,7 @@ using FakeItEasy;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -46,6 +47,45 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldApplyConfiguredHarvestPathPolicy()
+    {
+        var harvester = new CSharpDocHarvester(
+            A.Fake<ILogger<CSharpDocHarvester>>(),
+            CreatePathPolicy(
+                options =>
+                {
+                    options.Harvest.Paths.IncludeGlobs = ["src/**"];
+                    options.Harvest.CSharp.IncludeGlobs = ["src/public/**"];
+                }));
+        var publicDir = Path.Combine(_testRoot, "src", "public");
+        var internalDir = Path.Combine(_testRoot, "src", "internal");
+        Directory.CreateDirectory(publicDir);
+        Directory.CreateDirectory(internalDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(publicDir, "PublicService.cs"),
+            """
+            namespace Product.Public;
+
+            /// <summary>Public service docs.</summary>
+            public class PublicService {}
+            """);
+        await File.WriteAllTextAsync(
+            Path.Combine(internalDir, "InternalService.cs"),
+            """
+            namespace Product.Internal;
+
+            /// <summary>Internal service docs.</summary>
+            public class InternalService {}
+            """);
+
+        var results = (await harvester.HarvestAsync(_testRoot)).ToList();
+
+        Assert.Contains(results, n => n.Title == "PublicService" && n.ParentPath == "Namespaces/Product.Public");
+        Assert.DoesNotContain(results, n => n.Title == "InternalService");
+        Assert.DoesNotContain(results, n => n.Path == "Namespaces/Product.Internal");
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldIgnoreExampleApplicationSource()
     {
         var exampleDir = Path.Combine(_testRoot, "examples", "web-app");
@@ -75,6 +115,33 @@ public class CSharpDocHarvesterTests : IDisposable
         Assert.Contains(results, n => n.Path == "Namespaces/ForgeTrust.AppSurface.Web");
         Assert.DoesNotContain(results, n => n.Path.Contains("WebAppExample", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(results, n => n.Title == "ExampleService");
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldTraverseExampleSourceWhenAllowedByPolicy()
+    {
+        var harvester = new CSharpDocHarvester(
+            A.Fake<ILogger<CSharpDocHarvester>>(),
+            CreatePathPolicy(
+                options =>
+                {
+                    options.Harvest.CSharp.DefaultExclusions.AllowGlobs["CSharpExampleSource"] = ["examples/web-app/**"];
+                }));
+        var exampleDir = Path.Combine(_testRoot, "examples", "web-app");
+        Directory.CreateDirectory(exampleDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(exampleDir, "ExampleService.cs"),
+            """
+            namespace WebAppExample.Services;
+
+            /// <summary>Example app service docs.</summary>
+            public class ExampleService {}
+            """);
+
+        var results = (await harvester.HarvestAsync(_testRoot)).ToList();
+
+        Assert.Contains(results, n => n.Path == "Namespaces/WebAppExample.Services");
+        Assert.Contains(results, n => n.Title == "ExampleService" && n.ParentPath == "Namespaces/WebAppExample.Services");
     }
 
     [Fact]
@@ -920,6 +987,16 @@ public class GlobalType {}
         var title = CSharpDocHarvester.GetNamespaceTitle(string.Empty);
 
         Assert.Equal("Namespaces", title);
+    }
+
+    private static RazorDocsHarvestPathPolicy CreatePathPolicy(Action<RazorDocsOptions> configure)
+    {
+        var options = new RazorDocsOptions();
+        configure(options);
+
+        return new RazorDocsHarvestPathPolicy(
+            options,
+            NullLogger<RazorDocsHarvestPathPolicy>.Instance);
     }
 
     public void Dispose()

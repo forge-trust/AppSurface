@@ -339,6 +339,72 @@ Use the default single-surface configuration when you want the live docs experie
 
 If `RazorDocs:Source:RepositoryRoot` is omitted, the package falls back to repository discovery from the app content root.
 
+### Harvest path policy
+
+RazorDocs harvests from source by default, so every host should be intentional about the repository paths it turns into public documentation. `RazorDocs:Harvest:Paths` defines the global repository-relative boundary shared by the built-in Markdown and C# harvesters. `RazorDocs:Harvest:Markdown` and `RazorDocs:Harvest:CSharp` refine that boundary for one source kind.
+
+```json
+{
+  "RazorDocs": {
+    "Harvest": {
+      "Paths": {
+        "IncludeGlobs": [
+          "README.md",
+          "LICENSE",
+          "docs/**/*.md",
+          "src/**/*.cs"
+        ],
+        "ExcludeGlobs": [
+          "docs/drafts/**",
+          "**/generated/**"
+        ],
+        "DefaultExclusions": {
+          "AllowGlobs": {
+            "HiddenDirectories": [
+              ".github/workflows/README.md"
+            ]
+          }
+        }
+      },
+      "Markdown": {
+        "IncludeGlobs": [
+          "README.md",
+          "LICENSE",
+          "docs/**/*.md"
+        ]
+      },
+      "CSharp": {
+        "IncludeGlobs": [
+          "src/**/*.cs"
+        ],
+        "DefaultExclusions": {
+          "DisabledGroups": [
+            "CSharpExampleSource"
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+Glob syntax is provided by `Microsoft.Extensions.FileSystemGlobbing` and always uses normalized repository-relative paths with `/` separators. RazorDocs trims configured patterns, converts `\` to `/`, removes blanks, and deduplicates case-insensitively during `AddRazorDocs()` post-configuration. Patterns must not be rooted (`/docs/**`, `./docs/**`, `C:/repo/**`), URI-shaped, query or fragment shaped, or contain `..` path segments. Invalid configured patterns fail options validation instead of silently changing the public surface.
+
+Empty include arrays mean "use the built-in candidate set." Nonempty global includes are a real boundary: a Markdown or C# source file must match `Harvest:Paths:IncludeGlobs` before a source-specific include can accept it. Source-specific includes narrow that source kind further. Configured excludes are final denials and win after includes and default-exclusion allows.
+
+RazorDocs keeps four package-defined default exclusion groups active when no path config is present:
+
+| Group | Default behavior |
+| --- | --- |
+| `BuildOutput` | Excludes `node_modules`, `bin`, and `obj` subtrees. |
+| `HiddenDirectories` | Excludes dot-prefixed directories such as `.github` and `.codex`, while dot-prefixed files such as `.hidden.md` remain candidates. |
+| `TestProjects` | Excludes common test directories and project suffixes such as `Tests`, `.Tests`, `.IntegrationTests`, `-Tests`, and `_Tests`. |
+| `CSharpExampleSource` | Excludes C# source under `examples` so sample applications do not become API reference by accident. Markdown in `examples` remains eligible. |
+
+Use `DefaultExclusions:DisabledGroups` when an entire default group should stop applying for a scope. Use `DefaultExclusions:AllowGlobs` when only selected files inside a default group should come back. Allows are group-aware: if a path matches both `HiddenDirectories` and `BuildOutput`, it needs an allow for both groups, or one of the groups must be disabled. Configured excludes still win after an allow.
+
+Traversal uses the same policy for Markdown and C#. RazorDocs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file. The root `LICENSE` file is a Markdown candidate, but when global includes are configured it still needs to match an include such as `LICENSE`.
+
 To host the same live source surface somewhere else, set the route-family root. With versioning disabled, the live docs root defaults to the route root:
 
 ```json
@@ -564,6 +630,28 @@ Pitfalls:
   - Controls whether the built-in sidebar shows health status chrome.
   - This is independent from `ExposeRoutes` so machine-readable checks and visible docs chrome can be configured separately.
   - If routes are hidden for the current environment, the sidebar renders status-only chrome without an `href`.
+- `RazorDocs:Harvest:Paths:IncludeGlobs`
+  - Defaults to an empty array, which means every built-in harvester starts from its normal candidate set.
+  - When nonempty, this is the global source boundary for all built-in harvesters. Markdown and C# source-specific includes can narrow it but cannot bypass it.
+  - Patterns are repository-relative `Microsoft.Extensions.FileSystemGlobbing` globs with `/` separators. `AddRazorDocs()` trims, slash-normalizes, removes blanks, and deduplicates them.
+- `RazorDocs:Harvest:Paths:ExcludeGlobs`
+  - Defaults to an empty array.
+  - Excludes win over global includes, source-specific includes, and default-exclusion allows.
+  - Use this for host-specific private paths such as generated output, CI artifacts, or draft docs. The reusable package does not treat `generated` or `TestResults` as defaults.
+- `RazorDocs:Harvest:Paths:DefaultExclusions:DisabledGroups`
+  - Defaults to an empty array.
+  - Disables package default groups globally. Supported group IDs are `BuildOutput`, `HiddenDirectories`, `TestProjects`, and `CSharpExampleSource`.
+  - Prefer a disabled group only when the entire group is intentionally public for the host. For one-off exceptions, prefer `AllowGlobs`.
+- `RazorDocs:Harvest:Paths:DefaultExclusions:AllowGlobs`
+  - Defaults to an empty dictionary.
+  - Maps a default group ID to repository-relative globs that opt matching files back into that group.
+  - Allows are group-aware. A path matching multiple enabled groups needs an allow for every matched group, and configured excludes still win afterward.
+- `RazorDocs:Harvest:Markdown:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
+  - Defaults mirror the global path option shape, but apply only to Markdown candidates and the root `LICENSE` candidate.
+  - Source-specific includes are evaluated after global includes, so they narrow Markdown rather than widening it.
+- `RazorDocs:Harvest:CSharp:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
+  - Defaults mirror the global path option shape, but apply only to C# API-reference candidates.
+  - `CSharpExampleSource` is only a C# default group. Markdown example READMEs stay eligible unless excluded by other policy.
 - `RazorDocs:Routing:RouteRootPath`
   - Controls the route-family root for stable entry, archive, and exact-version routes.
   - Defaults to `/docs` when versioning is on.

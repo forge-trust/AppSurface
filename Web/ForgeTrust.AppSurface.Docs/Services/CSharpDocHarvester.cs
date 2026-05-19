@@ -16,23 +16,29 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 public class CSharpDocHarvester : IDocHarvester
 {
     private readonly ILogger<CSharpDocHarvester> _logger;
+    private readonly RazorDocsHarvestPathPolicy _pathPolicy;
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
-    private static readonly HashSet<string> SourceExcludedDirectories = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "node_modules",
-        "bin",
-        "obj",
-        "Test",
-        "Tests",
-        "examples"
-    };
 
     /// <summary>
     /// Initializes a new instance of <see cref="CSharpDocHarvester"/> with the provided logger.
     /// </summary>
     public CSharpDocHarvester(ILogger<CSharpDocHarvester> logger)
+        : this(logger, RazorDocsHarvestPathPolicy.CreateDefault())
     {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="CSharpDocHarvester"/> with the provided logger and harvest path policy.
+    /// </summary>
+    internal CSharpDocHarvester(
+        ILogger<CSharpDocHarvester> logger,
+        RazorDocsHarvestPathPolicy pathPolicy)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(pathPolicy);
+
         _logger = logger;
+        _pathPolicy = pathPolicy;
     }
 
     /// <summary>
@@ -57,10 +63,7 @@ public class CSharpDocHarvester : IDocHarvester
 
             var relativePath = Path.GetRelativePath(rootPath, file)
                 .Replace('\\', '/'); // Normalize to forward slashes for URLs
-            if (HarvestPathExclusions.ShouldExcludeFilePath(
-                    relativePath,
-                    SourceExcludedDirectories,
-                    excludeTestProjectDirectories: true))
+            if (!_pathPolicy.ShouldIncludeFilePath(relativePath, RazorDocsHarvestSourceKind.CSharp))
             {
                 continue;
             }
@@ -277,36 +280,17 @@ public class CSharpDocHarvester : IDocHarvester
         return nodes;
     }
 
-    private static IEnumerable<string> EnumerateEligibleCSharpFiles(
+    private IEnumerable<string> EnumerateEligibleCSharpFiles(
         string rootPath,
         CancellationToken cancellationToken)
     {
-        var pendingDirectories = new Stack<string>();
-        pendingDirectories.Push(rootPath);
-
-        while (pendingDirectories.Count > 0)
+        foreach (var file in _pathPolicy.EnumerateCandidateFiles(
+                     rootPath,
+                     RazorDocsHarvestSourceKind.CSharp,
+                     "*.cs",
+                     cancellationToken))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var currentDirectory = pendingDirectories.Pop();
-            foreach (var file in Directory.EnumerateFiles(currentDirectory, "*.cs", SearchOption.TopDirectoryOnly))
-            {
-                yield return file;
-            }
-
-            foreach (var directory in Directory.EnumerateDirectories(currentDirectory))
-            {
-                var relativeDirectory = Path.GetRelativePath(rootPath, directory).Replace('\\', '/');
-                if (HarvestPathExclusions.ShouldExcludeFilePath(
-                        $"{relativeDirectory}/_",
-                        SourceExcludedDirectories,
-                        excludeTestProjectDirectories: true))
-                {
-                    continue;
-                }
-
-                pendingDirectories.Push(directory);
-            }
+            yield return file;
         }
     }
 

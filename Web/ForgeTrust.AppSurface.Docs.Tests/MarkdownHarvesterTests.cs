@@ -5,6 +5,7 @@ using Markdig.Helpers;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -41,6 +42,58 @@ public class MarkdownHarvesterTests : IDisposable
         Assert.Single(results);
         Assert.Contains(results, n => n.Title == "Included");
         Assert.DoesNotContain(results, n => n.Title == "Ignored");
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldApplyConfiguredHarvestPathPolicy()
+    {
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            File.ReadAllTextAsync,
+            CreatePathPolicy(
+                options =>
+                {
+                    options.Harvest.Paths.IncludeGlobs = ["docs/**"];
+                    options.Harvest.Markdown.ExcludeGlobs = ["docs/private/**"];
+                }));
+        var docsDir = Path.Combine(_testRoot, "docs");
+        var publicDir = Path.Combine(docsDir, "public");
+        var privateDir = Path.Combine(docsDir, "private");
+        Directory.CreateDirectory(publicDir);
+        Directory.CreateDirectory(privateDir);
+        Directory.CreateDirectory(Path.Combine(_testRoot, "outside"));
+        await File.WriteAllTextAsync(Path.Combine(publicDir, "Included.md"), "# Included");
+        await File.WriteAllTextAsync(Path.Combine(privateDir, "Secret.md"), "# Secret");
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, "outside", "Outside.md"), "# Outside");
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, "LICENSE"), "# License");
+
+        var results = (await harvester.HarvestAsync(_testRoot)).ToList();
+
+        var doc = Assert.Single(results);
+        Assert.Equal("Included", doc.Title);
+        Assert.Equal("docs/public/Included.md", doc.Path);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldTraverseDefaultExcludedDirectoriesWhenAllowedByPolicy()
+    {
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            File.ReadAllTextAsync,
+            CreatePathPolicy(
+                options =>
+                {
+                    options.Harvest.Markdown.DefaultExclusions.AllowGlobs["HiddenDirectories"] = [".github/**"];
+                }));
+        var workflowsDir = Path.Combine(_testRoot, ".github", "workflows");
+        Directory.CreateDirectory(workflowsDir);
+        await File.WriteAllTextAsync(Path.Combine(workflowsDir, "Actions.md"), "# Actions");
+
+        var results = (await harvester.HarvestAsync(_testRoot)).ToList();
+
+        var doc = Assert.Single(results);
+        Assert.Equal("Actions", doc.Title);
+        Assert.Equal(".github/workflows/Actions.md", doc.Path);
     }
 
     [Fact]
@@ -918,6 +971,16 @@ public class MarkdownHarvesterTests : IDisposable
     {
         var message = call.GetArgument<object>(2)?.ToString();
         return message?.Contains(expectedMessageFragment, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static RazorDocsHarvestPathPolicy CreatePathPolicy(Action<RazorDocsOptions> configure)
+    {
+        var options = new RazorDocsOptions();
+        configure(options);
+
+        return new RazorDocsHarvestPathPolicy(
+            options,
+            NullLogger<RazorDocsHarvestPathPolicy>.Instance);
     }
 
     private sealed class RecordingCodeHighlighter : IRazorDocsCodeHighlighter

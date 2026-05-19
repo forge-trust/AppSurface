@@ -137,32 +137,6 @@ public sealed class RazorDocsSourceOptions
 }
 
 /// <summary>
-/// Harvest policy settings for RazorDocs source-backed documentation.
-/// </summary>
-/// <remarks>
-/// The default policy is tolerant so public runtime hosts can continue serving even when source harvesting has a
-/// transient problem. Enable <see cref="FailOnFailure"/> in CI or export hosts that should fail closed when every
-/// configured harvester fails, times out, or cancels.
-/// </remarks>
-public sealed class RazorDocsHarvestOptions
-{
-    /// <summary>
-    /// Gets or sets a value indicating whether host startup should fail when the aggregate harvest health is
-    /// <see cref="ForgeTrust.AppSurface.Docs.Models.DocHarvestHealthStatus.Failed"/>.
-    /// </summary>
-    /// <remarks>
-    /// Strict mode treats only the aggregate failed state as fatal. Empty docs and degraded partial harvests remain
-    /// non-fatal in this slice because they can represent intentional empty repositories or still-usable partial docs.
-    /// </remarks>
-    public bool FailOnFailure { get; set; }
-
-    /// <summary>
-    /// Gets health-surface settings for the operator-facing RazorDocs harvest health routes and sidebar chrome.
-    /// </summary>
-    public RazorDocsHarvestHealthOptions Health { get; set; } = new();
-}
-
-/// <summary>
 /// Operator-facing harvest health settings for RazorDocs.
 /// </summary>
 /// <remarks>
@@ -646,6 +620,10 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
                     failures.Add($"Unsupported RazorDocs harvest health chrome exposure mode '{harvest.Health.ShowChrome}'.");
                 }
             }
+
+            ValidateHarvestPathOptions(harvest.Paths, "RazorDocs:Harvest:Paths", failures);
+            ValidateHarvestSourceOptions(harvest.Markdown, "RazorDocs:Harvest:Markdown", failures);
+            ValidateHarvestSourceOptions(harvest.CSharp, "RazorDocs:Harvest:CSharp", failures);
         }
 
         if (bundle is null)
@@ -878,6 +856,124 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
         }
 
         return trimmedPath.IndexOfAny(['?', '#']) < 0;
+    }
+
+    private static void ValidateHarvestPathOptions(
+        RazorDocsHarvestPathOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
+        ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
+        ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+    }
+
+    private static void ValidateHarvestSourceOptions(
+        RazorDocsMarkdownHarvestOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
+        ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
+        ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+    }
+
+    private static void ValidateHarvestSourceOptions(
+        RazorDocsCSharpHarvestOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
+        ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
+        ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+    }
+
+    private static void ValidateGlobPatterns(
+        IReadOnlyList<string>? patterns,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (patterns is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        foreach (var pattern in patterns)
+        {
+            if (!RazorDocsHarvestPathPatternValidator.IsValidConfiguredGlobPattern(pattern))
+            {
+                failures.Add(
+                    $"{configurationPath} contains invalid repository-relative glob pattern '{pattern}'. Use forward-slash paths without leading '/', './', URI schemes, drive roots, query strings, fragments, or '..' segments.");
+            }
+        }
+    }
+
+    private static void ValidateDefaultExclusions(
+        RazorDocsHarvestDefaultExclusionOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        if (options.DisabledGroups is null)
+        {
+            failures.Add($"{configurationPath}:DisabledGroups must not be null.");
+        }
+        else
+        {
+            foreach (var groupId in options.DisabledGroups)
+            {
+                ValidateDefaultGroupId(groupId, $"{configurationPath}:DisabledGroups", failures);
+            }
+        }
+
+        if (options.AllowGlobs is null)
+        {
+            failures.Add($"{configurationPath}:AllowGlobs must not be null.");
+            return;
+        }
+
+        foreach (var (groupId, patterns) in options.AllowGlobs)
+        {
+            ValidateDefaultGroupId(groupId, $"{configurationPath}:AllowGlobs", failures);
+            ValidateGlobPatterns(patterns, $"{configurationPath}:AllowGlobs:{groupId}", failures);
+        }
+    }
+
+    private static void ValidateDefaultGroupId(
+        string? groupId,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (string.IsNullOrWhiteSpace(groupId)
+            || !RazorDocsHarvestPathPolicy.IsKnownDefaultGroupId(groupId))
+        {
+            failures.Add(
+                $"{configurationPath} contains unsupported default exclusion group '{groupId}'. Supported groups are: {string.Join(", ", Enum.GetNames<RazorDocsHarvestDefaultExclusionGroup>())}.");
+        }
     }
 
     private static bool IsReservedRouteFamilyChildPath(string path)

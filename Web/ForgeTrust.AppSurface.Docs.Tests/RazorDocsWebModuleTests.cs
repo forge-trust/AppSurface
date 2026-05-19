@@ -80,11 +80,9 @@ public class RazorDocsWebModuleTests
         // Assert
         Assert.Contains(
             services,
-            s => s.ServiceType == typeof(IDocHarvester) && s.ImplementationType == typeof(MarkdownHarvester));
-        Assert.Contains(
-            services,
-            s => s.ServiceType == typeof(IDocHarvester) && s.ImplementationType == typeof(CSharpDocHarvester));
+            s => s.ServiceType == typeof(IDocHarvester) && s.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, s => s.ServiceType == typeof(DocAggregator));
+        Assert.Contains(services, s => s.ServiceType == typeof(RazorDocsHarvestPathPolicy));
         Assert.Contains(
             services,
             s => s.ServiceType == typeof(IRazorDocsHtmlSanitizer) && s.Lifetime == ServiceLifetime.Singleton);
@@ -108,7 +106,9 @@ public class RazorDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetRequiredService<IMemoryCache>());
         Assert.NotNull(serviceProvider.GetRequiredService<IMemo>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
+        Assert.NotNull(serviceProvider.GetRequiredService<RazorDocsHarvestPathPolicy>());
         Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is MarkdownHarvester);
+        Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is CSharpDocHarvester);
         Assert.Equal(RazorDocsAssetPathResolver.PackagedStylesheetPath, assetPathResolver.StylesheetPath);
         Assert.Contains("section", sanitizer.InnerSanitizer.AllowedTags);
         Assert.Contains("article", sanitizer.InnerSanitizer.AllowedTags);

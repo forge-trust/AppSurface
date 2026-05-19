@@ -3,6 +3,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Docs;
@@ -29,6 +30,14 @@ public static class RazorDocsServiceCollectionExtensions
     /// <para>
     /// During post-configuration this method rehydrates null nested option blocks with defaults, trims nullable string
     /// settings such as repository roots and contributor URL templates, normalizes
+    /// <see cref="RazorDocsHarvestPathOptions.IncludeGlobs"/>,
+    /// <see cref="RazorDocsHarvestPathOptions.ExcludeGlobs"/>,
+    /// <see cref="RazorDocsMarkdownHarvestOptions.IncludeGlobs"/>,
+    /// <see cref="RazorDocsMarkdownHarvestOptions.ExcludeGlobs"/>,
+    /// <see cref="RazorDocsCSharpHarvestOptions.IncludeGlobs"/>, and
+    /// <see cref="RazorDocsCSharpHarvestOptions.ExcludeGlobs"/> by trimming, using forward-slash separators,
+    /// removing blanks, and case-insensitively deduplicating values, normalizes default exclusion group IDs and allow
+    /// globs, normalizes
     /// <see cref="RazorDocsRoutingOptions.RouteRootPath"/> and
     /// <see cref="RazorDocsRoutingOptions.DocsRootPath"/> through
     /// <see cref="DocsUrlBuilder.NormalizeRouteRootPath(string?, string, bool)"/> and
@@ -74,6 +83,12 @@ public static class RazorDocsServiceCollectionExtensions
                     options.Source ??= new RazorDocsSourceOptions();
                     options.Harvest ??= new RazorDocsHarvestOptions();
                     options.Harvest.Health ??= new RazorDocsHarvestHealthOptions();
+                    options.Harvest.Paths ??= new RazorDocsHarvestPathOptions();
+                    options.Harvest.Paths.DefaultExclusions ??= new RazorDocsHarvestDefaultExclusionOptions();
+                    options.Harvest.Markdown ??= new RazorDocsMarkdownHarvestOptions();
+                    options.Harvest.Markdown.DefaultExclusions ??= new RazorDocsHarvestDefaultExclusionOptions();
+                    options.Harvest.CSharp ??= new RazorDocsCSharpHarvestOptions();
+                    options.Harvest.CSharp.DefaultExclusions ??= new RazorDocsHarvestDefaultExclusionOptions();
                     options.Bundle ??= new RazorDocsBundleOptions();
                     options.Sidebar ??= new RazorDocsSidebarOptions();
                     options.Contributor ??= new RazorDocsContributorOptions();
@@ -82,6 +97,18 @@ public static class RazorDocsServiceCollectionExtensions
                     options.Localization ??= new RazorDocsLocalizationOptions();
                     options.Sidebar.NamespacePrefixes ??= [];
                     options.Localization.Locales ??= [];
+                    options.Harvest.Paths.IncludeGlobs = NormalizeGlobArray(options.Harvest.Paths.IncludeGlobs);
+                    options.Harvest.Paths.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Paths.ExcludeGlobs);
+                    options.Harvest.Paths.DefaultExclusions =
+                        NormalizeDefaultExclusions(options.Harvest.Paths.DefaultExclusions);
+                    options.Harvest.Markdown.IncludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.IncludeGlobs);
+                    options.Harvest.Markdown.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.ExcludeGlobs);
+                    options.Harvest.Markdown.DefaultExclusions =
+                        NormalizeDefaultExclusions(options.Harvest.Markdown.DefaultExclusions);
+                    options.Harvest.CSharp.IncludeGlobs = NormalizeGlobArray(options.Harvest.CSharp.IncludeGlobs);
+                    options.Harvest.CSharp.ExcludeGlobs = NormalizeGlobArray(options.Harvest.CSharp.ExcludeGlobs);
+                    options.Harvest.CSharp.DefaultExclusions =
+                        NormalizeDefaultExclusions(options.Harvest.CSharp.DefaultExclusions);
 
                     if (options.Source.RepositoryRoot is null)
                     {
@@ -142,14 +169,50 @@ public static class RazorDocsServiceCollectionExtensions
         services.AddMemoryCache();
         services.TryAddSingleton<IMemo, Memo>();
         services.TryAddSingleton<IRazorDocsHtmlSanitizer, RazorDocsHtmlSanitizer>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IDocHarvester, MarkdownHarvester>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IDocHarvester, CSharpDocHarvester>());
+        services.TryAddSingleton<RazorDocsHarvestPathPolicy>();
+        TryAddMarkdownHarvester(services);
+        TryAddCSharpDocHarvester(services);
         services.TryAddSingleton<DocFeaturedPageResolver>();
         services.TryAddSingleton<DocAggregator>();
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, RazorDocsHarvestFailurePreflightService>());
 
         return services;
+    }
+
+    private static void TryAddMarkdownHarvester(IServiceCollection services)
+    {
+        if (services.Any(
+                descriptor => descriptor.ServiceType == typeof(MarkdownHarvesterRegistrationMarker)
+                              || descriptor.ServiceType == typeof(IDocHarvester)
+                              && descriptor.ImplementationType == typeof(MarkdownHarvester)))
+        {
+            return;
+        }
+
+        services.AddSingleton(new MarkdownHarvesterRegistrationMarker());
+        services.AddSingleton<IDocHarvester>(
+            sp => new MarkdownHarvester(
+                sp.GetRequiredService<ILogger<MarkdownHarvester>>(),
+                sp.GetRequiredService<ILoggerFactory>(),
+                sp.GetRequiredService<RazorDocsHarvestPathPolicy>()));
+    }
+
+    private static void TryAddCSharpDocHarvester(IServiceCollection services)
+    {
+        if (services.Any(
+                descriptor => descriptor.ServiceType == typeof(CSharpDocHarvesterRegistrationMarker)
+                              || descriptor.ServiceType == typeof(IDocHarvester)
+                              && descriptor.ImplementationType == typeof(CSharpDocHarvester)))
+        {
+            return;
+        }
+
+        services.AddSingleton(new CSharpDocHarvesterRegistrationMarker());
+        services.AddSingleton<IDocHarvester>(
+            sp => new CSharpDocHarvester(
+                sp.GetRequiredService<ILogger<CSharpDocHarvester>>(),
+                sp.GetRequiredService<RazorDocsHarvestPathPolicy>()));
     }
 
     private static string? NormalizeOrNull(string? value)
@@ -162,4 +225,45 @@ public static class RazorDocsServiceCollectionExtensions
         return value.Trim();
     }
 
+    private static string[] NormalizeGlobArray(IEnumerable<string>? values)
+    {
+        return (values ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => RazorDocsHarvestPathPatternValidator.NormalizeSlashes(value.Trim()))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static RazorDocsHarvestDefaultExclusionOptions NormalizeDefaultExclusions(
+        RazorDocsHarvestDefaultExclusionOptions options)
+    {
+        options.DisabledGroups = (options.DisabledGroups ?? [])
+            .Where(group => !string.IsNullOrWhiteSpace(group))
+            .Select(RazorDocsHarvestPathPolicy.NormalizeDefaultGroupId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var allowGlobs = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (groupId, patterns) in options.AllowGlobs ?? [])
+        {
+            var normalizedGroupId = RazorDocsHarvestPathPolicy.NormalizeDefaultGroupId(groupId);
+            var normalizedPatterns = NormalizeGlobArray(patterns);
+            if (allowGlobs.TryGetValue(normalizedGroupId, out var existingPatterns))
+            {
+                normalizedPatterns = existingPatterns
+                    .Concat(normalizedPatterns)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+
+            allowGlobs[normalizedGroupId] = normalizedPatterns;
+        }
+
+        options.AllowGlobs = allowGlobs;
+        return options;
+    }
+
+    private sealed class MarkdownHarvesterRegistrationMarker;
+
+    private sealed class CSharpDocHarvesterRegistrationMarker;
 }

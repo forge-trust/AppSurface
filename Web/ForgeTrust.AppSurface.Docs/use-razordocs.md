@@ -60,6 +60,47 @@ Point the host at the repository you want to harvest:
 
 If `RazorDocs:Source:RepositoryRoot` is omitted, RazorDocs falls back to repository discovery from the app content root. That is convenient for local dogfooding, but production hosts should make the repository root explicit so the docs source is not guessed from deployment layout.
 
+## Define the public source boundary
+
+Before pointing RazorDocs at a large repository, decide which paths are meant to be public. The safest production shape is a small global include list, then optional Markdown and C# refinements:
+
+```json
+{
+  "RazorDocs": {
+    "Harvest": {
+      "Paths": {
+        "IncludeGlobs": [
+          "README.md",
+          "LICENSE",
+          "docs/**/*.md",
+          "src/**/*.cs"
+        ],
+        "ExcludeGlobs": [
+          "docs/drafts/**",
+          "**/generated/**"
+        ]
+      },
+      "Markdown": {
+        "IncludeGlobs": [
+          "README.md",
+          "LICENSE",
+          "docs/**/*.md"
+        ]
+      },
+      "CSharp": {
+        "IncludeGlobs": [
+          "src/**/*.cs"
+        ]
+      }
+    }
+  }
+}
+```
+
+Use repository-relative globs with `/` separators. RazorDocs rejects rooted paths, URI-shaped patterns, query strings, fragments, and `..` segments during startup validation. Empty includes mean the built-in harvester defaults are used; nonempty global includes become the outer boundary for both Markdown and C#.
+
+The package also keeps protective defaults for build output, hidden directories, test projects, and C# source under `examples`. These defaults prevent common accidental publication without requiring every host to write the same excludes. If a default is too broad, use `DefaultExclusions:AllowGlobs` for narrow exceptions or `DefaultExclusions:DisabledGroups` when the entire group is intentionally public. Allows are group-aware, so a path inside `.github/bin` needs an allow for both `HiddenDirectories` and `BuildOutput` unless one group is disabled.
+
 ## Author the first useful page set
 
 Start with pages that answer adoption questions before you tune visuals:
@@ -161,6 +202,7 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 
 - Pick a host: embedded AppSurface web module or standalone RazorDocs app.
 - Configure `RazorDocs:Source:RepositoryRoot` for the repository to harvest.
+- Configure `RazorDocs:Harvest:Paths` so only intentional public source paths are eligible.
 - Keep `RazorDocs:Mode` set to `Source` unless a later bundle-hosting slice changes that contract.
 - Add sidecar metadata for repository and package README files.
 - Feature the first consumer paths through `featured_page_groups`.
