@@ -38,6 +38,18 @@ internal static partial class AppSurfaceDocsHeadingSuppressor
     [GeneratedRegex(@"\A(?:[\uFEFF\s]|<!--.*?-->)*<h1\b[^>]*>.*?</h1>\s*", RegexOptions.IgnoreCase | RegexOptions.Singleline, matchTimeoutMilliseconds: 100)]
     private static partial Regex LeadingH1Regex();
 
+    /// <summary>
+    /// Performs a cheap prefix scan for content that can safely be passed to the leading-H1 regex.
+    /// </summary>
+    /// <param name="content">The harvested HTML body that may begin with whitespace, a BOM, comments, or an <c>h1</c>.</param>
+    /// <returns>
+    /// <c>true</c> when the first meaningful token is an <c>h1</c> start tag; otherwise <c>false</c>, including when
+    /// an opening HTML comment is unterminated.
+    /// </returns>
+    /// <remarks>
+    /// This keeps the regex on the intended fast path and preserves authored content that starts with anything other
+    /// than ignorable leading trivia followed by Markdown's rendered page heading.
+    /// </remarks>
     private static bool StartsWithMarkdownH1Candidate(string content)
     {
         var index = 0;

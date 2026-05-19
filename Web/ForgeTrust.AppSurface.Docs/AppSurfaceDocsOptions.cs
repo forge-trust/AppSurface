@@ -256,7 +256,7 @@ public sealed class AppSurfaceDocsSourceOptions
 /// <remarks>
 /// The default policy is tolerant so public runtime hosts can continue serving even when source harvesting has a
 /// transient problem. Enable <see cref="FailOnFailure"/> in CI or export hosts that should fail closed when every
-/// configured harvester fails, times out, or cancels. Use <see cref="Paths"/>, <see cref="Markdown"/>, and
+/// active harvester fails, times out, or cancels. Use <see cref="Paths"/>, <see cref="Markdown"/>, and
 /// <see cref="CSharp"/> to define the repository-relative public documentation boundary shared by runtime hosts,
 /// export flows, and hygiene checks.
 /// </remarks>

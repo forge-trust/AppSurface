@@ -3,7 +3,7 @@ using System.Text;
 namespace ForgeTrust.AppSurface.Docs.Models;
 
 /// <summary>
-/// Exception thrown by strict AppSurface Docs startup preflight when every configured harvester fails.
+/// Exception thrown by strict AppSurface Docs startup preflight when every active harvester fails.
 /// </summary>
 /// <remarks>
 /// The exception message and <see cref="Summary"/> intentionally contain only redacted harvest-health fields. Repository
@@ -41,7 +41,7 @@ public sealed class AppSurfaceDocsHarvestFailedException : InvalidOperationExcep
         ArgumentNullException.ThrowIfNull(summary);
 
         var builder = new StringBuilder();
-        builder.Append("AppSurface Docs strict harvest failed because every configured harvester failed, timed out, or canceled.");
+        builder.Append("AppSurface Docs strict harvest failed because every active harvester failed, timed out, or canceled.");
         builder.Append(
             $" Status={summary.Status}; SuccessfulHarvesters={summary.SuccessfulHarvesters}/{summary.TotalHarvesters}; FailedHarvesters={summary.FailedHarvesters}; TotalDocs={summary.TotalDocs}.");
 
@@ -76,8 +76,8 @@ public sealed class AppSurfaceDocsHarvestFailedException : InvalidOperationExcep
 /// <param name="Status">The aggregate harvest-health status that triggered strict failure.</param>
 /// <param name="GeneratedUtc">The timestamp for the cached harvest snapshot generation.</param>
 /// <param name="TotalHarvesters">Number of active harvesters that participated in the failed snapshot.</param>
-/// <param name="SuccessfulHarvesters">Number of harvesters that completed with docs or an intentional empty result.</param>
-/// <param name="FailedHarvesters">Number of harvesters that failed, timed out, or canceled.</param>
+/// <param name="SuccessfulHarvesters">Number of active harvesters that completed with docs or an intentional empty result.</param>
+/// <param name="FailedHarvesters">Number of active harvesters that failed, timed out, or canceled.</param>
 /// <param name="TotalDocs">Number of final docs in the failed snapshot.</param>
 /// <param name="Diagnostics">Redacted diagnostic entries copied from the failed snapshot.</param>
 public sealed record DocHarvestFailureSummary(

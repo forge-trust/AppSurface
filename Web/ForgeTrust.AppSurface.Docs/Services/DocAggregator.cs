@@ -316,7 +316,7 @@ public class DocAggregator
     /// Optional freshness resolver used by tests to simulate git-backed timestamps and failure modes.
     /// </param>
     /// <param name="harvesterTimeout">
-    /// Optional timeout override for each configured harvester during snapshot generation.
+    /// Optional timeout override for each active harvester during snapshot generation.
     /// </param>
     /// <param name="contributorFreshnessTimeout">
     /// Optional timeout override for snapshot-time contributor freshness resolution.
@@ -397,7 +397,7 @@ public class DocAggregator
     /// is used against the resolved repository root.
     /// </param>
     /// <param name="harvesterTimeout">
-    /// Optional timeout override for each configured harvester during snapshot generation. When
+    /// Optional timeout override for each active harvester during snapshot generation. When
     /// <see langword="null" />, the aggregator uses the default 30 second timeout.
     /// </param>
     /// <param name="contributorFreshnessTimeout">
@@ -714,7 +714,7 @@ public class DocAggregator
     /// Retrieves the cached docs snapshot, harvesting docs and generating the search-index payload when absent.
     /// </summary>
     /// <remarks>
-    /// When harvesting, each configured harvester is invoked; failures from individual harvesters are caught and logged. 
+    /// When harvesting, each active harvester is invoked; failures from individual harvesters are caught and logged.
     /// Contents are sanitized before being cached. If multiple nodes share the same Path, a warning is logged and the first occurrence is retained.
     /// The search-index payload is generated from the same harvested snapshot.
     /// Caller cancellation does not cancel shared snapshot computation; callers can cancel their own wait.
@@ -946,7 +946,7 @@ public class DocAggregator
                     "The harvester observed cancellation outside AppSurface Docs' timeout budget, so AppSurface Docs skipped its docs for this snapshot.",
                     "Check whether the harvester is observing an external cancellation token or canceling its own work."));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!IsFatalException(ex))
         {
             logger.LogError(
                 ex,
@@ -1064,7 +1064,7 @@ public class DocAggregator
                 DocHarvestDiagnosticSeverity.Critical,
                 HarvesterType: null,
                 "All AppSurface Docs harvesters failed.",
-                "Every configured harvester failed, timed out, or canceled, so AppSurface Docs could not produce a trustworthy docs corpus.",
+                "Every active harvester failed, timed out, or canceled, so AppSurface Docs could not produce a trustworthy docs corpus.",
                 "Inspect the preceding harvester logs, fix the failing source or configuration, and refresh the AppSurface Docs cache.");
             diagnostics.Add(aggregateDiagnostic);
 

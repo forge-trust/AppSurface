@@ -22,7 +22,7 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 
 Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands.
 
-`--strict` and `--mode cdn` check different things. `--strict` fails host startup when every configured harvester fails. `--mode cdn` validates the emitted static artifact and preserves RazorWire `RWEXPORT00x` diagnostics for missing or unrewritable managed URLs.
+`--strict` and `--mode cdn` check different things. `--strict` fails host startup when every active harvester fails. `--mode cdn` validates the emitted static artifact and preserves RazorWire `RWEXPORT00x` diagnostics for missing or unrewritable managed URLs.
 
 Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `--project`, or `--dll`. Use `appsurface docs export` when AppSurface owns the AppSurface Docs repository host.
 
@@ -213,7 +213,7 @@ The returned `DocHarvestHealthSnapshot` includes:
 
 `DocHarvestHealthStatus` is intentionally distinct from HTTP or process health:
 
-- `Healthy`: at least one configured harvester returned documentation and no harvester failed.
+- `Healthy`: at least one active harvester returned documentation and no harvester failed.
 - `Empty`: harvesting completed without failures, but the final docs corpus is empty. This can be valid for an empty repository, a disabled source set, or a host with no registered harvesters.
 - `Degraded`: at least one harvester succeeded or returned a valid empty result while another failed, timed out, or canceled. Docs remain usable, but the corpus may be incomplete.
 - `Failed`: every active harvester failed, timed out, or canceled. AppSurface Docs returns an empty corpus for compatibility, but the snapshot should be treated as an operational failure.

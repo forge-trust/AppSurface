@@ -3069,6 +3069,21 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldRethrowFatalHarvesterExceptions()
+    {
+        var fatalHarvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => fatalHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new OutOfMemoryException("Fatal harvester failure."));
+        var aggregator = CreateHarvestHealthAggregator([fatalHarvester]);
+
+        var exception = await Assert.ThrowsAsync<OutOfMemoryException>(() => aggregator.GetHarvestHealthAsync());
+
+        Assert.Equal("Fatal harvester failure.", exception.Message);
+        Assert.Equal(0, CountLogCalls(_loggerFake, LogLevel.Error));
+        Assert.Equal(0, CountLogCalls(_loggerFake, LogLevel.Critical));
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldIgnoreDisabledOptionalHarvesters_WhenResolvingAggregateFailure()
     {
         var failingHarvester = A.Fake<IDocHarvester>();
@@ -4086,10 +4101,22 @@ public class DocAggregatorTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Test-only optional harvester that must be excluded from active harvest health accounting.
+    /// </summary>
     private sealed class DisabledHarvester : IDocHarvester, IDocHarvesterActivation
     {
+        /// <summary>
+        /// Gets a value indicating that this test harvester is intentionally inactive.
+        /// </summary>
         public bool IsEnabled => false;
 
+        /// <summary>
+        /// Throws if invoked, proving inactive harvesters are filtered before harvest execution.
+        /// </summary>
+        /// <param name="rootPath">The repository root that would be harvested if this harvester were active.</param>
+        /// <param name="cancellationToken">The snapshot cancellation token that would be passed to an active harvester.</param>
+        /// <returns>No value; this method should never be reached.</returns>
         public Task<IReadOnlyList<DocNode>> HarvestAsync(
             string rootPath,
             CancellationToken cancellationToken = default)
@@ -4098,8 +4125,18 @@ public class DocAggregatorTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Test-only diagnostic provider that returns docs successfully and then fails while reporting supplemental diagnostics.
+    /// </summary>
+    /// <param name="docs">The documentation nodes to return from harvest execution.</param>
     private sealed class DiagnosticThrowingHarvester(IReadOnlyList<DocNode> docs) : IDocHarvester, IDocHarvesterDiagnosticProvider
     {
+        /// <summary>
+        /// Returns the configured documentation nodes so tests can isolate diagnostic-provider failures.
+        /// </summary>
+        /// <param name="rootPath">The repository root passed to the harvester.</param>
+        /// <param name="cancellationToken">The snapshot cancellation token.</param>
+        /// <returns>The documentation nodes supplied to the test helper.</returns>
         public Task<IReadOnlyList<DocNode>> HarvestAsync(
             string rootPath,
             CancellationToken cancellationToken = default)
@@ -4107,6 +4144,10 @@ public class DocAggregatorTests : IDisposable
             return Task.FromResult(docs);
         }
 
+        /// <summary>
+        /// Throws to verify supplemental diagnostic failures do not discard already harvested documentation.
+        /// </summary>
+        /// <returns>No value; this method always throws.</returns>
         public IReadOnlyList<DocHarvestDiagnostic> GetHarvestDiagnostics()
         {
             throw new InvalidOperationException("diagnostics unavailable");

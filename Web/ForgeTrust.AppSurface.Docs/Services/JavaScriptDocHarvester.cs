@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Acornima;
@@ -553,21 +554,24 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return [];
         }
 
+        var reservedGroupSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         return items
             .GroupBy(item => item.Group, StringComparer.OrdinalIgnoreCase)
             .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
-            .SelectMany(CreateGroupDocNodes)
+            .SelectMany(group => CreateGroupDocNodes(group, reservedGroupSlugs))
             .ToArray();
     }
 
-    private static IReadOnlyList<DocNode> CreateGroupDocNodes(IGrouping<string, JavaScriptApiItem> group)
+    private static IReadOnlyList<DocNode> CreateGroupDocNodes(
+        IGrouping<string, JavaScriptApiItem> group,
+        ISet<string> reservedGroupSlugs)
     {
         var orderedItems = group
             .OrderBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.StartLine)
             .ThenBy(item => item.Name, StringComparer.Ordinal)
             .ToArray();
-        var groupSlug = Slugify(group.Key);
+        var groupSlug = ReserveGroupSlug(group.Key, reservedGroupSlugs);
         var groupPath = $"api/javascript/{groupSlug}";
         var groupTitle = $"{group.Key} JavaScript API";
         var content = new StringBuilder();
@@ -636,6 +640,26 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         return nodes;
+    }
+
+    private static string ReserveGroupSlug(string groupName, ISet<string> reservedGroupSlugs)
+    {
+        var baseSlug = Slugify(groupName);
+        if (reservedGroupSlugs.Add(baseSlug))
+        {
+            return baseSlug;
+        }
+
+        var suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(groupName)))[..8].ToLowerInvariant();
+        var candidate = $"{baseSlug}-{suffix}";
+        var sequence = 2;
+        while (!reservedGroupSlugs.Add(candidate))
+        {
+            candidate = $"{baseSlug}-{suffix}-{sequence.ToString(CultureInfo.InvariantCulture)}";
+            sequence++;
+        }
+
+        return candidate;
     }
 
     private static DocMetadata CreateJavaScriptMetadata(

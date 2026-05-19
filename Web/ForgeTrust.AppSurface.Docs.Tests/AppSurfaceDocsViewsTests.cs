@@ -1407,9 +1407,11 @@ public class AppSurfaceDocsViewsTests
         };
 
         var group = Assert.Single(DocSectionDisplayBuilder.BuildGroups(snapshot));
+        var link = Assert.Single(group.Links);
 
         Assert.Equal("API Reference", group.Title);
-        Assert.Equal("Health Endpoint", Assert.Single(group.Links).Title);
+        Assert.Equal("Health Endpoint", link.Title);
+        Assert.Equal("/docs/api/health", link.Href);
     }
 
     [Fact]

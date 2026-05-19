@@ -186,6 +186,45 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldKeepDistinctGroupPages_WhenNamespaceSlugsCollide()
+    {
+        await WriteAsync(
+            "src/spaced.js",
+            """
+            /**
+             * Public function in a spaced namespace.
+             * @public
+             * @namespace Foo Bar
+             */
+            function fromSpacedNamespace() {}
+            """);
+        await WriteAsync(
+            "src/hyphenated.js",
+            """
+            /**
+             * Public function in a hyphenated namespace.
+             * @public
+             * @namespace Foo-Bar
+             */
+            function fromHyphenatedNamespace() {}
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var groupPages = docs
+            .Where(doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(2, groupPages.Length);
+        Assert.Equal(2, groupPages.Select(doc => doc.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Contains(groupPages, doc => string.Equals(doc.Path, "api/javascript/foo-bar", StringComparison.Ordinal));
+        Assert.Contains(
+            groupPages,
+            doc => doc.Path.StartsWith("api/javascript/foo-bar-", StringComparison.Ordinal)
+                   && !string.Equals(doc.Path, "api/javascript/foo-bar", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldHarvestAttachedDocletsInsideRuntimeClosures()
     {
         await WriteAsync(
@@ -484,6 +523,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
         try
         {
+            Assert.ThrowsAny<Exception>(() => Directory.GetFileSystemEntries(unreadableDirectory));
+
             var docs = await harvester.HarvestAsync(_testRoot);
 
             Assert.Contains(docs, doc => doc.Path.EndsWith("#function-publicapi", StringComparison.Ordinal));
