@@ -1,4 +1,5 @@
 using System.Text;
+using AngleSharp.Html.Parser;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using TextMateSharp.Grammars;
@@ -21,9 +22,35 @@ public class TextMateSharpRazorDocsCodeHighlighterTests
         Assert.True(result.IsHighlighted);
         Assert.Equal("csharp", result.NormalizedLanguage);
         Assert.Contains("doc-code doc-code--highlighted doc-code--language-csharp language-csharp", result.Html);
-        Assert.Contains("language-csharp\"><span class=\"doc-code__language\">C#</span><code>", result.Html);
+        Assert.Contains("language-csharp\" data-doc-code-language=\"C#\"><code>", result.Html);
+        Assert.DoesNotContain("doc-code__language", result.Html);
         Assert.Contains("doc-token doc-token--keyword", result.Html);
         Assert.Contains("RazorDocs", result.Html);
+    }
+
+    [Theory]
+    [InlineData("bash", "Bash", "dotnet run")]
+    [InlineData("csharp", "C#", "[HttpPost]")]
+    [InlineData("cs", "C#", "public class Demo { }")]
+    [InlineData("razor", "Razor", "<div data-value=\"1\"></div>")]
+    [InlineData("json", "JSON", "{\"enabled\": true}")]
+    [InlineData("yaml", "YAML", "enabled: true")]
+    [InlineData("text", "Plain text", "literal line")]
+    [InlineData("plain", "Plain text", "literal line")]
+    public void Highlight_ShouldKeepLanguageLabelOutOfRenderedCodeText(
+        string language,
+        string expectedLabel,
+        string code)
+    {
+        var result = _highlighter.Highlight(new RazorDocsCodeBlock(code, language));
+        var document = new HtmlParser().ParseDocument(result.Html);
+        var pre = document.QuerySelector("pre");
+
+        Assert.NotNull(pre);
+        Assert.Equal(expectedLabel, pre.GetAttribute("data-doc-code-language"));
+        Assert.Equal(code, pre.TextContent);
+        Assert.DoesNotContain("doc-code__language", result.Html);
+        Assert.DoesNotContain(expectedLabel, pre.TextContent, StringComparison.Ordinal);
     }
 
     [Fact]

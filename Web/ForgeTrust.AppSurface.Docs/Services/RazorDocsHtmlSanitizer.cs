@@ -8,9 +8,10 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// <remarks>
 /// RazorDocs starts from the HtmlSanitizer defaults, adds the package-owned content tags <c>section</c>,
 /// <c>article</c>, <c>header</c>, <c>details</c>, <c>summary</c>, <c>pre</c>, <c>code</c>, and <c>span</c>, and
-/// allows the <c>class</c>, <c>id</c>, and <c>open</c> attributes. The sanitizer explicitly removes <c>style</c>
-/// from the default attribute set so harvested Markdown, generated API HTML, and server-side highlighted code can
-/// keep structural hooks while inline presentation and unsafe markup are stripped. Callers should pass already-rendered
+/// allows the <c>class</c>, <c>id</c>, <c>open</c>, and package-owned <c>data-doc-code-language</c> attributes. The
+/// sanitizer explicitly removes <c>style</c> from the default attribute set so harvested Markdown, generated API HTML,
+/// and server-side highlighted code can keep structural hooks while inline presentation and unsafe markup are stripped.
+/// Callers should pass already-rendered
 /// RazorDocs HTML through this sanitizer before display or export; supported semantic wrappers and token spans are
 /// preserved, while scripts, event handlers, inline styles, and unsupported attributes are discarded.
 /// </remarks>
@@ -39,7 +40,7 @@ internal sealed class RazorDocsHtmlSanitizer : IRazorDocsHtmlSanitizer
             sanitizer.AllowedTags.Add(tag);
         }
 
-        foreach (var attribute in new[] { "class", "id", "open" })
+        foreach (var attribute in new[] { "class", "id", "open", "data-doc-code-language" })
         {
             sanitizer.AllowedAttributes.Add(attribute);
         }

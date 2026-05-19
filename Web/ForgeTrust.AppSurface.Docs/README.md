@@ -135,10 +135,10 @@ RazorDocs renders fenced Markdown code blocks during Markdown harvest. Supported
 The v1 contract is RazorDocs-owned HTML:
 
 ```html
-<pre class="doc-code doc-code--highlighted doc-code--language-csharp language-csharp"><span class="doc-code__language">C#</span><code>...</code></pre>
+<pre class="doc-code doc-code--highlighted doc-code--language-csharp language-csharp" data-doc-code-language="C#"><code>...</code></pre>
 ```
 
-Plain fallback uses the same shape with `doc-code--plain`. Token spans, when present, use `doc-token` plus semantic modifiers such as `doc-token--keyword`, `doc-token--string`, `doc-token--comment`, `doc-token--number`, `doc-token--type`, `doc-token--member`, `doc-token--operator`, and `doc-token--punctuation`. These classes are internal RazorDocs output in v1. They are stable enough for the package stylesheet and tests, but they are not a public custom highlighter API.
+Plain fallback uses the same shape with `doc-code--plain`. `data-doc-code-language` is renderer chrome: the package stylesheet may display it as a code-block badge, but RazorDocs does not insert the language label as text inside `<pre>` or `<code>`. Search indexing, copied code, and plain-text extraction should therefore see the code content without a leading language token. Token spans, when present, use `doc-token` plus semantic modifiers such as `doc-token--keyword`, `doc-token--string`, `doc-token--comment`, `doc-token--number`, `doc-token--type`, `doc-token--member`, `doc-token--operator`, and `doc-token--punctuation`. These classes are internal RazorDocs output in v1. They are stable enough for the package stylesheet and tests, but they are not a public custom highlighter API.
 
 ### Language aliases
 
@@ -150,13 +150,14 @@ RazorDocs uses the first whitespace-delimited code-fence info token as the langu
 | `razor`, `cshtml` | `razor` |
 | `xml` | `xml` |
 | `json` | `json` |
+| `yaml`, `yml` | `yaml` |
 | `bash`, `sh`, `shell` | `bash` |
 | `html` | `html` |
 | `css` | `css` |
 | `js`, `javascript` | `javascript` |
 | `md`, `markdown` | `markdown` |
 | `diff` | `diff` |
-| `txt`, `text`, `plaintext` | `plaintext` |
+| `txt`, `text`, `plain`, `text/plain`, `plaintext` | `plaintext` |
 
 Supported normalized languages render highlighted output when the bundled TextMateSharp grammar loads successfully. `plaintext`, unsupported languages, unknown languages, grammar failures, tokenization failures, and blocks above RazorDocs' internal size threshold render as escaped plaintext with the same quiet code-block treatment. A correct plain block is preferred over fake highlighting.
 
