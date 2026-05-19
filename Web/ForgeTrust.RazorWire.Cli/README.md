@@ -121,7 +121,7 @@ For both `--project` and `--dll`:
 
 ### AppSurface Docs versioned export notes
 
-When the target app hosts AppSurfaceDocs:
+When the target app hosts AppSurface Docs:
 
 - Export the live unreleased preview surface from its configured live docs root, such as `/docs` when versioning is off, `/docs/next` when versioning is on with defaults, or `/foo/bar/next` when the host sets `AppSurfaceDocs:Routing:RouteRootPath` to `/foo/bar`.
 - Export exact published release trees as standalone static subtrees that already contain their own `index.html`, `search.html`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, section routes, and detail pages.

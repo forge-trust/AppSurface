@@ -9,6 +9,7 @@ public sealed class AppSurfaceDocsPublicRebrandTests
         "README.md",
         "README.md.yml",
         "CHANGELOG.md",
+        ".github",
         "packages",
         "releases",
         "Cli/ForgeTrust.AppSurface.Cli",

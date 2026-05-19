@@ -169,10 +169,11 @@ public sealed class AppSurfaceDocsLogoOptions
     public string? Path { get; set; }
 
     /// <summary>
-    /// Gets or sets alt text for the logo image.
+    /// Gets or sets accessible text for logo-only renderers that consume the resolved identity.
     /// </summary>
     /// <remarks>
-    /// When omitted or blank, the resolved display name is used as the image alt text.
+    /// When omitted or blank, the resolved display name is used. The built-in AppSurface Docs chrome renders configured
+    /// logo images as decorative because the visible display name is rendered in the same brand link.
     /// </remarks>
     public string? AltText { get; set; }
 }

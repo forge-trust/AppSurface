@@ -127,7 +127,8 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("<title>Documentation Index - Acme Docs</title>", html);
         Assert.Contains("href=\"/some-base/reference\"", html);
         Assert.Contains("src=\"/some-base/brand/logo.svg\"", html);
-        Assert.Contains("alt=\"Acme logo\"", html);
+        Assert.Contains("alt=\"\" aria-hidden=\"true\"", html);
+        Assert.DoesNotContain("alt=\"Acme logo\"", html);
         Assert.Contains("href=\"/some-base/brand/favicon.svg\"", html);
         Assert.Contains("type=\"image/svg", html);
         Assert.Contains("href=\"/some-base/favicon.ico\"", html);

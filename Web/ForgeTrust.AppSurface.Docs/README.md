@@ -258,7 +258,7 @@ The sidebar health entry follows `AppSurfaceDocs:Harvest:Health:ShowChrome`, whi
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Harvest": {
       "Health": {
         "ExposeRoutes": "DevelopmentOnly",
@@ -285,7 +285,7 @@ Set `AppSurfaceDocs:Harvest:FailOnFailure` to `true` when a host should fail dur
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Harvest": {
       "FailOnFailure": true
     }
@@ -309,7 +309,7 @@ Use the default single-surface configuration when you want the live docs experie
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Mode": "Source",
     "CacheExpirationMinutes": 5,
     "Source": {
@@ -325,7 +325,7 @@ To host the same live source surface somewhere else, set the route-family root. 
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Routing": {
       "RouteRootPath": "/foo/bar"
     }
@@ -341,7 +341,7 @@ Enable versioning when you want the host to keep serving the live unreleased sna
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Mode": "Source",
     "Source": {
       "RepositoryRoot": "/path/to/repo"
@@ -543,8 +543,9 @@ Pitfalls:
   - Must be an app-root path such as `/brand/docs-logo.svg` or an application-relative path such as `~/brand/docs-logo.svg`.
   - Remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments are rejected.
 - `AppSurfaceDocs:Identity:Logo:AltText`
-  - Optional logo alt text.
+  - Optional accessible text for logo-only renderers that consume the resolved identity.
   - Defaults to the resolved display name when omitted or blank.
+  - The built-in AppSurface Docs chrome renders configured logo images as decorative because the visible display name is rendered in the same brand link.
 - `AppSurfaceDocs:Identity:Favicon:SvgPath`
   - Optional SVG favicon path.
   - Uses the same app-root or `~/` path rules as the logo.
@@ -738,7 +739,7 @@ Contributor provenance is configured under `AppSurfaceDocs:Contributor`:
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Mode": "Source",
     "Source": {
       "RepositoryRoot": "/path/to/repo"
@@ -783,7 +784,7 @@ Generated C# API pages can render small `Source` links beside documented types, 
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Contributor": {
       "DefaultBranch": "main",
       "SourceRef": "8b7c6d5",

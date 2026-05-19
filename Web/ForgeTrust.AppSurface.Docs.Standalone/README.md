@@ -64,7 +64,7 @@ If you want the live standalone host to exercise the full `Source of truth` stri
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Contributor": {
       "Enabled": true,
       "DefaultBranch": "feature/issue-143",
