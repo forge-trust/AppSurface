@@ -29,6 +29,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 
 - Pull request titles are now expected to follow Conventional Commits so the merge history is machine-readable for future automation.
 - Pull requests are expected to update this page unless maintainers explicitly mark the change as outside the public release story.
+- Test and integration process helpers now use CliWrap for child-process execution, keeping stdout and stderr diagnostics available while aligning test infrastructure with the preferred process-launch abstraction.
 - The primary build workflow now declares explicit read-only `GITHUB_TOKEN` contents permissions, keeping CI aligned with least-privilege GitHub Actions defaults.
 - Markdown-only changes on `main` now republish the docs surface, so release-note and policy edits are treated as first-class product updates.
 - AppSurface now exposes focused GitHub issue forms for bug reports, feature requests, and docs/developer-experience feedback, with the root README and contribution guide pointing developers to that feedback path.
@@ -54,6 +55,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 ### Core diagnostics
 
 - Core static utilities now use explicit `ILogger` overloads and source-generated `[LoggerMessage]` definitions for host-owned diagnostics. `PathUtils.FindRepositoryRoot` can warn when discovery falls back from a missing path, and parallel enumerable cleanup paths now log suppressed cleanup failures at `Debug` when a caller supplies a logger.
+- `ProcessUtils` now runs through CliWrap while keeping the existing AppSurface process contract for captured output, streaming logs, cancellation, and non-throwing non-zero exit codes.
 
 ### Dependency maintenance
 
