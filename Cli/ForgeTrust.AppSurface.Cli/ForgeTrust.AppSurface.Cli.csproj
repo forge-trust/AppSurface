@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Console\ForgeTrust.AppSurface.Console\ForgeTrust.AppSurface.Console.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Docs.Standalone\ForgeTrust.AppSurface.Docs.Standalone.csproj" />
+    <ProjectReference Include="..\..\Web\ForgeTrust.RazorWire.Cli\ForgeTrust.RazorWire.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>

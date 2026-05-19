@@ -1078,6 +1078,14 @@ public class RazorDocsWebModuleRegressionTests
                 await searchClientResponse.Content.ReadAsStringAsync(),
                 StringComparison.Ordinal);
 
+            using var brandIconResponse = await client.GetAsync($"{PackagedAssetBasePath}/appsurface-docs-icon.svg");
+            Assert.Equal(HttpStatusCode.OK, brandIconResponse.StatusCode);
+            Assert.Equal("image/svg+xml", brandIconResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains(
+                "AppSurface layered document mark",
+                await brandIconResponse.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+
             using var packagedSearchCssResponse = await client.GetAsync($"{PackagedAssetBasePath}/search.css");
             Assert.Equal(HttpStatusCode.OK, packagedSearchCssResponse.StatusCode);
             Assert.Equal("text/css", packagedSearchCssResponse.Content.Headers.ContentType?.MediaType);
