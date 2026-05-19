@@ -203,6 +203,10 @@ internal sealed class DocsExportCommand : RazorDocsRepositoryCommand, ICommand
             DefaultExportUrl);
     }
 
+    /// <summary>
+    /// Builds the default export seed routes from the resolved RazorDocs routing options.
+    /// </summary>
+    /// <returns>The root route plus the live docs root, with duplicates removed.</returns>
     private IReadOnlyList<string> BuildDefaultSeedRoutes()
     {
         var docsUrlBuilder = new DocsUrlBuilder(new RazorDocsOptions
@@ -471,15 +475,31 @@ internal abstract class RazorDocsRepositoryCommand
             : TimeSpan.FromSeconds(StartupTimeoutSeconds);
     }
 
+    /// <summary>
+    /// Restores the previous process current directory when disposed.
+    /// </summary>
+    /// <remarks>
+    /// The standalone host resolves some relative paths from the current directory, so preview temporarily scopes it to
+    /// the repository root while the host runner executes.
+    /// </remarks>
     protected sealed class CurrentDirectoryScope : IDisposable
     {
         private readonly string _previousDirectory;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="CurrentDirectoryScope"/> class.
+        /// </summary>
+        /// <param name="previousDirectory">Directory to restore when the scope is disposed.</param>
         private CurrentDirectoryScope(string previousDirectory)
         {
             _previousDirectory = previousDirectory;
         }
 
+        /// <summary>
+        /// Changes the process current directory and returns a scope that restores the previous value.
+        /// </summary>
+        /// <param name="directory">Directory to make current for the scope lifetime.</param>
+        /// <returns>A disposable scope that restores the previous current directory.</returns>
         public static CurrentDirectoryScope ChangeTo(string directory)
         {
             var previousDirectory = Directory.GetCurrentDirectory();
@@ -487,6 +507,9 @@ internal abstract class RazorDocsRepositoryCommand
             return new CurrentDirectoryScope(previousDirectory);
         }
 
+        /// <summary>
+        /// Restores the current directory captured when the scope was created.
+        /// </summary>
         public void Dispose()
         {
             Directory.SetCurrentDirectory(_previousDirectory);
@@ -633,6 +656,12 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
     {
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RazorDocsInProcessExportRunner"/> class with an explicit host starter.
+    /// </summary>
+    /// <param name="logger">Logger used for host lifecycle diagnostics.</param>
+    /// <param name="exporter">Static exporter invoked after the in-process host starts.</param>
+    /// <param name="hostStarter">Host starter used to build and start the docs application.</param>
     internal RazorDocsInProcessExportRunner(
         ILogger<RazorDocsInProcessExportRunner> logger,
         IRazorWireStaticExporter exporter,
@@ -680,6 +709,12 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         }
     }
 
+    /// <summary>
+    /// Resolves the single bound loopback base URL published by the started export host.
+    /// </summary>
+    /// <param name="host">Started host that exposes Kestrel server addresses.</param>
+    /// <returns>The scheme and authority used by the export crawler.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the host does not publish exactly one valid URL.</exception>
     internal static string ResolveBoundBaseUrl(IHost host)
     {
         ArgumentNullException.ThrowIfNull(host);
@@ -693,6 +728,12 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         return ResolveBoundBaseUrl(addresses);
     }
 
+    /// <summary>
+    /// Resolves the crawler base URL from a Kestrel address collection.
+    /// </summary>
+    /// <param name="addresses">Published server addresses.</param>
+    /// <returns>The absolute URL authority to crawl.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when no URL, multiple URLs, or an invalid URL is published.</exception>
     internal static string ResolveBoundBaseUrl(ICollection<string>? addresses)
     {
         if (addresses is null || addresses.Count == 0)
@@ -714,6 +755,14 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         return uri.GetLeftPart(UriPartial.Authority);
     }
 
+    /// <summary>
+    /// Builds and starts the docs host while enforcing the configured startup watchdog.
+    /// </summary>
+    /// <param name="args">Resolved export arguments.</param>
+    /// <param name="environmentName">Environment name applied to the standalone host.</param>
+    /// <param name="cancellationToken">External cancellation token for the export operation.</param>
+    /// <returns>The started host.</returns>
+    /// <exception cref="TimeoutException">Thrown when the host does not start before the startup timeout.</exception>
     private async Task<IHost> BuildAndStartHostWithTimeoutAsync(
         RazorDocsExportArgs args,
         string environmentName,
@@ -760,6 +809,12 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         }
     }
 
+    /// <summary>
+    /// Creates the linked cancellation source used to distinguish startup timeout from external cancellation.
+    /// </summary>
+    /// <param name="startupTimeout">Startup timeout to enforce.</param>
+    /// <param name="cancellationToken">External cancellation token to link.</param>
+    /// <returns>A disposable lease for the linked startup cancellation source.</returns>
     private static StartupTimeoutCancellationLease CreateStartupTimeout(TimeSpan startupTimeout, CancellationToken cancellationToken)
     {
         var startupTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -767,6 +822,11 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         return new StartupTimeoutCancellationLease(startupTimeoutCts);
     }
 
+    /// <summary>
+    /// Observes a startup task that outlived the configured timeout so late completion can stop or log the host.
+    /// </summary>
+    /// <param name="startTask">Background startup task to observe.</param>
+    /// <param name="startupTimeoutCts">Cancellation source transferred from the timeout branch.</param>
     private void ObserveTimedOutStartupTask(Task<IHost> startTask, CancellationTokenSource startupTimeoutCts)
     {
         _ = ObserveStartupTaskAsync(
@@ -775,6 +835,11 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
             "RazorDocs export host startup task completed after the startup timeout.");
     }
 
+    /// <summary>
+    /// Observes a startup task that outlived external cancellation so late completion can stop or log the host.
+    /// </summary>
+    /// <param name="startTask">Background startup task to observe.</param>
+    /// <param name="startupTimeoutCts">Cancellation source transferred from the external cancellation branch.</param>
     private void ObserveCanceledStartupTask(Task<IHost> startTask, CancellationTokenSource startupTimeoutCts)
     {
         _ = ObserveStartupTaskAsync(
@@ -783,6 +848,13 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
             "RazorDocs export host startup task completed after external cancellation.");
     }
 
+    /// <summary>
+    /// Awaits a late startup task and disposes the host if startup eventually succeeds.
+    /// </summary>
+    /// <param name="startTask">Background startup task to observe.</param>
+    /// <param name="startupTimeoutCts">Cancellation source owned by the observation task.</param>
+    /// <param name="lateCompletionMessage">Debug message used when late startup faults.</param>
+    /// <returns>A task that completes after the late startup task is observed.</returns>
     private async Task ObserveStartupTaskAsync(
         Task<IHost> startTask,
         CancellationTokenSource startupTimeoutCts,
@@ -801,12 +873,23 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         }
     }
 
+    /// <summary>
+    /// Creates the user-facing timeout exception for a host that failed to start in time.
+    /// </summary>
+    /// <param name="startupTimeout">Timeout that elapsed.</param>
+    /// <param name="innerException">Optional cancellation exception that came from the startup token.</param>
+    /// <returns>The timeout exception reported to command execution.</returns>
     private static TimeoutException CreateStartupTimeoutException(TimeSpan startupTimeout, Exception? innerException)
     {
         var seconds = startupTimeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
         return new TimeoutException($"RazorDocs export host did not start within {seconds} seconds.", innerException);
     }
 
+    /// <summary>
+    /// Stops the export host and always disposes it, logging non-fatal shutdown failures.
+    /// </summary>
+    /// <param name="host">Host to stop and dispose.</param>
+    /// <returns>A task that completes after shutdown and disposal.</returns>
     private async Task StopAndDisposeHostAsync(IHost host)
     {
         using var disposableHost = host;
@@ -821,6 +904,11 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
         }
     }
 
+    /// <summary>
+    /// Determines whether an exception is safe to catch for cleanup or diagnostic logging.
+    /// </summary>
+    /// <param name="ex">Exception to classify.</param>
+    /// <returns><see langword="true"/> when the exception is non-fatal and can be handled locally.</returns>
     private static bool IsNonFatalException(Exception ex)
     {
         return ex is not OutOfMemoryException
@@ -833,23 +921,41 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
             and not ThreadAbortException;
     }
 
+    /// <summary>
+    /// Owns a startup cancellation source until timeout observation needs to transfer that ownership.
+    /// </summary>
     private sealed class StartupTimeoutCancellationLease : IDisposable
     {
         private CancellationTokenSource? _source;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="StartupTimeoutCancellationLease"/> class.
+        /// </summary>
+        /// <param name="source">Linked cancellation source to own.</param>
         public StartupTimeoutCancellationLease(CancellationTokenSource source)
         {
             ArgumentNullException.ThrowIfNull(source);
             _source = source;
         }
 
+        /// <summary>
+        /// Gets the token exposed by the owned startup cancellation source.
+        /// </summary>
         public CancellationToken Token => (_source ?? throw new ObjectDisposedException(nameof(StartupTimeoutCancellationLease))).Token;
 
+        /// <summary>
+        /// Requests cancellation of the owned startup cancellation source.
+        /// </summary>
+        /// <returns>A task that completes after cancellation callbacks have run.</returns>
         public Task CancelAsync()
         {
             return (_source ?? throw new ObjectDisposedException(nameof(StartupTimeoutCancellationLease))).CancelAsync();
         }
 
+        /// <summary>
+        /// Transfers cancellation source ownership to a late-startup observer.
+        /// </summary>
+        /// <returns>The owned cancellation source.</returns>
         public CancellationTokenSource Transfer()
         {
             var source = _source ?? throw new ObjectDisposedException(nameof(StartupTimeoutCancellationLease));
@@ -857,6 +963,9 @@ internal sealed class RazorDocsInProcessExportRunner : IRazorDocsExportRunner
             return source;
         }
 
+        /// <summary>
+        /// Disposes the owned cancellation source unless ownership has been transferred.
+        /// </summary>
         public void Dispose()
         {
             _source?.Dispose();
@@ -933,20 +1042,39 @@ internal sealed class RazorDocsStandaloneExportHostStarter : IRazorDocsExportHos
             and not ThreadAbortException;
     }
 
+    /// <summary>
+    /// Provides a fixed environment name to the standalone host builder during export startup.
+    /// </summary>
     private sealed class FixedEnvironmentProvider : IEnvironmentProvider
     {
         private readonly string _environmentName;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="FixedEnvironmentProvider"/> class.
+        /// </summary>
+        /// <param name="environmentName">Environment name exposed to the host builder.</param>
         public FixedEnvironmentProvider(string environmentName)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(environmentName);
             _environmentName = environmentName;
         }
 
+        /// <summary>
+        /// Gets the fixed environment name.
+        /// </summary>
         public string Environment => _environmentName;
 
+        /// <summary>
+        /// Gets a value indicating whether the fixed environment is Development.
+        /// </summary>
         public bool IsDevelopment => string.Equals(_environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Gets environment variable values while overriding ASP.NET and .NET environment variables.
+        /// </summary>
+        /// <param name="name">Environment variable name.</param>
+        /// <param name="defaultValue">Fallback value when the variable is not set.</param>
+        /// <returns>The fixed host environment for environment-name variables, otherwise the process value or fallback.</returns>
         public string? GetEnvironmentVariable(string name, string? defaultValue = null)
         {
             if (string.Equals(name, "ASPNETCORE_ENVIRONMENT", StringComparison.OrdinalIgnoreCase)

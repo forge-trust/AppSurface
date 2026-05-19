@@ -301,6 +301,12 @@ public class ExportEngine
         EnqueueRoute(context, "/");
     }
 
+    /// <summary>
+    /// Validates, normalizes, and enqueues seed routes from a file or in-memory route collection.
+    /// </summary>
+    /// <param name="context">Export context whose queue receives valid normalized routes.</param>
+    /// <param name="seeds">Raw seed route values to validate.</param>
+    /// <param name="cancellationToken">Token observed between seed values.</param>
     private void QueueSeedRoutes(
         ExportContext context,
         IEnumerable<string> seeds,
