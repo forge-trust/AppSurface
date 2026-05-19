@@ -152,7 +152,7 @@ internal sealed class AppSurfaceDocsHarvestPathMatcher
 
         private static bool HasGlobSyntax(string pattern)
         {
-            return pattern.IndexOfAny(['*', '?', '[', '{']) >= 0;
+            return pattern.IndexOfAny(['*', '?', '[']) >= 0;
         }
 
         private static string GetLiteralDirectoryPrefix(string pattern)

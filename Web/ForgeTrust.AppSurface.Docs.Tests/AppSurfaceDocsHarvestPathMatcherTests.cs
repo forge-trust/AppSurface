@@ -41,6 +41,16 @@ public sealed class AppSurfaceDocsHarvestPathMatcherTests
     }
 
     [Fact]
+    public void MatchDirectoryOrDescendant_TreatsBracesAsLiteralPathCharacters()
+    {
+        var matcher = new AppSurfaceDocsHarvestPathMatcher(["docs/{literal}/README.md"]);
+
+        Assert.Equal("docs/{literal}/README.md", matcher.MatchDirectoryOrDescendant("docs"));
+        Assert.Equal("docs/{literal}/README.md", matcher.MatchDirectoryOrDescendant("docs/{literal}"));
+        Assert.Null(matcher.MatchDirectoryOrDescendant("docs/{other}"));
+    }
+
+    [Fact]
     public void MatchDirectoryOrDescendantSubtree_IgnoresFileLevelPatterns()
     {
         var matcher = new AppSurfaceDocsHarvestPathMatcher([".github/workflows/README.md"]);
