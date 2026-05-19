@@ -1213,6 +1213,59 @@ public sealed class RazorDocsOptionsTests
     }
 
     [Fact]
+    public void Validator_ShouldRejectNumericDefaultExclusionGroups()
+    {
+        var validator = new RazorDocsOptionsValidator();
+        var options = new RazorDocsOptions
+        {
+            Harvest = new RazorDocsHarvestOptions
+            {
+                Paths = new RazorDocsHarvestPathOptions
+                {
+                    DefaultExclusions = new RazorDocsHarvestDefaultExclusionOptions
+                    {
+                        DisabledGroups = ["0"],
+                        AllowGlobs = new Dictionary<string, string[]>
+                        {
+                            ["42"] = ["docs/**"]
+                        }
+                    }
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("unsupported default exclusion group '0'", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("unsupported default exclusion group '42'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddRazorDocs_ShouldKeepNumericDefaultExclusionGroupsInvalidAfterNormalization()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["RazorDocs:Harvest:Paths:DefaultExclusions:DisabledGroups:0"] = "0",
+                        ["RazorDocs:Harvest:Paths:DefaultExclusions:AllowGlobs:42:0"] = "docs/**"
+                    })
+                .Build());
+
+        services.AddRazorDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var exception = Assert.Throws<OptionsValidationException>(
+            () => provider.GetRequiredService<IOptions<RazorDocsOptions>>().Value);
+
+        Assert.Contains(exception.Failures, failure => failure.Contains("unsupported default exclusion group '0'", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(exception.Failures, failure => failure.Contains("unsupported default exclusion group '42'", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Validator_ShouldAcceptRepositoryRelativeHarvestGlobPatterns()
     {
         var validator = new RazorDocsOptionsValidator();

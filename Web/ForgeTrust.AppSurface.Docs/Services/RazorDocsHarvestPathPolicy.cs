@@ -313,12 +313,9 @@ internal sealed class RazorDocsHarvestPathPolicy
             treatLastSegmentAsDirectory: true)
             .Where(group => !IsDefaultGroupDisabled(group, sourcePolicy));
 
-        foreach (var group in matchedDefaultGroups)
+        foreach (var group in matchedDefaultGroups.Where(group => !HasAnyDefaultGroupAllowPattern(group, sourcePolicy)))
         {
-            if (!HasAnyDefaultGroupAllowPattern(group, sourcePolicy))
-            {
-                return true;
-            }
+            return true;
         }
 
         return _globalExcludeMatcher.MatchDirectorySubtree(normalizedDirectory) is not null
@@ -327,20 +324,14 @@ internal sealed class RazorDocsHarvestPathPolicy
 
     public static bool IsKnownDefaultGroupId(string? groupId)
     {
-        return Enum.TryParse<RazorDocsHarvestDefaultExclusionGroup>(
-            groupId,
-            ignoreCase: true,
-            out _);
+        return TryParseDefaultGroupName(groupId, out _);
     }
 
     public static string NormalizeDefaultGroupId(string? groupId)
     {
         var trimmedGroupId = groupId?.Trim() ?? string.Empty;
 
-        return Enum.TryParse<RazorDocsHarvestDefaultExclusionGroup>(
-            trimmedGroupId,
-            ignoreCase: true,
-            out var group)
+        return TryParseDefaultGroupName(trimmedGroupId, out var group)
             ? group.ToString()
             : trimmedGroupId;
     }
@@ -372,19 +363,15 @@ internal sealed class RazorDocsHarvestPathPolicy
     private static HashSet<RazorDocsHarvestDefaultExclusionGroup> CreateDisabledGroupSet(
         IEnumerable<string>? disabledGroups)
     {
-        var groups = new HashSet<RazorDocsHarvestDefaultExclusionGroup>();
-        foreach (var groupId in disabledGroups ?? [])
-        {
-            if (Enum.TryParse<RazorDocsHarvestDefaultExclusionGroup>(
-                    groupId,
-                    ignoreCase: true,
-                    out var group))
+        return (disabledGroups ?? [])
+            .Select(groupId => new
             {
-                groups.Add(group);
-            }
-        }
-
-        return groups;
+                Parsed = TryParseDefaultGroupName(groupId, out var group),
+                Group = group
+            })
+            .Where(result => result.Parsed)
+            .Select(result => result.Group)
+            .ToHashSet();
     }
 
     private static Dictionary<RazorDocsHarvestDefaultExclusionGroup, RazorDocsHarvestPathMatcher> CreateAllowMatchers(
@@ -393,10 +380,7 @@ internal sealed class RazorDocsHarvestPathPolicy
         var matchers = new Dictionary<RazorDocsHarvestDefaultExclusionGroup, RazorDocsHarvestPathMatcher>();
         foreach (var (groupId, patterns) in allowGlobs ?? [])
         {
-            if (Enum.TryParse<RazorDocsHarvestDefaultExclusionGroup>(
-                    groupId,
-                    ignoreCase: true,
-                    out var group))
+            if (TryParseDefaultGroupName(groupId, out var group))
             {
                 matchers[group] = new RazorDocsHarvestPathMatcher(patterns ?? []);
             }
@@ -420,6 +404,28 @@ internal sealed class RazorDocsHarvestPathPolicy
             code,
             trace,
             matchedDefaultGroups);
+    }
+
+    private static bool TryParseDefaultGroupName(
+        string? groupId,
+        out RazorDocsHarvestDefaultExclusionGroup group)
+    {
+        group = default;
+
+        if (string.IsNullOrWhiteSpace(groupId))
+        {
+            return false;
+        }
+
+        var matchingName = Enum.GetNames<RazorDocsHarvestDefaultExclusionGroup>()
+            .FirstOrDefault(name => name.Equals(groupId.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (matchingName is null)
+        {
+            return false;
+        }
+
+        group = Enum.Parse<RazorDocsHarvestDefaultExclusionGroup>(matchingName);
+        return true;
     }
 
     private static bool IsBaseCandidate(

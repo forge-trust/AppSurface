@@ -256,6 +256,81 @@ public sealed class RazorDocsHarvestPathPolicyTests
         Assert.True(policy.ShouldPruneDirectory(".github", RazorDocsHarvestSourceKind.CSharp));
     }
 
+    [Theory]
+    [InlineData("BuildOutput", true, "BuildOutput")]
+    [InlineData(" buildoutput ", true, "BuildOutput")]
+    [InlineData("0", false, "0")]
+    [InlineData("42", false, "42")]
+    [InlineData("", false, "")]
+    public void DefaultGroupHelpers_AcceptNamesButNotNumericValues(
+        string groupId,
+        bool expectedKnown,
+        string expectedNormalized)
+    {
+        Assert.Equal(expectedKnown, RazorDocsHarvestPathPolicy.IsKnownDefaultGroupId(groupId));
+        Assert.Equal(expectedNormalized, RazorDocsHarvestPathPolicy.NormalizeDefaultGroupId(groupId));
+    }
+
+    [Fact]
+    public void Evaluate_IgnoresNumericDefaultGroupConfiguration()
+    {
+        var policy = CreatePolicy(
+            options =>
+            {
+                options.Harvest.Paths.DefaultExclusions.DisabledGroups = ["0"];
+                options.Harvest.Paths.DefaultExclusions.AllowGlobs["0"] = ["src/bin/**"];
+            });
+
+        var decision = policy.Evaluate("src/bin/README.md", RazorDocsHarvestSourceKind.Markdown);
+
+        AssertDecision(decision, included: false, RazorDocsHarvestPathDecisionCode.ExcludedByDefaultGroup);
+        Assert.Equal(["BuildOutput"], decision.MatchedDefaultGroups);
+    }
+
+    [Fact]
+    public void Evaluate_ReturnsRuleTraceForMatchedIncludesAndDefaultAllows()
+    {
+        var policy = CreatePolicy(
+            options =>
+            {
+                options.Harvest.Paths.IncludeGlobs = ["docs/**"];
+                options.Harvest.Paths.DefaultExclusions.AllowGlobs["HiddenDirectories"] = ["docs/.github/**"];
+            });
+
+        var decision = policy.Evaluate("docs/.github/README.md", RazorDocsHarvestSourceKind.Markdown);
+
+        AssertDecision(decision, included: true, RazorDocsHarvestPathDecisionCode.IncludedByDefaultGroupAllow);
+        Assert.Equal("docs/.github/README.md", decision.RelativePath);
+        Assert.Equal(RazorDocsHarvestSourceKind.Markdown, decision.SourceKind);
+        Assert.Equal(["HiddenDirectories"], decision.MatchedDefaultGroups);
+        Assert.Collection(
+            decision.Trace,
+            trace =>
+            {
+                Assert.Equal(RazorDocsHarvestPathDecisionCode.IncludedByGlobalInclude, trace.Code);
+                Assert.Equal("global", trace.Scope);
+                Assert.Equal("docs/**", trace.Pattern);
+                Assert.Null(trace.DefaultGroup);
+                Assert.True(trace.Matched);
+            },
+            trace =>
+            {
+                Assert.Equal(RazorDocsHarvestPathDecisionCode.ExcludedByDefaultGroup, trace.Code);
+                Assert.Equal("default", trace.Scope);
+                Assert.Null(trace.Pattern);
+                Assert.Equal("HiddenDirectories", trace.DefaultGroup);
+                Assert.True(trace.Matched);
+            },
+            trace =>
+            {
+                Assert.Equal(RazorDocsHarvestPathDecisionCode.IncludedByDefaultGroupAllow, trace.Code);
+                Assert.Equal("default-allow", trace.Scope);
+                Assert.Equal("docs/.github/**", trace.Pattern);
+                Assert.Equal("HiddenDirectories", trace.DefaultGroup);
+                Assert.True(trace.Matched);
+            });
+    }
+
     public static TheoryData<string, string[]> DefaultMarkdownExcludedPaths()
     {
         return new TheoryData<string, string[]>

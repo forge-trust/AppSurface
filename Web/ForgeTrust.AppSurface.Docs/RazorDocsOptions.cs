@@ -917,13 +917,10 @@ public sealed class RazorDocsOptionsValidator : IValidateOptions<RazorDocsOption
             return;
         }
 
-        foreach (var pattern in patterns)
+        foreach (var pattern in patterns.Where(pattern => !RazorDocsHarvestPathPatternValidator.IsValidConfiguredGlobPattern(pattern)))
         {
-            if (!RazorDocsHarvestPathPatternValidator.IsValidConfiguredGlobPattern(pattern))
-            {
-                failures.Add(
-                    $"{configurationPath} contains invalid repository-relative glob pattern '{pattern}'. Use forward-slash paths without leading '/', './', URI schemes, drive roots, query strings, fragments, or '..' segments.");
-            }
+            failures.Add(
+                $"{configurationPath} contains invalid repository-relative glob pattern '{pattern}'. Use forward-slash paths without leading '/', './', URI schemes, drive roots, query strings, fragments, or '..' segments.");
         }
     }
 

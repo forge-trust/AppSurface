@@ -57,12 +57,12 @@ public class CSharpDocHarvesterTests : IDisposable
                     options.Harvest.Paths.IncludeGlobs = ["src/**"];
                     options.Harvest.CSharp.IncludeGlobs = ["src/public/**"];
                 }));
-        var publicDir = Path.Combine(_testRoot, "src", "public");
-        var internalDir = Path.Combine(_testRoot, "src", "internal");
+        var publicDir = CombineUnder(_testRoot, "src", "public");
+        var internalDir = CombineUnder(_testRoot, "src", "internal");
         Directory.CreateDirectory(publicDir);
         Directory.CreateDirectory(internalDir);
         await File.WriteAllTextAsync(
-            Path.Combine(publicDir, "PublicService.cs"),
+            CombineUnder(publicDir, "PublicService.cs"),
             """
             namespace Product.Public;
 
@@ -70,7 +70,7 @@ public class CSharpDocHarvesterTests : IDisposable
             public class PublicService {}
             """);
         await File.WriteAllTextAsync(
-            Path.Combine(internalDir, "InternalService.cs"),
+            CombineUnder(internalDir, "InternalService.cs"),
             """
             namespace Product.Internal;
 
@@ -88,10 +88,10 @@ public class CSharpDocHarvesterTests : IDisposable
     [Fact]
     public async Task HarvestAsync_ShouldIgnoreExampleApplicationSource()
     {
-        var exampleDir = Path.Combine(_testRoot, "examples", "web-app");
+        var exampleDir = CombineUnder(_testRoot, "examples", "web-app");
         Directory.CreateDirectory(exampleDir);
         await File.WriteAllTextAsync(
-            Path.Combine(exampleDir, "ExampleService.cs"),
+            CombineUnder(exampleDir, "ExampleService.cs"),
             """
             namespace WebAppExample.Services;
 
@@ -127,10 +127,10 @@ public class CSharpDocHarvesterTests : IDisposable
                 {
                     options.Harvest.CSharp.DefaultExclusions.AllowGlobs["CSharpExampleSource"] = ["examples/web-app/**"];
                 }));
-        var exampleDir = Path.Combine(_testRoot, "examples", "web-app");
+        var exampleDir = CombineUnder(_testRoot, "examples", "web-app");
         Directory.CreateDirectory(exampleDir);
         await File.WriteAllTextAsync(
-            Path.Combine(exampleDir, "ExampleService.cs"),
+            CombineUnder(exampleDir, "ExampleService.cs"),
             """
             namespace WebAppExample.Services;
 
@@ -997,6 +997,15 @@ public class GlobalType {}
         return new RazorDocsHarvestPathPolicy(
             options,
             NullLogger<RazorDocsHarvestPathPolicy>.Instance);
+    }
+
+    private static string CombineUnder(
+        string root,
+        params string[] segments)
+    {
+        Assert.All(segments, segment => Assert.False(Path.IsPathRooted(segment)));
+
+        return segments.Aggregate(root, Path.Combine);
     }
 
     public void Dispose()

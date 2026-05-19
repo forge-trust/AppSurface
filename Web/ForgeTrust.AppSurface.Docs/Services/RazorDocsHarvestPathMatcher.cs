@@ -21,15 +21,7 @@ internal sealed class RazorDocsHarvestPathMatcher
     {
         ArgumentNullException.ThrowIfNull(relativePath);
 
-        foreach (var matcher in _matchers)
-        {
-            if (matcher.Matches(relativePath))
-            {
-                return matcher.Pattern;
-            }
-        }
-
-        return null;
+        return _matchers.FirstOrDefault(matcher => matcher.Matches(relativePath))?.Pattern;
     }
 
     public string? MatchDirectorySubtree(string relativeDirectory)
@@ -37,10 +29,9 @@ internal sealed class RazorDocsHarvestPathMatcher
         ArgumentNullException.ThrowIfNull(relativeDirectory);
 
         var sentinelPath = $"{relativeDirectory.TrimEnd('/')}/_";
-        foreach (var matcher in _matchers)
+        foreach (var matcher in _matchers.Where(matcher => matcher.Pattern.EndsWith("/**", StringComparison.Ordinal)))
         {
-            if (matcher.Pattern.EndsWith("/**", StringComparison.Ordinal)
-                && matcher.Matches(sentinelPath))
+            if (matcher.Matches(sentinelPath))
             {
                 return matcher.Pattern;
             }
