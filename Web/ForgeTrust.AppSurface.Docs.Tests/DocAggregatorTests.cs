@@ -3661,7 +3661,14 @@ public class DocAggregatorTests : IDisposable
         var namespaceContent = "<section class='doc-namespace-groups'><h4>Namespaces</h4></section><section id='ForgeTrust-Web-AddWeb' class='doc-method-group'>Type body</section>";
         var harvestedDocs = new List<DocNode>
         {
-            new("Web", "Namespaces/ForgeTrust.Web", namespaceContent),
+            new(
+                "Web",
+                "Namespaces/ForgeTrust.Web",
+                namespaceContent,
+                Outline:
+                [
+                    new DocOutlineItem { Id = "ForgeTrust-Web-AddWeb", Title = "AddWeb" }
+                ]),
             new(
                 "README",
                 "docs/ForgeTrust.Web/README.md",
@@ -3677,7 +3684,11 @@ public class DocAggregatorTests : IDisposable
                             Target = "ForgeTrust-Web-AddWeb"
                         }
                     ]
-                })
+                },
+                Outline:
+                [
+                    new DocOutlineItem { Id = "namespace-intro", Title = "Namespace intro" }
+                ])
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
 
@@ -3803,10 +3814,22 @@ public class DocAggregatorTests : IDisposable
                     [
                         new DocNamespaceEntryPoint
                         {
+                            Label = "   "
+                        },
+                        new DocNamespaceEntryPoint
+                        {
+                            Label = " API guide ",
+                            Href = " /docs/guides/api ",
+                            Order = 0,
+                            SourceIndex = 1
+                        },
+                        new DocNamespaceEntryPoint
+                        {
                             Label = "AddWeb(...)",
                             Summary = "Register Web services.",
                             Target = "ForgeTrust-Web-AddWeb",
-                            Keywords = ["service registration"]
+                            Keywords = ["service registration"],
+                            SourceIndex = 2
                         }
                     ]
                 })
@@ -3819,11 +3842,23 @@ public class DocAggregatorTests : IDisposable
         Assert.Contains("Namespace intro mentions bootstrapping", document.BodyText);
         Assert.Contains("AddWeb", document.BodyText);
         Assert.Contains("service registration", document.BodyText);
-        var entryPoint = Assert.Single(document.EntryPoints!);
-        Assert.Equal("AddWeb(...)", entryPoint.Label);
-        Assert.Equal("Register Web services.", entryPoint.Summary);
-        Assert.Equal("ForgeTrust-Web-AddWeb", entryPoint.Target);
-        Assert.Equal(["service registration"], entryPoint.Keywords);
+        Assert.Collection(
+            document.EntryPoints!,
+            first =>
+            {
+                Assert.Equal("API guide", first.Label);
+                Assert.Null(first.Summary);
+                Assert.Null(first.Target);
+                Assert.Equal("/docs/guides/api", first.Href);
+                Assert.Empty(first.Keywords);
+            },
+            second =>
+            {
+                Assert.Equal("AddWeb(...)", second.Label);
+                Assert.Equal("Register Web services.", second.Summary);
+                Assert.Equal("ForgeTrust-Web-AddWeb", second.Target);
+                Assert.Equal(["service registration"], second.Keywords);
+            });
     }
 
     [Fact]

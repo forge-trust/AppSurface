@@ -305,6 +305,31 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void ExtractWithDiagnostics_ShouldPreferNamespaceEntryPointTarget_AndDropEmptyKeywords()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: AddWeb
+                target: Known.Anchor
+                href: /docs/ignored
+                keywords:
+                  - ""
+                  - "   "
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("Known.Anchor", entry.Target);
+        Assert.Null(entry.Href);
+        Assert.Null(entry.Keywords);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
     public void ExtractWithDiagnostics_ShouldSkipNullDuplicateAndOverlongNamespaceEntryPoints()
     {
         var longLabel = new string('L', 81);

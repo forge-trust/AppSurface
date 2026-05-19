@@ -110,6 +110,68 @@ public sealed class NamespaceEntryPointPanelRendererTests
     }
 
     [Fact]
+    public void Render_ShouldFallBackToGeneratedApiInsertion_WhenPreferredSectionsAreMalformed()
+    {
+        var noSectionStart = NamespaceEntryPointPanelRenderer.Render(
+            "ForgeTrust.Web",
+            "doc-namespace-intro<section id='Known' class='doc-type'></section>",
+            outline: null,
+            entryPoints:
+            [
+                new DocNamespaceEntryPoint { Label = "Known", Target = "Known" }
+            ]);
+        var missingClose = NamespaceEntryPointPanelRenderer.Render(
+            "ForgeTrust.Web",
+            "<section class='doc-namespace-intro'><p>Intro</p><section id='Known' class='doc-type'></section>",
+            outline: null,
+            entryPoints:
+            [
+                new DocNamespaceEntryPoint { Label = "Known", Target = "Known" }
+            ]);
+        var malformedNestedOpen = NamespaceEntryPointPanelRenderer.Render(
+            "ForgeTrust.Web",
+            "<section class='doc-namespace-intro'><section class='inner'</section><section id='Known' class='doc-type'></section>",
+            outline: null,
+            entryPoints:
+            [
+                new DocNamespaceEntryPoint { Label = "Known", Target = "Known" }
+            ]);
+        var missingCloseOnly = NamespaceEntryPointPanelRenderer.Render(
+            "ForgeTrust.Web",
+            "<section class='doc-namespace-intro'><p>Intro",
+            outline: null,
+            entryPoints:
+            [
+                new DocNamespaceEntryPoint { Label = "Guide", Href = "/docs/guide" }
+            ]);
+
+        AssertPanelPrecedesGeneratedApi(noSectionStart.Content);
+        AssertPanelPrecedesGeneratedApi(missingClose.Content);
+        AssertPanelPrecedesGeneratedApi(malformedNestedOpen.Content);
+        Assert.Contains("doc-namespace-entry-points", missingCloseOnly.Content, StringComparison.Ordinal);
+        Assert.Contains("href=\"/docs/guide\"", missingCloseOnly.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_ShouldInsertAfterNestedIntroSection()
+    {
+        var result = NamespaceEntryPointPanelRenderer.Render(
+            "ForgeTrust.Web",
+            "<section class='doc-namespace-intro'><section><p>Nested</p></section><p>Intro</p></section><section id='Known' class='doc-type'></section>",
+            outline: null,
+            entryPoints:
+            [
+                new DocNamespaceEntryPoint { Label = "Known", Target = "Known" }
+            ]);
+
+        var introCloseIndex = result.Content.IndexOf("</section><section class=\"doc-namespace-entry-points\"", StringComparison.Ordinal);
+        var panelIndex = result.Content.IndexOf("doc-namespace-entry-points", StringComparison.Ordinal);
+        var typeIndex = result.Content.IndexOf("doc-type", StringComparison.Ordinal);
+        Assert.True(introCloseIndex >= 0);
+        Assert.True(panelIndex < typeIndex);
+    }
+
+    [Fact]
     public void Render_ShouldInsertBeforeGeneratedApiDetail_WhenIntroAndGroupsAreMissing()
     {
         var content = "<p>Lead</p><section id='Known' class='doc-method-group'></section>";
@@ -163,5 +225,12 @@ public sealed class NamespaceEntryPointPanelRendererTests
         var thirdIndex = result.Content.IndexOf(">Third<", StringComparison.Ordinal);
         Assert.True(firstIndex < secondIndex);
         Assert.True(secondIndex < thirdIndex);
+    }
+
+    private static void AssertPanelPrecedesGeneratedApi(string content)
+    {
+        Assert.True(
+            content.IndexOf("doc-namespace-entry-points", StringComparison.Ordinal)
+            < content.IndexOf("doc-type", StringComparison.Ordinal));
     }
 }
