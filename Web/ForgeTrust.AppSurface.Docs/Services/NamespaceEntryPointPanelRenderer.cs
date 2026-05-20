@@ -233,16 +233,11 @@ internal static class NamespaceEntryPointPanelRenderer
 
     private static int FindGeneratedApiSectionStart(string content)
     {
-        var markerIndex = -1;
-        foreach (var marker in GeneratedApiSectionMarkers)
-        {
-            var index = content.IndexOf(marker, StringComparison.Ordinal);
-            if (index >= 0 && (markerIndex < 0 || index < markerIndex))
-            {
-                markerIndex = index;
-            }
-        }
-
+        var markerIndex = GeneratedApiSectionMarkers
+            .Select(marker => content.IndexOf(marker, StringComparison.Ordinal))
+            .Where(index => index >= 0)
+            .DefaultIfEmpty(-1)
+            .Min();
         return markerIndex < 0
             ? -1
             : FindGeneratedApiElementStart(content, markerIndex);
