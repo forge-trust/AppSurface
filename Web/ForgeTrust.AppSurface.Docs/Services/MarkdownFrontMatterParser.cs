@@ -148,6 +148,7 @@ internal static class MarkdownFrontMatterParser
                 document.FeaturedPageGroups,
                 document.FeaturedPages,
                 diagnostics),
+            Outline = NormalizeOutline(document.Outline, diagnostics),
             Trust = NormalizeTrust(document.Trust),
             Contributor = NormalizeContributor(document.Contributor),
             Localization = NormalizeLocalization(document, diagnostics),
@@ -368,6 +369,138 @@ internal static class MarkdownFrontMatterParser
         }
 
         return normalizedGroups;
+    }
+
+    private static DocOutlineMetadata? NormalizeOutline(
+        object? value,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        if (value is not IDictionary<object, object> mapping)
+        {
+            diagnostics.Add(
+                new AppSurfaceDocsMetadataDiagnostic(
+                    "invalid-outline-metadata",
+                    "outline",
+                    "The outline metadata value is not an object.",
+                    "AppSurface Docs expects outline metadata to be a mapping with supported child fields.",
+                    "Use outline.max_heading_level or outline.repeated_heading_policy, or remove the outline field."));
+            return null;
+        }
+
+        var maxHeadingLevel = NormalizeOutlineMaxHeadingLevel(mapping, diagnostics);
+        var repeatedHeadingPolicy = NormalizeOutlineRepeatedHeadingPolicy(mapping, diagnostics);
+
+        return maxHeadingLevel is null && repeatedHeadingPolicy is null
+            ? null
+            : new DocOutlineMetadata
+            {
+                MaxHeadingLevel = maxHeadingLevel,
+                RepeatedHeadingPolicy = repeatedHeadingPolicy
+            };
+    }
+
+    private static int? NormalizeOutlineMaxHeadingLevel(
+        IDictionary<object, object> mapping,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        if (!TryGetMappingValue(mapping, "max_heading_level", out var rawValue)
+            || rawValue is null)
+        {
+            return null;
+        }
+
+        if (TryConvertOutlineMaxHeadingLevel(rawValue, out var maxHeadingLevel)
+            && maxHeadingLevel is 2 or 3)
+        {
+            return maxHeadingLevel;
+        }
+
+        diagnostics.Add(
+            new AppSurfaceDocsMetadataDiagnostic(
+                "invalid-outline-max-heading-level",
+                "outline.max_heading_level",
+                "The outline max_heading_level value is not supported.",
+                "AppSurface Docs only supports display outline heading depths of 2 or 3.",
+                "Use max_heading_level: 2, max_heading_level: 3, or remove the field to use automatic behavior."));
+        return null;
+    }
+
+    internal static bool TryConvertOutlineMaxHeadingLevel(object rawValue, out int maxHeadingLevel)
+    {
+        switch (rawValue)
+        {
+            case int intValue:
+                maxHeadingLevel = intValue;
+                return true;
+            case long longValue
+                when longValue >= int.MinValue && longValue <= int.MaxValue:
+                maxHeadingLevel = (int)longValue;
+                return true;
+            case string textValue
+                when int.TryParse(textValue.Trim(), out var parsedValue):
+                maxHeadingLevel = parsedValue;
+                return true;
+            default:
+                maxHeadingLevel = 0;
+                return false;
+        }
+    }
+
+    private static string? NormalizeOutlineRepeatedHeadingPolicy(
+        IDictionary<object, object> mapping,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        if (!TryGetMappingValue(mapping, "repeated_heading_policy", out var rawValue)
+            || rawValue is null)
+        {
+            return null;
+        }
+
+        if (rawValue is string textValue)
+        {
+            var normalized = NormalizeOutlinePolicyToken(textValue);
+            if (normalized is "auto" or "include" or "h2_only")
+            {
+                return normalized;
+            }
+        }
+
+        diagnostics.Add(
+            new AppSurfaceDocsMetadataDiagnostic(
+                "invalid-outline-repeated-heading-policy",
+                "outline.repeated_heading_policy",
+                "The outline repeated_heading_policy value is not supported.",
+                "AppSurface Docs only supports auto, include, or h2_only for repeated heading behavior.",
+                "Use repeated_heading_policy: auto, repeated_heading_policy: include, repeated_heading_policy: h2_only, or remove the field."));
+        return null;
+    }
+
+    private static string? NormalizeOutlinePolicyToken(string value)
+    {
+        var normalized = Normalize(value);
+        return normalized?.ToLowerInvariant().Replace('-', '_');
+    }
+
+    private static bool TryGetMappingValue(
+        IDictionary<object, object> mapping,
+        string key,
+        out object? value)
+    {
+        foreach (var entry in mapping.Where(
+                     entry => entry.Key is string candidate
+                              && string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase)))
+        {
+            value = entry.Value;
+            return true;
+        }
+
+        value = null;
+        return false;
     }
 
     private static string NormalizeIntent(string label)
@@ -630,6 +763,8 @@ internal static class MarkdownFrontMatterParser
         public FrontMatterContributorDocument? Contributor { get; init; }
 
         public FrontMatterLocalizationDocument? Localization { get; init; }
+
+        public object? Outline { get; init; }
 
         public string? Locale { get; init; }
 
