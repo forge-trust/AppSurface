@@ -2493,6 +2493,48 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldUseFilteredOutlineHeadings_WhileBodyKeepsSuppressedHeadings()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Troubleshooting",
+                "guides/troubleshooting.md",
+                "<h2 id=\"login-fails\">Login fails</h2><h3 id=\"symptom\">Symptom</h3><p>Token expired.</p>",
+                Metadata: new DocMetadata
+                {
+                    Summary = "Troubleshooting summary."
+                },
+                Outline:
+                [
+                    new DocOutlineItem
+                    {
+                        Title = "Login fails",
+                        Id = "login-fails",
+                        Level = 2
+                    }
+                ])
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+        var json = System.Text.Json.JsonSerializer.Serialize(payload);
+
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var searchDocument = document.RootElement.GetProperty("documents")[0];
+        var headings = searchDocument
+            .GetProperty("headings")
+            .EnumerateArray()
+            .Select(item => item.GetString() ?? string.Empty)
+            .ToArray();
+        var bodyText = searchDocument.GetProperty("bodyText").GetString();
+
+        Assert.Equal(["Login fails"], headings);
+        Assert.Contains("Symptom", bodyText);
+        Assert.Contains("Token expired.", bodyText);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldUseEmptyBodyText_WhenContentIsNull()
     {
         var harvestedDocs = new List<DocNode>

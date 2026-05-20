@@ -136,6 +136,17 @@ public sealed record DocMetadata
     public IReadOnlyList<DocNamespaceEntryPoint>? EntryPoints { get; init; }
 
     /// <summary>
+    /// Gets optional page-local outline behavior for Markdown documents.
+    /// </summary>
+    /// <remarks>
+    /// This metadata controls the harvested display outline only. Rendered HTML headings and their fragment IDs remain
+    /// available in the page body even when the outline policy hides repeated lower-level entries from the "On this page"
+    /// rail or search heading metadata. Custom harvesters may ignore this metadata unless they intentionally mirror the
+    /// built-in Markdown outline behavior.
+    /// </remarks>
+    public DocOutlineMetadata? Outline { get; init; }
+
+    /// <summary>
     /// Gets optional trust and provenance metadata rendered near the top of the page.
     /// </summary>
     /// <remarks>
@@ -251,6 +262,7 @@ public sealed record DocMetadata
             BreadcrumbsMatchPathTargets = breadcrumbsMatchPathTargets,
             FeaturedPageGroups = MergeLists(primary.FeaturedPageGroups, fallback.FeaturedPageGroups),
             EntryPoints = MergeLists(primary.EntryPoints, fallback.EntryPoints),
+            Outline = DocOutlineMetadata.Merge(primary.Outline, fallback.Outline),
             Trust = DocTrustMetadata.Merge(primary.Trust, fallback.Trust),
             Contributor = DocContributorMetadata.Merge(primary.Contributor, fallback.Contributor),
             Localization = DocLocalizationMetadata.Merge(primary.Localization, fallback.Localization)
@@ -430,6 +442,75 @@ public sealed record DocOutlineItem
     /// Gets the normalized heading level for this entry.
     /// </summary>
     public int Level { get; init; }
+}
+
+/// <summary>
+/// Markdown page-local outline behavior supplied through front matter or paired sidecar metadata.
+/// </summary>
+/// <remarks>
+/// <see cref="MaxHeadingLevel"/> accepts <c>2</c> or <c>3</c> and has precedence over
+/// <see cref="RepeatedHeadingPolicy"/>. <see cref="RepeatedHeadingPolicy"/> accepts <c>auto</c>, <c>include</c>, or
+/// <c>h2_only</c>. Invalid authored values are normalized away by the Markdown metadata parser so a paired fallback can
+/// still contribute the valid child field.
+/// </remarks>
+public sealed record DocOutlineMetadata
+{
+    /// <summary>
+    /// Gets the deepest heading level to include in the display outline.
+    /// </summary>
+    public int? MaxHeadingLevel { get; init; }
+
+    /// <summary>
+    /// Gets the repeated-heading policy for pages whose repeated H3 headings would overwhelm the outline.
+    /// </summary>
+    public string? RepeatedHeadingPolicy { get; init; }
+
+    /// <summary>
+    /// Merges page outline metadata from a primary source and a fallback source.
+    /// </summary>
+    /// <param name="primary">
+    /// The preferred outline metadata. When this value is <see langword="null"/>, the fallback value is returned.
+    /// </param>
+    /// <param name="fallback">
+    /// The fallback outline metadata. When this value is <see langword="null"/>, the primary value is returned.
+    /// </param>
+    /// <returns>
+    /// The merged outline metadata, or <see langword="null"/> when both merged properties collapse to
+    /// <see langword="null"/>.
+    /// </returns>
+    /// <remarks>
+    /// <see cref="MaxHeadingLevel"/> selects the deepest heading level callers should include in the display outline,
+    /// and the primary value wins over the fallback value for that field. <see cref="RepeatedHeadingPolicy"/> controls
+    /// whether repeated H3 headings are included, suppressed automatically, or reduced to H2-only output; it is merged
+    /// with <see cref="DocTrustMergeHelpers.PreferNonBlank"/>, so a non-blank primary policy wins and blank or
+    /// whitespace-only values fall through to the fallback. If neither merged field has a value after this precedence
+    /// and whitespace handling, the method returns <see langword="null"/> so empty outline metadata does not survive
+    /// as a meaningless object.
+    /// </remarks>
+    internal static DocOutlineMetadata? Merge(DocOutlineMetadata? primary, DocOutlineMetadata? fallback)
+    {
+        if (primary is null)
+        {
+            return fallback;
+        }
+
+        if (fallback is null)
+        {
+            return primary;
+        }
+
+        var merged = new DocOutlineMetadata
+        {
+            MaxHeadingLevel = primary.MaxHeadingLevel ?? fallback.MaxHeadingLevel,
+            RepeatedHeadingPolicy = DocTrustMergeHelpers.PreferNonBlank(
+                primary.RepeatedHeadingPolicy,
+                fallback.RepeatedHeadingPolicy)
+        };
+
+        return merged.MaxHeadingLevel is null && merged.RepeatedHeadingPolicy is null
+            ? null
+            : merged;
+    }
 }
 
 /// <summary>

@@ -188,6 +188,18 @@ entry_points:
 
 The README is consumed into `Namespaces/{Dotted.Namespace}` and removed as a standalone page. Copied source-shaped README URLs redirect to the namespace page. Entry-point `target` values are generated anchors on that namespace page; stale targets render as unlinked rows and produce harvest-health warnings instead of breaking the docs site.
 
+For troubleshooting pages that repeat the same H3 headings under each issue, AppSurface Docs automatically keeps the `On this page` outline focused on the H2 issue headings while leaving the H3 headings and hash targets in the rendered page body. Override that only when the repeated H3 entries are genuinely useful as reader waypoints:
+
+```yaml
+---
+page_type: troubleshooting
+outline:
+  repeated_heading_policy: include
+---
+```
+
+Use `outline.max_heading_level: 2` when a page should always expose an H2-only outline, or `outline.max_heading_level: 3` when it should always expose H2-H3 entries. `max_heading_level` wins when both outline fields are present.
+
 ## Curate the landing page
 
 AppSurface Docs does not require a bespoke homepage template for each repo. The root landing can be curated from metadata:

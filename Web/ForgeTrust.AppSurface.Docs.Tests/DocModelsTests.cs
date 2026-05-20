@@ -34,6 +34,11 @@ public class DocModelsTests
                 Locale = "fr",
                 TranslationKey = "guides/quickstart"
             },
+            Outline = new DocOutlineMetadata
+            {
+                MaxHeadingLevel = 2,
+                RepeatedHeadingPolicy = "h2_only"
+            },
             FeaturedPageGroups =
             [
                 new DocFeaturedPageGroupDefinition
@@ -87,6 +92,8 @@ public class DocModelsTests
         Assert.Equal(new DateTimeOffset(2026, 4, 22, 23, 19, 0, TimeSpan.Zero), node.Metadata?.Contributor?.LastUpdatedOverride);
         Assert.Equal("fr", node.Metadata?.Localization?.Locale);
         Assert.Equal("guides/quickstart", node.Metadata?.Localization?.TranslationKey);
+        Assert.Equal(2, node.Metadata?.Outline?.MaxHeadingLevel);
+        Assert.Equal("h2_only", node.Metadata?.Outline?.RepeatedHeadingPolicy);
         Assert.Single(node.Metadata?.FeaturedPageGroups!);
         Assert.Equal(["alias-one"], node.Metadata?.Aliases);
         Assert.Equal(["legacy/alias"], node.Metadata?.RedirectAliases);
@@ -150,6 +157,97 @@ public class DocModelsTests
     }
 
     [Fact]
+    public void Merge_ShouldMergeOutlineMetadata_FieldByField()
+    {
+        var merged = DocMetadata.Merge(
+            new DocMetadata
+            {
+                Outline = new DocOutlineMetadata
+                {
+                    RepeatedHeadingPolicy = "include"
+                }
+            },
+            new DocMetadata
+            {
+                Outline = new DocOutlineMetadata
+                {
+                    MaxHeadingLevel = 2,
+                    RepeatedHeadingPolicy = "h2_only"
+                }
+            });
+
+        Assert.NotNull(merged);
+        Assert.Equal(2, merged!.Outline?.MaxHeadingLevel);
+        Assert.Equal("include", merged.Outline?.RepeatedHeadingPolicy);
+    }
+
+    [Fact]
+    public void Merge_ShouldTreatWhitespaceOutlinePolicyAsMissing_AndKeepFallbackPolicy()
+    {
+        var merged = DocMetadata.Merge(
+            new DocMetadata
+            {
+                Outline = new DocOutlineMetadata
+                {
+                    RepeatedHeadingPolicy = "   "
+                }
+            },
+            new DocMetadata
+            {
+                Outline = new DocOutlineMetadata
+                {
+                    RepeatedHeadingPolicy = "h2_only"
+                }
+            });
+
+        Assert.NotNull(merged);
+        Assert.Equal("h2_only", merged!.Outline?.RepeatedHeadingPolicy);
+    }
+
+    [Fact]
+    public void OutlineMerge_ShouldReturnFallback_WhenPrimaryIsNull()
+    {
+        var fallback = new DocOutlineMetadata
+        {
+            MaxHeadingLevel = 2
+        };
+
+        var merged = DocOutlineMetadata.Merge(null, fallback);
+
+        Assert.Same(fallback, merged);
+    }
+
+    [Fact]
+    public void OutlineMerge_ShouldReturnPrimary_WhenFallbackIsNull()
+    {
+        var primary = new DocOutlineMetadata
+        {
+            RepeatedHeadingPolicy = "include"
+        };
+
+        var merged = DocOutlineMetadata.Merge(primary, null);
+
+        Assert.Same(primary, merged);
+    }
+
+    [Fact]
+    public void OutlineMerge_ShouldReturnNull_WhenBothNormalizeToEmpty()
+    {
+        var primary = new DocOutlineMetadata
+        {
+            RepeatedHeadingPolicy = "   "
+        };
+        var fallback = new DocOutlineMetadata
+        {
+            RepeatedHeadingPolicy = ""
+        };
+
+        var merged = DocOutlineMetadata.Merge(primary, fallback);
+
+        Assert.Null(merged);
+    }
+
+    [Fact]
     public void Merge_ShouldTreatWhitespaceTitleAsMissing_AndKeepFallbackTitle()
     {
         var merged = DocMetadata.Merge(
@@ -164,6 +262,38 @@ public class DocModelsTests
 
         Assert.NotNull(merged);
         Assert.Equal("Fallback Title", merged!.Title);
+    }
+
+    [Fact]
+    public void LocalizationMerge_ShouldReturnPrimary_WhenFallbackIsNull()
+    {
+        var primary = new DocLocalizationMetadata
+        {
+            Locale = "fr"
+        };
+
+        var merged = DocLocalizationMetadata.Merge(primary, null);
+
+        Assert.Same(primary, merged);
+    }
+
+    [Fact]
+    public void DetailsViewModel_HasOutline_ShouldReflectOutlineEntries()
+    {
+        var details = new DocDetailsViewModel
+        {
+            Outline =
+            [
+                new DocOutlineItem
+                {
+                    Title = "Install",
+                    Id = "install",
+                    Level = 2
+                }
+            ]
+        };
+
+        Assert.True(details.HasOutline);
     }
 
     [Fact]

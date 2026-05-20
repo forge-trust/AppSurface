@@ -282,6 +282,332 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldSuppressRepeatedH3Outline_ForAuthoredTroubleshootingPages()
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            """
+            ---
+            page_type: troubleshooting
+            ---
+            # Troubleshooting
+
+            ## Login fails
+
+            ### Symptom
+
+            ### Cause
+
+            ## Build fails
+
+            ### Symptom
+
+            ### Cause
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(["Login fails", "Build fails"], doc.Outline!.Select(item => item.Title));
+        Assert.Contains("<h3 id=\"symptom\"", doc.Content);
+        Assert.Contains("<h3 id=\"cause\"", doc.Content);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSuppressRepeatedH3Outline_ForPathDerivedTroubleshootingPages()
+    {
+        await WriteMarkdownAsync(
+            "troubleshoot/runtime.md",
+            """
+            # Runtime troubleshooting
+
+            ## Error 500
+
+            ### Symptom
+
+            ### Cause
+
+            ## Worker timeout
+
+            ### Symptom
+
+            ### Cause
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(["Error 500", "Worker timeout"], doc.Outline!.Select(item => item.Title));
+        Assert.Equal("Troubleshooting", doc.Metadata?.NavGroup);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepVariedH3Outline_ForGuidePages()
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            """
+            # Guide
+
+            ## Install
+
+            ### Download
+
+            ### Configure
+
+            ## Verify
+
+            ### Run tests
+
+            ### Inspect logs
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(["Install", "Download", "Configure", "Verify", "Run tests", "Inspect logs"], doc.Outline!.Select(item => item.Title));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSuppressRepeatedH3Outline_ForGeneralPagesAfterHigherThreshold()
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            """
+            # Guide
+
+            ## Install
+
+            ### Symptom
+
+            ### Cause
+
+            ## Configure
+
+            ### Symptom
+
+            ### Cause
+
+            ## Verify
+
+            ### Symptom
+
+            ### Cause
+
+            ## Operate
+
+            ### Symptom
+
+            ### Cause
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(["Install", "Configure", "Verify", "Operate"], doc.Outline!.Select(item => item.Title));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSuppressSingleRepeatedH3Outline_WhenTitleRepeatsAcrossParents()
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            """
+            ---
+            page_type: troubleshooting
+            ---
+            # Troubleshooting
+
+            ## Login fails
+
+            ### Example
+
+            ## Build fails
+
+            ### Example
+
+            ## Deploy fails
+
+            ### Example
+
+            ## Rollback fails
+
+            ### Example
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(["Login fails", "Build fails", "Deploy fails", "Rollback fails"], doc.Outline!.Select(item => item.Title));
+        Assert.Contains("<h3 id=\"example\"", doc.Content);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepRepeatedH3Outline_WhenRepeatedHeadingsStayUnderOneParent()
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            """
+            ---
+            page_type: troubleshooting
+            ---
+            # Troubleshooting
+
+            ## Login fails
+
+            ### Symptom
+
+            ### Cause
+
+            ### Symptom
+
+            ### Cause
+
+            ## Build fails
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(["Login fails", "Symptom", "Cause", "Symptom", "Cause", "Build fails"], doc.Outline!.Select(item => item.Title));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepRepeatedH3Outline_WhenRepeatedTitlesDoNotCrossParents()
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            """
+            ---
+            page_type: troubleshooting
+            ---
+            # Troubleshooting
+
+            ## Login fails
+
+            ### Symptom
+
+            ### Symptom
+
+            ## Build fails
+
+            ### Cause
+
+            ### Cause
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(["Login fails", "Symptom", "Symptom", "Build fails", "Cause", "Cause"], doc.Outline!.Select(item => item.Title));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepRepeatedH3Outline_WhenPolicyIncludesRepeatedHeadings()
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            """
+            ---
+            page_type: troubleshooting
+            outline:
+              repeated_heading_policy: include
+            ---
+            # Troubleshooting
+
+            ## Login fails
+
+            ### Symptom
+
+            ### Cause
+
+            ## Build fails
+
+            ### Symptom
+
+            ### Cause
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(["Login fails", "Symptom", "Cause", "Build fails", "Symptom", "Cause"], doc.Outline!.Select(item => item.Title));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSuppressVariedH3Outline_WhenPolicyIsH2Only()
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            """
+            ---
+            outline:
+              repeated_heading_policy: h2_only
+            ---
+            # Guide
+
+            ## Install
+
+            ### Download
+
+            ## Verify
+
+            ### Run tests
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(["Install", "Verify"], doc.Outline!.Select(item => item.Title));
+    }
+
+    [Theory]
+    [InlineData(2, "include", "Install,Verify")]
+    [InlineData(3, "h2_only", "Install,Download,Verify,Run tests")]
+    public async Task HarvestAsync_ShouldLetMaxHeadingLevelWinOverRepeatedHeadingPolicy(
+        int maxHeadingLevel,
+        string repeatedHeadingPolicy,
+        string expectedTitlesCsv)
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            $$"""
+            ---
+            outline:
+              max_heading_level: {{maxHeadingLevel}}
+              repeated_heading_policy: {{repeatedHeadingPolicy}}
+            ---
+            # Guide
+
+            ## Install
+
+            ### Download
+
+            ## Verify
+
+            ### Run tests
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Equal(
+            expectedTitlesCsv.Split(','),
+            doc.Outline!.Select(item => item.Title));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldAllowExplicitH2OnlyPolicyToProduceEmptyOutline()
+    {
+        await WriteMarkdownAsync(
+            "Guide.md",
+            """
+            ---
+            outline:
+              max_heading_level: 2
+            ---
+            # Guide
+
+            ### Orphan detail
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+
+        Assert.Empty(doc.Outline!);
+        Assert.Contains("<h3 id=\"orphan-detail\">Orphan detail</h3>", doc.Content);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldRenderFencedCodeBlocksThroughAppSurfaceDocsHighlighter()
     {
         var highlighter = new RecordingCodeHighlighter();
@@ -981,6 +1307,23 @@ public class MarkdownHarvesterTests : IDisposable
     {
         var message = call.GetArgument<object>(2)?.ToString();
         return message?.Contains(expectedMessageFragment, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private async Task WriteMarkdownAsync(string relativePath, string content)
+    {
+        Assert.False(Path.IsPathRooted(relativePath));
+
+        var pathSegments = relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+        var path = CombineUnder(_testRoot, pathSegments);
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        await File.WriteAllTextAsync(path, content);
     }
 
     private static AppSurfaceDocsHarvestPathPolicy CreatePathPolicy(Action<AppSurfaceDocsOptions> configure)

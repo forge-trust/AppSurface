@@ -1251,6 +1251,26 @@ AppSurface Docs can render two kinds of page-local wayfinding on details pages w
 
 `On this page` is local navigation for the current detail page. It intentionally does not mirror the left sidebar, which remains global documentation navigation. This keeps the two maps separate: the sidebar answers "where am I in the docs product?" while the outline answers "where am I on this page?"
 
+The built-in Markdown harvester creates the display outline from rendered H2-H3 headings, then applies a repeated-heading policy before exposing `DocNode.Outline` to details views and search heading metadata. The page body HTML is not rewritten by this policy. Suppressed H3 headings keep their rendered IDs, so direct hash links and full-body search recall still work.
+
+By default, Markdown pages include H2-H3 outline entries unless repeated H3 titles would dominate the reader-facing outline. Troubleshooting pages use the lower automatic threshold because they commonly repeat mechanic headings such as "Symptom" and "Cause" under each problem section. A page is treated as troubleshooting when it authors `page_type: troubleshooting` or when path-derived public-section metadata places it in `Troubleshooting`.
+
+Authors can override the automatic behavior with nested outline metadata:
+
+```yaml
+outline:
+  max_heading_level: 3
+  repeated_heading_policy: include
+```
+
+`outline.max_heading_level` accepts `2` or `3` and wins over `outline.repeated_heading_policy` when both are present. `outline.repeated_heading_policy` accepts:
+
+- `auto`: use the repeated-heading heuristic
+- `include`: keep H2-H3 entries even when repeated H3 headings dominate
+- `h2_only`: expose only H2 entries
+
+Invalid child values are ignored field by field and produce metadata diagnostics such as `invalid-outline-max-heading-level` or `invalid-outline-repeated-heading-policy`. A malformed `outline` value such as `outline: true` or `outline: []` is ignored as `invalid-outline-metadata`; when inline front matter is malformed this way, paired sidecar outline metadata can still act as fallback because the invalid outline object normalizes away.
+
 When `DocDetailsViewModel.HasOutline` is true, AppSurface Docs renders one semantic outline nav:
 
 - wide desktop (`>=1280px`): a sticky right rail beside the article
@@ -1335,7 +1355,7 @@ The built-in Markdown and C# harvesters now populate `DocNode.Outline` directly 
 - heading metadata in the current-surface `search-index.json`
 - stable behavior without re-parsing rendered HTML later
 
-Each outline entry should provide the rendered fragment `Id`, the reader-facing `Title`, and the normalized heading `Level`. For visual parity with the built-in wayfinding UI, custom `IDocHarvester` implementations should populate `DocNode.Outline` only with entries that have a non-empty rendered fragment `Id` and non-empty `Title`; headings or generated sections missing either value are skipped by the built-ins. The Markdown harvester emits source-ordered H2-H3 headings by default, with titles normalized from inline heading text and IDs taken from the rendered heading fragment. The C# harvester emits level 2 entries for documented types and enums, and level 3 entries for method groups and properties. Matching those defaults keeps custom outlines aligned with the built-in `On this page` rail, active-section behavior, and search heading metadata.
+Each outline entry should provide the rendered fragment `Id`, the reader-facing `Title`, and the normalized heading `Level`. For visual parity with the built-in wayfinding UI, custom `IDocHarvester` implementations should populate `DocNode.Outline` only with entries that have a non-empty rendered fragment `Id` and non-empty `Title`; headings or generated sections missing either value are skipped by the built-ins. The Markdown harvester extracts source-ordered H2-H3 headings, with titles normalized from inline heading text and IDs taken from the rendered heading fragment, then applies the Markdown outline policy described above before assigning `DocNode.Outline`. The C# harvester emits level 2 entries for documented types and enums, and level 3 entries for method groups and properties. Matching those defaults keeps custom outlines aligned with the built-in `On this page` rail, active-section behavior, and search heading metadata.
 
 Public visibility note:
 
