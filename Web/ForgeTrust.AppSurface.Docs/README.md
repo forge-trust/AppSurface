@@ -1016,7 +1016,7 @@ Entry-point fields:
 - `label` is required, decoded, trimmed, and limited to 80 characters.
 - `summary` is optional, decoded, trimmed, and limited to 220 characters.
 - `target` is an anchor ID from the generated namespace page. Authors may include one leading `#`; AppSurface Docs stores it without the hash and allows only letters, digits, `_`, `-`, `.`, and `:`.
-- `href` is an escape hatch used only when `target` is absent or invalid. It must be a fragment such as `#anchor` or an app-relative docs URL under `/docs/`.
+- `href` is an escape hatch used only when `target` is absent or invalid. It must be a fragment such as `#anchor` or an app-relative docs URL under the active docs root, for example `/docs/...` or `/foo/bar/...`.
 - `keywords` are distinct search terms, up to 20 values of 80 characters each.
 - `order` is an optional non-negative integer. Ordered entries render first, then unordered entries keep author order.
 

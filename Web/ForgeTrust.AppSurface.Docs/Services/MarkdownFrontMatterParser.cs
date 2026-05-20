@@ -382,7 +382,7 @@ internal static class MarkdownFrontMatterParser
         }
 
         var normalizedEntries = new List<DocNamespaceEntryPoint>();
-        var labelsByTarget = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var labelsByTarget = new HashSet<string>(StringComparer.Ordinal);
         for (var index = 0; index < entries.Count; index++)
         {
             var entry = entries[index];
@@ -473,7 +473,13 @@ internal static class MarkdownFrontMatterParser
     private static string? NormalizeDecoded(string? value)
     {
         var normalized = Normalize(value);
-        return normalized is null ? null : System.Net.WebUtility.HtmlDecode(normalized).Trim();
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        var decoded = System.Net.WebUtility.HtmlDecode(normalized);
+        return Normalize(decoded);
     }
 
     private static string? NormalizeEntryPointTarget(
@@ -535,7 +541,7 @@ internal static class MarkdownFrontMatterParser
         }
 
         var valid = href.StartsWith('#') && href.Length > 1 && !href.StartsWith("##", StringComparison.Ordinal)
-                    || href.StartsWith("/docs/", StringComparison.OrdinalIgnoreCase);
+                    || href.StartsWith('/') && !href.StartsWith("//", StringComparison.Ordinal);
         if (valid
             && !href.Contains('?', StringComparison.Ordinal)
             && !href.Any(char.IsWhiteSpace))
@@ -548,8 +554,8 @@ internal static class MarkdownFrontMatterParser
                 "invalid-namespace-entry-point-href",
                 $"{fieldPath}.href",
                 "A namespace entry-point href is not supported.",
-                "Entry-point href values must be a fragment such as #anchor or an app-relative docs URL under /docs/.",
-                "Use a generated target anchor when possible, or replace href with a valid /docs/... URL."));
+                "Entry-point href values must be a fragment such as #anchor or an app-relative URL under the active docs root.",
+                "Use a generated target anchor when possible, or replace href with a valid app-relative docs URL."));
         return null;
     }
 

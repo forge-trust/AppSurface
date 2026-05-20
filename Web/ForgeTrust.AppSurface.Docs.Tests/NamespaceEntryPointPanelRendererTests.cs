@@ -60,6 +60,26 @@ public sealed class NamespaceEntryPointPanelRendererTests
     }
 
     [Fact]
+    public void Render_ShouldUseNamespaceScopedHeadingId()
+    {
+        var result = NamespaceEntryPointPanelRenderer.Render(
+            "ForgeTrust.Web",
+            "<section id='Known' class='doc-type'></section>",
+            outline: null,
+            entryPoints:
+            [
+                new DocNamespaceEntryPoint { Label = "Known", Target = "Known" }
+            ]);
+
+        var ariaPrefix = "aria-labelledby=\"common-entry-points-ForgeTrust-Web-";
+        var headingPrefix = "<h2 id=\"common-entry-points-ForgeTrust-Web-";
+        Assert.Contains(ariaPrefix, result.Content, StringComparison.Ordinal);
+        Assert.Contains(headingPrefix, result.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("aria-labelledby=\"common-entry-points\"", result.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("<h2 id=\"common-entry-points\">", result.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Render_ShouldResolveGeneratedApiAnchors_FromAllowedElementsAndClasses()
     {
         var content = """
@@ -188,6 +208,30 @@ public sealed class NamespaceEntryPointPanelRendererTests
         Assert.True(
             result.Content.IndexOf("doc-namespace-entry-points", StringComparison.Ordinal)
             < result.Content.IndexOf("doc-method-group", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("section", "doc-property")]
+    [InlineData("details", "doc-property")]
+    [InlineData("article", "doc-enum")]
+    public void Render_ShouldInsertBeforeGeneratedApiPropertyAndEnumElements_WhenIntroAndGroupsAreMissing(
+        string tag,
+        string cssClass)
+    {
+        var content = $"<p>Lead</p><{tag} id='Known' class='{cssClass}'></{tag}>";
+
+        var result = NamespaceEntryPointPanelRenderer.Render(
+            "ForgeTrust.Web",
+            content,
+            outline: null,
+            entryPoints:
+            [
+                new DocNamespaceEntryPoint { Label = "Known", Target = "Known" }
+            ]);
+
+        Assert.True(
+            result.Content.IndexOf("doc-namespace-entry-points", StringComparison.Ordinal)
+            < result.Content.IndexOf(cssClass, StringComparison.Ordinal));
     }
 
     [Fact]

@@ -3632,7 +3632,8 @@ public class DocAggregatorTests : IDisposable
                     Component = "docs",
                     ComponentIsDerived = true,
                     NavGroup = "How-to Guides",
-                    NavGroupIsDerived = true
+                    NavGroupIsDerived = true,
+                    RedirectAliases = ["docs/web-overview"]
                 })
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
@@ -3650,6 +3651,7 @@ public class DocAggregatorTests : IDisposable
                 "docs/ForgeTrust.Web/README.md",
                 "docs/ForgeTrust.Web/README.md.html",
                 "docs/ForgeTrust.Web/README",
+                "docs/web-overview",
                 "existing-alias"
             ],
             namespaceDoc.Metadata?.RedirectAliases);
@@ -3859,6 +3861,33 @@ public class DocAggregatorTests : IDisposable
                 Assert.Equal("ForgeTrust-Web-AddWeb", second.Target);
                 Assert.Equal(["service registration"], second.Keywords);
             });
+    }
+
+    [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldOmitEntryPoints_WhenNamespaceMetadataHasNoUsableRows()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Web",
+                "Namespaces/ForgeTrust.Web",
+                "<section class='doc-type'>Generated API body</section>",
+                Metadata: new DocMetadata
+                {
+                    EntryPoints =
+                    [
+                        new DocNamespaceEntryPoint { Label = " " }
+                    ]
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+
+        var document = Assert.Single(payload.Documents, item => item.Id == "Namespaces/ForgeTrust.Web.html");
+        Assert.Null(document.EntryPoints);
+        var json = System.Text.Json.JsonSerializer.Serialize(payload);
+        Assert.DoesNotContain("entryPoints", json, StringComparison.Ordinal);
     }
 
     [Fact]

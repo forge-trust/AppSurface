@@ -90,7 +90,9 @@ internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("relatedPages")] IReadOnlyList<string> RelatedPages,
     [property: JsonPropertyName("breadcrumbs")] IReadOnlyList<string> Breadcrumbs,
     [property: JsonPropertyName("sourcePath")] string SourcePath = "",
-    [property: JsonPropertyName("entryPoints")] IReadOnlyList<DocsSearchIndexEntryPoint>? EntryPoints = null);
+    [property: JsonPropertyName("entryPoints")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<DocsSearchIndexEntryPoint>? EntryPoints = null);
 
 /// <summary>
 /// Search projection for one namespace README entry point.
@@ -1725,7 +1727,7 @@ public class DocAggregator
                     var entryPointSearchText = NormalizeSearchText(
                         string.Join(
                             ' ',
-                            entryPoints.SelectMany(
+                            (entryPoints ?? []).SelectMany(
                                 entry => new[]
                                     {
                                         entry.Label,
@@ -1797,15 +1799,15 @@ public class DocAggregator
         return (payload, records.Count);
     }
 
-    private static IReadOnlyList<DocsSearchIndexEntryPoint> BuildSearchIndexEntryPoints(
+    private static IReadOnlyList<DocsSearchIndexEntryPoint>? BuildSearchIndexEntryPoints(
         IReadOnlyList<DocNamespaceEntryPoint>? entryPoints)
     {
         if ((entryPoints?.Count ?? 0) == 0)
         {
-            return [];
+            return null;
         }
 
-        return entryPoints!
+        var normalized = entryPoints!
             .Where(entry => !string.IsNullOrWhiteSpace(entry.Label))
             .OrderBy(entry => entry.Order is null ? 1 : 0)
             .ThenBy(entry => entry.Order ?? int.MaxValue)
@@ -1818,6 +1820,7 @@ public class DocAggregator
                     string.IsNullOrWhiteSpace(entry.Href) ? null : entry.Href.Trim(),
                     entry.Keywords ?? []))
             .ToArray();
+        return normalized.Length == 0 ? null : normalized;
     }
 
     private static string ResolveSearchIndexTitle(DocNode doc)
@@ -2223,6 +2226,9 @@ public class DocAggregator
         DocMetadata? namespaceMetadata)
     {
         var sourceAliases = BuildConsumedNamespaceReadmeRedirectAliases(readmePath);
+        var redirectAliases = MergeDistinctLists(
+            sourceAliases,
+            MergeDistinctLists(metadata?.RedirectAliases, namespaceMetadata?.RedirectAliases));
         var readmeContributor = new DocContributorMetadata
         {
             HideContributorInfo = metadata?.Contributor?.HideContributorInfo,
@@ -2236,7 +2242,7 @@ public class DocAggregator
         {
             return new DocMetadata
             {
-                RedirectAliases = MergeDistinctLists(sourceAliases, namespaceMetadata?.RedirectAliases),
+                RedirectAliases = redirectAliases,
                 Contributor = readmeContributor
             };
         }
@@ -2254,7 +2260,7 @@ public class DocAggregator
             Component = metadata.ComponentIsDerived == true ? null : metadata.Component,
             ComponentIsDerived = metadata.ComponentIsDerived == true ? null : metadata.ComponentIsDerived,
             Aliases = metadata.Aliases,
-            RedirectAliases = MergeDistinctLists(sourceAliases, namespaceMetadata?.RedirectAliases),
+            RedirectAliases = redirectAliases,
             Keywords = metadata.Keywords,
             NavGroup = metadata.NavGroupIsDerived == true ? null : metadata.NavGroup,
             NavGroupIsDerived = metadata.NavGroupIsDerived == true ? null : metadata.NavGroupIsDerived,

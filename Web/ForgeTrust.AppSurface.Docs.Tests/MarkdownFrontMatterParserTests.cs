@@ -305,6 +305,29 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void ExtractWithDiagnostics_ShouldKeepCaseSensitiveNamespaceEntryPointTargets()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: AddWeb
+                target: ForgeTrust.Web.AddWeb
+              - label: AddWeb
+                target: ForgeTrust.Web.addweb
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Collection(
+            result.Metadata!.EntryPoints!,
+            first => Assert.Equal("ForgeTrust.Web.AddWeb", first.Target),
+            second => Assert.Equal("ForgeTrust.Web.addweb", second.Target));
+        Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Code == "duplicate-namespace-entry-point");
+    }
+
+    [Fact]
     public void ExtractWithDiagnostics_ShouldPreferNamespaceEntryPointTarget_AndDropEmptyKeywords()
     {
         var markdown = """
@@ -327,6 +350,24 @@ public sealed class MarkdownFrontMatterParserTests
         Assert.Null(entry.Href);
         Assert.Null(entry.Keywords);
         Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldRejectDecodedBlankNamespaceEntryPointLabels()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: "&#32;"
+                href: /docs/ignored
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata!.EntryPoints);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-label");
     }
 
     [Fact]
@@ -371,6 +412,7 @@ public sealed class MarkdownFrontMatterParserTests
     [InlineData("##bad")]
     [InlineData("/docs/bad path")]
     [InlineData("/docs/search?query=api")]
+    [InlineData("//docs.example.test/path")]
     [InlineData("https://example.test/docs")]
     public void ExtractWithDiagnostics_ShouldDropUnsupportedNamespaceEntryPointHrefs(string href)
     {
@@ -389,6 +431,25 @@ public sealed class MarkdownFrontMatterParserTests
         Assert.Equal("Bad href", entry.Label);
         Assert.Null(entry.Href);
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-href");
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldAllowNamespaceEntryPointHrefUnderCustomDocsRoot()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: Custom root
+                href: /foo/bar/guide
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("/foo/bar/guide", entry.Href);
+        Assert.Empty(result.Diagnostics);
     }
 
     [Fact]

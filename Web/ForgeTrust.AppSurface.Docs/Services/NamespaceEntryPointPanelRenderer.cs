@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.RazorWire;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
@@ -14,6 +15,22 @@ internal static class NamespaceEntryPointPanelRenderer
     private const string NamespaceIntroClass = "doc-namespace-intro";
     private const string NamespaceGroupsClass = "doc-namespace-groups";
     private const string EntryPointsClass = "doc-namespace-entry-points";
+    private const string EntryPointsHeadingIdPrefix = "common-entry-points";
+
+    private static readonly string[] GeneratedApiSectionMarkers =
+    [
+        "doc-type",
+        "doc-method-group",
+        "doc-property",
+        "doc-enum"
+    ];
+
+    private static readonly string[] GeneratedApiElementTags =
+    [
+        "<section",
+        "<details",
+        "<article"
+    ];
 
     private static readonly Regex AnchorIdRegex = new(
         """<(?<tag>section|details|article)\b(?=[^>]*\bid\s*=\s*(?<quote>["'])(?<id>[^"']+)\k<quote>)(?=[^>]*\bclass\s*=\s*(?<classQuote>["'])(?<class>[^"']*)\k<classQuote>)[^>]*>""",
@@ -46,10 +63,15 @@ internal static class NamespaceEntryPointPanelRenderer
         }
 
         var panel = new StringBuilder();
+        var headingId = $"{EntryPointsHeadingIdPrefix}-{StringUtils.ToSafeId(namespaceName, appendHash: true)}";
         panel.Append("<section class=\"");
         panel.Append(EntryPointsClass);
-        panel.Append("\" aria-labelledby=\"common-entry-points\">");
-        panel.Append("<h2 id=\"common-entry-points\">Common entry points</h2>");
+        panel.Append("\" aria-labelledby=\"");
+        panel.Append(WebUtility.HtmlEncode(headingId));
+        panel.Append("\">");
+        panel.Append("<h2 id=\"");
+        panel.Append(WebUtility.HtmlEncode(headingId));
+        panel.Append("\">Common entry points</h2>");
         panel.Append("<ul>");
         foreach (var renderedEntry in renderedEntries)
         {
@@ -211,12 +233,34 @@ internal static class NamespaceEntryPointPanelRenderer
 
     private static int FindGeneratedApiSectionStart(string content)
     {
-        var typeIndex = content.IndexOf("doc-type", StringComparison.Ordinal);
-        var methodIndex = content.IndexOf("doc-method-group", StringComparison.Ordinal);
-        var markerIndex = typeIndex < 0 ? methodIndex : methodIndex < 0 ? typeIndex : Math.Min(typeIndex, methodIndex);
+        var markerIndex = -1;
+        foreach (var marker in GeneratedApiSectionMarkers)
+        {
+            var index = content.IndexOf(marker, StringComparison.Ordinal);
+            if (index >= 0 && (markerIndex < 0 || index < markerIndex))
+            {
+                markerIndex = index;
+            }
+        }
+
         return markerIndex < 0
             ? -1
-            : content.LastIndexOf("<section", markerIndex, StringComparison.OrdinalIgnoreCase);
+            : FindGeneratedApiElementStart(content, markerIndex);
+    }
+
+    private static int FindGeneratedApiElementStart(string content, int markerIndex)
+    {
+        var elementStart = -1;
+        foreach (var tag in GeneratedApiElementTags)
+        {
+            var tagIndex = content.LastIndexOf(tag, markerIndex, StringComparison.OrdinalIgnoreCase);
+            if (tagIndex > elementStart)
+            {
+                elementStart = tagIndex;
+            }
+        }
+
+        return elementStart;
     }
 
     private static int FindMatchingSectionEnd(string content, int sectionStart)
