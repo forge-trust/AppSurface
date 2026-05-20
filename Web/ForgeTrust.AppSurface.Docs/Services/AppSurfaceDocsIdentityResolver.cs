@@ -51,9 +51,7 @@ public sealed class AppSurfaceDocsIdentityResolver
         return new AppSurfaceDocsResolvedIdentity(displayName, homeHref, logo, favicons.AsReadOnly())
         {
             WordmarkHighlightText = highlightText,
-            WordmarkHighlightColor = highlightText is null
-                ? null
-                : AppSurfaceDocsIdentityPath.NormalizeCssHexColorOrNull(wordmarkOptions.HighlightColor)
+            WordmarkHighlightColor = ResolveHighlightColor(highlightText, wordmarkOptions.HighlightColor)
         };
     }
 
@@ -72,6 +70,14 @@ public sealed class AppSurfaceDocsIdentityResolver
         return normalizedHighlightText is not null
                && displayName.Contains(normalizedHighlightText, StringComparison.Ordinal)
             ? normalizedHighlightText
+            : null;
+    }
+
+    private static string? ResolveHighlightColor(string? highlightText, string? highlightColor)
+    {
+        return highlightText is not null
+               && AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(highlightColor, out var normalizedHighlightColor, out _)
+            ? normalizedHighlightColor
             : null;
     }
 }

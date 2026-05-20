@@ -1134,6 +1134,12 @@ public sealed class AppSurfaceDocsOptionsTests
         services.Configure<AppSurfaceDocsOptions>(
             options =>
             {
+                options.Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    Logo = null!,
+                    Wordmark = null!,
+                    Favicon = null!
+                };
                 options.Source = null!;
                 options.Harvest = null!;
                 options.Bundle = null!;
@@ -1145,6 +1151,10 @@ public sealed class AppSurfaceDocsOptionsTests
         using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
 
+        Assert.NotNull(options.Identity);
+        Assert.NotNull(options.Identity.Logo);
+        Assert.NotNull(options.Identity.Wordmark);
+        Assert.NotNull(options.Identity.Favicon);
         Assert.NotNull(options.Source);
         Assert.NotNull(options.Harvest);
         Assert.NotNull(options.Harvest.Health);

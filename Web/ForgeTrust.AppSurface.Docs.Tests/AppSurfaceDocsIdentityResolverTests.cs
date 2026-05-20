@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using ForgeTrust.AppSurface.Docs.Services;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
@@ -129,6 +130,92 @@ public sealed class AppSurfaceDocsIdentityResolverTests
         Assert.Null(resolver.Identity.WordmarkHighlightColor);
     }
 
+    [Fact]
+    public void Identity_ShouldIgnoreInvalidHighlightColor_WhenConstructedDirectly()
+    {
+        var resolver = new AppSurfaceDocsIdentityResolver(
+            new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    DisplayName = "Client Docs",
+                    Wordmark = new AppSurfaceDocsWordmarkOptions
+                    {
+                        HighlightText = "Docs",
+                        HighlightColor = "var(--brand)"
+                    }
+                }
+            },
+            new DocsUrlBuilder(new AppSurfaceDocsOptions()));
+
+        Assert.Equal("Docs", resolver.Identity.WordmarkHighlightText);
+        Assert.Null(resolver.Identity.WordmarkHighlightColor);
+    }
+
+    [Fact]
+    public void WordmarkHtml_ShouldEncodePlainText()
+    {
+        var identity = new AppSurfaceDocsResolvedIdentity(
+            "Client <Docs>",
+            "/docs",
+            null,
+            []);
+
+        var html = RenderWordmark(identity, "docs-wordmark");
+
+        Assert.Equal("<span class=\"docs-wordmark\">Client &lt;Docs&gt;</span>", html);
+    }
+
+    [Fact]
+    public void WordmarkHtml_ShouldEncodeHighlightSegments_AndCssClass()
+    {
+        var identity = new AppSurfaceDocsResolvedIdentity(
+            "Client <Docs>",
+            "/docs",
+            null,
+            [])
+        {
+            WordmarkHighlightText = "<Docs>",
+            WordmarkHighlightColor = "#3b82f6"
+        };
+
+        var html = RenderWordmark(identity, "docs-wordmark \"quoted\"", "h1");
+
+        Assert.Equal(
+            "<h1 class=\"docs-wordmark &quot;quoted&quot;\" style=\"--docs-brand-wordmark-highlight-color:#3b82f6\">Client <span class=\"docs-wordmark-highlight\">&lt;Docs&gt;</span></h1>",
+            html);
+    }
+
+    [Fact]
+    public void WordmarkHtml_ShouldRenderPlainText_WhenResolvedHighlightDoesNotMatch()
+    {
+        var identity = new AppSurfaceDocsResolvedIdentity(
+            "Client Docs",
+            "/docs",
+            null,
+            [])
+        {
+            WordmarkHighlightText = "Platform",
+            WordmarkHighlightColor = "#3b82f6"
+        };
+
+        var html = RenderWordmark(identity, "docs-wordmark");
+
+        Assert.Equal("<span class=\"docs-wordmark\" style=\"--docs-brand-wordmark-highlight-color:#3b82f6\">Client Docs</span>", html);
+    }
+
+    [Fact]
+    public void WordmarkHtml_ShouldRejectUnsupportedElementNames()
+    {
+        var identity = new AppSurfaceDocsResolvedIdentity(
+            "Client Docs",
+            "/docs",
+            null,
+            []);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => AppSurfaceDocsWordmarkHtml.Render(identity, "docs-wordmark", "div"));
+    }
+
     [Theory]
     [InlineData("~/brand/logo.svg", true, "~/brand/logo.svg", "")]
     [InlineData("/", true, "/", "")]
@@ -187,5 +274,12 @@ public sealed class AppSurfaceDocsIdentityResolverTests
         {
             Assert.Contains(expectedErrorFragment, error, StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    private static string RenderWordmark(AppSurfaceDocsResolvedIdentity identity, string cssClass, string elementName = "span")
+    {
+        using var writer = new StringWriter();
+        AppSurfaceDocsWordmarkHtml.Render(identity, cssClass, elementName).WriteTo(writer, HtmlEncoder.Default);
+        return writer.ToString();
     }
 }
