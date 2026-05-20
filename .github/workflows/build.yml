@@ -111,6 +111,9 @@ jobs:
           AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{ref}/{path}#L{line}
           AppSurfaceDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
           AppSurfaceDocs__Contributor__LastUpdatedMode: Git
+          AppSurfaceDocs__Identity__DisplayName: AppSurface
+          AppSurfaceDocs__Identity__Wordmark__HighlightText: Surface
+          AppSurfaceDocs__Identity__Wordmark__HighlightColor: "#3b82f6"
           AppSurfaceDocs__Harvest__JavaScript__Enabled: "true"
           AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js
         run: |

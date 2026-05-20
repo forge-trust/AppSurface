@@ -31,10 +31,12 @@ public sealed class AppSurfaceDocsIdentityResolver
     private static AppSurfaceDocsResolvedIdentity Resolve(AppSurfaceDocsIdentityOptions identity, DocsUrlBuilder urlBuilder)
     {
         var logoOptions = identity.Logo ?? new AppSurfaceDocsLogoOptions();
+        var wordmarkOptions = identity.Wordmark ?? new AppSurfaceDocsWordmarkOptions();
         var faviconOptions = identity.Favicon ?? new AppSurfaceDocsFaviconOptions();
         var displayName = AppSurfaceDocsIdentityPath.NormalizeDisplayName(identity.DisplayName);
         var homeHref = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(identity.HomeHref) ?? urlBuilder.Routes.Home;
         var logoPath = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(logoOptions.Path);
+        var highlightText = ResolveHighlightText(displayName, wordmarkOptions.HighlightText);
         var logo = logoPath is null
             ? null
             : new AppSurfaceDocsResolvedLogo(
@@ -46,7 +48,11 @@ public sealed class AppSurfaceDocsIdentityResolver
         AddFavicon(favicons, faviconOptions.IcoPath, "image/x-icon");
         AddFavicon(favicons, faviconOptions.PngPath, "image/png");
 
-        return new AppSurfaceDocsResolvedIdentity(displayName, homeHref, logo, favicons.AsReadOnly());
+        return new AppSurfaceDocsResolvedIdentity(displayName, homeHref, logo, favicons.AsReadOnly())
+        {
+            WordmarkHighlightText = highlightText,
+            WordmarkHighlightColor = ResolveHighlightColor(highlightText, wordmarkOptions.HighlightColor)
+        };
     }
 
     private static void AddFavicon(List<AppSurfaceDocsResolvedFavicon> favicons, string? path, string type)
@@ -56,6 +62,23 @@ public sealed class AppSurfaceDocsIdentityResolver
         {
             favicons.Add(new AppSurfaceDocsResolvedFavicon(normalizedPath, type));
         }
+    }
+
+    private static string? ResolveHighlightText(string displayName, string? highlightText)
+    {
+        var normalizedHighlightText = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(highlightText);
+        return normalizedHighlightText is not null
+               && displayName.Contains(normalizedHighlightText, StringComparison.Ordinal)
+            ? normalizedHighlightText
+            : null;
+    }
+
+    private static string? ResolveHighlightColor(string? highlightText, string? highlightColor)
+    {
+        return highlightText is not null
+               && AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(highlightColor, out var normalizedHighlightColor, out _)
+            ? normalizedHighlightColor
+            : null;
     }
 }
 
@@ -70,7 +93,26 @@ public sealed record AppSurfaceDocsResolvedIdentity(
     string DisplayName,
     string HomeHref,
     AppSurfaceDocsResolvedLogo? Logo,
-    IReadOnlyList<AppSurfaceDocsResolvedFavicon> Favicons);
+    IReadOnlyList<AppSurfaceDocsResolvedFavicon> Favicons)
+{
+    /// <summary>
+    /// Gets the first display-name substring rendered with highlight treatment by the built-in docs chrome.
+    /// </summary>
+    /// <remarks>
+    /// Null means the wordmark is rendered as plain text. The value is already trimmed and confirmed to appear in
+    /// <see cref="DisplayName"/>, so Razor views can split the display name without repeating configuration policy.
+    /// </remarks>
+    public string? WordmarkHighlightText { get; init; }
+
+    /// <summary>
+    /// Gets the CSS hex color used for <see cref="WordmarkHighlightText"/>.
+    /// </summary>
+    /// <remarks>
+    /// Null keeps highlighted text in the surrounding wordmark color. Non-null values have already passed the
+    /// AppSurface Docs CSS hex color allowlist.
+    /// </remarks>
+    public string? WordmarkHighlightColor { get; init; }
+}
 
 /// <summary>
 /// Render-ready AppSurface Docs logo.

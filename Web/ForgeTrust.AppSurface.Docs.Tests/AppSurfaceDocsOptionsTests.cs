@@ -141,6 +141,8 @@ public sealed class AppSurfaceDocsOptionsTests
                     {
                         ["AppSurfaceDocs:Identity:DisplayName"] = "  Acme Docs  ",
                         ["AppSurfaceDocs:Identity:HomeHref"] = "  ~/docs  ",
+                        ["AppSurfaceDocs:Identity:Wordmark:HighlightText"] = "  Docs  ",
+                        ["AppSurfaceDocs:Identity:Wordmark:HighlightColor"] = "  #3B82F6  ",
                         ["AppSurfaceDocs:Identity:Logo:Path"] = "  /brand/logo.svg  ",
                         ["AppSurfaceDocs:Identity:Logo:AltText"] = "  Acme mark  ",
                         ["AppSurfaceDocs:Identity:Favicon:SvgPath"] = "  /brand/favicon.svg  ",
@@ -156,11 +158,96 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Equal("Acme Docs", options.Identity.DisplayName);
         Assert.Equal("~/docs", options.Identity.HomeHref);
+        Assert.Equal("Docs", options.Identity.Wordmark.HighlightText);
+        Assert.Equal("#3b82f6", options.Identity.Wordmark.HighlightColor);
         Assert.Equal("/brand/logo.svg", options.Identity.Logo.Path);
         Assert.Equal("Acme mark", options.Identity.Logo.AltText);
         Assert.Equal("/brand/favicon.svg", options.Identity.Favicon.SvgPath);
         Assert.Equal("~/favicon.ico", options.Identity.Favicon.IcoPath);
         Assert.Equal("/brand/favicon.png", options.Identity.Favicon.PngPath);
+    }
+
+    [Theory]
+    [InlineData("AppSurfaceDocs:Identity:Wordmark:HighlightColor", "blue", "CSS hex color")]
+    [InlineData("AppSurfaceDocs:Identity:Wordmark:HighlightColor", "var(--brand)", "CSS hex color")]
+    [InlineData("AppSurfaceDocs:Identity:Wordmark:HighlightColor", "#12345g", "CSS hex color")]
+    public void AddAppSurfaceDocs_ShouldRejectInvalidWordmarkHighlightColors(
+        string key,
+        string value,
+        string expectedFailureFragment)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Identity:DisplayName"] = "Acme Docs",
+                        ["AppSurfaceDocs:Identity:Wordmark:HighlightText"] = "Docs",
+                        [key] = value
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.Contains(ex.Failures, failure => failure.Contains(expectedFailureFragment, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldRejectWordmarkHighlightColorWithoutHighlightText()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Identity:DisplayName"] = "Acme Docs",
+                        ["AppSurfaceDocs:Identity:Wordmark:HighlightColor"] = "#3b82f6"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.Contains(
+            ex.Failures,
+            failure => failure.Contains("HighlightColor requires AppSurfaceDocs:Identity:Wordmark:HighlightText", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldRejectWordmarkHighlightTextOutsideResolvedDisplayName()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Identity:DisplayName"] = "Acme Docs",
+                        ["AppSurfaceDocs:Identity:Wordmark:HighlightText"] = "Platform"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<OptionsValidationException>(
+            () => _ = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value);
+
+        Assert.Contains(
+            ex.Failures,
+            failure => failure.Contains("HighlightText must match part of the resolved", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
@@ -1075,6 +1162,12 @@ public sealed class AppSurfaceDocsOptionsTests
         services.Configure<AppSurfaceDocsOptions>(
             options =>
             {
+                options.Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    Logo = null!,
+                    Wordmark = null!,
+                    Favicon = null!
+                };
                 options.Source = null!;
                 options.Harvest = null!;
                 options.Bundle = null!;
@@ -1086,6 +1179,10 @@ public sealed class AppSurfaceDocsOptionsTests
         using var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
 
+        Assert.NotNull(options.Identity);
+        Assert.NotNull(options.Identity.Logo);
+        Assert.NotNull(options.Identity.Wordmark);
+        Assert.NotNull(options.Identity.Favicon);
         Assert.NotNull(options.Source);
         Assert.NotNull(options.Harvest);
         Assert.NotNull(options.Harvest.Health);
@@ -1655,6 +1752,12 @@ public sealed class AppSurfaceDocsOptionsTests
         var validator = new AppSurfaceDocsOptionsValidator();
         var options = new AppSurfaceDocsOptions
         {
+            Identity = new AppSurfaceDocsIdentityOptions
+            {
+                Logo = null!,
+                Wordmark = null!,
+                Favicon = null!
+            },
             Source = null!,
             Bundle = null!,
             Sidebar = null!,
@@ -1667,6 +1770,9 @@ public sealed class AppSurfaceDocsOptionsTests
         var result = validator.Validate(Options.DefaultName, options);
 
         Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:Logo must not be null.", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:Wordmark must not be null.", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:Favicon must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Source must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Bundle must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Sidebar must not be null.", StringComparison.OrdinalIgnoreCase));
