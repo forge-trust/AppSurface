@@ -3,7 +3,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Builds canonical RazorDocs URLs for one RazorDocs route family.
+/// Builds canonical AppSurface Docs URLs for one AppSurface Docs route family.
 /// </summary>
 /// <remarks>
 /// This builder centralizes the route contract so controllers, view components, views, and client scripts do not
@@ -34,10 +34,10 @@ public sealed class DocsUrlBuilder
     private readonly string _docsVersionPrefixPath;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="DocsUrlBuilder"/> from typed RazorDocs options.
+    /// Initializes a new instance of <see cref="DocsUrlBuilder"/> from typed AppSurface Docs options.
     /// </summary>
-    /// <param name="options">Typed RazorDocs options that provide the normalized route root and current docs root paths.</param>
-    public DocsUrlBuilder(RazorDocsOptions options)
+    /// <param name="options">Typed AppSurface Docs options that provide the normalized route root and current docs root paths.</param>
+    public DocsUrlBuilder(AppSurfaceDocsOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         VersioningEnabled = options.Versioning?.Enabled == true;
@@ -47,7 +47,7 @@ public sealed class DocsUrlBuilder
             ? ResolveDefaultDocsRootPath(_routeRootPath, VersioningEnabled)
             : normalizedDocsRootPath;
         _docsVersionPrefixPath = JoinPath(_routeRootPath, "v");
-        Routes = new RazorDocsRouteReferences
+        Routes = new AppSurfaceDocsRouteReferences
         {
             Home = BuildHomeUrl(),
             Search = BuildSearchUrl(),
@@ -70,7 +70,7 @@ public sealed class DocsUrlBuilder
     public string CurrentDocsRootPath => _currentDocsRootPath;
 
     /// <summary>
-    /// Gets the stable route-family root for this RazorDocs instance.
+    /// Gets the stable route-family root for this AppSurface Docs instance.
     /// </summary>
     /// <remarks>
     /// The route root is the parent for the stable entry alias, version archive, and exact-version release trees. It is
@@ -97,9 +97,9 @@ public sealed class DocsUrlBuilder
     public string DocsVersionsRootPath => BuildVersionsUrl();
 
     /// <summary>
-    /// Gets named RazorDocs routes that consumers should prefer over hardcoded route strings.
+    /// Gets named AppSurface Docs routes that consumers should prefer over hardcoded route strings.
     /// </summary>
-    public RazorDocsRouteReferences Routes { get; }
+    public AppSurfaceDocsRouteReferences Routes { get; }
 
     /// <summary>
     /// Builds the current live docs home URL.
@@ -347,7 +347,7 @@ public sealed class DocsUrlBuilder
     }
 
     /// <summary>
-    /// Normalizes a configured docs root into the app-relative route contract RazorDocs uses at runtime.
+    /// Normalizes a configured docs root into the app-relative route contract AppSurface Docs uses at runtime.
     /// </summary>
     /// <param name="docsRootPath">The configured docs root, which may be null, relative-looking, or already normalized.</param>
     /// <param name="versioningEnabled">Whether versioning is enabled and the default should therefore become <c>/docs/next</c>.</param>
@@ -370,7 +370,7 @@ public sealed class DocsUrlBuilder
     }
 
     /// <summary>
-    /// Normalizes a configured route-family root into the app-relative route contract RazorDocs uses at runtime.
+    /// Normalizes a configured route-family root into the app-relative route contract AppSurface Docs uses at runtime.
     /// </summary>
     /// <param name="routeRootPath">The configured route root, which may be null, relative-looking, or already normalized.</param>
     /// <param name="docsRootPath">The normalized live docs root used when versioning is disabled and no route root is configured.</param>
@@ -400,24 +400,24 @@ public sealed class DocsUrlBuilder
 }
 
 /// <summary>
-/// Named RazorDocs routes for one configured route family.
+/// Named AppSurface Docs routes for one configured route family.
 /// </summary>
 /// <remarks>
-/// Consumers should prefer this record when they need well-known RazorDocs destinations in host code, operator guidance,
+/// Consumers should prefer this record when they need well-known AppSurface Docs destinations in host code, operator guidance,
 /// generated configuration, or documentation. The values are app-relative. Views and other presentation boundaries apply
 /// request <c>PathBase</c> separately before sending browser-facing URLs.
 /// </remarks>
-public sealed record RazorDocsRouteReferences
+public sealed record AppSurfaceDocsRouteReferences
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="RazorDocsRouteReferences"/> record for object-initializer use.
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsRouteReferences"/> record for object-initializer use.
     /// </summary>
-    public RazorDocsRouteReferences()
+    public AppSurfaceDocsRouteReferences()
     {
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="RazorDocsRouteReferences"/> record with the original route set.
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsRouteReferences"/> record with the original route set.
     /// </summary>
     /// <remarks>
     /// This constructor preserves source compatibility for callers that created route references before the harvest
@@ -428,7 +428,7 @@ public sealed record RazorDocsRouteReferences
     /// <param name="searchIndex">The current live docs search-index JSON route.</param>
     /// <param name="searchIndexRefresh">The authenticated search-index refresh route.</param>
     /// <param name="versions">The route-family archive route.</param>
-    public RazorDocsRouteReferences(
+    public AppSurfaceDocsRouteReferences(
         string home,
         string search,
         string searchIndex,
@@ -439,7 +439,7 @@ public sealed record RazorDocsRouteReferences
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="RazorDocsRouteReferences"/> record with all known routes.
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsRouteReferences"/> record with all known routes.
     /// </summary>
     /// <param name="home">The current live docs home route.</param>
     /// <param name="search">The current live docs search workspace route.</param>
@@ -448,7 +448,7 @@ public sealed record RazorDocsRouteReferences
     /// <param name="versions">The route-family archive route.</param>
     /// <param name="health">The current live docs harvest health HTML route.</param>
     /// <param name="healthJson">The current live docs harvest health JSON route.</param>
-    public RazorDocsRouteReferences(
+    public AppSurfaceDocsRouteReferences(
         string home,
         string search,
         string searchIndex,

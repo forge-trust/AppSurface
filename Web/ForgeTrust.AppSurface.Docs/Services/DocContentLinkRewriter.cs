@@ -5,14 +5,14 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
 /// Rewrites harvested documentation links so authored Markdown can use repository-relative source links while the
-/// rendered docs experience still navigates through canonical RazorDocs routes.
+/// rendered docs experience still navigates through canonical AppSurface Docs routes.
 /// </summary>
 internal static class DocContentLinkRewriter
 {
     private const string DocsFrameId = "doc-content";
 
     /// <summary>
-    /// Rewrites internal documentation anchors in rendered HTML so they point at canonical RazorDocs routes and carry
+    /// Rewrites internal documentation anchors in rendered HTML so they point at canonical AppSurface Docs routes and carry
     /// Turbo navigation attributes that keep browser history aligned with frame navigation.
     /// </summary>
     /// <param name="sourcePath">The harvested source path whose content is being rewritten.</param>

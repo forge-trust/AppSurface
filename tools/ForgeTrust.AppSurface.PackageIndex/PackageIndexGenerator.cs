@@ -24,6 +24,32 @@ internal sealed class PackageIndexGenerator
     private const string ChangelogPath = "CHANGELOG.md";
     private const string UpgradePolicyPath = "releases/upgrade-policy.md";
     private const string WebExamplePath = "examples/web-app/README.md";
+    private static readonly HashSet<string> ReservedWindowsDeviceNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        "clock$",
+        "com1",
+        "com2",
+        "com3",
+        "com4",
+        "com5",
+        "com6",
+        "com7",
+        "com8",
+        "com9",
+        "lpt1",
+        "lpt2",
+        "lpt3",
+        "lpt4",
+        "lpt5",
+        "lpt6",
+        "lpt7",
+        "lpt8",
+        "lpt9"
+    };
 
     private readonly PackageProjectScanner _scanner;
     private readonly IProjectMetadataProvider _metadataProvider;
@@ -263,7 +289,93 @@ internal sealed class PackageIndexGenerator
             }
         }
 
+        ValidateToolCommandName(entry, metadata);
         ValidatePublishContract(entry, knownPackageIds);
+    }
+
+    /// <summary>
+    /// Validates the manifest command-name contract against project metadata for one package row.
+    /// </summary>
+    /// <param name="entry">Manifest row that may declare <c>tool_command_name</c> and a publish decision.</param>
+    /// <param name="metadata">Evaluated project metadata that reports whether the project packs as a .NET tool.</param>
+    /// <exception cref="PackageIndexException">
+    /// Thrown when a tool selected for <see cref="PackagePublishDecision.Publish"/> or
+    /// <see cref="PackagePublishDecision.SupportPublish"/> omits or mis-shapes <c>tool_command_name</c>, or when a
+    /// non-tool project declares a command name despite not setting <c>PackAsTool=true</c>.
+    /// </exception>
+    private static void ValidateToolCommandName(PackageManifestEntry entry, PackageProjectMetadata metadata)
+    {
+        if (metadata.IsTool
+            && entry.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish)
+        {
+            RequireValue(entry.Project, "tool_command_name", entry.ToolCommandName);
+            ValidateToolCommandNameValue(entry.Project, entry.ToolCommandName!);
+            return;
+        }
+
+        if (metadata.IsTool
+            && !string.IsNullOrWhiteSpace(entry.ToolCommandName))
+        {
+            ValidateToolCommandNameValue(entry.Project, entry.ToolCommandName);
+            return;
+        }
+
+        if (!metadata.IsTool
+            && !string.IsNullOrWhiteSpace(entry.ToolCommandName))
+        {
+            throw new PackageIndexException(
+                $"Manifest entry '{entry.Project}' defines 'tool_command_name' but the project does not report PackAsTool=true.");
+        }
+    }
+
+    /// <summary>
+    /// Validates the manifest-declared tool command token for one project.
+    /// </summary>
+    /// <param name="projectPath">Repository-relative project path used in actionable error messages.</param>
+    /// <param name="commandName">Command token read from <c>tool_command_name</c>.</param>
+    /// <exception cref="PackageIndexException">
+    /// Thrown when the command token is missing or uses a value that cannot safely resolve to one command shim file.
+    /// </exception>
+    /// <remarks>
+    /// The value must be a single file-name-safe token. It must not be blank, <c>.</c>, <c>..</c>,
+    /// a Windows reserved device name or dotted alias such as <c>con.txt</c>, end with a period, or contain
+    /// whitespace, path separators, control characters, or portable file-name-invalid characters.
+    /// </remarks>
+    internal static void ValidateToolCommandNameValue(string projectPath, string commandName)
+    {
+        if (string.IsNullOrWhiteSpace(commandName))
+        {
+            throw new PackageIndexException($"Tool command name ('tool_command_name') for '{projectPath}' must be provided.");
+        }
+
+        if (IsWindowsReservedDeviceName(commandName))
+        {
+            throw new PackageIndexException(
+                $"Tool command name ('tool_command_name') for '{projectPath}' is invalid: '{commandName}'. Tool command names must not use Windows reserved device names or dotted aliases.");
+        }
+
+        if (string.Equals(commandName, ".", StringComparison.Ordinal)
+            || string.Equals(commandName, "..", StringComparison.Ordinal)
+            || commandName.EndsWith(".", StringComparison.Ordinal)
+            || commandName.Any(IsInvalidToolCommandNameCharacter))
+        {
+            throw new PackageIndexException(
+                $"Tool command name ('tool_command_name') for '{projectPath}' is invalid: '{commandName}'. Tool command names must not be reserved path segments, Windows reserved device names or dotted aliases, end with a period, or contain whitespace, path separators, control characters, or characters invalid in file names.");
+        }
+    }
+
+    private static bool IsInvalidToolCommandNameCharacter(char value)
+    {
+        return char.IsWhiteSpace(value)
+            || char.IsControl(value)
+            || value is '/' or '\\' or '<' or '>' or ':' or '"' or '|' or '?' or '*';
+    }
+
+    private static bool IsWindowsReservedDeviceName(string commandName)
+    {
+        var extensionStart = commandName.IndexOf('.', StringComparison.Ordinal);
+        var deviceName = extensionStart < 0 ? commandName : commandName[..extensionStart];
+        return ReservedWindowsDeviceNames.Contains(deviceName);
     }
 
     private static void ValidatePublishContract(PackageManifestEntry entry, IReadOnlySet<string> knownPackageIds)
@@ -477,10 +589,11 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine($"- Edit `packages/package-index.yml` when the public package story changes.");
         builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
+        builder.AppendLine("- Keep `tool_command_name` aligned with each public .NET tool project's `ToolCommandName` so package validation and post-publish smoke tests run the command users will type. The value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
         builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications or package READMEs.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, or Tailwind runtime payloads.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");
-        builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so RazorDocs metadata, trust-bar copy, and section placement stay intentional.");
+        builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so AppSurface Docs metadata, trust-bar copy, and section placement stay intentional.");
 
         return NormalizeMarkdownNewlines(builder.ToString()).TrimEnd('\n') + "\n";
     }
@@ -725,6 +838,15 @@ internal static class PackageGateValidator
         }
 
         if (entry.Manifest.Classification == PackageClassification.Public
+            && entry.Metadata.IsTool
+            && !string.Equals(entry.Metadata.OutputType, "Exe", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new PackageIndexException(
+                $"Manifest entry '{entry.Manifest.Project}' is public and reports PackAsTool=true, but its output type is '{entry.Metadata.OutputType}'. Public .NET tool packages must be executable projects.");
+        }
+
+        if (entry.Manifest.Classification == PackageClassification.Public
+            && !entry.Metadata.IsTool
             && !string.Equals(entry.Metadata.OutputType, "Library", StringComparison.OrdinalIgnoreCase))
         {
             throw new PackageIndexException(
@@ -919,7 +1041,7 @@ internal sealed record PackageProjectMetadata(
     /// Gets the primary install command shown in the chooser for this package or tool.
     /// </summary>
     internal string InstallCommand => IsTool
-        ? $"dotnet tool install --global {PackageId}"
+        ? $"dotnet tool install --global {PackageId} --prerelease"
         : $"dotnet package add {PackageId}";
 }
 
@@ -1268,6 +1390,18 @@ internal sealed class PackageManifestEntry
     public string? RecipeSummary { get; init; }
 
     /// <summary>
+    /// Gets the command shim expected from a .NET tool package.
+    /// </summary>
+    /// <remarks>
+    /// This field is only valid for projects that set <c>PackAsTool=true</c>. Public tool packages must provide a
+    /// value so package validation, publish planning, and post-publish smoke tests can execute the command users type;
+    /// non-tool packages must leave it unset. The value must be one file-name-safe command token rather than a path:
+    /// no whitespace, path separators, reserved <c>.</c>/<c>..</c> segments, trailing periods, Windows reserved device
+    /// names or dotted aliases, control characters, or Windows-invalid file-name characters.
+    /// </remarks>
+    public string? ToolCommandName { get; init; }
+
+    /// <summary>
     /// Gets the explanatory note rendered for non-public package rows.
     /// </summary>
     public string? Note { get; init; }
@@ -1304,7 +1438,7 @@ internal sealed class PackageManifestEntry
 internal enum PackageClassification
 {
     /// <summary>
-    /// A direct-install package that appears in the main package matrix.
+    /// A direct-install package or tool that appears in the main package matrix.
     /// </summary>
     Public,
 
@@ -1330,7 +1464,7 @@ internal enum PackageClassification
 internal enum PackagePublishDecision
 {
     /// <summary>
-    /// A public package that should be packed and eventually published as a direct install surface.
+    /// A public package or tool that should be packed and eventually published as a direct install surface.
     /// </summary>
     Publish,
 
@@ -1356,7 +1490,7 @@ internal enum PackageReleaseStatus
     Unknown,
 
     /// <summary>
-    /// Public preview package that can be installed directly by OSS adopters.
+    /// Public preview package or tool that can be installed directly by OSS adopters.
     /// </summary>
     PublicPreview,
 

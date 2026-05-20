@@ -1,5 +1,5 @@
 @model ForgeTrust.AppSurface.Docs.Models.DocLandingViewModel
-@inject ForgeTrust.AppSurface.Docs.RazorDocsAssetPathResolver AssetPathResolver
+@inject ForgeTrust.AppSurface.Docs.AppSurfaceDocsAssetPathResolver AssetPathResolver
 @{
     ViewData["Title"] = "Documentation Index";
     var docsBrandIconUrl = Url.Content(AssetPathResolver.BrandIconPath);

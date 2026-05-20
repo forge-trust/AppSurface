@@ -33,7 +33,7 @@ public class DocsControllerTests : IDisposable
     private readonly IMemo _memo;
     private readonly ILogger<DocsController> _controllerLoggerFake;
     private readonly ILogger<DocFeaturedPageResolver> _featuredPageResolverLoggerFake;
-    private readonly IRazorDocsHtmlSanitizer _sanitizerFake;
+    private readonly IAppSurfaceDocsHtmlSanitizer _sanitizerFake;
 
     public DocsControllerTests()
     {
@@ -42,10 +42,10 @@ public class DocsControllerTests : IDisposable
         var loggerFake = A.Fake<ILogger<DocAggregator>>();
         _controllerLoggerFake = A.Fake<ILogger<DocsController>>();
         _featuredPageResolverLoggerFake = A.Fake<ILogger<DocFeaturedPageResolver>>();
-        var options = new RazorDocsOptions();
+        var options = new AppSurfaceDocsOptions();
         _cache = new MemoryCache(new MemoryCacheOptions());
         var envFake = A.Fake<IWebHostEnvironment>();
-        _sanitizerFake = A.Fake<IRazorDocsHtmlSanitizer>();
+        _sanitizerFake = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
         A.CallTo(() => envFake.ContentRootPath).Returns(Path.GetTempPath());
         A.CallTo(() => _sanitizerFake.Sanitize(A<string>._))
             .ReturnsLazily((string input) => input);
@@ -530,13 +530,13 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(new List<DocNode>());
         var (controller, cache, memo) = CreateController(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "/"
                 },
-                Versioning = new RazorDocsVersioningOptions
+                Versioning = new AppSurfaceDocsVersioningOptions
                 {
                     Enabled = false
                 }
@@ -1009,13 +1009,13 @@ public class DocsControllerTests : IDisposable
     public async Task Index_ShouldHonorConfiguredLiveDocsRoot_ForCuratedFeaturedPages()
     {
         var harvester = A.Fake<IDocHarvester>();
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/docs/next"
             },
-            Versioning = new RazorDocsVersioningOptions
+            Versioning = new AppSurfaceDocsVersioningOptions
             {
                 Enabled = true
             }
@@ -1058,13 +1058,13 @@ public class DocsControllerTests : IDisposable
     public async Task Index_ShouldResolveConfiguredRootCanonicalFeaturedPaths()
     {
         var harvester = A.Fake<IDocHarvester>();
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/docs/next"
             },
-            Versioning = new RazorDocsVersioningOptions
+            Versioning = new AppSurfaceDocsVersioningOptions
             {
                 Enabled = true
             }
@@ -1396,9 +1396,9 @@ public class DocsControllerTests : IDisposable
     [Fact]
     public async Task Details_ShouldPreserveConfiguredDocsRoot_WhenResolvedBreadcrumbTargetIsPublishedDoc()
     {
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Routing = new RazorDocsRoutingOptions
+            Routing = new AppSurfaceDocsRoutingOptions
             {
                 DocsRootPath = "/docs/next"
             }
@@ -1774,7 +1774,7 @@ public class DocsControllerTests : IDisposable
             () => new DocsController(
                 _aggregator,
                 null!,
-                CreateDefaultVersionCatalogService(new RazorDocsOptions()),
+                CreateDefaultVersionCatalogService(new AppSurfaceDocsOptions()),
                 _controllerLoggerFake));
     }
 
@@ -1784,7 +1784,7 @@ public class DocsControllerTests : IDisposable
         Assert.Throws<ArgumentNullException>(
             () => new DocsController(
                 _aggregator,
-                new DocsUrlBuilder(new RazorDocsOptions()),
+                new DocsUrlBuilder(new AppSurfaceDocsOptions()),
                 null!,
                 _controllerLoggerFake));
     }
@@ -1792,13 +1792,13 @@ public class DocsControllerTests : IDisposable
     [Fact]
     public void Constructor_ShouldThrow_WhenOptionsIsNull()
     {
-        var docsUrlBuilder = new DocsUrlBuilder(new RazorDocsOptions());
+        var docsUrlBuilder = new DocsUrlBuilder(new AppSurfaceDocsOptions());
 
         Assert.Throws<ArgumentNullException>(
             () => new DocsController(
                 _aggregator,
                 docsUrlBuilder,
-                CreateDefaultVersionCatalogService(new RazorDocsOptions()),
+                CreateDefaultVersionCatalogService(new AppSurfaceDocsOptions()),
                 new DocFeaturedPageResolver(_featuredPageResolverLoggerFake, docsUrlBuilder),
                 null!,
                 A.Fake<IWebHostEnvironment>(),
@@ -1808,7 +1808,7 @@ public class DocsControllerTests : IDisposable
     [Fact]
     public void Constructor_ShouldThrow_WhenEnvironmentIsNull()
     {
-        var options = new RazorDocsOptions();
+        var options = new AppSurfaceDocsOptions();
         var docsUrlBuilder = new DocsUrlBuilder(options);
 
         Assert.Throws<ArgumentNullException>(
@@ -2191,9 +2191,9 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
         var (controller, cache, memo) = CreateController(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "/"
                 }
@@ -2246,9 +2246,9 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
         var (controller, cache, memo) = CreateController(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "/"
                 }
@@ -2316,9 +2316,9 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
         var (controller, cache, memo) = CreateController(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "/"
                 }
@@ -2366,9 +2366,9 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
         var (controller, cache, memo) = CreateController(
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
-                Routing = new RazorDocsRoutingOptions
+                Routing = new AppSurfaceDocsRoutingOptions
                 {
                     DocsRootPath = "/"
                 }
@@ -2566,7 +2566,7 @@ public class DocsControllerTests : IDisposable
 
         var env = A.Fake<IWebHostEnvironment>();
         A.CallTo(() => env.ContentRootPath).Returns(Path.GetTempPath());
-        var sanitizer = A.Fake<IRazorDocsHtmlSanitizer>();
+        var sanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
         A.CallTo(() => sanitizer.Sanitize(A<string>._))
             .ReturnsLazily((string input) => input);
 
@@ -2574,10 +2574,10 @@ public class DocsControllerTests : IDisposable
         using var memo = new Memo(cache);
         var aggregator = new DocAggregator(
             [harvester],
-            new RazorDocsOptions
+            new AppSurfaceDocsOptions
             {
                 CacheExpirationMinutes = 0.5,
-                Source = new RazorDocsSourceOptions
+                Source = new AppSurfaceDocsSourceOptions
                 {
                     RepositoryRoot = Path.GetTempPath()
                 }
@@ -2605,12 +2605,12 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
-        var (controller, cache, memo) = CreateController(new RazorDocsOptions(), harvester);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
         using (memo)
         using (cache)
         {
             var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
-            var response = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Value);
+            var response = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Value);
             var serialized = JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web));
             var customSerialized = JsonSerializer.Serialize(
                 response,
@@ -2644,12 +2644,12 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns([]);
-        var (controller, cache, memo) = CreateController(new RazorDocsOptions(), harvester);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
         using (memo)
         using (cache)
         {
             var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
-            var response = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Value);
+            var response = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Value);
 
             Assert.Equal(StatusCodes.Status200OK, result.StatusCode);
             Assert.True(response.Verification.Ok);
@@ -2663,9 +2663,9 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Throws(new InvalidOperationException("boom at /tmp/secret/root"));
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Source = new RazorDocsSourceOptions
+            Source = new AppSurfaceDocsSourceOptions
             {
                 RepositoryRoot = "/tmp/secret/root"
             }
@@ -2675,7 +2675,7 @@ public class DocsControllerTests : IDisposable
         using (cache)
         {
             var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
-            var response = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Value);
+            var response = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Value);
             var serialized = JsonSerializer.Serialize(response);
 
             Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
@@ -2697,12 +2697,12 @@ public class DocsControllerTests : IDisposable
             .Throws(new InvalidOperationException("boom"));
         A.CallTo(() => workingHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns([new DocNode("Recovered", "recovered.md", "<p>Recovered</p>")]);
-        var (controller, cache, memo) = CreateController(new RazorDocsOptions(), [failingHarvester, workingHarvester]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), [failingHarvester, workingHarvester]);
         using (memo)
         using (cache)
         {
             var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
-            var response = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Value);
+            var response = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Value);
 
             Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
             Assert.False(response.Verification.Ok);
@@ -2718,12 +2718,12 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Throws(new InvalidOperationException("boom"));
-        var (controller, cache, memo) = CreateController(new RazorDocsOptions(), harvester);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
         using (memo)
         using (cache)
         {
             var result = Assert.IsType<ViewResult>(await controller.HarvestHealth());
-            var model = Assert.IsType<RazorDocsHarvestHealthResponse>(result.Model);
+            var model = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Model);
 
             Assert.Equal("HarvestHealth", result.ViewName);
             Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
@@ -2737,7 +2737,7 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
-        var options = new RazorDocsOptions();
+        var options = new AppSurfaceDocsOptions();
         var (controller, cache, memo) = CreateController(options, harvester, Environments.Production);
         using (memo)
         using (cache)
@@ -2754,7 +2754,7 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
-        var options = new RazorDocsOptions();
+        var options = new AppSurfaceDocsOptions();
         var (controller, cache, memo) = CreateController(options, harvester, Environments.Production);
         using (memo)
         using (cache)
@@ -2771,13 +2771,13 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Harvest = new RazorDocsHarvestOptions
+            Harvest = new AppSurfaceDocsHarvestOptions
             {
-                Health = new RazorDocsHarvestHealthOptions
+                Health = new AppSurfaceDocsHarvestHealthOptions
                 {
-                    ExposeRoutes = RazorDocsHarvestHealthExposure.Never
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Never
                 }
             }
         };
@@ -2799,13 +2799,13 @@ public class DocsControllerTests : IDisposable
         var harvester = A.Fake<IDocHarvester>();
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .Returns([new DocNode("Getting Started", "guides/start", "<p>First steps.</p>")]);
-        var options = new RazorDocsOptions
+        var options = new AppSurfaceDocsOptions
         {
-            Harvest = new RazorDocsHarvestOptions
+            Harvest = new AppSurfaceDocsHarvestOptions
             {
-                Health = new RazorDocsHarvestHealthOptions
+                Health = new AppSurfaceDocsHarvestHealthOptions
                 {
-                    ExposeRoutes = RazorDocsHarvestHealthExposure.Always
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Always
                 }
             }
         };
@@ -3439,14 +3439,14 @@ public class DocsControllerTests : IDisposable
     }
 
     private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(
-        RazorDocsOptions options,
+        AppSurfaceDocsOptions options,
         IDocHarvester harvester)
     {
         return CreateController(options, [harvester]);
     }
 
     private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(
-        RazorDocsOptions options,
+        AppSurfaceDocsOptions options,
         IDocHarvester harvester,
         string environmentName)
     {
@@ -3454,14 +3454,14 @@ public class DocsControllerTests : IDisposable
     }
 
     private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(
-        RazorDocsOptions options,
+        AppSurfaceDocsOptions options,
         IReadOnlyList<IDocHarvester> harvesters,
         string? environmentName = null)
     {
         var cache = new MemoryCache(new MemoryCacheOptions());
         var memo = new Memo(cache);
         var environment = A.Fake<IWebHostEnvironment>();
-        var sanitizer = A.Fake<IRazorDocsHtmlSanitizer>();
+        var sanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
         var aggregatorLogger = A.Fake<ILogger<DocAggregator>>();
         var controllerLogger = A.Fake<ILogger<DocsController>>();
 
@@ -3551,11 +3551,11 @@ public class DocsControllerTests : IDisposable
         return message?.Contains(expectedMessageFragment, StringComparison.OrdinalIgnoreCase) == true;
     }
 
-    private RazorDocsVersionCatalogService CreateDefaultVersionCatalogService(RazorDocsOptions options)
+    private AppSurfaceDocsVersionCatalogService CreateDefaultVersionCatalogService(AppSurfaceDocsOptions options)
     {
         var emptyCatalogRoot = Path.Combine(
             Path.GetTempPath(),
-            "razordocs-controller-tests",
+            "appsurfacedocs-controller-tests",
             Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(emptyCatalogRoot);
         _temporaryCatalogRoots.Add(emptyCatalogRoot);
@@ -3563,10 +3563,10 @@ public class DocsControllerTests : IDisposable
         var environment = A.Fake<IWebHostEnvironment>();
         A.CallTo(() => environment.ContentRootPath).Returns(emptyCatalogRoot);
 
-        return new RazorDocsVersionCatalogService(
+        return new AppSurfaceDocsVersionCatalogService(
             options,
             environment,
-            NullLogger<RazorDocsVersionCatalogService>.Instance);
+            NullLogger<AppSurfaceDocsVersionCatalogService>.Instance);
     }
 
     private static bool IsWarningLog(FakeItEasy.Core.IFakeObjectCall call)

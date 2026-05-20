@@ -262,13 +262,13 @@ public sealed class DocFeaturedPageResolverTests
         var resolver = new DocFeaturedPageResolver(
             A.Fake<ILogger<DocFeaturedPageResolver>>(),
             new DocsUrlBuilder(
-                new RazorDocsOptions
+                new AppSurfaceDocsOptions
                 {
-                    Routing = new RazorDocsRoutingOptions
+                    Routing = new AppSurfaceDocsRoutingOptions
                     {
                         DocsRootPath = "/docs/next"
                     },
-                    Versioning = new RazorDocsVersioningOptions
+                    Versioning = new AppSurfaceDocsVersioningOptions
                     {
                         Enabled = true
                     }
@@ -293,13 +293,13 @@ public sealed class DocFeaturedPageResolverTests
         var resolver = new DocFeaturedPageResolver(
             A.Fake<ILogger<DocFeaturedPageResolver>>(),
             new DocsUrlBuilder(
-                new RazorDocsOptions
+                new AppSurfaceDocsOptions
                 {
-                    Routing = new RazorDocsRoutingOptions
+                    Routing = new AppSurfaceDocsRoutingOptions
                     {
                         DocsRootPath = "/docs/next"
                     },
-                    Versioning = new RazorDocsVersioningOptions
+                    Versioning = new AppSurfaceDocsVersioningOptions
                     {
                         Enabled = true
                     }
@@ -328,14 +328,14 @@ public sealed class DocFeaturedPageResolverTests
         var resolver = new DocFeaturedPageResolver(
             A.Fake<ILogger<DocFeaturedPageResolver>>(),
             new DocsUrlBuilder(
-                new RazorDocsOptions
+                new AppSurfaceDocsOptions
                 {
-                    Routing = new RazorDocsRoutingOptions
+                    Routing = new AppSurfaceDocsRoutingOptions
                     {
                         RouteRootPath = "/foo/bar",
                         DocsRootPath = "/foo/bar/next"
                     },
-                    Versioning = new RazorDocsVersioningOptions
+                    Versioning = new AppSurfaceDocsVersioningOptions
                     {
                         Enabled = true
                     }
@@ -360,9 +360,9 @@ public sealed class DocFeaturedPageResolverTests
         var resolver = new DocFeaturedPageResolver(
             A.Fake<ILogger<DocFeaturedPageResolver>>(),
             new DocsUrlBuilder(
-                new RazorDocsOptions
+                new AppSurfaceDocsOptions
                 {
-                    Routing = new RazorDocsRoutingOptions
+                    Routing = new AppSurfaceDocsRoutingOptions
                     {
                         DocsRootPath = "/"
                     }
@@ -388,9 +388,9 @@ public sealed class DocFeaturedPageResolverTests
         var resolver = new DocFeaturedPageResolver(
             logger,
             new DocsUrlBuilder(
-                new RazorDocsOptions
+                new AppSurfaceDocsOptions
                 {
-                    Routing = new RazorDocsRoutingOptions
+                    Routing = new AppSurfaceDocsRoutingOptions
                     {
                         DocsRootPath = "/"
                     }

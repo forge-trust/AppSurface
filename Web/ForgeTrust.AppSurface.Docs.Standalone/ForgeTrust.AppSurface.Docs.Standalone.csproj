@@ -10,4 +10,10 @@
     <ProjectReference Include="..\ForgeTrust.AppSurface.Docs\ForgeTrust.AppSurface.Docs.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

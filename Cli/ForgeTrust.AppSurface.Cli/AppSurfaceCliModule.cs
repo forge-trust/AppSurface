@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Cli;
 /// </summary>
 /// <remarks>
 /// The module is intentionally empty today: the CLI owns command registration in <see cref="AppSurfaceCliApp"/> and
-/// delegates web-host behavior to RazorDocs-specific runners. Add dependencies here only when every AppSurface CLI
+/// delegates web-host behavior to AppSurface Docs-specific runners. Add dependencies here only when every AppSurface CLI
 /// command needs the same module-level dependency graph or host lifecycle hook. Prefer command-local services or custom
 /// test registrations for isolated behavior, and do not place runtime command logic in this module.
 /// </remarks>

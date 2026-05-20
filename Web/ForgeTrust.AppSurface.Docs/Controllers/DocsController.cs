@@ -28,9 +28,9 @@ public class DocsController : Controller
 
     private readonly DocAggregator _aggregator;
     private readonly DocsUrlBuilder _docsUrlBuilder;
-    private readonly RazorDocsVersionCatalogService _versionCatalogService;
+    private readonly AppSurfaceDocsVersionCatalogService _versionCatalogService;
     private readonly DocFeaturedPageResolver _featuredPageResolver;
-    private readonly RazorDocsOptions _options;
+    private readonly AppSurfaceDocsOptions _options;
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<DocsController> _logger;
 
@@ -38,11 +38,11 @@ public class DocsController : Controller
     /// Initializes a new instance of <see cref="DocsController"/> for ad hoc callers that only supply the doc aggregator and logger.
     /// </summary>
     /// <remarks>
-    /// This convenience overload does <em>not</em> use the host-configured RazorDocs routing or version catalog.
-    /// Instead it constructs <see cref="DocsUrlBuilder" /> from <c>new RazorDocsOptions()</c> and creates a fallback
+    /// This convenience overload does <em>not</em> use the host-configured AppSurface Docs routing or version catalog.
+    /// Instead it constructs <see cref="DocsUrlBuilder" /> from <c>new AppSurfaceDocsOptions()</c> and creates a fallback
     /// version catalog via <see cref="CreateDefaultVersionCatalogService()" />. Callers that need the configured live
     /// docs root, preview/versioned routing surface, or published-release catalog should use the
-    /// <see cref="DocsController(DocAggregator, DocsUrlBuilder, RazorDocsVersionCatalogService, ILogger{DocsController})" />
+    /// <see cref="DocsController(DocAggregator, DocsUrlBuilder, AppSurfaceDocsVersionCatalogService, ILogger{DocsController})" />
     /// overload instead.
     /// </remarks>
     /// <param name="aggregator">Service used to retrieve documentation items.</param>
@@ -50,12 +50,12 @@ public class DocsController : Controller
     public DocsController(DocAggregator aggregator, ILogger<DocsController> logger)
         : this(
             aggregator,
-            new DocsUrlBuilder(new RazorDocsOptions()),
+            new DocsUrlBuilder(new AppSurfaceDocsOptions()),
             CreateDefaultVersionCatalogService(),
             new DocFeaturedPageResolver(
                 NullLogger<DocFeaturedPageResolver>.Instance,
-                new DocsUrlBuilder(new RazorDocsOptions())),
-            new RazorDocsOptions(),
+                new DocsUrlBuilder(new AppSurfaceDocsOptions())),
+            new AppSurfaceDocsOptions(),
             new DefaultWebHostEnvironment(),
             logger)
     {
@@ -67,9 +67,9 @@ public class DocsController : Controller
     /// </summary>
     /// <remarks>
     /// This overload preserves the convenience surface introduced for landing-curation callers while still constructing
-    /// <see cref="DocsUrlBuilder" /> from <c>new RazorDocsOptions()</c> and the fallback version catalog from
+    /// <see cref="DocsUrlBuilder" /> from <c>new AppSurfaceDocsOptions()</c> and the fallback version catalog from
     /// <see cref="CreateDefaultVersionCatalogService()" />. Use the overload that accepts
-    /// <see cref="DocsUrlBuilder" /> and <see cref="RazorDocsVersionCatalogService" /> when the configured live docs root,
+    /// <see cref="DocsUrlBuilder" /> and <see cref="AppSurfaceDocsVersionCatalogService" /> when the configured live docs root,
     /// path-base-aware versioning routes, or published catalog state must match the host.
     /// </remarks>
     /// <param name="aggregator">Service used to retrieve documentation items.</param>
@@ -81,10 +81,10 @@ public class DocsController : Controller
         ILogger<DocsController> logger)
         : this(
             aggregator,
-            new DocsUrlBuilder(new RazorDocsOptions()),
+            new DocsUrlBuilder(new AppSurfaceDocsOptions()),
             CreateDefaultVersionCatalogService(),
             featuredPageResolver,
-            new RazorDocsOptions(),
+            new AppSurfaceDocsOptions(),
             new DefaultWebHostEnvironment(),
             logger)
     {
@@ -100,14 +100,14 @@ public class DocsController : Controller
     public DocsController(
         DocAggregator aggregator,
         DocsUrlBuilder docsUrlBuilder,
-        RazorDocsVersionCatalogService versionCatalogService,
+        AppSurfaceDocsVersionCatalogService versionCatalogService,
         ILogger<DocsController> logger)
         : this(
             aggregator,
             docsUrlBuilder,
             versionCatalogService,
             new DocFeaturedPageResolver(NullLogger<DocFeaturedPageResolver>.Instance, docsUrlBuilder),
-            new RazorDocsOptions(),
+            new AppSurfaceDocsOptions(),
             new DefaultWebHostEnvironment(),
             logger)
     {
@@ -120,16 +120,16 @@ public class DocsController : Controller
     /// <param name="docsUrlBuilder">Shared URL builder for the live source-backed docs surface.</param>
     /// <param name="versionCatalogService">Resolved catalog service for published docs versions.</param>
     /// <param name="featuredPageResolver">Service used to resolve grouped landing curation metadata.</param>
-    /// <param name="options">Typed RazorDocs options used for operator health visibility.</param>
+    /// <param name="options">Typed AppSurface Docs options used for operator health visibility.</param>
     /// <param name="environment">Host environment used for development-default health visibility.</param>
     /// <param name="logger">Logger used for search index diagnostics.</param>
     [ActivatorUtilitiesConstructor]
     public DocsController(
         DocAggregator aggregator,
         DocsUrlBuilder docsUrlBuilder,
-        RazorDocsVersionCatalogService versionCatalogService,
+        AppSurfaceDocsVersionCatalogService versionCatalogService,
         DocFeaturedPageResolver featuredPageResolver,
-        RazorDocsOptions options,
+        AppSurfaceDocsOptions options,
         IWebHostEnvironment environment,
         ILogger<DocsController> logger)
     {
@@ -444,7 +444,7 @@ public class DocsController : Controller
     [HttpGet]
     public async Task<IActionResult> HarvestHealth()
     {
-        if (!RazorDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
+        if (!AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
         {
             return NotFound();
         }
@@ -470,7 +470,7 @@ public class DocsController : Controller
     [HttpGet]
     public async Task<IActionResult> HarvestHealthJson()
     {
-        if (!RazorDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
+        if (!AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
         {
             return NotFound();
         }
@@ -510,10 +510,10 @@ public class DocsController : Controller
         return User?.Identity?.IsAuthenticated == true;
     }
 
-    private async Task<RazorDocsHarvestHealthResponse> BuildHarvestHealthResponseAsync()
+    private async Task<AppSurfaceDocsHarvestHealthResponse> BuildHarvestHealthResponseAsync()
     {
         var health = await _aggregator.GetHarvestHealthAsync(HttpContext.RequestAborted);
-        return RazorDocsHarvestHealthResponse.FromSnapshot(health);
+        return AppSurfaceDocsHarvestHealthResponse.FromSnapshot(health);
     }
 
     private void SetNoStoreCacheControl()
@@ -1125,13 +1125,13 @@ public class DocsController : Controller
             FailureFallbackLinks: BuildSearchFallbackLinks(docs));
     }
 
-    private RazorDocsVersionArchiveViewModel BuildVersionArchiveViewModel(bool entryFallback)
+    private AppSurfaceDocsVersionArchiveViewModel BuildVersionArchiveViewModel(bool entryFallback)
     {
         var catalog = _versionCatalogService.GetCatalog();
         var recommendedVersion = catalog.RecommendedVersion;
         var versions = catalog.PublicVersions
             .Select(
-                version => new RazorDocsVersionArchiveEntryViewModel
+                version => new AppSurfaceDocsVersionArchiveEntryViewModel
                 {
                     Version = version.Version,
                     Label = version.Label,
@@ -1148,7 +1148,7 @@ public class DocsController : Controller
                 })
             .ToList();
 
-        return new RazorDocsVersionArchiveViewModel
+        return new AppSurfaceDocsVersionArchiveViewModel
         {
             Heading = entryFallback ? "Published documentation versions" : "Documentation versions",
             Description = entryFallback
@@ -1376,25 +1376,25 @@ public class DocsController : Controller
                && doc.Metadata?.HideFromSearch != true;
     }
 
-    private static string GetSupportStateLabel(RazorDocsVersionSupportState supportState)
+    private static string GetSupportStateLabel(AppSurfaceDocsVersionSupportState supportState)
     {
         return supportState switch
         {
-            RazorDocsVersionSupportState.Current => "Current",
-            RazorDocsVersionSupportState.Maintained => "Maintained",
-            RazorDocsVersionSupportState.Deprecated => "Deprecated",
-            RazorDocsVersionSupportState.Archived => "Archived",
+            AppSurfaceDocsVersionSupportState.Current => "Current",
+            AppSurfaceDocsVersionSupportState.Maintained => "Maintained",
+            AppSurfaceDocsVersionSupportState.Deprecated => "Deprecated",
+            AppSurfaceDocsVersionSupportState.Archived => "Archived",
             _ => supportState.ToString()
         };
     }
 
-    private static string? GetAdvisoryLabel(RazorDocsVersionAdvisoryState advisoryState)
+    private static string? GetAdvisoryLabel(AppSurfaceDocsVersionAdvisoryState advisoryState)
     {
         return advisoryState switch
         {
-            RazorDocsVersionAdvisoryState.None => null,
-            RazorDocsVersionAdvisoryState.Vulnerable => "Vulnerable",
-            RazorDocsVersionAdvisoryState.SecurityRisk => "Security risk",
+            AppSurfaceDocsVersionAdvisoryState.None => null,
+            AppSurfaceDocsVersionAdvisoryState.Vulnerable => "Vulnerable",
+            AppSurfaceDocsVersionAdvisoryState.SecurityRisk => "Security risk",
             _ => advisoryState.ToString()
         };
     }
@@ -1449,7 +1449,7 @@ public class DocsController : Controller
     /// Determines whether a documentation node should render with the API reference reading surface.
     /// </summary>
     /// <remarks>
-    /// Non-Markdown generated docs use the API surface by default because RazorDocs cannot assume extensionless
+    /// Non-Markdown generated docs use the API surface by default because AppSurface Docs cannot assume extensionless
     /// generated pages have authored prose rhythm. Markdown docs opt into the API surface only when
     /// <c>page_type</c> normalizes to <c>api</c> or <c>api-reference</c>. Extensionless authored content is therefore
     /// treated as generated API/reference content unless a future harvester exposes a stronger authorship signal.
@@ -1488,17 +1488,17 @@ public class DocsController : Controller
                || path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static RazorDocsVersionCatalogService CreateDefaultVersionCatalogService()
+    private static AppSurfaceDocsVersionCatalogService CreateDefaultVersionCatalogService()
     {
-        return new RazorDocsVersionCatalogService(
-            new RazorDocsOptions(),
+        return new AppSurfaceDocsVersionCatalogService(
+            new AppSurfaceDocsOptions(),
             new DefaultWebHostEnvironment(),
-            NullLogger<RazorDocsVersionCatalogService>.Instance);
+            NullLogger<AppSurfaceDocsVersionCatalogService>.Instance);
     }
 
     private sealed class DefaultWebHostEnvironment : IWebHostEnvironment
     {
-        public string ApplicationName { get; set; } = typeof(DocsController).Assembly.GetName().Name ?? "RazorDocs";
+        public string ApplicationName { get; set; } = typeof(DocsController).Assembly.GetName().Name ?? "AppSurface Docs";
 
         public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
 
