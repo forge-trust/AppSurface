@@ -1313,7 +1313,10 @@ public class MarkdownHarvesterTests : IDisposable
     {
         Assert.False(Path.IsPathRooted(relativePath));
 
-        var path = Path.Combine(_testRoot, relativePath);
+        var pathSegments = relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+        var path = CombineUnder(_testRoot, pathSegments);
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))
         {
