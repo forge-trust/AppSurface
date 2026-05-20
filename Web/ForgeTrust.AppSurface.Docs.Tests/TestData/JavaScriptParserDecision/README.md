@@ -59,7 +59,7 @@ Historical spike use:
 Current product use:
 
 - `ForgeTrust.AppSurface.Docs` now references Acornima for JavaScript public API harvesting, so the package redistributes Acornima transitively when hosts install AppSurface Docs.
-- `Web/ForgeTrust.AppSurface.Docs/THIRD-PARTY-NOTICES.md` carries the Acornima package identity, version, BSD-3-Clause license, project URL, and redistribution requirements.
+- `Web/ForgeTrust.AppSurface.Docs/THIRD-PARTY-NOTICES.md` carries the Acornima package identity, version, BSD-3-Clause license, project URL, copyright notice, license conditions, and disclaimer text.
 - No endorsement: release and marketing copy must not imply Acornima, Adam Simon, or Acornima contributors endorse AppSurface or AppSurface Docs without specific written permission.
 - Keep the notice file in the package when Acornima remains in product code, and update it when the package version or parser dependency changes.
 

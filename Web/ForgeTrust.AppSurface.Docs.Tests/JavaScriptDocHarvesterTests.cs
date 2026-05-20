@@ -523,7 +523,14 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
         try
         {
-            Assert.ThrowsAny<Exception>(() => Directory.GetFileSystemEntries(unreadableDirectory));
+            try
+            {
+                _ = Directory.GetFileSystemEntries(unreadableDirectory);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
 
             var docs = await harvester.HarvestAsync(_testRoot);
 

@@ -189,6 +189,9 @@ public sealed class JavaScriptParserDecisionTests
         var notices = File.ReadAllText(PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "THIRD-PARTY-NOTICES.md"));
         Assert.Contains("Acornima", notices, StringComparison.Ordinal);
         Assert.Contains("BSD-3-Clause", notices, StringComparison.Ordinal);
+        Assert.Contains("Copyright (c) Adam Simon", notices, StringComparison.Ordinal);
+        Assert.Contains("Redistribution and use in source and binary forms", notices, StringComparison.Ordinal);
+        Assert.Contains("THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS", notices, StringComparison.Ordinal);
         Assert.Contains("endorse", notices, StringComparison.OrdinalIgnoreCase);
 
         var decision = File.ReadAllText(PathUnder(FixtureDirectory, "README.md"));

@@ -847,13 +847,16 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         CancellationToken cancellationToken)
     {
         var fullRoot = Path.GetFullPath(rootPath);
+        var includePatterns = NormalizeIncludePatterns(options.IncludeGlobs ?? []).ToArray();
+        var includeMatcher = new AppSurfaceDocsHarvestPathMatcher(includePatterns);
         var yielded = new HashSet<string>(PathComparer);
-        foreach (var includeRoot in ResolveIncludeRoots(fullRoot, options.IncludeGlobs ?? []))
+        foreach (var includeRoot in ResolveIncludeRoots(fullRoot, includePatterns))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(includeRoot))
             {
-                if (IsJavaScriptFile(includeRoot) && yielded.Add(includeRoot))
+                var relativeFile = NormalizeRelativePath(Path.GetRelativePath(fullRoot, includeRoot));
+                if (IsJavaScriptFile(includeRoot) && includeMatcher.MatchFirst(relativeFile) is not null && yielded.Add(includeRoot))
                 {
                     yield return includeRoot;
                 }
@@ -863,7 +866,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
             if (!Directory.Exists(includeRoot))
             {
-                if (IsJavaScriptFile(includeRoot) && yielded.Add(includeRoot))
+                var relativeFile = NormalizeRelativePath(Path.GetRelativePath(fullRoot, includeRoot));
+                if (IsJavaScriptFile(includeRoot) && includeMatcher.MatchFirst(relativeFile) is not null && yielded.Add(includeRoot))
                 {
                     yield return includeRoot;
                 }
@@ -871,7 +875,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 continue;
             }
 
-            foreach (var file in EnumerateJavaScriptFilesUnderRoot(fullRoot, includeRoot, options, yielded, cancellationToken))
+            foreach (var file in EnumerateJavaScriptFilesUnderRoot(fullRoot, includeRoot, includeMatcher, yielded, cancellationToken))
             {
                 yield return file;
             }
@@ -881,7 +885,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     private IEnumerable<string> EnumerateJavaScriptFilesUnderRoot(
         string repositoryRoot,
         string traversalRoot,
-        AppSurfaceDocsJavaScriptHarvestOptions options,
+        AppSurfaceDocsHarvestPathMatcher includeMatcher,
         HashSet<string> yielded,
         CancellationToken cancellationToken)
     {
@@ -894,18 +898,45 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             var current = pending.Pop();
             foreach (var file in EnumerateFilesSafely(current).Where(yielded.Add))
             {
+                var relativeFile = NormalizeRelativePath(Path.GetRelativePath(repositoryRoot, file));
+                if (includeMatcher.MatchFirst(relativeFile) is null)
+                {
+                    continue;
+                }
+
                 yield return file;
             }
 
             foreach (var directory in EnumerateDirectoriesSafely(current))
             {
-                if (ShouldPruneDirectory(repositoryRoot, directory))
+                var relativeDirectory = NormalizeRelativePath(Path.GetRelativePath(repositoryRoot, directory));
+                if (ShouldPruneDirectory(relativeDirectory, directory)
+                    || includeMatcher.MatchFileInDirectoryOrDescendant(relativeDirectory) is null)
                 {
                     continue;
                 }
 
                 pending.Push(directory);
             }
+        }
+    }
+
+    private static IEnumerable<string> NormalizeIncludePatterns(IEnumerable<string> includePatterns)
+    {
+        foreach (var pattern in includePatterns)
+        {
+            if (string.IsNullOrWhiteSpace(pattern))
+            {
+                continue;
+            }
+
+            var normalizedPattern = AppSurfaceDocsHarvestPathPatternValidator.NormalizeSlashes(pattern.Trim());
+            if (!AppSurfaceDocsHarvestPathPatternValidator.IsValidConfiguredGlobPattern(normalizedPattern))
+            {
+                continue;
+            }
+
+            yield return normalizedPattern;
         }
     }
 
@@ -958,7 +989,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     }
 
     private bool ShouldPruneDirectory(
-        string repositoryRoot,
+        string relativeDirectory,
         string directory)
     {
         var directoryInfo = new DirectoryInfo(directory);
@@ -968,8 +999,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return true;
         }
 
-        var relativePath = NormalizeRelativePath(Path.GetRelativePath(repositoryRoot, directory));
-        return _pathPolicy.ShouldPruneDirectory(relativePath, AppSurfaceDocsHarvestSourceKind.JavaScript);
+        return _pathPolicy.ShouldPruneDirectory(relativeDirectory, AppSurfaceDocsHarvestSourceKind.JavaScript);
     }
 
     private static IReadOnlyList<string> EnumerateFilesSafely(string directory)
