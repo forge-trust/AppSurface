@@ -77,6 +77,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                 {
                     options.Identity ??= new AppSurfaceDocsIdentityOptions();
                     options.Identity.Logo ??= new AppSurfaceDocsLogoOptions();
+                    options.Identity.Wordmark ??= new AppSurfaceDocsWordmarkOptions();
                     options.Identity.Favicon ??= new AppSurfaceDocsFaviconOptions();
                     options.Source ??= new AppSurfaceDocsSourceOptions();
                     options.Harvest ??= new AppSurfaceDocsHarvestOptions();
@@ -100,6 +101,9 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Identity.HomeHref = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.HomeHref);
                     options.Identity.Logo.Path = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Logo.Path);
                     options.Identity.Logo.AltText = NormalizeOrNull(options.Identity.Logo.AltText);
+                    options.Identity.Wordmark.HighlightText = NormalizeOrNull(options.Identity.Wordmark.HighlightText);
+                    options.Identity.Wordmark.HighlightColor = AppSurfaceDocsIdentityPath.NormalizeCssHexColorOrNull(
+                        options.Identity.Wordmark.HighlightColor);
                     options.Identity.Favicon.SvgPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.SvgPath);
                     options.Identity.Favicon.IcoPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.IcoPath);
                     options.Identity.Favicon.PngPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.PngPath);

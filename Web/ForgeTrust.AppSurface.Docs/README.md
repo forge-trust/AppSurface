@@ -616,8 +616,19 @@ Pitfalls:
   - When omitted, AppSurface Docs falls back to repository discovery from the content root.
 - `AppSurfaceDocs:Identity:DisplayName`
   - Optional visible product name for the document title and docs chrome.
-  - Defaults to `AppSurface Docs` when omitted or blank.
+  - Defaults to `Documentation` when omitted or blank so built-in docs chrome starts with a short title.
   - Razor views HTML-encode this as plain text; do not put markup here.
+  - Long display names are clipped with an ellipsis inside the built-in sidebar and mobile header instead of expanding the chrome outside its bounds.
+- `AppSurfaceDocs:Identity:Wordmark:HighlightText`
+  - Optional substring of the resolved display name that the built-in docs chrome highlights.
+  - Defaults to no highlight.
+  - Use this when the publishing repository wants a specific product wordmark treatment, such as highlighting `Surface` in a shorter `AppSurface` display name.
+  - The value must match part of the resolved display name using ordinal comparison. Only the first occurrence is highlighted.
+- `AppSurfaceDocs:Identity:Wordmark:HighlightColor`
+  - Optional CSS hex color for the highlighted wordmark substring, such as `#3b82f6`.
+  - Defaults to the surrounding wordmark text color.
+  - Requires `AppSurfaceDocs:Identity:Wordmark:HighlightText`; otherwise AppSurface Docs rejects the configuration because the color has no visible target.
+  - CSS color names, functions, custom properties, semicolon-delimited declarations, and non-hex values are rejected.
 - `AppSurfaceDocs:Identity:HomeHref`
   - Optional brand-link target for the built-in docs chrome.
   - Defaults to the configured docs home route.
