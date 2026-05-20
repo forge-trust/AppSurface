@@ -2220,7 +2220,7 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task Search_ShouldSkipFallbackDocsWithoutPublicRoutes()
+    public async Task Search_ShouldUseNextFallbackDoc_WhenFirstMatchHasNoPublicRoute()
     {
         var docs = new List<DocNode>
         {
@@ -2251,8 +2251,9 @@ public class DocsControllerTests : IDisposable
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
-        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "Start Here");
-        Assert.Contains(model.FailureFallbackLinks, link => link.Href == "/docs" && !link.UsesDocsFrame);
+        Assert.Contains(
+            model.FailureFallbackLinks,
+            link => link.Title == "Start Here" && link.Href == "/docs/guides/shared" && link.UsesDocsFrame);
     }
 
     [Fact]

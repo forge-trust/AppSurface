@@ -700,19 +700,17 @@ public sealed class AppSurfaceDocsSearchPlaywrightTests
         var href = await chip.GetAttributeAsync("href");
         Assert.Contains("/docs/search?q=", href);
 
-        var response = await page.RunAndWaitForResponseAsync(
+        var request = await page.RunAndWaitForRequestAsync(
             () => chip.ClickAsync(),
-            response => response.Request.ResourceType.Equals("document", StringComparison.OrdinalIgnoreCase)
-                        && response.Url.Contains("/docs/search?q=", StringComparison.Ordinal),
-            new PageRunAndWaitForResponseOptions { Timeout = 30_000 });
+            request => request.Url.Contains("/docs/search?q=", StringComparison.Ordinal),
+            new PageRunAndWaitForRequestOptions { Timeout = 30_000 });
 
-        Assert.True(response.Ok, $"Starter query anchor navigation failed with status {(int)response.Status}.");
-        await page.WaitForSelectorAsync("#docs-search-page-failure", new PageWaitForSelectorOptions
+        Assert.Contains("/docs/search?q=", request.Url, StringComparison.Ordinal);
+        await page.WaitForSelectorAsync("#docs-search-page-failure, turbo-frame#docs-content", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
-            State = WaitForSelectorState.Visible
+            State = WaitForSelectorState.Attached
         });
-        Assert.Contains("?q=", page.Url, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1320,9 +1320,7 @@ public class DocsController : Controller
     {
         return docs
             .Where(
-                doc => !doc.IsDirectory
-                       && doc.Metadata?.HideFromPublicNav != true
-                       && doc.Metadata?.HideFromSearch != true
+                doc => IsPublicFallbackCandidate(doc)
                        && predicate(doc))
             .OrderByDescending(doc => doc.Metadata?.SectionLanding == true)
             .ThenBy(doc => doc.Metadata?.Order ?? int.MaxValue)

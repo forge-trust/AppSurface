@@ -1764,6 +1764,10 @@
   }
 
   function shouldEnhanceSearchSuggestionClick(event) {
+    if (!event.isTrusted) {
+      return false;
+    }
+
     if (!isPlainPrimaryClick(event)) {
       return false;
     }
@@ -2117,14 +2121,6 @@
     suggestionButtons.forEach((button) => {
       button.addEventListener('click', (event) => {
         if (!shouldEnhanceSearchSuggestionClick(event)) {
-          if (isPlainPrimaryClick(event)) {
-            const href = button.getAttribute('href');
-            if (href) {
-              event.preventDefault();
-              window.location.assign(href);
-            }
-          }
-
           return;
         }
 
