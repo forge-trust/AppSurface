@@ -523,13 +523,19 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
         try
         {
+            var directoryEnumerationDenied = false;
             try
             {
                 _ = Directory.GetFileSystemEntries(unreadableDirectory);
-                return;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                directoryEnumerationDenied = true;
+            }
+
+            if (!directoryEnumerationDenied)
+            {
+                return;
             }
 
             var docs = await harvester.HarvestAsync(_testRoot);
