@@ -7,7 +7,6 @@
 :root {
     --docs-brand-navy: #0d182a;
     --docs-brand-blue: #2563eb;
-    --docs-brand-wordmark-blue: #3b82f6;
     --docs-brand-teal: #14b8a6;
     --docs-brand-violet: #8b5cf6;
     --docs-brand-ice: #e5e7eb;
@@ -150,6 +149,7 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 0.65rem;
+    max-width: 100%;
     min-width: 0;
     color: var(--docs-color-text-strong);
     text-decoration: none;
@@ -181,9 +181,17 @@ body {
     text-shadow: 0 1px 2px var(--docs-color-wordmark-edge-shadow);
 }
 
+.docs-brand .docs-wordmark,
+.docs-brand .docs-brand-wordmark {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .docs-wordmark-highlight,
 .docs-brand-wordmark-highlight {
-    color: var(--docs-brand-wordmark-blue);
+    color: var(--docs-brand-wordmark-highlight-color, currentColor);
 }
 
 .docs-brand-kicker {

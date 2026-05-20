@@ -49,7 +49,7 @@ Point the host at the repository you want to harvest:
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Mode": "Source",
     "Source": {
       "RepositoryRoot": "/path/to/repo"
@@ -64,10 +64,14 @@ Add identity settings when the consuming repository should own the visible docs 
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Identity": {
       "DisplayName": "Acme Platform Docs",
       "HomeHref": "/docs",
+      "Wordmark": {
+        "HighlightText": "Platform",
+        "HighlightColor": "#38bdf8"
+      },
       "Logo": {
         "Path": "/brand/docs-logo.svg",
         "AltText": "Acme"
@@ -82,6 +86,8 @@ Add identity settings when the consuming repository should own the visible docs 
 ```
 
 Identity paths must be app-root paths such as `/brand/docs-logo.svg` or application-relative paths such as `~/brand/docs-logo.svg`. AppSurface Docs rejects remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments during startup validation so the docs chrome cannot accidentally point at unsafe or environment-specific locations.
+
+Leave `Identity:Wordmark` unset for a plain-text docs title. The built-in sidebar and mobile header clip long display names with an ellipsis so they do not push the chrome outside its bounds. Configure `DisplayName`, `HighlightText`, and `HighlightColor` when the publishing repository wants a shorter product wordmark treatment. The highlight text must be a substring of `DisplayName`, and the color must be a CSS hex color so the docs layout cannot receive arbitrary style declarations from configuration.
 
 ## Define the public source boundary
 

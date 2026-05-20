@@ -32,7 +32,7 @@ If a new surface starts to feel like a feature grid, a landing page, or an AI-ge
 
 ### Brand
 
-The AppSurface wordmark is a two-tone text treatment: `App` uses ice white (`--docs-color-text-strong`, `#F8FAFC`) and `Surface` uses readable brand blue (`--docs-brand-wordmark-blue`, `#3B82F6`). Use the shared `.docs-wordmark` and `.docs-wordmark-highlight` classes anywhere the AppSurface wordmark is rendered in text.
+The package wordmark is plain text by default and must stay inside the sidebar/header bounds with ellipsis clipping for long display names. Product-specific wordmark color is opt-in through `AppSurfaceDocs:Identity:Wordmark`, which sets `--docs-brand-wordmark-highlight-color` only for the configured publish. AppSurface's public docs configure the shorter `DisplayName=AppSurface`, `HighlightText=Surface`, and `HighlightColor=#3B82F6` in the Pages export.
 
 Do not use page-title gradients, teal, violet, or ad hoc Tailwind color utilities for the wordmark. `--docs-brand-blue` (`#2563EB`) remains the cobalt product/control accent, but it is too low-contrast for normal-size wordmark text on raised navy surfaces such as `#0D182A`. The wordmark blue `#3B82F6` clears WCAG AA for normal text on the docs navy surfaces, including `#0D182A`.
 
