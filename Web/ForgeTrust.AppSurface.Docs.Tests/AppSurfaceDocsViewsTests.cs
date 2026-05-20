@@ -91,14 +91,15 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
-    public async Task Layout_ShouldRenderDefaultAppSurfaceDocsIdentity()
+    public async Task Layout_ShouldRenderDefaultNeutralDocsIdentity()
     {
         using var services = CreateServiceProvider(CreateDocs());
 
         var html = await RenderDocsViewAsync(services, "Index", c => c.Index());
 
-        Assert.Contains("<title>Documentation Index - AppSurface Docs</title>", html);
-        Assert.Contains(">AppSurface Docs</span>", html);
+        Assert.Contains("<title>Documentation Index - Documentation</title>", html);
+        Assert.Contains(">Documentation</span>", html);
+        Assert.DoesNotContain("docs-wordmark-highlight", html);
         Assert.Contains("rel=\"icon\" type=\"image/svg+xml\" href=\"/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg\"", html);
         Assert.DoesNotContain("<img src=\"/brand", html);
     }
@@ -112,6 +113,8 @@ public class AppSurfaceDocsViewsTests
             {
                 ["AppSurfaceDocs:Identity:DisplayName"] = "Acme Docs",
                 ["AppSurfaceDocs:Identity:HomeHref"] = "~/reference",
+                ["AppSurfaceDocs:Identity:Wordmark:HighlightText"] = "Docs",
+                ["AppSurfaceDocs:Identity:Wordmark:HighlightColor"] = "#38BDF8",
                 ["AppSurfaceDocs:Identity:Logo:Path"] = "/brand/logo.svg",
                 ["AppSurfaceDocs:Identity:Logo:AltText"] = "Acme logo",
                 ["AppSurfaceDocs:Identity:Favicon:SvgPath"] = "/brand/favicon.svg",
@@ -126,6 +129,9 @@ public class AppSurfaceDocsViewsTests
             pathBase: "/some-base");
 
         Assert.Contains("<title>Documentation Index - Acme Docs</title>", html);
+        Assert.Contains(
+            "<span class=\"docs-wordmark block text-lg\" style=\"--docs-brand-wordmark-highlight-color:#38bdf8\">Acme <span class=\"docs-wordmark-highlight\">Docs</span></span>",
+            html);
         Assert.Contains("href=\"/some-base/reference\"", html);
         Assert.Contains("src=\"/some-base/brand/logo.svg\"", html);
         Assert.Contains("alt=\"\" aria-hidden=\"true\"", html);
@@ -267,7 +273,7 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains(":root {", tailwindEntryStylesheet);
         Assert.Contains("--docs-brand-navy: #0d182a;", tailwindEntryStylesheet);
         Assert.Contains("--docs-brand-blue: #2563eb;", tailwindEntryStylesheet);
-        Assert.Contains("--docs-brand-wordmark-blue: #3b82f6;", tailwindEntryStylesheet);
+        Assert.DoesNotContain("--docs-brand-wordmark-blue:", tailwindEntryStylesheet);
         Assert.Contains("--docs-brand-teal: #14b8a6;", tailwindEntryStylesheet);
         Assert.Contains("--docs-brand-violet: #8b5cf6;", tailwindEntryStylesheet);
         Assert.Contains("--docs-color-surface-canvas: #050b17;", tailwindEntryStylesheet);
@@ -279,7 +285,10 @@ public class AppSurfaceDocsViewsTests
 
         Assert.Contains("border: 1px solid var(--docs-color-border-default);", tailwindEntryStylesheet);
         Assert.Contains("color: var(--docs-color-accent);", tailwindEntryStylesheet);
-        Assert.Contains("color: var(--docs-brand-wordmark-blue);", tailwindEntryStylesheet);
+        Assert.Contains("color: var(--docs-brand-wordmark-highlight-color, currentColor);", tailwindEntryStylesheet);
+        Assert.Contains(".docs-brand .docs-wordmark", tailwindEntryStylesheet);
+        Assert.Contains("max-width: 100%;", tailwindEntryStylesheet);
+        Assert.Contains("text-overflow: ellipsis;", tailwindEntryStylesheet);
         Assert.Contains("text-shadow: 0 1px 2px var(--docs-color-wordmark-edge-shadow);", tailwindEntryStylesheet);
         Assert.Contains("outline: var(--docs-focus-outline);", tailwindEntryStylesheet);
 
@@ -461,12 +470,20 @@ public class AppSurfaceDocsViewsTests
                     Summary = "Destination summary."
                 })
         };
-        using var services = CreateServiceProvider(docs);
+        using var services = CreateServiceProvider(
+            docs,
+            new Dictionary<string, string?>
+            {
+                ["AppSurfaceDocs:Identity:DisplayName"] = "AppSurface",
+                ["AppSurfaceDocs:Identity:Wordmark:HighlightText"] = "Surface",
+                ["AppSurfaceDocs:Identity:Wordmark:HighlightColor"] = "#3B82F6"
+            });
 
         var html = await RenderDocsViewAsync(services, "Index", c => c.Index());
 
-        Assert.Contains("<h1 class=\"docs-wordmark mt-3 text-3xl sm:text-4xl\">", html);
-        Assert.Contains("App<span class=\"docs-wordmark-highlight\">Surface</span></h1>", html);
+        Assert.Contains(
+            "<h1 class=\"docs-wordmark mt-3 text-3xl sm:text-4xl\" style=\"--docs-brand-wordmark-highlight-color:#3b82f6\">App<span class=\"docs-wordmark-highlight\">Surface</span></h1>",
+            html);
         Assert.Contains("Proof before promises.", html);
         Assert.Contains(">Test</h3>", html);
         Assert.Contains("How does composition work?", html);

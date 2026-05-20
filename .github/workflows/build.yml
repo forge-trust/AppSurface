@@ -111,6 +111,9 @@ jobs:
           AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate: https://github.com/${{ github.repository }}/blob/{ref}/{path}#L{line}
           AppSurfaceDocs__Contributor__EditUrlTemplate: https://github.com/${{ github.repository }}/edit/{branch}/{path}
           AppSurfaceDocs__Contributor__LastUpdatedMode: Git
+          AppSurfaceDocs__Identity__DisplayName: AppSurface
+          AppSurfaceDocs__Identity__Wordmark__HighlightText: Surface
+          AppSurfaceDocs__Identity__Wordmark__HighlightColor: "#3b82f6"
         run: |
           printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/appsurface-docs-seeds.txt"
           dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
