@@ -1165,34 +1165,28 @@ public class DocsController : Controller
 
     private IReadOnlyList<SearchPageFallbackLink> BuildSearchFallbackLinks(IReadOnlyList<DocNode> docs)
     {
-        var pathResolver = DocPathResolver.Create(docs);
         var links = new List<SearchPageFallbackLink>();
 
         TryAddFallbackBucket(
             links,
-            pathResolver,
             docs,
             "Start Here",
             "Orient quickly and follow the strongest first-read path.",
             DocPublicSection.StartHere,
-            doc => BelongsToPublicSection(doc, DocPublicSection.StartHere)
-                   || HasPageType(doc, "guide", "concept", "tutorial")
+            doc => HasPageType(doc, "guide", "concept", "tutorial")
                    || doc.Path.StartsWith("guides/", StringComparison.OrdinalIgnoreCase));
 
         TryAddFallbackBucket(
             links,
-            pathResolver,
             docs,
             "Examples",
             "Inspect concrete proof and working examples.",
             DocPublicSection.Examples,
-            doc => BelongsToPublicSection(doc, DocPublicSection.Examples)
-                   || HasPageType(doc, "example")
+            doc => HasPageType(doc, "example")
                    || doc.Path.StartsWith("examples/", StringComparison.OrdinalIgnoreCase));
 
         TryAddFallbackBucket(
             links,
-            pathResolver,
             docs,
             "Packages",
             "Review package entry points and installation-facing docs.",
@@ -1201,24 +1195,20 @@ public class DocsController : Controller
 
         TryAddFallbackBucket(
             links,
-            pathResolver,
             docs,
             "Troubleshooting",
             "Recover from failures and check operational fixes.",
             DocPublicSection.Troubleshooting,
-            doc => BelongsToPublicSection(doc, DocPublicSection.Troubleshooting)
-                   || HasPageType(doc, "troubleshooting")
+            doc => HasPageType(doc, "troubleshooting")
                    || doc.Path.Contains("troubleshoot", StringComparison.OrdinalIgnoreCase));
 
         TryAddFallbackBucket(
             links,
-            pathResolver,
             docs,
             "API Reference",
             "Browse namespaces and type-level detail directly.",
             DocPublicSection.ApiReference,
-            doc => BelongsToPublicSection(doc, DocPublicSection.ApiReference)
-                   || HasPageType(doc, "api-reference", "api")
+            doc => HasPageType(doc, "api-reference", "api")
                    || doc.Path.StartsWith("Namespaces/", StringComparison.OrdinalIgnoreCase)
                    || string.Equals(doc.Path, "Namespaces", StringComparison.OrdinalIgnoreCase));
 
@@ -1237,7 +1227,6 @@ public class DocsController : Controller
 
     private void TryAddFallbackBucket(
         ICollection<SearchPageFallbackLink> links,
-        DocPathResolver pathResolver,
         IReadOnlyList<DocNode> docs,
         string title,
         string description,
@@ -1257,7 +1246,6 @@ public class DocsController : Controller
 
         TryAddFallbackLink(
             links,
-            pathResolver,
             SelectFallbackDoc(docs, representativePredicate),
             title,
             description);
@@ -1265,7 +1253,6 @@ public class DocsController : Controller
 
     private void TryAddFallbackLink(
         ICollection<SearchPageFallbackLink> links,
-        DocPathResolver pathResolver,
         DocNode? doc,
         string title,
         string description)
@@ -1276,13 +1263,7 @@ public class DocsController : Controller
         }
 
         var href = DocAggregator.BuildSearchDocUrl(_docsUrlBuilder.CurrentDocsRootPath, GetSnapshotCanonicalPath(doc));
-        var usesDocsFrame = ShouldUseDocsFrame(href, pathResolver);
-        if (!usesDocsFrame)
-        {
-            return;
-        }
-
-        TryAddFallbackLink(links, href, title, description, usesDocsFrame);
+        TryAddFallbackLink(links, href, title, description, usesDocsFrame: true);
     }
 
     private static void TryAddFallbackLink(

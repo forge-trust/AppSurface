@@ -2018,6 +2018,87 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_ShouldOrderRepresentativeRecoveryDocsByLandingThenOrder()
+    {
+        var docs = new List<DocNode>
+        {
+            new(
+                "No Order Guide",
+                "guides/no-order.md",
+                "<p>No order body</p>",
+                Metadata: new DocMetadata
+                {
+                    PageType = "guide"
+                }),
+            new(
+                "Ordered Guide",
+                "guides/ordered.md",
+                "<p>Ordered body</p>",
+                Metadata: new DocMetadata
+                {
+                    PageType = "guide",
+                    Order = 2
+                }),
+            new(
+                "Landing Concept",
+                "concepts/landing.md",
+                "<p>Landing body</p>",
+                Metadata: new DocMetadata
+                {
+                    PageType = "concept",
+                    SectionLanding = true,
+                    Order = 50
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        var result = await _controller.Search();
+
+        var viewResult = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
+        var startLink = Assert.Single(model.FailureFallbackLinks, link => link.Title == "Start Here");
+
+        Assert.Equal("/docs/concepts/landing", startLink.Href);
+        Assert.True(startLink.UsesDocsFrame);
+    }
+
+    [Fact]
+    public async Task Search_ShouldUseTroubleshootingHeuristics_WhenSectionRouteIsUnavailable()
+    {
+        var docs = new List<DocNode>
+        {
+            new(
+                "Troubleshooting Runbook",
+                "operations/runbook.md",
+                "<p>Runbook body</p>",
+                Metadata: new DocMetadata
+                {
+                    PageType = "troubleshooting",
+                    Order = 2
+                }),
+            new(
+                "Troubleshoot Error",
+                "operations/troubleshoot-error.md",
+                "<p>Error body</p>",
+                Metadata: new DocMetadata
+                {
+                    PageType = "reference",
+                    Order = 1
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+
+        var result = await _controller.Search();
+
+        var viewResult = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
+        var troubleshootingLink = Assert.Single(model.FailureFallbackLinks, link => link.Title == "Troubleshooting");
+
+        Assert.Equal("/docs/operations/troubleshoot-error", troubleshootingLink.Href);
+        Assert.True(troubleshootingLink.UsesDocsFrame);
+    }
+
+    [Fact]
     public async Task Search_ShouldStillRenderShell_WhenDocAggregationFails()
     {
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
