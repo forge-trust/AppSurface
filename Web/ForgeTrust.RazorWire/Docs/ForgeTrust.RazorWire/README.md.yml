@@ -1,0 +1,34 @@
+title: ForgeTrust.RazorWire
+summary: Start here for RazorWire registration, endpoint mapping, options, and stream-result entry points.
+aliases:
+  - RazorWire namespace
+  - RazorWire API entry points
+keywords:
+  - RazorWire registration
+  - RazorWire services
+  - RazorWire streams
+entry_points:
+  - label: AddRazorWire(...)
+    summary: Register RazorWire options, stream hub services, form handling, and partial rendering.
+    target: ForgeTrust-RazorWire-RazorWireServiceCollectionExtensions-AddRazorWire-method-group
+    keywords:
+      - register RazorWire
+      - services
+  - label: MapRazorWire(...)
+    summary: Map the configured Server-Sent Events stream endpoint for channel subscriptions.
+    target: ForgeTrust-RazorWire-RazorWireEndpointRouteBuilderExtensions-MapRazorWire-method-group
+    keywords:
+      - endpoint mapping
+      - SSE
+  - label: RazorWireOptions
+    summary: Configure stream paths, output-cache policy names, and enhanced form behavior.
+    target: ForgeTrust-RazorWire-RazorWireOptions
+    keywords:
+      - configuration
+      - options
+  - label: RazorWireWebModule
+    summary: Use the AppSurface module when you want package registration and endpoint mapping through module conventions.
+    target: ForgeTrust-RazorWire-RazorWireWebModule
+    keywords:
+      - AppSurface module
+      - endpoint conventions

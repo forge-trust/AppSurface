@@ -63,6 +63,7 @@ internal sealed record DocsSearchIndexMetadata(
 /// <param name="RelatedPages">Authored related-page references used for recovery links.</param>
 /// <param name="Breadcrumbs">Authored breadcrumb labels displayed in result chrome.</param>
 /// <param name="SourcePath">Repository-relative source path retained for provenance and custom integrations.</param>
+/// <param name="EntryPoints">Namespace README entry-point terms projected for richer search consumers.</param>
 internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("path")] string Path,
@@ -88,7 +89,25 @@ internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("canonicalSlug")] string? CanonicalSlug,
     [property: JsonPropertyName("relatedPages")] IReadOnlyList<string> RelatedPages,
     [property: JsonPropertyName("breadcrumbs")] IReadOnlyList<string> Breadcrumbs,
-    [property: JsonPropertyName("sourcePath")] string SourcePath = "");
+    [property: JsonPropertyName("sourcePath")] string SourcePath = "",
+    [property: JsonPropertyName("entryPoints")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<DocsSearchIndexEntryPoint>? EntryPoints = null);
+
+/// <summary>
+/// Search projection for one namespace README entry point.
+/// </summary>
+/// <param name="Label">Reader-facing entry label.</param>
+/// <param name="Summary">Optional entry summary.</param>
+/// <param name="Target">Resolved generated anchor target when authored.</param>
+/// <param name="Href">Resolved fragment or app-relative href when available.</param>
+/// <param name="Keywords">Additional search terms authored on the entry point.</param>
+internal sealed record DocsSearchIndexEntryPoint(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("summary")] string? Summary,
+    [property: JsonPropertyName("target")] string? Target,
+    [property: JsonPropertyName("href")] string? Href,
+    [property: JsonPropertyName("keywords")] IReadOnlyList<string> Keywords);
 
 /// <summary>
 /// Describes a requested search-index projection for the cached docs snapshot.
@@ -777,7 +796,7 @@ public class DocAggregator
                            .ToList();
 
                        var targetNodes = sanitizedNodes.ToList();
-                       MergeNamespaceReadmes(targetNodes);
+                       MergeNamespaceReadmes(targetNodes, renderEntryPointPanel: false, logger);
                        var routeIdentityCatalog = DocRouteIdentityCatalog.Create(targetNodes, _docsUrlBuilder);
                        // Rewrite before the real namespace merge so README-relative links keep their source path
                        // context, while the manifest still reflects only final published docs targets.
@@ -801,7 +820,10 @@ public class DocAggregator
                                    n.SymbolSourceProvenance))
                            .ToList();
 
-                       MergeNamespaceReadmes(rewrittenNodes);
+                       var namespaceReadmeDiagnostics = MergeNamespaceReadmes(
+                           rewrittenNodes,
+                           renderEntryPointPanel: true,
+                           logger);
 
                        var docsByPath = rewrittenNodes
                            .GroupBy(n => n.Path)
@@ -835,7 +857,10 @@ public class DocAggregator
                        var searchIndexProjections = new DocsSearchIndexProjectionCache(searchIndexPayload, localizedGraph);
                        var harvestHealth = BuildHarvestHealthSnapshot(
                            harvesterResults,
-                           finalRouteIdentityCatalog.Diagnostics.Concat(localizedGraph.Diagnostics).ToArray(),
+                           finalRouteIdentityCatalog.Diagnostics
+                               .Concat(localizedGraph.Diagnostics)
+                               .Concat(namespaceReadmeDiagnostics)
+                               .ToArray(),
                            docsByPath.Count,
                            repositoryRoot,
                            utcNow(),
@@ -1741,7 +1766,23 @@ public class DocAggregator
 
                     var content = d.Content ?? string.Empty;
                     var searchableContent = SymbolSourceLinkRegex.Replace(content, " ");
-                    var bodyText = NormalizeSearchText(TagRegex.Replace(ScriptOrStyleRegex.Replace(searchableContent, string.Empty), " "));
+                    var entryPoints = BuildSearchIndexEntryPoints(d.Metadata?.EntryPoints);
+                    var entryPointSearchText = NormalizeSearchText(
+                        string.Join(
+                            ' ',
+                            (entryPoints ?? []).SelectMany(
+                                entry => new[]
+                                    {
+                                        entry.Label,
+                                        entry.Summary,
+                                        entry.Target,
+                                        entry.Href
+                                    }
+                                    .Concat(entry.Keywords))));
+                    var bodyText = NormalizeSearchText(
+                        TagRegex.Replace(ScriptOrStyleRegex.Replace(searchableContent, string.Empty), " ")
+                        + " "
+                        + entryPointSearchText);
                     var snippet = TruncateSnippetAtWordBoundary(bodyText, SearchSnippetMaxLength);
                     var title = ResolveSearchIndexTitle(d);
                     var summary = d.Metadata?.Summary ?? snippet;
@@ -1780,7 +1821,8 @@ public class DocAggregator
                         d.Metadata?.CanonicalSlug,
                         d.Metadata?.RelatedPages ?? [],
                         d.Metadata?.Breadcrumbs ?? [],
-                        d.Path);
+                        d.Path,
+                        entryPoints);
                 })
             .Where(r => r is not null)
             .Select(r => r!)
@@ -1798,6 +1840,30 @@ public class DocAggregator
             records);
 
         return (payload, records.Count);
+    }
+
+    private static IReadOnlyList<DocsSearchIndexEntryPoint>? BuildSearchIndexEntryPoints(
+        IReadOnlyList<DocNamespaceEntryPoint>? entryPoints)
+    {
+        if ((entryPoints?.Count ?? 0) == 0)
+        {
+            return null;
+        }
+
+        var normalized = entryPoints!
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Label))
+            .OrderBy(entry => entry.Order is null ? 1 : 0)
+            .ThenBy(entry => entry.Order ?? int.MaxValue)
+            .ThenBy(entry => entry.SourceIndex)
+            .Select(
+                entry => new DocsSearchIndexEntryPoint(
+                    entry.Label.Trim(),
+                    string.IsNullOrWhiteSpace(entry.Summary) ? null : entry.Summary.Trim(),
+                    string.IsNullOrWhiteSpace(entry.Target) ? null : entry.Target.Trim(),
+                    string.IsNullOrWhiteSpace(entry.Href) ? null : entry.Href.Trim(),
+                    entry.Keywords ?? []))
+            .ToArray();
+        return normalized.Length == 0 ? null : normalized;
     }
 
     private static string ResolveSearchIndexTitle(DocNode doc)
@@ -2072,8 +2138,15 @@ public class DocAggregator
     /// Merges README content into the corresponding namespace overview pages.
     /// </summary>
     /// <param name="nodes">The list of documentation nodes to process; README nodes used for merging are removed from this list.</param>
-    private static void MergeNamespaceReadmes(List<DocNode> nodes)
+    /// <param name="renderEntryPointPanel">Whether to render validated namespace entry-point metadata into the merged namespace content.</param>
+    /// <param name="logger">Logger used for namespace entry-point target diagnostics.</param>
+    /// <returns>Non-fatal harvest diagnostics produced while merging namespace README metadata.</returns>
+    private static IReadOnlyList<DocHarvestDiagnostic> MergeNamespaceReadmes(
+        List<DocNode> nodes,
+        bool renderEntryPointPanel,
+        ILogger logger)
     {
+        var diagnostics = new List<DocHarvestDiagnostic>();
         var namespaceNodes = nodes
             .Where(
                 n => string.IsNullOrEmpty(n.ParentPath)
@@ -2106,14 +2179,43 @@ public class DocAggregator
 
             if (!string.IsNullOrWhiteSpace(readmeNode.Content) || readmeNode.Metadata != null)
             {
+                var readmeMetadata = PrepareNamespaceReadmeMetadata(
+                    readmeNode.Metadata,
+                    readmeNode.Path,
+                    namespaceNode.Metadata);
                 var mergedContent = string.IsNullOrWhiteSpace(readmeNode.Content)
                     ? namespaceNode.Content
                     : MergeNamespaceIntroIntoContent(namespaceNode.Content, readmeNode.Content);
-                var mergedMetadata = DocMetadata.Merge(
-                    AddNamespaceReadmeContributorSource(
-                        RemoveDerivedNamespaceReadmeOverrides(readmeNode.Metadata),
-                        readmeNode.Path),
-                    namespaceNode.Metadata);
+                var mergedMetadata = DocMetadata.Merge(readmeMetadata, namespaceNode.Metadata);
+                if (namespaceNode.Metadata?.Contributor?.HideContributorInfo == true
+                    && mergedMetadata is { Contributor: not null })
+                {
+                    mergedMetadata = mergedMetadata with
+                    {
+                        Contributor = mergedMetadata.Contributor with { HideContributorInfo = true }
+                    };
+                }
+
+                if (renderEntryPointPanel)
+                {
+                    var panelResult = NamespaceEntryPointPanelRenderer.Render(
+                        namespaceName,
+                        mergedContent,
+                        CombineOutlines(readmeNode.Outline, namespaceNode.Outline),
+                        mergedMetadata?.EntryPoints);
+                    mergedContent = panelResult.Content;
+                    diagnostics.AddRange(panelResult.Diagnostics);
+                    foreach (var diagnostic in panelResult.Diagnostics)
+                    {
+                        logger.LogWarning(
+                            "AppSurface Docs namespace README warning {Code}: {Problem} Cause: {Cause} Fix: {Fix}",
+                            diagnostic.Code,
+                            diagnostic.Problem,
+                            diagnostic.Cause,
+                            diagnostic.Fix);
+                    }
+                }
+
                 var mergedNamespaceNode = new DocNode(
                     mergedMetadata?.Title ?? namespaceNode.Title,
                     namespaceNode.Path,
@@ -2136,6 +2238,8 @@ public class DocAggregator
 
             nodes.RemoveAll(n => string.Equals(n.Path, readmeNode.Path, StringComparison.OrdinalIgnoreCase));
         }
+
+        return diagnostics;
     }
 
     private static IReadOnlyList<DocOutlineItem>? CombineOutlines(
@@ -2159,10 +2263,21 @@ public class DocAggregator
             .ToArray();
     }
 
-    private static DocMetadata? AddNamespaceReadmeContributorSource(DocMetadata? metadata, string readmePath)
+    private static DocMetadata? PrepareNamespaceReadmeMetadata(
+        DocMetadata? metadata,
+        string readmePath,
+        DocMetadata? namespaceMetadata)
     {
+        var sourceAliases = BuildConsumedNamespaceReadmeRedirectAliases(readmePath);
+        var redirectAliases = MergeDistinctLists(
+            sourceAliases,
+            MergeDistinctLists(metadata?.RedirectAliases, namespaceMetadata?.RedirectAliases));
         var readmeContributor = new DocContributorMetadata
         {
+            HideContributorInfo = metadata?.Contributor?.HideContributorInfo,
+            SourceUrlOverride = metadata?.Contributor?.SourceUrlOverride,
+            EditUrlOverride = metadata?.Contributor?.EditUrlOverride,
+            LastUpdatedOverride = metadata?.Contributor?.LastUpdatedOverride,
             SourcePathOverride = readmePath
         };
 
@@ -2170,34 +2285,76 @@ public class DocAggregator
         {
             return new DocMetadata
             {
+                RedirectAliases = redirectAliases,
                 Contributor = readmeContributor
             };
         }
 
-        return metadata with
+        return new DocMetadata
         {
-            Contributor = DocContributorMetadata.Merge(metadata.Contributor, readmeContributor)
-        };
-    }
-
-    private static DocMetadata? RemoveDerivedNamespaceReadmeOverrides(DocMetadata? metadata)
-    {
-        if (metadata is null)
-        {
-            return null;
-        }
-
-        return metadata with
-        {
+            Title = metadata.TitleIsDerived == true ? null : metadata.Title,
+            TitleIsDerived = metadata.TitleIsDerived == true ? null : metadata.TitleIsDerived,
+            Summary = metadata.Summary,
+            SummaryIsDerived = metadata.SummaryIsDerived,
             PageType = metadata.PageTypeIsDerived == true ? null : metadata.PageType,
             PageTypeIsDerived = metadata.PageTypeIsDerived == true ? null : metadata.PageTypeIsDerived,
             Audience = metadata.AudienceIsDerived == true ? null : metadata.Audience,
             AudienceIsDerived = metadata.AudienceIsDerived == true ? null : metadata.AudienceIsDerived,
             Component = metadata.ComponentIsDerived == true ? null : metadata.Component,
             ComponentIsDerived = metadata.ComponentIsDerived == true ? null : metadata.ComponentIsDerived,
+            Aliases = metadata.Aliases,
+            RedirectAliases = redirectAliases,
+            Keywords = metadata.Keywords,
             NavGroup = metadata.NavGroupIsDerived == true ? null : metadata.NavGroup,
-            NavGroupIsDerived = metadata.NavGroupIsDerived == true ? null : metadata.NavGroupIsDerived
+            NavGroupIsDerived = metadata.NavGroupIsDerived == true ? null : metadata.NavGroupIsDerived,
+            RelatedPages = metadata.RelatedPages,
+            Breadcrumbs = metadata.Breadcrumbs,
+            BreadcrumbsMatchPathTargets = metadata.BreadcrumbsMatchPathTargets,
+            EntryPoints = metadata.EntryPoints,
+            Contributor = DocContributorMetadata.Merge(metadata.Contributor, readmeContributor)
         };
+    }
+
+    private static IReadOnlyList<string> BuildConsumedNamespaceReadmeRedirectAliases(string readmePath)
+    {
+        var normalized = NormalizeLookupPath(readmePath);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return [];
+        }
+
+        var aliases = new List<string> { normalized };
+        if (normalized.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+        {
+            aliases.Add(normalized + ".html");
+            aliases.Add(normalized[..^".md".Length]);
+        }
+
+        return aliases
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string>? MergeDistinctLists(
+        IReadOnlyList<string>? primary,
+        IReadOnlyList<string>? fallback)
+    {
+        if ((primary?.Count ?? 0) == 0)
+        {
+            return fallback;
+        }
+
+        if ((fallback?.Count ?? 0) == 0)
+        {
+            return primary;
+        }
+
+        return primary!
+            .Concat(fallback!)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     /// <summary>
