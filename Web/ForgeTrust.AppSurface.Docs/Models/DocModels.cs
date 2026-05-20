@@ -393,6 +393,28 @@ public sealed record DocOutlineMetadata
     /// </summary>
     public string? RepeatedHeadingPolicy { get; init; }
 
+    /// <summary>
+    /// Merges page outline metadata from a primary source and a fallback source.
+    /// </summary>
+    /// <param name="primary">
+    /// The preferred outline metadata. When this value is <see langword="null"/>, the fallback value is returned.
+    /// </param>
+    /// <param name="fallback">
+    /// The fallback outline metadata. When this value is <see langword="null"/>, the primary value is returned.
+    /// </param>
+    /// <returns>
+    /// The merged outline metadata, or <see langword="null"/> when both merged properties collapse to
+    /// <see langword="null"/>.
+    /// </returns>
+    /// <remarks>
+    /// <see cref="MaxHeadingLevel"/> selects the deepest heading level callers should include in the display outline,
+    /// and the primary value wins over the fallback value for that field. <see cref="RepeatedHeadingPolicy"/> controls
+    /// whether repeated H3 headings are included, suppressed automatically, or reduced to H2-only output; it is merged
+    /// with <see cref="DocTrustMergeHelpers.PreferNonBlank"/>, so a non-blank primary policy wins and blank or
+    /// whitespace-only values fall through to the fallback. If neither merged field has a value after this precedence
+    /// and whitespace handling, the method returns <see langword="null"/> so empty outline metadata does not survive
+    /// as a meaningless object.
+    /// </remarks>
     internal static DocOutlineMetadata? Merge(DocOutlineMetadata? primary, DocOutlineMetadata? fallback)
     {
         if (primary is null)

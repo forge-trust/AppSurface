@@ -231,6 +231,23 @@ public class DocModelsTests
     }
 
     [Fact]
+    public void OutlineMerge_ShouldReturnNull_WhenBothNormalizeToEmpty()
+    {
+        var primary = new DocOutlineMetadata
+        {
+            RepeatedHeadingPolicy = "   "
+        };
+        var fallback = new DocOutlineMetadata
+        {
+            RepeatedHeadingPolicy = ""
+        };
+
+        var merged = DocOutlineMetadata.Merge(primary, fallback);
+
+        Assert.Null(merged);
+    }
+
+    [Fact]
     public void Merge_ShouldTreatWhitespaceTitleAsMissing_AndKeepFallbackTitle()
     {
         var merged = DocMetadata.Merge(
