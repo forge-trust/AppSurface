@@ -30,9 +30,53 @@ internal static partial class AppSurfaceDocsHeadingSuppressor
             return content;
         }
 
-        return LeadingH1Regex().Replace(content, string.Empty, count: 1);
+        return StartsWithMarkdownH1Candidate(content)
+            ? LeadingH1Regex().Replace(content, string.Empty, count: 1)
+            : content;
     }
 
     [GeneratedRegex(@"\A(?:[\uFEFF\s]|<!--.*?-->)*<h1\b[^>]*>.*?</h1>\s*", RegexOptions.IgnoreCase | RegexOptions.Singleline, matchTimeoutMilliseconds: 100)]
     private static partial Regex LeadingH1Regex();
+
+    /// <summary>
+    /// Performs a cheap prefix scan for content that can safely be passed to the leading-H1 regex.
+    /// </summary>
+    /// <param name="content">The harvested HTML body that may begin with whitespace, a BOM, comments, or an <c>h1</c>.</param>
+    /// <returns>
+    /// <c>true</c> when the first meaningful token is an <c>h1</c> start tag; otherwise <c>false</c>, including when
+    /// an opening HTML comment is unterminated.
+    /// </returns>
+    /// <remarks>
+    /// This keeps the regex on the intended fast path and preserves authored content that starts with anything other
+    /// than ignorable leading trivia followed by Markdown's rendered page heading.
+    /// </remarks>
+    private static bool StartsWithMarkdownH1Candidate(string content)
+    {
+        var index = 0;
+        while (index < content.Length)
+        {
+            var current = content[index];
+            if (current == '\uFEFF' || char.IsWhiteSpace(current))
+            {
+                index++;
+                continue;
+            }
+
+            if (content.AsSpan(index).StartsWith("<!--", StringComparison.Ordinal))
+            {
+                var commentEnd = content.IndexOf("-->", index + 4, StringComparison.Ordinal);
+                if (commentEnd < 0)
+                {
+                    return false;
+                }
+
+                index = commentEnd + 3;
+                continue;
+            }
+
+            return content.AsSpan(index).StartsWith("<h1", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
 }

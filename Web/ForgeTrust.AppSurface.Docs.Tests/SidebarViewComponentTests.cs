@@ -269,6 +269,45 @@ public sealed class SidebarViewComponentTests
     }
 
     [Fact]
+    public async Task InvokeAsync_ShouldExposeJavaScriptApiGroupsInApiReferenceNavigation()
+    {
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Web", "Namespaces/ForgeTrust.AppSurface.Web", "API Reference"),
+                new DocNode(
+                    "RazorWire JavaScript API",
+                    "api/javascript/razorwire",
+                    "<p>RazorWire browser contracts.</p>",
+                    Metadata: new DocMetadata
+                    {
+                        NavGroup = "API Reference",
+                        PageType = "javascript-api",
+                        CanonicalSlug = "api/javascript/razorwire",
+                        Breadcrumbs =
+                        [
+                            "API Reference",
+                            "JavaScript",
+                            "RazorWire"
+                        ],
+                        Order = 250
+                    })
+            ]);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            var section = Assert.Single(model.Sections);
+            Assert.Equal(DocPublicSection.ApiReference, section.Section);
+            var javaScriptGroup = Assert.Single(section.Groups, group => group.Title == "JavaScript");
+            var link = Assert.Single(javaScriptGroup.Links);
+            Assert.Equal("RazorWire JavaScript API", link.Title);
+            Assert.Equal("/docs/api/javascript/razorwire", link.Href);
+            Assert.Contains(section.Groups, group => group.Title == "Web");
+        }
+    }
+
+    [Fact]
     public async Task InvokeAsync_ShouldTrimMetadataNavGroup_WhenGroupingDocs()
     {
         var (component, cache, memo) = CreateComponent(

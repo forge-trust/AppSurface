@@ -272,7 +272,8 @@ public class DocAggregator
         string HarvesterType,
         DocHarvesterHealthStatus Status,
         IReadOnlyList<DocNode> Docs,
-        DocHarvestDiagnostic? Diagnostic);
+        DocHarvestDiagnostic? Diagnostic,
+        IReadOnlyList<DocHarvestDiagnostic>? AdditionalDiagnostics = null);
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocAggregator"/> with the provided dependencies and determines the repository root.
@@ -315,7 +316,7 @@ public class DocAggregator
     /// Optional freshness resolver used by tests to simulate git-backed timestamps and failure modes.
     /// </param>
     /// <param name="harvesterTimeout">
-    /// Optional timeout override for each configured harvester during snapshot generation.
+    /// Optional timeout override for each active harvester during snapshot generation.
     /// </param>
     /// <param name="contributorFreshnessTimeout">
     /// Optional timeout override for snapshot-time contributor freshness resolution.
@@ -396,7 +397,7 @@ public class DocAggregator
     /// is used against the resolved repository root.
     /// </param>
     /// <param name="harvesterTimeout">
-    /// Optional timeout override for each configured harvester during snapshot generation. When
+    /// Optional timeout override for each active harvester during snapshot generation. When
     /// <see langword="null" />, the aggregator uses the default 30 second timeout.
     /// </param>
     /// <param name="contributorFreshnessTimeout">
@@ -713,7 +714,7 @@ public class DocAggregator
     /// Retrieves the cached docs snapshot, harvesting docs and generating the search-index payload when absent.
     /// </summary>
     /// <remarks>
-    /// When harvesting, each configured harvester is invoked; failures from individual harvesters are caught and logged. 
+    /// When harvesting, each active harvester is invoked; failures from individual harvesters are caught and logged.
     /// Contents are sanitized before being cached. If multiple nodes share the same Path, a warning is logged and the first occurrence is retained.
     /// The search-index payload is generated from the same harvested snapshot.
     /// Caller cancellation does not cancel shared snapshot computation; callers can cancel their own wait.
@@ -725,7 +726,7 @@ public class DocAggregator
     private async Task<CachedDocsSnapshot> GetCachedDocsSnapshotAsync()
     {
         var generation = Interlocked.Read(ref _cacheGeneration);
-        var harvesters = _harvesters;
+        var harvesters = _harvesters.Where(IsHarvesterActive).ToArray();
         var repositoryRoot = _repositoryRoot;
         var sanitizer = _sanitizer;
         var logger = _logger;
@@ -878,6 +879,11 @@ public class DocAggregator
         return await Task.WhenAll(tasks);
     }
 
+    private static bool IsHarvesterActive(IDocHarvester harvester)
+    {
+        return harvester is not IDocHarvesterActivation activation || activation.IsEnabled;
+    }
+
     private static async Task<HarvesterRunResult> RunHarvesterAsync(
         IDocHarvester harvester,
         string repositoryRoot,
@@ -891,10 +897,11 @@ public class DocAggregator
         {
             var harvestTask = harvester.HarvestAsync(repositoryRoot, timeoutCts.Token);
             var docs = await harvestTask.WaitAsync(harvesterTimeout) ?? [];
+            var additionalDiagnostics = CollectHarvestDiagnostics(harvester, harvesterType, logger);
             var status = docs.Count == 0
                 ? DocHarvesterHealthStatus.ReturnedEmpty
                 : DocHarvesterHealthStatus.Succeeded;
-            return new HarvesterRunResult(harvesterType, status, docs, Diagnostic: null);
+            return new HarvesterRunResult(harvesterType, status, docs, Diagnostic: null, additionalDiagnostics);
         }
         catch (TimeoutException ex)
         {
@@ -939,7 +946,7 @@ public class DocAggregator
                     "The harvester observed cancellation outside AppSurface Docs' timeout budget, so AppSurface Docs skipped its docs for this snapshot.",
                     "Check whether the harvester is observing an external cancellation token or canceling its own work."));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!IsFatalException(ex))
         {
             logger.LogError(
                 ex,
@@ -959,6 +966,41 @@ public class DocAggregator
                     "The harvester threw while scanning the docs repository, so AppSurface Docs skipped its docs for this snapshot.",
                     "Inspect the host logs for exception details, then fix the harvester configuration, repository root, or source content."));
         }
+    }
+
+    private static IReadOnlyList<DocHarvestDiagnostic> CollectHarvestDiagnostics(
+        IDocHarvester harvester,
+        string harvesterType,
+        ILogger logger)
+    {
+        if (harvester is not IDocHarvesterDiagnosticProvider diagnosticProvider)
+        {
+            return [];
+        }
+
+        try
+        {
+            return diagnosticProvider.GetHarvestDiagnostics() ?? [];
+        }
+        catch (Exception ex) when (!IsFatalException(ex))
+        {
+            logger.LogWarning(
+                ex,
+                "Harvester {HarvesterType} returned docs but failed to provide supplemental diagnostics. Continuing with harvested docs.",
+                harvesterType);
+            return [];
+        }
+    }
+
+    private static bool IsFatalException(Exception exception)
+    {
+        return exception is OutOfMemoryException
+            or StackOverflowException
+            or AccessViolationException
+            or AppDomainUnloadedException
+            or BadImageFormatException
+            or CannotUnloadAppDomainException
+            or InvalidProgramException;
     }
 
     private static HarvesterRunResult CreateTimedOutHarvesterRunResult(string harvesterType)
@@ -996,6 +1038,7 @@ public class DocAggregator
             .Select(result => result.Diagnostic)
             .OfType<DocHarvestDiagnostic>()
             .ToList();
+        diagnostics.AddRange(harvesterResults.SelectMany(result => result.AdditionalDiagnostics ?? []));
         diagnostics.AddRange(routeDiagnostics);
 
         if (harvesters.Length == 0)
@@ -1021,7 +1064,7 @@ public class DocAggregator
                 DocHarvestDiagnosticSeverity.Critical,
                 HarvesterType: null,
                 "All AppSurface Docs harvesters failed.",
-                "Every configured harvester failed, timed out, or canceled, so AppSurface Docs could not produce a trustworthy docs corpus.",
+                "Every active harvester failed, timed out, or canceled, so AppSurface Docs could not produce a trustworthy docs corpus.",
                 "Inspect the preceding harvester logs, fix the failing source or configuration, and refresh the AppSurface Docs cache.");
             diagnostics.Add(aggregateDiagnostic);
 

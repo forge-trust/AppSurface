@@ -513,6 +513,87 @@
 
     }
 
+    /**
+     * A RazorWire-enhanced form started submitting through Turbo.
+     * @public
+     * @namespace RazorWire
+     * @event razorwire:form:submit-start
+     * @target form[data-rw-form="true"]
+     * @firesWhen Turbo begins submitting a RazorWire-enhanced form and RazorWire marks it busy.
+     * @bubbles true
+     * @cancelable false
+     * @property {HTMLFormElement} detail.form - Submitted form.
+     * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
+     * @example
+     * form.addEventListener('razorwire:form:submit-start', event => {
+     *   event.detail.form.classList.add('is-saving');
+     * });
+     */
+
+    /**
+     * A RazorWire-enhanced form submission failed and custom UI may handle the failure.
+     * @public
+     * @namespace RazorWire
+     * @event razorwire:form:failure
+     * @target form[data-rw-form="true"]
+     * @firesWhen a RazorWire-enhanced form receives an unhandled failure response or a network error.
+     * @bubbles true
+     * @cancelable true
+     * @property {HTMLFormElement} detail.form - Submitted form.
+     * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
+     * @property {number|null} detail.statusCode - HTTP status code when a response was received.
+     * @property {boolean} detail.handled - Whether the server response already handled the failure.
+     * @property {string} detail.responseKind - Failure category: turbo-stream, html, json, unknown, or network.
+     * @property {Element|null} detail.target - Element RazorWire will use for generated failure UI.
+     * @property {string} detail.message - Reader-facing fallback message.
+     * @property {Object|null} detail.developmentDiagnostic - Development-only diagnostic payload when enabled.
+     * @example
+     * form.addEventListener('razorwire:form:failure', event => {
+     *   event.preventDefault();
+     *   renderCustomFailure(event.detail);
+     * });
+     */
+
+    /**
+     * Development diagnostics are available for a failed RazorWire-enhanced form submission.
+     * @public
+     * @namespace RazorWire
+     * @event razorwire:form:diagnostic
+     * @target form[data-rw-form="true"]
+     * @firesWhen development diagnostics are enabled and RazorWire can explain a failed form submission.
+     * @bubbles true
+     * @cancelable false
+     * @property {HTMLFormElement} detail.form - Submitted form.
+     * @property {number|null} detail.statusCode - HTTP status code when a response was received.
+     * @property {string} detail.title - Short diagnostic title.
+     * @property {string} detail.detail - Diagnostic explanation.
+     * @property {string} detail.docsHref - Repository-relative documentation target for the diagnostic.
+     * @property {string[]} detail.hints - Suggested fixes for the developer.
+     * @example
+     * form.addEventListener('razorwire:form:diagnostic', event => {
+     *   console.debug(event.detail.title, event.detail.hints);
+     * });
+     */
+
+    /**
+     * A RazorWire-enhanced form finished submitting.
+     * @public
+     * @namespace RazorWire
+     * @event razorwire:form:submit-end
+     * @target form[data-rw-form="true"]
+     * @firesWhen Turbo finishes a RazorWire-enhanced form submission or RazorWire handles a fetch error.
+     * @bubbles true
+     * @cancelable false
+     * @property {HTMLFormElement} detail.form - Submitted form.
+     * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
+     * @property {boolean} detail.success - Whether Turbo reported a successful submission.
+     * @property {number|null} detail.statusCode - HTTP status code when a response was received.
+     * @property {boolean} detail.handled - Whether the server response already handled the result.
+     * @example
+     * form.addEventListener('razorwire:form:submit-end', event => {
+     *   event.detail.form.classList.remove('is-saving');
+     * });
+     */
     class FormFailureManager {
         constructor(config) {
             this.config = config;
@@ -975,6 +1056,12 @@
         formFailureManager.start();
     }
 
+    /**
+     * Browser global that exposes RazorWire runtime managers and runtime configuration for diagnostics and advanced integrations.
+     * @public
+     * @namespace RazorWire
+     * @global
+     */
     window.RazorWire = {
         ...(window.RazorWire || {}),
         config: { ...((window.RazorWire && window.RazorWire.config) || {}), ...runtimeConfig },

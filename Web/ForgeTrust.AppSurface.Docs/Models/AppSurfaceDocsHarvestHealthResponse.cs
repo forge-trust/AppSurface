@@ -33,7 +33,7 @@ public sealed record AppSurfaceDocsHarvestHealthResponse
     public AppSurfaceDocsHarvestHealthVerification Verification { get; init; } = new();
 
     /// <summary>
-    /// Gets the number of configured harvesters in the snapshot.
+    /// Gets the number of active harvesters that participated in the snapshot.
     /// </summary>
     [JsonPropertyName("totalHarvesters")]
     public int TotalHarvesters { get; init; }

@@ -132,7 +132,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - The primary AppSurface Docs Pages export now uses `appsurface docs export --repo .` instead of the generic `razorwire export --project` child-process path, so CI exercises the public AppSurface docs command, in-process standalone host startup, strict harvest failure, and CDN validation together.
 - RazorWire CDN export now ignores authoring-only source-navigation anchors, including repo-relative links to common source and project files and app-rendered anchors marked with `data-rw-export-ignore`.
 - AppSurface Docs snapshot caching is now configurable with `AppSurfaceDocs:CacheExpirationMinutes`, so development hosts can shorten reuse while production hosts can choose a longer docs and search-index cache lifetime.
-- AppSurface Docs source harvesting now has configurable global, Markdown, and C# path-policy scopes, including include/exclude globs and named default-exclusion controls for build output, hidden directories, test projects, and example C# source.
+- AppSurface Docs source harvesting now has configurable global, Markdown, C#, and JavaScript path-policy scopes, including include/exclude globs and named default-exclusion controls for build output, hidden directories, test projects, and example C# source.
 - Shared AppSurface Docs badges, metadata chips, provenance strips, and trust bars now live in the shared package stylesheet while `search.css` stays focused on search-specific UI.
 - AppSurface Docs shared package chrome and search UI now consume one internal `--docs-*` design-token layer, with `search.css` fallback aliases so exact published release trees keep styled search controls even when they load the search stylesheet without the generated package stylesheet.
 - AppSurface Docs legacy asset redirects now validate app-relative redirect targets before preserving cache-busting query strings, closing an open-redirect path while keeping virtual-path deployments and packaged asset fallbacks working.
@@ -153,7 +153,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs now uses the new AppSurface brand system across the docs shell, landing page, search workspace, iconography, and responsive article outline, while keeping the UI focused on developer wayfinding instead of marketing chrome.
 - AppSurface Docs search result rows now use one semantic full-row link, so touch users can tap anywhere in a visible result while keyboard focus, copied links, and open-in-new-tab behavior stay native.
 - First localization foundation slice for AppSurface Docs: disabled-by-default locale configuration, localized front matter metadata, inferred `README.fr.md`-style variant grouping, diagnostics for unsupported or ambiguous locale signals, and an internal route/search graph seam for later visible localized pages.
-- AppSurface Docs now has a test-backed JavaScript parser decision probe for future public API harvesting, covering Acornima span behavior, malformed syntax handling, BSD-3-Clause compliance expectations, and the first max-file-size recommendation before that parser moves into product code.
+- AppSurface Docs now has an opt-in JavaScript public API harvester backed by Acornima, with narrow include globs, conservative default exclusions, `@public` doclets, source-provenance links, structured diagnostics, and RazorWire form-event dogfood coverage in the primary docs export.
 
 ### RazorWire form UX
 

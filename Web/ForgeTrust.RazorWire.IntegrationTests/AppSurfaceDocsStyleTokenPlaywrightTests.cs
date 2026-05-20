@@ -89,6 +89,19 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
             """,
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const activeOutline = document.querySelector("#docs-page-outline a[href='#files-behind-the-hero-flow']");
+              return Boolean(activeOutline)
+                && window
+                  .getComputedStyle(activeOutline, '::before')
+                  .backgroundColor
+                  .includes('37, 99, 235');
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
 
         var detailStyles = await page.EvaluateAsync<string[]>(
             """
@@ -124,6 +137,19 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
             State = WaitForSelectorState.Visible,
             Timeout = 15_000
         });
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+              const trustBar = document.querySelector('.docs-trust-bar');
+              return Boolean(trustBar)
+                && window
+                  .getComputedStyle(trustBar)
+                  .borderTopColor
+                  .includes('37, 99, 235');
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
 
         var trustStyles = await page.EvaluateAsync<string[]>(
             """

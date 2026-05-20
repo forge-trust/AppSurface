@@ -45,10 +45,40 @@ public class AppSurfaceDocsHeadingSuppressorTests
     }
 
     [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldKeepContent_WhenLeadingCommentIsNotFollowedByH1()
+    {
+        var content = "<!-- docs:snippet start -->\n<p>Intro</p>\n<h1 id=\"deep-cut\">Deep Cut</h1>";
+
+        var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal(content, suppressed);
+    }
+
+    [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldKeepContent_WhenLeadingCommentIsUnterminated()
+    {
+        var content = "<!-- docs:snippet start\n<h1 id=\"quickstart\">Quickstart</h1>";
+
+        var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal(content, suppressed);
+    }
+
+    [Fact]
     public void SuppressLeadingMarkdownH1_ShouldKeepEmptyContent()
     {
         var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(string.Empty, shellOwnsH1: true);
 
         Assert.Equal(string.Empty, suppressed);
+    }
+
+    [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldKeepWhitespaceOnlyContent()
+    {
+        var content = " \n\t";
+
+        var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal(content, suppressed);
     }
 }

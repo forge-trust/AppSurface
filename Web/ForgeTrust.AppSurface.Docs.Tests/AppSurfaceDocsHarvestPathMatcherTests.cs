@@ -76,4 +76,21 @@ public sealed class AppSurfaceDocsHarvestPathMatcherTests
 
         Assert.Null(matcher.MatchDirectoryOrDescendantSubtree("docs"));
     }
+
+    [Theory]
+    [InlineData("src/public*.js", "src", true)]
+    [InlineData("src/public*.js", "src/nested", false)]
+    [InlineData("src/**/*.js", "src/nested/deeper", true)]
+    [InlineData("*.js", "src", false)]
+    [InlineData("src/*/public.js", "src/widget", true)]
+    [InlineData("src/*/public.js", "src/widget/deeper", false)]
+    public void MatchFileInDirectoryOrDescendant_IdentifiesPotentialFileSubtrees(
+        string pattern,
+        string relativeDirectory,
+        bool expectedMatch)
+    {
+        var matcher = new AppSurfaceDocsHarvestPathMatcher([pattern]);
+
+        Assert.Equal(expectedMatch, matcher.MatchFileInDirectoryOrDescendant(relativeDirectory) is not null);
+    }
 }

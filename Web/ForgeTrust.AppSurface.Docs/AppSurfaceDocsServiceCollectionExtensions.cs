@@ -88,6 +88,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Harvest.Markdown.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
                     options.Harvest.CSharp ??= new AppSurfaceDocsCSharpHarvestOptions();
                     options.Harvest.CSharp.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
+                    options.Harvest.JavaScript ??= new AppSurfaceDocsJavaScriptHarvestOptions();
+                    options.Harvest.JavaScript.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
                     options.Bundle ??= new AppSurfaceDocsBundleOptions();
                     options.Sidebar ??= new AppSurfaceDocsSidebarOptions();
                     options.Contributor ??= new AppSurfaceDocsContributorOptions();
@@ -119,6 +121,10 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Harvest.CSharp.ExcludeGlobs = NormalizeGlobArray(options.Harvest.CSharp.ExcludeGlobs);
                     options.Harvest.CSharp.DefaultExclusions =
                         NormalizeDefaultExclusions(options.Harvest.CSharp.DefaultExclusions);
+                    options.Harvest.JavaScript.IncludeGlobs = NormalizeGlobArray(options.Harvest.JavaScript.IncludeGlobs);
+                    options.Harvest.JavaScript.ExcludeGlobs = NormalizeGlobArray(options.Harvest.JavaScript.ExcludeGlobs);
+                    options.Harvest.JavaScript.DefaultExclusions =
+                        NormalizeDefaultExclusions(options.Harvest.JavaScript.DefaultExclusions);
 
                     options.Source.RepositoryRoot = options.Source.RepositoryRoot?.Trim();
                     options.Bundle.Path = NormalizeOrNull(options.Bundle.Path);
@@ -177,6 +183,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.TryAddSingleton<AppSurfaceDocsHarvestPathPolicy>();
         TryAddMarkdownHarvester(services);
         TryAddCSharpDocHarvester(services);
+        TryAddJavaScriptDocHarvester(services);
         services.TryAddSingleton<DocFeaturedPageResolver>();
         services.TryAddSingleton<DocAggregator>();
         services.TryAddEnumerable(
@@ -217,6 +224,24 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.AddSingleton<IDocHarvester>(
             sp => new CSharpDocHarvester(
                 sp.GetRequiredService<ILogger<CSharpDocHarvester>>(),
+                sp.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>()));
+    }
+
+    private static void TryAddJavaScriptDocHarvester(IServiceCollection services)
+    {
+        if (services.Any(
+                descriptor => descriptor.ServiceType == typeof(JavaScriptDocHarvesterRegistrationMarker)
+                              || descriptor.ServiceType == typeof(IDocHarvester)
+                              && descriptor.ImplementationType == typeof(JavaScriptDocHarvester)))
+        {
+            return;
+        }
+
+        services.AddSingleton(new JavaScriptDocHarvesterRegistrationMarker());
+        services.AddSingleton<IDocHarvester>(
+            sp => new JavaScriptDocHarvester(
+                sp.GetRequiredService<AppSurfaceDocsOptions>(),
+                sp.GetRequiredService<ILogger<JavaScriptDocHarvester>>(),
                 sp.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>()));
     }
 
@@ -271,4 +296,6 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     private sealed class MarkdownHarvesterRegistrationMarker;
 
     private sealed class CSharpDocHarvesterRegistrationMarker;
+
+    private sealed class JavaScriptDocHarvesterRegistrationMarker;
 }

@@ -2999,6 +2999,28 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldPreserveHarvestedDocs_WhenDiagnosticProviderThrows()
+    {
+        var harvester = new DiagnosticThrowingHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]);
+        var aggregator = CreateHarvestHealthAggregator([harvester]);
+
+        var docs = await aggregator.GetDocsAsync();
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Single(docs);
+        Assert.Equal(DocHarvestHealthStatus.Healthy, health.Status);
+        Assert.Equal(1, health.TotalHarvesters);
+        Assert.Equal(1, health.SuccessfulHarvesters);
+        Assert.Equal(0, health.FailedHarvesters);
+        var harvesterHealth = Assert.Single(health.Harvesters);
+        Assert.Equal(nameof(DiagnosticThrowingHarvester), harvesterHealth.HarvesterType);
+        Assert.Equal(DocHarvesterHealthStatus.Succeeded, harvesterHealth.Status);
+        Assert.Equal(1, harvesterHealth.DocCount);
+        Assert.Empty(health.Diagnostics);
+        Assert.Equal(1, CountLogCalls(_loggerFake, LogLevel.Warning, "failed to provide supplemental diagnostics"));
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldReturnEmpty_WhenRegisteredHarvestersReturnNoDocs()
     {
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
@@ -3086,6 +3108,40 @@ public class DocAggregatorTests : IDisposable
         Assert.Equal(DocHarvestDiagnosticCodes.HarvesterFailed, failed.Diagnostic?.Code);
         Assert.DoesNotContain(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.AllFailed);
         Assert.Equal(0, CountLogCalls(_loggerFake, LogLevel.Critical));
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldRethrowFatalHarvesterExceptions()
+    {
+        var fatalHarvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => fatalHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new OutOfMemoryException("Fatal harvester failure."));
+        var aggregator = CreateHarvestHealthAggregator([fatalHarvester]);
+
+        var exception = await Assert.ThrowsAsync<OutOfMemoryException>(() => aggregator.GetHarvestHealthAsync());
+
+        Assert.Equal("Fatal harvester failure.", exception.Message);
+        Assert.Equal(0, CountLogCalls(_loggerFake, LogLevel.Error));
+        Assert.Equal(0, CountLogCalls(_loggerFake, LogLevel.Critical));
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldIgnoreDisabledOptionalHarvesters_WhenResolvingAggregateFailure()
+    {
+        var failingHarvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => failingHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new InvalidOperationException("Harvester boom"));
+        var disabledHarvester = new DisabledHarvester();
+        var aggregator = CreateHarvestHealthAggregator([failingHarvester, disabledHarvester]);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        Assert.Equal(1, health.TotalHarvesters);
+        Assert.Equal(0, health.SuccessfulHarvesters);
+        Assert.Equal(1, health.FailedHarvesters);
+        Assert.DoesNotContain(health.Harvesters, item => item.HarvesterType == nameof(DisabledHarvester));
+        Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.AllFailed);
     }
 
     [Fact]
@@ -4084,6 +4140,59 @@ public class DocAggregatorTests : IDisposable
         public void Release()
         {
             _release.TrySetResult([new DocNode("Late", "late.md", "late")]);
+        }
+    }
+
+    /// <summary>
+    /// Test-only optional harvester that must be excluded from active harvest health accounting.
+    /// </summary>
+    private sealed class DisabledHarvester : IDocHarvester, IDocHarvesterActivation
+    {
+        /// <summary>
+        /// Gets a value indicating that this test harvester is intentionally inactive.
+        /// </summary>
+        public bool IsEnabled => false;
+
+        /// <summary>
+        /// Throws if invoked, proving inactive harvesters are filtered before harvest execution.
+        /// </summary>
+        /// <param name="rootPath">The repository root that would be harvested if this harvester were active.</param>
+        /// <param name="cancellationToken">The snapshot cancellation token that would be passed to an active harvester.</param>
+        /// <returns>No value; this method should never be reached.</returns>
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Disabled harvesters should not participate.");
+        }
+    }
+
+    /// <summary>
+    /// Test-only diagnostic provider that returns docs successfully and then fails while reporting supplemental diagnostics.
+    /// </summary>
+    /// <param name="docs">The documentation nodes to return from harvest execution.</param>
+    private sealed class DiagnosticThrowingHarvester(IReadOnlyList<DocNode> docs) : IDocHarvester, IDocHarvesterDiagnosticProvider
+    {
+        /// <summary>
+        /// Returns the configured documentation nodes so tests can isolate diagnostic-provider failures.
+        /// </summary>
+        /// <param name="rootPath">The repository root passed to the harvester.</param>
+        /// <param name="cancellationToken">The snapshot cancellation token.</param>
+        /// <returns>The documentation nodes supplied to the test helper.</returns>
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(docs);
+        }
+
+        /// <summary>
+        /// Throws to verify supplemental diagnostic failures do not discard already harvested documentation.
+        /// </summary>
+        /// <returns>No value; this method always throws.</returns>
+        public IReadOnlyList<DocHarvestDiagnostic> GetHarvestDiagnostics()
+        {
+            throw new InvalidOperationException("diagnostics unavailable");
         }
     }
 
