@@ -57,8 +57,12 @@ public sealed class AppSurfaceDocsPublicRebrandTests
     public void PublicSurface_ShouldNotContainLegacyRazorDocsBranding()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var offenders = PublicSurfaceRoots
+        var publicSurfacePaths = PublicSurfaceRoots
             .Select(root => CombineUnderRepoRoot(repoRoot, root))
+            .ToArray();
+        AssertPublicSurfaceRootsExist(repoRoot, publicSurfacePaths);
+
+        var offenders = publicSurfacePaths
             .SelectMany(EnumerateTextFiles)
             .SelectMany(file => FindLegacyMentions(repoRoot, file))
             .Order(StringComparer.Ordinal)
@@ -111,8 +115,12 @@ public sealed class AppSurfaceDocsPublicRebrandTests
     public void PublicProse_ShouldUseSpacedAppSurfaceDocsBranding()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var offenders = PublicSurfaceRoots
+        var publicSurfacePaths = PublicSurfaceRoots
             .Select(root => CombineUnderRepoRoot(repoRoot, root))
+            .ToArray();
+        AssertPublicSurfaceRootsExist(repoRoot, publicSurfacePaths);
+
+        var offenders = publicSurfacePaths
             .SelectMany(EnumerateProseFiles)
             .SelectMany(file => FindUnspacedAppSurfaceDocsProseMentions(repoRoot, file))
             .Order(StringComparer.Ordinal)
