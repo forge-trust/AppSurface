@@ -1,13 +1,19 @@
 using System.Collections.Concurrent;
 using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.RazorWire.Cli;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -927,6 +933,37 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task AppSurfaceDocsHarvestSummaryReader_Should_Read_Aggregator_Health()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
+        using var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        var aggregator = new DocAggregator(
+            [new StaticDocHarvester([new DocNode("Intro", "README.md", "<p>Intro</p>")])],
+            new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions
+                {
+                    RepositoryRoot = repository.Path
+                }
+            },
+            new TestWebHostEnvironment(repository.Path),
+            new Memo(memoryCache),
+            new PassthroughDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+        using var host = new TrackingHost(configureServices: services => services.AddSingleton(aggregator));
+        var reader = new AppSurfaceDocsHarvestSummaryReader();
+
+        var summary = await reader.ReadAsync(host, CancellationToken.None);
+
+        Assert.NotNull(summary);
+        Assert.Equal(DocHarvestHealthStatus.Healthy, summary.Status);
+        Assert.Equal(1, summary.TotalDocs);
+        Assert.Equal(1, summary.TotalHarvesters);
+        Assert.Equal(1, summary.SuccessfulHarvesters);
+        Assert.Equal(0, summary.DiagnosticCount);
+    }
+
+    [Fact]
     public async Task AppSurfaceDocsStandaloneHostRunner_Should_Log_When_Browser_Launch_Fails()
     {
         var loggerProvider = new InMemoryLoggerProvider();
@@ -1006,6 +1043,22 @@ public sealed class ProgramEntryPointTests
         {
             starter.Complete(new TrackingHost());
         }
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Translate_Startup_Cancellation_To_Startup_Timeout()
+    {
+        using var loggerFactory = LoggerFactory.Create(static builder => { });
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            new CapturingBrowserLauncher(),
+            new CancelingPreviewHostStarter());
+
+        var ex = await Assert.ThrowsAsync<TimeoutException>(
+            () => runner.RunAsync(["--environment", "Development"], TimeSpan.FromSeconds(30), CancellationToken.None));
+
+        Assert.Contains("AppSurface Docs preview host did not start within 30 seconds.", ex.Message, StringComparison.Ordinal);
+        Assert.IsType<OperationCanceledException>(ex.InnerException);
     }
 
     [Fact]
@@ -1249,7 +1302,7 @@ public sealed class ProgramEntryPointTests
     }
 
     [Theory]
-    [InlineData("--environment")]
+    [InlineData("--environment=Development")]
     [InlineData("--environment", "--Some:Setting", "value")]
     public void AppSurfaceDocsPreviewUrlResolver_Should_Ignore_Incomplete_Environment_Probe_Arguments(params string[] args)
     {
@@ -1699,6 +1752,37 @@ public sealed class ProgramEntryPointTests
         }
     }
 
+    private sealed class StaticDocHarvester(IReadOnlyList<DocNode> docs) : IDocHarvester
+    {
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(docs);
+        }
+    }
+
+    private sealed class PassthroughDocsHtmlSanitizer : IAppSurfaceDocsHtmlSanitizer
+    {
+        public string Sanitize(string html)
+        {
+            return html;
+        }
+    }
+
+    private sealed class TestWebHostEnvironment(string contentRootPath) : IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = Environments.Development;
+
+        public string ApplicationName { get; set; } = "ForgeTrust.AppSurface.Cli.Tests";
+
+        public string WebRootPath { get; set; } = contentRootPath;
+
+        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
+
+        public string ContentRootPath { get; set; } = contentRootPath;
+
+        public IFileProvider ContentRootFileProvider { get; set; } = new PhysicalFileProvider(contentRootPath);
+    }
+
     private sealed class CancelingHarvestSummaryReader(CancellationTokenSource cancellationTokenSource) : IAppSurfaceDocsHarvestSummaryReader
     {
         public Task<AppSurfaceDocsHarvestSummary?> ReadAsync(IHost host, CancellationToken cancellationToken)
@@ -1720,6 +1804,14 @@ public sealed class ProgramEntryPointTests
             Args = args;
             StartupToken = cancellationToken;
             return Task.FromResult(host);
+        }
+    }
+
+    private sealed class CancelingPreviewHostStarter : IAppSurfaceDocsPreviewHostStarter
+    {
+        public Task<IHost> BuildAndStartAsync(AppSurfaceDocsPreviewHostArgs args, CancellationToken cancellationToken)
+        {
+            return Task.FromException<IHost>(new OperationCanceledException(cancellationToken));
         }
     }
 
@@ -1817,14 +1909,18 @@ public sealed class ProgramEntryPointTests
         private readonly ServiceProvider _services;
         private readonly TaskCompletionSource<object?> _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public TrackingHost(string boundAddress = "http://127.0.0.1:51234", bool throwOnStop = false)
+        public TrackingHost(
+            string boundAddress = "http://127.0.0.1:51234",
+            bool throwOnStop = false,
+            Action<IServiceCollection>? configureServices = null)
         {
             _throwOnStop = throwOnStop;
             Lifetime = new FakeHostApplicationLifetime();
-            _services = new ServiceCollection()
+            var services = new ServiceCollection()
                 .AddSingleton<IServer>(new FakeServer(boundAddress))
-                .AddSingleton<IHostApplicationLifetime>(Lifetime)
-                .BuildServiceProvider();
+                .AddSingleton<IHostApplicationLifetime>(Lifetime);
+            configureServices?.Invoke(services);
+            _services = services.BuildServiceProvider();
         }
 
         public IServiceProvider Services => _services;
