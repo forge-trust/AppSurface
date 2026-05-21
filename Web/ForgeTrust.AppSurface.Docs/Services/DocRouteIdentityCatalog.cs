@@ -80,6 +80,7 @@ internal sealed class DocRouteIdentityCatalog
     private readonly Dictionary<string, DocRouteIdentity> _publicIdentityByRoutePath;
     private readonly Dictionary<string, DocRouteIdentity> _aliasIdentityByRoutePath;
     private readonly HashSet<string> _reservedRoutePaths;
+    private readonly DocsUrlBuilder _docsUrlBuilder;
 
     private DocRouteIdentityCatalog(
         Dictionary<string, DocRouteIdentity> identityBySourcePath,
@@ -88,6 +89,7 @@ internal sealed class DocRouteIdentityCatalog
         Dictionary<string, DocRouteIdentity> publicIdentityByRoutePath,
         Dictionary<string, DocRouteIdentity> aliasIdentityByRoutePath,
         HashSet<string> reservedRoutePaths,
+        DocsUrlBuilder docsUrlBuilder,
         IReadOnlyList<DocHarvestDiagnostic> diagnostics)
     {
         _identityBySourcePath = identityBySourcePath;
@@ -96,6 +98,7 @@ internal sealed class DocRouteIdentityCatalog
         _publicIdentityByRoutePath = publicIdentityByRoutePath;
         _aliasIdentityByRoutePath = aliasIdentityByRoutePath;
         _reservedRoutePaths = reservedRoutePaths;
+        _docsUrlBuilder = docsUrlBuilder;
         Diagnostics = diagnostics;
     }
 
@@ -184,6 +187,7 @@ internal sealed class DocRouteIdentityCatalog
             publicIdentityByRoutePath,
             aliasIdentityByRoutePath,
             reservedRoutePaths,
+            docsUrlBuilder,
             diagnostics.ToArray());
     }
 
@@ -253,6 +257,18 @@ internal sealed class DocRouteIdentityCatalog
 
         publicRoutePath = string.Empty;
         return false;
+    }
+
+    internal AppSurfaceDocsRouteManifest BuildRouteManifest()
+    {
+        var diagnostics = Diagnostics.ToList();
+        var entries = _publicIdentityByRoutePath.Values
+            .OrderBy(identity => identity.PublicRoutePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(identity => identity.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .Select(identity => BuildRouteManifestEntry(identity, diagnostics))
+            .ToArray();
+
+        return new AppSurfaceDocsRouteManifest(entries, diagnostics);
     }
 
     /// <summary>
@@ -348,6 +364,80 @@ internal sealed class DocRouteIdentityCatalog
         return !string.IsNullOrWhiteSpace(identity.PublicRoutePath)
                && identity.PublicRoutePath.StartsWith("#", StringComparison.Ordinal)
                && identity.SourcePath.TrimStart().StartsWith("#", StringComparison.Ordinal);
+    }
+
+    private AppSurfaceDocsRouteManifestEntry BuildRouteManifestEntry(
+        DocRouteIdentity identity,
+        List<DocHarvestDiagnostic> diagnostics)
+    {
+        var recoveryAliases = identity.SourcePathIsMarkdown
+            ? BuildMarkdownSourceRecoveryAliases(identity, diagnostics)
+            : [];
+        var declaredAliases = identity.RedirectAliasPaths
+            .Select(alias => BuildRouteAlias(alias, AppSurfaceDocsRouteAliasKind.DeclaredRedirect))
+            .ToArray();
+
+        return new AppSurfaceDocsRouteManifestEntry(
+            identity.SourcePath,
+            identity.PublicRoutePath,
+            _docsUrlBuilder.BuildDocUrl(identity.PublicRoutePath),
+            recoveryAliases,
+            declaredAliases,
+            identity.SourcePathIsMarkdown);
+    }
+
+    private IReadOnlyList<AppSurfaceDocsRouteAlias> BuildMarkdownSourceRecoveryAliases(
+        DocRouteIdentity identity,
+        List<DocHarvestDiagnostic> diagnostics)
+    {
+        var aliases = new List<AppSurfaceDocsRouteAlias>(capacity: 2);
+        var sourceRoutePath = NormalizeRouteLookupPath(identity.SourcePath);
+        if (ShouldPublishImplicitRecoveryAlias(identity, sourceRoutePath, diagnostics))
+        {
+            aliases.Add(BuildRouteAlias(sourceRoutePath, AppSurfaceDocsRouteAliasKind.MarkdownSource));
+        }
+
+        var legacyHtmlRoutePath = NormalizeRouteLookupPath(BuildLegacyHtmlPath(identity.SourcePath));
+        if (ShouldPublishImplicitRecoveryAlias(identity, legacyHtmlRoutePath, diagnostics)
+            && aliases.All(alias => !string.Equals(alias.RoutePath, legacyHtmlRoutePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            aliases.Add(BuildRouteAlias(legacyHtmlRoutePath, AppSurfaceDocsRouteAliasKind.MarkdownSourceHtml));
+        }
+
+        return aliases;
+    }
+
+    private bool ShouldPublishImplicitRecoveryAlias(
+        DocRouteIdentity identity,
+        string aliasRoutePath,
+        List<DocHarvestDiagnostic> diagnostics)
+    {
+        if (string.IsNullOrWhiteSpace(aliasRoutePath)
+            || string.Equals(aliasRoutePath, identity.PublicRoutePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (_publicIdentityByRoutePath.TryGetValue(aliasRoutePath, out var publicIdentity)
+            && !string.Equals(publicIdentity.SourcePath, identity.SourcePath, StringComparison.OrdinalIgnoreCase))
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DocHarvestDiagnosticCodes.DocImplicitRecoveryAliasCollision,
+                $"Implicit source recovery alias '{DisplayRoute(aliasRoutePath)}' collides with another public doc route.",
+                $"'{publicIdentity.SourcePath}' owns the public route, so exporting '{aliasRoutePath}' as a redirect for '{identity.SourcePath}' would diverge from live routing.",
+                $"Choose a different canonical_slug for '{identity.SourcePath}' or '{publicIdentity.SourcePath}' if source-shaped paste recovery should be exported."));
+            return false;
+        }
+
+        return true;
+    }
+
+    private AppSurfaceDocsRouteAlias BuildRouteAlias(string routePath, AppSurfaceDocsRouteAliasKind kind)
+    {
+        return new AppSurfaceDocsRouteAlias(
+            routePath,
+            _docsUrlBuilder.BuildDocUrl(routePath),
+            kind);
     }
 
     internal static string NormalizeRouteLookupPath(string path)

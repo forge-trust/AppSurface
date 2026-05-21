@@ -91,6 +91,23 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task Layout_ShouldRenderCanonicalLink_WhenDetailsPageProvidesCanonicalUrl()
+    {
+        using var services = CreateServiceProvider(CreateDocsWithOverrides(
+        [
+            new("Intro", "guides/intro.md", "<p>Start here.</p>")
+        ]));
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Details",
+            controller => controller.Details("guides/intro"),
+            pathBase: "/some-base");
+
+        Assert.Contains("<link rel=\"canonical\" href=\"/some-base/docs/guides/intro\" />", html);
+    }
+
+    [Fact]
     public async Task Layout_ShouldRenderDefaultNeutralDocsIdentity()
     {
         using var services = CreateServiceProvider(CreateDocs());

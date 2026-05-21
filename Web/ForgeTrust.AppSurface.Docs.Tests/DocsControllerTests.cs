@@ -1189,6 +1189,7 @@ public class DocsControllerTests : IDisposable
         var model = Assert.IsType<DocDetailsViewModel>(viewResult.Model);
         Assert.Equal("Title", model.Title);
         Assert.Equal("Title", model.Document.Title);
+        Assert.Equal("/docs/target-path.html", model.CanonicalUrl);
     }
 
     [Fact]

@@ -845,6 +845,7 @@ public class DocsController : Controller
         {
             Document = pathBaseAwareDoc,
             Title = resolvedTitle,
+            CanonicalUrl = currentHref,
             Summary = summary,
             ShowSummary = showSummary,
             IsCSharpApiDoc = doc.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),

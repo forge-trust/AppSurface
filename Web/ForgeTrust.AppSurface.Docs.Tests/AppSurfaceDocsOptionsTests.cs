@@ -60,6 +60,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.routes.reserved_collision", DocHarvestDiagnosticCodes.DocReservedRouteCollision);
         Assert.Equal("appsurfacedocs.routes.doc_collision", DocHarvestDiagnosticCodes.DocRouteCollision);
         Assert.Equal("appsurfacedocs.routes.redirect_alias_collision", DocHarvestDiagnosticCodes.DocRedirectAliasCollision);
+        Assert.Equal("appsurfacedocs.routes.implicit_recovery_alias_collision", DocHarvestDiagnosticCodes.DocImplicitRecoveryAliasCollision);
         Assert.Equal("appsurfacedocs.routes.invalid_canonical_slug", DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug);
         Assert.Equal("appsurfacedocs.routes.invalid_redirect_alias", DocHarvestDiagnosticCodes.DocInvalidRedirectAlias);
         Assert.Equal("appsurfacedocs.routes.lossy_slug_normalization", DocHarvestDiagnosticCodes.DocLossySlugNormalization);

@@ -357,6 +357,23 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsExportCommand_Should_Reject_NonEmpty_Output_Directory()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-output-");
+        await File.WriteAllTextAsync(Path.Join(output.Path, "README.md.html"), "<html>stale</html>");
+        var runner = new CapturingAppSurfaceDocsExportRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "export", "--repo", repository.Path, "--output", output.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("must be empty before export starts", result.AllText, StringComparison.Ordinal);
+        Assert.Null(runner.Args);
+    }
+
+    [Fact]
     public async Task DocsExportCommand_Should_Derive_Default_Seed_From_Custom_DocsRoot()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");

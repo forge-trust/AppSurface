@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -160,8 +161,9 @@ public class ExportEngine
             await CrawlRouteAsync(client, route, context, cancellationToken);
         }
 
-        ValidateCdnExport(context);
+        ValidateExport(context);
         await MaterializeTextRoutesAsync(context, cancellationToken);
+        await MaterializeRedirectArtifactsAsync(context, cancellationToken);
 
         sw.Stop();
         _logger.LogInformation("Export completed in {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
@@ -360,6 +362,37 @@ public class ExportEngine
         }
     }
 
+    private async Task MaterializeRedirectArtifactsAsync(ExportContext context, CancellationToken cancellationToken)
+    {
+        var writtenArtifactPaths = new HashSet<string>(CreateArtifactPathComparer());
+        foreach (var artifact in context.RedirectArtifacts)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!context.ArtifactUrls.TryGetValue(artifact.CanonicalRoute, out var canonicalArtifactUrl))
+            {
+                continue;
+            }
+
+            var artifactPath = MapRouteToFilePath(artifact.AliasRoute, context.OutputPath, isHtml: true);
+            var artifactUrl = MapFilePathToArtifactUrl(artifactPath, context.OutputPath, artifact.AliasRoute);
+            if (writtenArtifactPaths.Add(artifactPath))
+            {
+                EnsureDirectoryExists(artifactPath);
+                await File.WriteAllTextAsync(
+                    artifactPath,
+                    BuildRedirectArtifactBody(canonicalArtifactUrl),
+                    cancellationToken);
+            }
+
+            context.ArtifactUrls[artifact.AliasRoute] = artifactUrl;
+            context.RouteOutcomes[artifact.AliasRoute] = ExportRouteOutcome.RedirectAliasArtifact(
+                artifact.AliasRoute,
+                artifactPath,
+                artifactUrl);
+        }
+    }
+
     private bool TryGetNormalizedSeedRoute(string seed, ExportContext context, out string normalized)
     {
         normalized = string.Empty;
@@ -460,14 +493,20 @@ public class ExportEngine
         await File.WriteAllTextAsync(filePath, cssForWrite, cancellationToken);
     }
 
-    private void ValidateCdnExport(ExportContext context)
+    private void ValidateExport(ExportContext context)
     {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        ValidateRedirectArtifacts(context, seen);
+
         if (context.Mode != ExportMode.Cdn)
         {
+            if (context.Diagnostics.Count > 0)
+            {
+                throw new ExportValidationException(context.Diagnostics);
+            }
+
             return;
         }
-
-        var seen = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var outcome in context.RouteOutcomes.Values.Where(o => !o.Succeeded))
         {
@@ -516,6 +555,98 @@ public class ExportEngine
         }
     }
 
+    private void ValidateRedirectArtifacts(ExportContext context, ISet<string> seen)
+    {
+        var aliasArtifactPathByCanonicalRoute = new Dictionary<string, string>(CreateArtifactPathComparer());
+        var routeByArtifactPath = BuildProtectedArtifactPathMap(context);
+
+        foreach (var artifact in context.RedirectArtifacts)
+        {
+            if (!context.ArtifactUrls.TryGetValue(artifact.CanonicalRoute, out _)
+                || !context.RouteOutcomes.TryGetValue(artifact.CanonicalRoute, out var canonicalOutcome)
+                || !canonicalOutcome.Succeeded
+                || canonicalOutcome.ArtifactPath is null)
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        $"AppSurface Docs redirect alias '{artifact.AliasRoute}' could not resolve canonical artifact '{artifact.CanonicalRoute}'."));
+                continue;
+            }
+
+            var aliasArtifactPath = MapRouteToFilePath(artifact.AliasRoute, context.OutputPath, isHtml: true);
+            if (routeByArtifactPath.TryGetValue(aliasArtifactPath, out var existingRoute)
+                && !string.Equals(existingRoute, artifact.AliasRoute, StringComparison.Ordinal)
+                && !string.Equals(existingRoute, artifact.CanonicalRoute, StringComparison.Ordinal))
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        $"AppSurface Docs redirect alias '{artifact.AliasRoute}' would overwrite the artifact for exported route '{existingRoute}'."));
+            }
+
+            if (ArtifactPathsEqual(aliasArtifactPath, canonicalOutcome.ArtifactPath))
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        $"AppSurface Docs redirect alias '{artifact.AliasRoute}' maps to the same artifact as canonical route '{artifact.CanonicalRoute}'."));
+            }
+
+            if (aliasArtifactPathByCanonicalRoute.TryGetValue(aliasArtifactPath, out var existingCanonicalRoute)
+                && !string.Equals(existingCanonicalRoute, artifact.CanonicalRoute, StringComparison.Ordinal))
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        $"AppSurface Docs redirect alias '{artifact.AliasRoute}' maps to the same artifact as alias for '{existingCanonicalRoute}'."));
+            }
+            else
+            {
+                aliasArtifactPathByCanonicalRoute[aliasArtifactPath] = artifact.CanonicalRoute;
+            }
+
+            if (context.RouteOutcomes.TryGetValue(artifact.AliasRoute, out var aliasOutcome)
+                && aliasOutcome.Succeeded
+                && aliasOutcome.IsHtml
+                && !aliasOutcome.IsRedirectAliasArtifact)
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        $"AppSurface Docs redirect alias '{artifact.AliasRoute}' was crawled as a normal HTML page body."));
+            }
+        }
+    }
+
+    private static Dictionary<string, string> BuildProtectedArtifactPathMap(ExportContext context)
+    {
+        var routeByArtifactPath = new Dictionary<string, string>(CreateArtifactPathComparer());
+        foreach (var outcome in context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && outcome.ArtifactPath is not null))
+        {
+            routeByArtifactPath.TryAdd(outcome.ArtifactPath!, outcome.Route);
+
+            if (outcome.IsHtml && context.PartialArtifactUrls.ContainsKey(outcome.Route))
+            {
+                routeByArtifactPath.TryAdd(
+                    MapHtmlFilePathToPartialPath(outcome.ArtifactPath!),
+                    $"{outcome.Route} partial");
+            }
+        }
+
+        return routeByArtifactPath;
+    }
+
     private static void AddMissingReferenceDiagnostic(
         ExportContext context,
         ISet<string> seen,
@@ -540,16 +671,45 @@ public class ExportEngine
                 code,
                 $"The {description} '{reference.RawValue}' from '{reference.SourceRoute}' did not map to an emitted CDN artifact.",
                 reference.SourceRoute,
-                reference));
+            reference));
+    }
+
+    private static ExportDiagnostic CreateRedirectArtifactDiagnostic(string route, string problem)
+    {
+        return new ExportDiagnostic(
+            "RWEXPORT005",
+            problem + " Ensure the canonical docs route is exported before alias artifacts are written.",
+            route);
     }
 
     private static void AddDiagnostic(ExportContext context, ISet<string> seen, ExportDiagnostic diagnostic)
     {
-        var key = $"{diagnostic.Code}|{diagnostic.Route}|{diagnostic.Reference?.Kind}|{diagnostic.Reference?.RawValue}";
+        var key = $"{diagnostic.Code}|{diagnostic.Route}|{diagnostic.Message}|{diagnostic.Reference?.Kind}|{diagnostic.Reference?.RawValue}";
         if (seen.Add(key))
         {
             context.Diagnostics.Add(diagnostic);
         }
+    }
+
+    private static string BuildRedirectArtifactBody(string canonicalArtifactUrl)
+    {
+        var encodedUrl = WebUtility.HtmlEncode(canonicalArtifactUrl);
+        return $"""
+            <!doctype html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="appsurface-docs-redirect-alias" content="1">
+              <meta name="appsurface-docs-canonical-artifact" content="{encodedUrl}">
+              <link rel="canonical" href="{encodedUrl}">
+              <meta http-equiv="refresh" content="0; url={encodedUrl}">
+              <title>Redirecting...</title>
+            </head>
+            <body>
+              <a href="{encodedUrl}">Continue to the canonical documentation page.</a>
+            </body>
+            </html>
+            """;
     }
 
     private async Task TryStageConventionalNotFoundPageAsync(
@@ -833,6 +993,33 @@ public class ExportEngine
         return fullPath;
     }
 
+    private static bool ArtifactPathsEqual(string left, string right)
+    {
+        return string.Equals(
+            NormalizeArtifactPath(left),
+            NormalizeArtifactPath(right),
+            GetArtifactPathComparison());
+    }
+
+    private static IEqualityComparer<string> CreateArtifactPathComparer()
+    {
+        return OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+    }
+
+    private static StringComparison GetArtifactPathComparison()
+    {
+        return OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+    }
+
+    private static string NormalizeArtifactPath(string path)
+    {
+        return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
     private static string MapFilePathToArtifactUrl(string filePath, string outputPath, string route)
     {
         if (route == "/")
@@ -1023,7 +1210,8 @@ public class ExportEngine
                 && !rel.Contains("icon", StringComparison.OrdinalIgnoreCase)
                 && !rel.Contains("preload", StringComparison.OrdinalIgnoreCase)
                 && !rel.Contains("prefetch", StringComparison.OrdinalIgnoreCase)
-                && !rel.Contains("dns-prefetch", StringComparison.OrdinalIgnoreCase))
+                && !rel.Contains("dns-prefetch", StringComparison.OrdinalIgnoreCase)
+                && !rel.Contains("canonical", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -1242,7 +1430,8 @@ public class ExportEngine
                     && !rel.Contains("icon", StringComparison.OrdinalIgnoreCase)
                     && !rel.Contains("preload", StringComparison.OrdinalIgnoreCase)
                     && !rel.Contains("prefetch", StringComparison.OrdinalIgnoreCase)
-                    && !rel.Contains("dns-prefetch", StringComparison.OrdinalIgnoreCase))
+                    && !rel.Contains("dns-prefetch", StringComparison.OrdinalIgnoreCase)
+                    && !rel.Contains("canonical", StringComparison.OrdinalIgnoreCase))
                 {
                     return tag;
                 }

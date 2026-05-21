@@ -3216,6 +3216,38 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldExposeRouteManifestDiagnostics()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Intro",
+                "docs/intro.md",
+                "<p>Intro</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "start-here/intro"
+                }),
+            new(
+                "Literal Route",
+                "literal-route.md",
+                "<p>Literal</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "docs/intro.md"
+                })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var health = await _aggregator.GetHarvestHealthAsync();
+
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.DocImplicitRecoveryAliasCollision
+                          && diagnostic.Problem.Contains("docs/intro.md", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldCancelCallerWait_WithoutPoisoningSharedSnapshot()
     {
         var releaseHarvester = new TaskCompletionSource<IReadOnlyList<DocNode>>(TaskCreationOptions.RunContinuationsAsynchronously);

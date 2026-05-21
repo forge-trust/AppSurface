@@ -77,7 +77,7 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 Options:
 
 - `--repo`, `-r`: Repository root to harvest. Defaults to the current directory.
-- `--output`, `-o`: Output directory for exported static docs. Defaults to `dist/docs`; existing files are rejected because the exporter writes a directory tree. CI should pass this explicitly.
+- `--output`, `-o`: Output directory for exported static docs. Defaults to `dist/docs`; the directory must be missing or empty before export starts. CI should pass this explicitly and create a fresh output location per run.
 - `--mode`, `-m`: Export mode. `cdn` is the default and validates plus rewrites managed URLs for plain static hosts. Use `hybrid` only when the output still sits behind application-aware routing.
 - `--seeds`: Optional path to a seed-route file. This is long-only because `-r` means `--repo` in AppSurface CLI commands.
 - `--strict`: Enables `AppSurfaceDocs:Harvest:FailOnFailure=true`, which fails startup when every configured harvester fails. This is separate from `--mode cdn`, which validates the emitted static artifact and preserves `RWEXPORT00x` diagnostics.
@@ -86,7 +86,7 @@ Options:
 - `--environment`, `-e`: Host environment forwarded to the AppSurface Docs host. Defaults to `Production` for export.
 - `--startup-timeout-seconds`: Seconds to wait for the in-process AppSurface Docs host to start before failing fast. Defaults to `10`; use `0` to disable while investigating intentional pre-bind delays.
 
-Export does not expose `--port` or `--urls`. It binds `http://127.0.0.1:0` internally, resolves the actual Kestrel listener, crawls that URL, then stops the host. Use the generic `razorwire export` command when exporting arbitrary RazorWire apps via `--url`, `--project`, or `--dll`; use `appsurface docs export` when AppSurface owns the AppSurface Docs repository host.
+Export does not expose `--port` or `--urls`. It binds `http://127.0.0.1:0` internally, resolves the actual Kestrel listener, crawls that URL, then stops the host. Before crawling, it reads the AppSurface Docs route manifest from the in-process host and registers redirect artifacts for source-shaped Markdown URLs and declared aliases. Use the generic `razorwire export` command when exporting arbitrary RazorWire apps via `--url`, `--project`, or `--dll`; use `appsurface docs export` when AppSurface owns the AppSurface Docs repository host.
 
 Migration map for repo-owned AppSurface Docs export:
 

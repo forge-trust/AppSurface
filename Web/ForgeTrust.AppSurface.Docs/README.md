@@ -242,6 +242,7 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.DocReservedRouteCollision` (`appsurfacedocs.routes.reserved_collision`)
 - `DocHarvestDiagnosticCodes.DocRouteCollision` (`appsurfacedocs.routes.doc_collision`)
 - `DocHarvestDiagnosticCodes.DocRedirectAliasCollision` (`appsurfacedocs.routes.redirect_alias_collision`)
+- `DocHarvestDiagnosticCodes.DocImplicitRecoveryAliasCollision` (`appsurfacedocs.routes.implicit_recovery_alias_collision`)
 - `DocHarvestDiagnosticCodes.DocInvalidCanonicalSlug` (`appsurfacedocs.routes.invalid_canonical_slug`)
 - `DocHarvestDiagnosticCodes.DocInvalidRedirectAlias` (`appsurfacedocs.routes.invalid_redirect_alias`)
 - `DocHarvestDiagnosticCodes.DocLossySlugNormalization` (`appsurfacedocs.routes.lossy_slug_normalization`)
@@ -515,6 +516,10 @@ redirect_aliases:
 ```
 
 `canonical_slug` and `redirect_aliases` are docs-root-relative route paths. Do not include a query string, fragment, leading docs root, or host name. Canonical slugs use the same deterministic segment normalization as source-derived Markdown routes. Redirect aliases preserve their literal authored route text after separator cleanup, so legacy URLs such as `Old_Path/Guide.md.html` keep their existing shape instead of being slugified. Aliases redirect permanently to the public canonical route and preserve the request query string. Public Markdown source paths such as `/docs/foo.md` and `/docs/foo.md.html` also redirect to the clean route so GitHub-style copy-pasted links recover automatically. Use `redirect_aliases` for non-source legacy URLs, renamed pages, and old route shapes that are not already implied by the source path. Declared aliases that try to shadow another public Markdown source path are ignored with a `DocRedirectAliasCollision` diagnostic so copy-pasted source URLs keep pointing at their owning page.
+
+The cached route identity catalog also exposes a route manifest for exporters. Each manifest entry contains the public canonical live URL, source-shaped Markdown recovery aliases such as `/docs/foo.md` and `/docs/foo.md.html`, declared redirect aliases, and route diagnostics from the final public route catalog. Static AppSurface Docs export consumes that manifest after the snapshot is fully aggregated, so namespace README merging, collision handling, and reserved-route filtering have already selected the same public winners that the live controller serves. When a source-shaped recovery alias would shadow another public route, AppSurface Docs omits that alias from the manifest and emits `DocImplicitRecoveryAliasCollision`.
+
+Static export writes redirect alias artifacts for manifest aliases instead of copying page bodies to every legacy path. The alias file points at the canonical artifact with a canonical link and meta refresh, while the canonical page keeps the real content. This preserves recoverability for source-shaped URLs pasted from the repository without creating duplicate SEO surfaces or letting stale alias pages drift away from the clean route.
 
 ### Localization foundation
 
@@ -1119,6 +1124,7 @@ This means a link is rewritten only when the target exists in the harvested docs
 - Do not rely on file extensions alone. A `.md`, `.cs`, or `.html` suffix does not make a link an AppSurface Docs target unless the target was harvested.
 - If a doc link is not rewritten, first confirm the target file is included by the active harvester and not excluded by directory policy.
 - Public docs-surface links are safe for exported docs, but source-relative Markdown links are usually easier to keep portable in GitHub and editor previews.
+- Details pages emit a canonical link for the clean public route. In CDN export mode, RazorWire rewrites app-relative canonical links to the emitted static artifact URL, such as `/docs/guides/intro.html`, so exported pages and redirect alias artifacts agree on the same static canonical destination.
 
 ## Landing Curation
 

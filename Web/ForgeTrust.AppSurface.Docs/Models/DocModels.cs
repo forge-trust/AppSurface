@@ -877,6 +877,11 @@ public static class DocHarvestDiagnosticCodes
     public const string DocRedirectAliasCollision = "appsurfacedocs.routes.redirect_alias_collision";
 
     /// <summary>
+    /// An implicit source-shaped recovery alias was skipped because it collided with a public doc route.
+    /// </summary>
+    public const string DocImplicitRecoveryAliasCollision = "appsurfacedocs.routes.implicit_recovery_alias_collision";
+
+    /// <summary>
     /// A declared canonical slug was invalid for public route identity.
     /// </summary>
     public const string DocInvalidCanonicalSlug = "appsurfacedocs.routes.invalid_canonical_slug";
@@ -1529,6 +1534,11 @@ public sealed record DocDetailsViewModel
     /// Gets the resolved display title for the page.
     /// </summary>
     public string Title { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the app-relative canonical URL for the current details page.
+    /// </summary>
+    public string CanonicalUrl { get; init; } = string.Empty;
 
     /// <summary>
     /// Gets the authored summary that should be rendered under the title when available.
