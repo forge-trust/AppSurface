@@ -183,6 +183,23 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsCommand_Should_Translate_Startup_Timeout_To_CommandException()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingAppSurfaceDocsHostRunner
+        {
+            Exception = new TimeoutException("Preview startup timed out.")
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Preview startup timed out.", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DocsCommand_Should_Reject_Blank_RepositoryRoot()
     {
         var runner = new CapturingAppSurfaceDocsHostRunner();
@@ -877,6 +894,28 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Preserve_Cancellation_When_Harvest_Summary_Is_Canceled()
+    {
+        using var cts = new CancellationTokenSource();
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
+        var host = new TrackingHost("http://127.0.0.1:61249");
+        var harvestSummaryReader = new CancelingHarvestSummaryReader(cts);
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            new CapturingBrowserLauncher(),
+            new ImmediatePreviewHostStarter(host),
+            harvestSummaryReader);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => runner.RunAsync(["--environment", "Development"], TimeSpan.FromSeconds(10), cts.Token));
+
+        Assert.True(cts.IsCancellationRequested);
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
+    }
+
+    [Fact]
     public async Task AppSurfaceDocsHarvestSummaryReader_Should_Return_Null_When_Aggregator_Is_Not_Registered()
     {
         using var host = new TrackingHost();
@@ -907,6 +946,29 @@ public sealed class ProgramEntryPointTests
         Assert.Contains(
             loggerProvider.GetMessages(),
             message => message.Contains("browser could not be opened automatically: no browser", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Run_When_Startup_Timeout_Is_Disabled()
+    {
+        var host = new TrackingHost("http://127.0.0.1:61250");
+        var starter = new ImmediatePreviewHostStarter(host);
+        var browserLauncher = new CapturingBrowserLauncher();
+        using var loggerFactory = LoggerFactory.Create(static builder => { });
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            browserLauncher,
+            starter);
+
+        var runTask = runner.RunAsync(["--environment", "Development"], startupTimeout: null, CancellationToken.None);
+        await browserLauncher.Opened.WaitAsync(TimeSpan.FromSeconds(1));
+        host.Lifetime.StopApplication();
+        await runTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.False(starter.StartupToken.CanBeCanceled);
+        Assert.Equal("http://127.0.0.1:61250/docs", browserLauncher.Url?.AbsoluteUri);
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
     }
 
     [Fact]
@@ -944,6 +1006,59 @@ public sealed class ProgramEntryPointTests
         {
             starter.Complete(new TrackingHost());
         }
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Log_When_Late_Startup_Faults_After_Timeout()
+    {
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Debug);
+            builder.AddProvider(loggerProvider);
+        });
+        var starter = new ControllablePreviewHostStarter();
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            new CapturingBrowserLauncher(),
+            starter);
+
+        var runTask = runner.RunAsync(["--environment", "Development"], TimeSpan.FromMilliseconds(50), CancellationToken.None);
+        await starter.Started.WaitAsync(TimeSpan.FromSeconds(1));
+
+        var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.Same(runTask, completedTask);
+        await Assert.ThrowsAsync<TimeoutException>(() => runTask);
+
+        starter.Fail(new InvalidOperationException("Late preview startup fault."));
+        await WaitForLogMessageAsync(loggerProvider, "preview host startup task completed after the startup timeout.");
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Log_And_Dispose_When_Host_Stop_Fails()
+    {
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
+        var starter = new ControllablePreviewHostStarter();
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            new CapturingBrowserLauncher(),
+            starter);
+
+        var runTask = runner.RunAsync(["--environment", "Development"], TimeSpan.FromMilliseconds(50), CancellationToken.None);
+        await starter.Started.WaitAsync(TimeSpan.FromSeconds(1));
+
+        var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.Same(runTask, completedTask);
+        await Assert.ThrowsAsync<TimeoutException>(() => runTask);
+
+        var lateHost = new TrackingHost("http://127.0.0.1:61251", throwOnStop: true);
+        starter.Complete(lateHost);
+
+        await lateHost.Disposed.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.Contains(
+            loggerProvider.GetMessages(),
+            message => message.Contains("AppSurface Docs preview host failed during shutdown.", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -995,6 +1110,17 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Replace_AnyHost_Address_For_Browser()
+    {
+        var addresses = new ServerAddressesFeature();
+        addresses.Addresses.Add("http://0.0.0.0:61253");
+
+        var baseUrl = AppSurfaceDocsPreviewUrlResolver.ResolveBoundBaseUrl(addresses.Addresses);
+
+        Assert.Equal("http://localhost:61253", baseUrl);
+    }
+
+    [Fact]
     public void AppSurfaceDocsPreviewUrlResolver_Should_Use_RouteRoot_When_DocsRoot_Is_Not_Configured()
     {
         var docsUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDocsUrl(
@@ -1005,6 +1131,20 @@ public sealed class ProgramEntryPointTests
             ]);
 
         Assert.Equal("http://127.0.0.1:61241/reference", docsUrl.AbsoluteUri);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Use_DocsRoot_With_Equals_Syntax()
+    {
+        var docsUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDocsUrl(
+            "http://127.0.0.1:61252",
+            [
+                "--AppSurfaceDocs:Routing:RouteRootPath",
+                "/reference",
+                "--AppSurfaceDocs:Routing:DocsRootPath=/reference/current"
+            ]);
+
+        Assert.Equal("http://127.0.0.1:61252/reference/current", docsUrl.AbsoluteUri);
     }
 
     [Fact]
@@ -1106,6 +1246,28 @@ public sealed class ProgramEntryPointTests
             repository.Path);
 
         Assert.Null(defaultUrl);
+    }
+
+    [Theory]
+    [InlineData("--environment")]
+    [InlineData("--environment", "--Some:Setting", "value")]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Ignore_Incomplete_Environment_Probe_Arguments(params string[] args)
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
+        var previousValue = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+
+            var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(args, repository.Path);
+
+            Assert.StartsWith("http://localhost:", defaultUrl, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", previousValue);
+        }
     }
 
     [Fact]
@@ -1435,11 +1597,18 @@ public sealed class ProgramEntryPointTests
 
         public string? WorkingDirectoryDuringRun { get; private set; }
 
+        public Exception? Exception { get; init; }
+
         public Task RunAsync(string[] args, TimeSpan? startupTimeout, CancellationToken cancellationToken)
         {
             Args = args;
             StartupTimeout = startupTimeout;
             WorkingDirectoryDuringRun = Directory.GetCurrentDirectory();
+            if (Exception is not null)
+            {
+                throw Exception;
+            }
+
             return Task.CompletedTask;
         }
     }
@@ -1530,6 +1699,16 @@ public sealed class ProgramEntryPointTests
         }
     }
 
+    private sealed class CancelingHarvestSummaryReader(CancellationTokenSource cancellationTokenSource) : IAppSurfaceDocsHarvestSummaryReader
+    {
+        public Task<AppSurfaceDocsHarvestSummary?> ReadAsync(IHost host, CancellationToken cancellationToken)
+        {
+            cancellationTokenSource.Cancel();
+            return Task.FromException<AppSurfaceDocsHarvestSummary?>(
+                new OperationCanceledException(cancellationTokenSource.Token));
+        }
+    }
+
     private sealed class ImmediatePreviewHostStarter(IHost host) : IAppSurfaceDocsPreviewHostStarter
     {
         public AppSurfaceDocsPreviewHostArgs? Args { get; private set; }
@@ -1563,6 +1742,11 @@ public sealed class ProgramEntryPointTests
         public void Complete(IHost host)
         {
             _hostCompletion.TrySetResult(host);
+        }
+
+        public void Fail(Exception exception)
+        {
+            _hostCompletion.TrySetException(exception);
         }
     }
 
