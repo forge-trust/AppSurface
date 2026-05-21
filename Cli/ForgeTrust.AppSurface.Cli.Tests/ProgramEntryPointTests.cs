@@ -802,6 +802,92 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Log_Harvest_Diagnostics_Count()
+    {
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
+        var host = new TrackingHost("http://127.0.0.1:61246");
+        var harvestSummaryReader = new CapturingHarvestSummaryReader(
+            new AppSurfaceDocsHarvestSummary(
+                DocHarvestHealthStatus.Degraded,
+                TotalDocs: 12,
+                TotalHarvesters: 3,
+                SuccessfulHarvesters: 2,
+                DiagnosticCount: 1));
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            new CapturingBrowserLauncher(),
+            new ImmediatePreviewHostStarter(host),
+            harvestSummaryReader);
+
+        var runTask = runner.RunAsync(["--environment", "Development"], TimeSpan.FromSeconds(10), CancellationToken.None);
+        await harvestSummaryReader.Read.WaitAsync(TimeSpan.FromSeconds(1));
+        host.Lifetime.StopApplication();
+        await runTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Contains(
+            loggerProvider.GetMessages(),
+            message => message.Contains("Harvested 12 docs from 2/3 active harvesters. Status: Degraded; diagnostics: 1.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Skip_Harvest_Summary_When_Unavailable()
+    {
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
+        var host = new TrackingHost("http://127.0.0.1:61247");
+        var harvestSummaryReader = new CapturingHarvestSummaryReader(summary: null);
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            new CapturingBrowserLauncher(),
+            new ImmediatePreviewHostStarter(host),
+            harvestSummaryReader);
+
+        var runTask = runner.RunAsync(["--environment", "Development"], TimeSpan.FromSeconds(10), CancellationToken.None);
+        await harvestSummaryReader.Read.WaitAsync(TimeSpan.FromSeconds(1));
+        host.Lifetime.StopApplication();
+        await runTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.DoesNotContain(
+            loggerProvider.GetMessages(),
+            message => message.Contains("Harvested", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Log_When_Harvest_Summary_Fails()
+    {
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
+        var host = new TrackingHost("http://127.0.0.1:61248");
+        var harvestSummaryReader = new ThrowingHarvestSummaryReader(new InvalidOperationException("health unavailable"));
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            new CapturingBrowserLauncher(),
+            new ImmediatePreviewHostStarter(host),
+            harvestSummaryReader);
+
+        var runTask = runner.RunAsync(["--environment", "Development"], TimeSpan.FromSeconds(10), CancellationToken.None);
+        await harvestSummaryReader.Read.WaitAsync(TimeSpan.FromSeconds(1));
+        host.Lifetime.StopApplication();
+        await runTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Contains(
+            loggerProvider.GetMessages(),
+            message => message.Contains("AppSurface Docs harvest summary could not be read.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsHarvestSummaryReader_Should_Return_Null_When_Aggregator_Is_Not_Registered()
+    {
+        using var host = new TrackingHost();
+        var reader = new AppSurfaceDocsHarvestSummaryReader();
+
+        var summary = await reader.ReadAsync(host, CancellationToken.None);
+
+        Assert.Null(summary);
+    }
+
+    [Fact]
     public async Task AppSurfaceDocsStandaloneHostRunner_Should_Log_When_Browser_Launch_Fails()
     {
         var loggerProvider = new InMemoryLoggerProvider();
@@ -926,7 +1012,7 @@ public sealed class ProgramEntryPointTests
     {
         using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
         await File.WriteAllTextAsync(
-            Path.Combine(repository.Path, "appsettings.Development.json"),
+            Path.Join(repository.Path, "appsettings.Development.json"),
             """
             {
               "urls": "http://127.0.0.1:61240"
@@ -938,6 +1024,106 @@ public sealed class ProgramEntryPointTests
             repository.Path);
 
         Assert.Null(defaultUrl);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Default_To_Deterministic_Development_Url()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
+
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(
+            ["--environment", "Development"],
+            repository.Path);
+
+        Assert.StartsWith("http://localhost:", defaultUrl, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Not_Default_For_Production()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
+
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(
+            ["--environment", "Production"],
+            repository.Path);
+
+        Assert.Null(defaultUrl);
+    }
+
+    [Theory]
+    [InlineData("--port", "61242")]
+    [InlineData("--port=61242", null)]
+    [InlineData("--urls", "http://127.0.0.1:61242")]
+    [InlineData("--urls=http://127.0.0.1:61242", null)]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Not_Default_When_Endpoint_Argument_Is_Configured(
+        string firstArg,
+        string? secondArg)
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
+        var args = secondArg is null
+            ? new[] { "--environment", "Development", firstArg }
+            : ["--environment", "Development", firstArg, secondArg];
+
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(args, repository.Path);
+
+        Assert.Null(defaultUrl);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Not_Default_When_Endpoint_Environment_Is_Configured()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
+        var previousValue = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", "http://127.0.0.1:61243");
+
+            var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(
+                ["--environment", "Development"],
+                repository.Path);
+
+            Assert.Null(defaultUrl);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", previousValue);
+        }
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Not_Default_When_CommandLine_Configures_Kestrel_Endpoint()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
+
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(
+            [
+                "--environment",
+                "Development",
+                "--Kestrel:Endpoints:Http:Url",
+                "http://127.0.0.1:61244"
+            ],
+            repository.Path);
+
+        Assert.Null(defaultUrl);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Throw_When_No_Addresses_Are_Published()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => AppSurfaceDocsPreviewUrlResolver.ResolveBoundBaseUrl(Array.Empty<string>()));
+
+        Assert.Contains("No addresses were published", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Throw_When_No_Valid_Addresses_Are_Published()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => AppSurfaceDocsPreviewUrlResolver.ResolveBoundBaseUrl(["not-a-url"]));
+
+        Assert.Contains("did not publish a valid listening URL", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1328,6 +1514,19 @@ public sealed class ProgramEntryPointTests
         {
             _read.TrySetResult(null);
             return Task.FromResult(summary);
+        }
+    }
+
+    private sealed class ThrowingHarvestSummaryReader(Exception exception) : IAppSurfaceDocsHarvestSummaryReader
+    {
+        private readonly TaskCompletionSource<object?> _read = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Read => _read.Task;
+
+        public Task<AppSurfaceDocsHarvestSummary?> ReadAsync(IHost host, CancellationToken cancellationToken)
+        {
+            _read.TrySetResult(null);
+            return Task.FromException<AppSurfaceDocsHarvestSummary?>(exception);
         }
     }
 
