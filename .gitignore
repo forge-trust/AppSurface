@@ -80,6 +80,8 @@ junit.xml
 /reviewer_comments.json
 /pr_data.json
 .gstack/
+.pnpm-store/
+**/node_modules/
 
 # Tailwind binary
 **/tailwindcss

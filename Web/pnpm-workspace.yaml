@@ -1,0 +1,7 @@
+packages:
+  - ForgeTrust.AppSurface.Docs/assets
+  - ForgeTrust.RazorWire
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: true

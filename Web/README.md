@@ -14,5 +14,21 @@ Need install guidance first? Start with the [AppSurface v0.1 package chooser](..
 - [**ForgeTrust.AppSurface.Web.Scalar**](./ForgeTrust.AppSurface.Web.Scalar/README.md) – Scalar API Reference UI integration.
 - `ForgeTrust.AppSurface.Web.Tests` – Test suite for web components.
 
+## JavaScript workspace
+
+Browser assets in this directory are managed by the `Web/` pnpm workspace. Run these commands from the repository root:
+
+```bash
+pnpm --dir Web install --frozen-lockfile
+pnpm --dir Web run assets:typecheck
+pnpm --dir Web run assets:test
+pnpm --dir Web run assets:build
+pnpm --dir Web run assets:verify
+```
+
+`ForgeTrust.AppSurface.Docs/assets` owns the TypeScript source for generated Docs browser assets. Generated package outputs remain committed under `ForgeTrust.AppSurface.Docs/wwwroot/docs` because Razor Class Library delivery, embedded fallback resources, route aliases, and static export all depend on those paths. Do not edit generated `wwwroot/docs/search-client.js` or `wwwroot/docs/minisearch.min.js` by hand; edit the source or pinned package version, rebuild, then verify.
+
+`ForgeTrust.RazorWire` is represented in the same workspace so its existing `node --test` coverage runs through the shared command vocabulary. Its runtime migration to generated TypeScript assets is tracked separately.
+
 ---
 [🏠 Back to Root](../README.md)

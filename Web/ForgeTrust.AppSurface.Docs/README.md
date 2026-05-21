@@ -72,6 +72,8 @@ This section is the normative source of truth for the boundary. `DESIGN.md` expl
 
 - `wwwroot/css/app.css` is the Tailwind entry point for the generated package stylesheet (`site.gen.css`). It owns shared AppSurface Docs component primitives and wrapper-scoped document body styling because the generated stylesheet is loaded on every docs page before any search-specific assets.
 - `wwwroot/docs/search.css` owns the search shell, interactive search controls, JavaScript-rendered result states, empty/failure states, and search skeletons. It should not define shared page badges, metadata chips, provenance strips, trust bars, or other primitives required by non-search docs pages.
+- `assets/src/search-client.ts` is the authored source for the Docs search browser runtime. `pnpm --dir Web run assets:build` bundles and minifies it into `wwwroot/docs/search-client.js`.
+- `wwwroot/docs/minisearch.min.js` is generated from the pinned `minisearch` package's distributed UMD browser bundle. The exact version, source path, license, and update procedure live in `THIRD-PARTY-NOTICES.md`.
 
 ### Internal Style Tokens
 
@@ -111,6 +113,7 @@ Do not add broad fallbacks such as `var(--docs-color-text-default, #e2e8f0)` unl
 - Do not move syntax-highlight colors into the shared token layer until AppSurface Docs has a public code-theme story. Code block chrome can use shared tokens; syntax spans stay local.
 - Do not make search result rows feel tappable by adding a row-level `click` listener while the real anchor stays only on the title. That makes touch behavior work while breaking native link affordances.
 - Do not rely on the full wrapped row text as the accessible name for a full-row search result link. The row can be visually rich while the link name stays short.
+- Do not edit generated `wwwroot/docs/search-client.js` or `wwwroot/docs/minisearch.min.js` by hand. Edit `assets/src/search-client.ts` or the pinned `minisearch` dependency, run `pnpm --dir Web run assets:build`, and then run `pnpm --dir Web run assets:verify`.
 
 ## Details Page Heading Ownership
 
