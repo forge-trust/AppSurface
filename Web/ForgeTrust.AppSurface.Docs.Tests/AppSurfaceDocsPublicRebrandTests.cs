@@ -14,7 +14,23 @@ public sealed class AppSurfaceDocsPublicRebrandTests
         "releases",
         "Cli/ForgeTrust.AppSurface.Cli",
         "Web/ForgeTrust.AppSurface.Docs",
-        "Web/ForgeTrust.AppSurface.Docs.Standalone"
+        "Web/ForgeTrust.AppSurface.Docs.Standalone",
+        "ForgeTrust.AppSurface.Core/README.md",
+        "Config/ForgeTrust.AppSurface.Config/README.md",
+        "Caching/ForgeTrust.AppSurface.Caching/README.md",
+        "Console/README.md",
+        "Console/ForgeTrust.AppSurface.Console/README.md",
+        "Dependency/README.md",
+        "Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md",
+        "Aspire/README.md",
+        "Aspire/ForgeTrust.AppSurface.Aspire/README.md",
+        "Web/ForgeTrust.AppSurface.Web/README.md",
+        "Web/ForgeTrust.AppSurface.Web.OpenApi/README.md",
+        "Web/ForgeTrust.AppSurface.Web.Scalar/README.md",
+        "Web/ForgeTrust.AppSurface.Web.Tailwind/README.md",
+        "Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/README.md",
+        "Web/ForgeTrust.RazorWire/README.md",
+        "Web/ForgeTrust.RazorWire/README.md.yml"
     ];
 
     private static readonly string[] TextFileExtensions =
@@ -41,8 +57,12 @@ public sealed class AppSurfaceDocsPublicRebrandTests
     public void PublicSurface_ShouldNotContainLegacyRazorDocsBranding()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var offenders = PublicSurfaceRoots
+        var publicSurfacePaths = PublicSurfaceRoots
             .Select(root => CombineUnderRepoRoot(repoRoot, root))
+            .ToArray();
+        AssertPublicSurfaceRootsExist(repoRoot, publicSurfacePaths);
+
+        var offenders = publicSurfacePaths
             .SelectMany(EnumerateTextFiles)
             .SelectMany(file => FindLegacyMentions(repoRoot, file))
             .Order(StringComparer.Ordinal)
@@ -55,11 +75,52 @@ public sealed class AppSurfaceDocsPublicRebrandTests
     }
 
     [Fact]
+    public void PublicConfigurationExamples_ShouldUseCanonicalAppSurfaceDocsRoot()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var publicSurfacePaths = PublicSurfaceRoots
+            .Select(root => CombineUnderRepoRoot(repoRoot, root))
+            .ToArray();
+        AssertPublicSurfaceRootsExist(repoRoot, publicSurfacePaths);
+
+        var offenders = publicSurfacePaths
+            .SelectMany(EnumerateTextFiles)
+            .SelectMany(file => FindSpacedAppSurfaceDocsConfigRoots(repoRoot, file))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            offenders.Length == 0,
+            "Public configuration examples should use the canonical AppSurfaceDocs config root:"
+            + Environment.NewLine
+            + string.Join(Environment.NewLine, offenders));
+    }
+
+    private static void AssertPublicSurfaceRootsExist(string repoRoot, IEnumerable<string> publicSurfacePaths)
+    {
+        var missingRoots = publicSurfacePaths
+            .Where(path => !File.Exists(path) && !Directory.Exists(path))
+            .Select(path => Path.GetRelativePath(repoRoot, path))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            missingRoots.Length == 0,
+            "PublicSurfaceRoots contains missing repository paths:"
+            + Environment.NewLine
+            + string.Join(Environment.NewLine, missingRoots));
+    }
+
+    [Fact]
     public void PublicProse_ShouldUseSpacedAppSurfaceDocsBranding()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var offenders = PublicSurfaceRoots
+        var publicSurfacePaths = PublicSurfaceRoots
             .Select(root => CombineUnderRepoRoot(repoRoot, root))
+            .ToArray();
+        AssertPublicSurfaceRootsExist(repoRoot, publicSurfacePaths);
+
+        var offenders = publicSurfacePaths
             .SelectMany(EnumerateProseFiles)
             .SelectMany(file => FindUnspacedAppSurfaceDocsProseMentions(repoRoot, file))
             .Order(StringComparer.Ordinal)
@@ -135,6 +196,22 @@ public sealed class AppSurfaceDocsPublicRebrandTests
             lineNumber++;
             if (line.Contains("RazorDocs", StringComparison.OrdinalIgnoreCase)
                 || line.Contains("Razor Docs", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return $"{Path.GetRelativePath(repoRoot, file)}:{lineNumber}: {line.Trim()}";
+            }
+        }
+    }
+
+    private static IEnumerable<string> FindSpacedAppSurfaceDocsConfigRoots(string repoRoot, string file)
+    {
+        var lineNumber = 0;
+        foreach (var line in File.ReadLines(file))
+        {
+            lineNumber++;
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith("\"AppSurface Docs\":", StringComparison.Ordinal)
+                || trimmed.StartsWith("'AppSurface Docs':", StringComparison.Ordinal)
+                || trimmed.StartsWith("AppSurface Docs:", StringComparison.Ordinal))
             {
                 yield return $"{Path.GetRelativePath(repoRoot, file)}:{lineNumber}: {line.Trim()}";
             }

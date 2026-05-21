@@ -100,6 +100,8 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("<title>Documentation Index - Documentation</title>", html);
         Assert.Contains(">Documentation</span>", html);
         Assert.DoesNotContain("docs-wordmark-highlight", html);
+        AssertDocsSidebarFooterText(html, "Documentation");
+        Assert.DoesNotContain("Powered by RazorWire", html);
         Assert.Contains("rel=\"icon\" type=\"image/svg+xml\" href=\"/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg\"", html);
         Assert.DoesNotContain("<img src=\"/brand", html);
     }
@@ -134,6 +136,8 @@ public class AppSurfaceDocsViewsTests
             html);
         Assert.Contains("href=\"/some-base/reference\"", html);
         Assert.Contains("src=\"/some-base/brand/logo.svg\"", html);
+        AssertDocsSidebarFooterText(html, "Acme Docs");
+        Assert.DoesNotContain("Powered by RazorWire", html);
         Assert.Contains("alt=\"\" aria-hidden=\"true\"", html);
         Assert.DoesNotContain("alt=\"Acme logo\"", html);
         Assert.Contains("href=\"/some-base/brand/favicon.svg\"", html);
@@ -144,6 +148,15 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("type=\"image/png\"", html);
         Assert.DoesNotContain("href=\"/some-base/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg\"", html);
         Assert.Contains("\"docsRootPath\":\"/some-base/docs\"", html);
+    }
+
+    private static void AssertDocsSidebarFooterText(string html, string expectedText)
+    {
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var footer = document.QuerySelector("#docs-sidebar-footer");
+
+        Assert.NotNull(footer);
+        Assert.Equal(expectedText, footer.TextContent.Trim());
     }
 
     [Fact]
