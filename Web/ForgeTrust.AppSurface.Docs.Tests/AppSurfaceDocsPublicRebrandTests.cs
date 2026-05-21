@@ -14,7 +14,23 @@ public sealed class AppSurfaceDocsPublicRebrandTests
         "releases",
         "Cli/ForgeTrust.AppSurface.Cli",
         "Web/ForgeTrust.AppSurface.Docs",
-        "Web/ForgeTrust.AppSurface.Docs.Standalone"
+        "Web/ForgeTrust.AppSurface.Docs.Standalone",
+        "ForgeTrust.AppSurface.Core/README.md",
+        "Config/ForgeTrust.AppSurface.Config/README.md",
+        "Caching/ForgeTrust.AppSurface.Caching/README.md",
+        "Console/README.md",
+        "Console/ForgeTrust.AppSurface.Console/README.md",
+        "Dependency/README.md",
+        "Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md",
+        "Aspire/README.md",
+        "Aspire/ForgeTrust.AppSurface.Aspire/README.md",
+        "Web/ForgeTrust.AppSurface.Web/README.md",
+        "Web/ForgeTrust.AppSurface.Web.OpenApi/README.md",
+        "Web/ForgeTrust.AppSurface.Web.Scalar/README.md",
+        "Web/ForgeTrust.AppSurface.Web.Tailwind/README.md",
+        "Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/README.md",
+        "Web/ForgeTrust.RazorWire/README.md",
+        "Web/ForgeTrust.RazorWire/README.md.yml"
     ];
 
     private static readonly string[] TextFileExtensions =
@@ -51,6 +67,24 @@ public sealed class AppSurfaceDocsPublicRebrandTests
         Assert.True(
             offenders.Length == 0,
             "Public AppSurface Docs surfaces still contain legacy RazorDocs mentions:" + Environment.NewLine
+            + string.Join(Environment.NewLine, offenders));
+    }
+
+    [Fact]
+    public void PublicConfigurationExamples_ShouldUseCanonicalAppSurfaceDocsRoot()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var offenders = PublicSurfaceRoots
+            .Select(root => CombineUnderRepoRoot(repoRoot, root))
+            .SelectMany(EnumerateTextFiles)
+            .SelectMany(file => FindSpacedAppSurfaceDocsConfigRoots(repoRoot, file))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            offenders.Length == 0,
+            "Public configuration examples should use the canonical AppSurfaceDocs config root:"
+            + Environment.NewLine
             + string.Join(Environment.NewLine, offenders));
     }
 
@@ -135,6 +169,22 @@ public sealed class AppSurfaceDocsPublicRebrandTests
             lineNumber++;
             if (line.Contains("RazorDocs", StringComparison.OrdinalIgnoreCase)
                 || line.Contains("Razor Docs", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return $"{Path.GetRelativePath(repoRoot, file)}:{lineNumber}: {line.Trim()}";
+            }
+        }
+    }
+
+    private static IEnumerable<string> FindSpacedAppSurfaceDocsConfigRoots(string repoRoot, string file)
+    {
+        var lineNumber = 0;
+        foreach (var line in File.ReadLines(file))
+        {
+            lineNumber++;
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith("\"AppSurface Docs\":", StringComparison.Ordinal)
+                || trimmed.StartsWith("'AppSurface Docs':", StringComparison.Ordinal)
+                || trimmed.StartsWith("AppSurface Docs:", StringComparison.Ordinal))
             {
                 yield return $"{Path.GetRelativePath(repoRoot, file)}:{lineNumber}: {line.Trim()}";
             }

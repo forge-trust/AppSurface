@@ -49,7 +49,7 @@ Point the host at the repository you want to harvest:
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Mode": "Source",
     "Source": {
       "RepositoryRoot": "/path/to/repo"
@@ -64,7 +64,7 @@ Add identity settings when the consuming repository should own the visible docs 
 
 ```json
 {
-  "AppSurface Docs": {
+  "AppSurfaceDocs": {
     "Identity": {
       "DisplayName": "Acme Platform Docs",
       "HomeHref": "/docs",
