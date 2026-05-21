@@ -1,4 +1,5 @@
 @model ForgeTrust.AppSurface.Docs.Models.SearchPageViewModel
+@inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
     const string FailureLinkClass = "grid gap-1 rounded-lg border border-[#1b2a43] bg-[#0d182a]/55 px-[0.95rem] py-[0.85rem] no-underline transition-colors hover:border-[#14b8a6]/45 hover:bg-[#0d182a]/80";
 }
@@ -45,22 +46,56 @@
 
     <section id="docs-search-page-starter"
              class="docs-search-page-starter"
-             hidden
              aria-label="Search suggestions">
         <p class="docs-search-page-starter-copy">@Model.StarterHint</p>
         <div class="flex flex-wrap gap-[0.6rem]">
             @foreach (var query in Model.SuggestedQueries)
             {
-                <button type="button"
-                        class="docs-search-page-starter-chip"
-                        data-rw-search-suggestion="@query">
+                var queryHref = Url.PathBaseAware($"{DocsUrlBuilder.Routes.Search}?q={Uri.EscapeDataString(query)}");
+                <a class="docs-search-page-starter-chip"
+                   href="@queryHref"
+                   data-rw-search-suggestion="@query">
                     @query
-                </button>
+                </a>
             }
         </div>
         <div id="docs-search-page-starter-docs"
              class="docs-search-page-starter-docs"
              hidden></div>
+    </section>
+
+    <section id="docs-search-page-recovery"
+             class="docs-search-page-recovery"
+             aria-label="Browse documentation entry points">
+        <h2 class="docs-search-page-section-title">Browse while search loads</h2>
+        <p class="m-0 text-slate-300 leading-[1.55]">
+            These links are rendered by the server, so they stay useful for crawlers, no-JS readers, and failed index loads.
+        </p>
+        <div class="docs-search-page-recovery-links">
+            @foreach (var link in Model.FailureFallbackLinks)
+            {
+                var resolvedHref = Url.PathBaseAware(link.Href);
+                if (link.UsesDocsFrame)
+                {
+                    <a class="@FailureLinkClass docs-search-page-recovery-link"
+                       href="@resolvedHref"
+                       data-turbo-frame="doc-content"
+                       data-turbo-action="advance">
+                        <span class="text-[0.95rem] font-semibold text-[#14b8a6]">@link.Title</span>
+                        <span class="text-[0.82rem] leading-[1.45] text-slate-400">@link.Description</span>
+                    </a>
+                }
+                else
+                {
+                    <a class="@FailureLinkClass docs-search-page-recovery-link"
+                       href="@resolvedHref"
+                       data-turbo-frame="_top">
+                        <span class="text-[0.95rem] font-semibold text-[#14b8a6]">@link.Title</span>
+                        <span class="text-[0.82rem] leading-[1.45] text-slate-400">@link.Description</span>
+                    </a>
+                }
+            }
+        </div>
     </section>
 
     <section id="docs-search-page-failure"
@@ -72,7 +107,7 @@
     <template id="docs-search-page-failure-template">
         <h2 class="docs-search-page-section-title">Search is temporarily unavailable</h2>
         <p class="m-0 text-slate-300 leading-[1.55]">
-            The search workspace loaded, but the index could not be fetched yet. You can retry or keep moving with one of these fallback paths.
+            Search index could not be loaded. You can retry or keep moving with the browse links already on this page.
         </p>
         <div class="flex flex-wrap gap-3">
             <button id="docs-search-page-retry"
@@ -80,31 +115,6 @@
                     type="button">
                 Retry
             </button>
-        </div>
-        <div class="grid gap-3 md:grid-cols-3">
-            @foreach (var link in Model.FailureFallbackLinks)
-            {
-                var resolvedHref = Url.PathBaseAware(link.Href);
-                if (link.UsesDocsFrame)
-                {
-                    <a class="@FailureLinkClass"
-                       href="@resolvedHref"
-                       data-turbo-frame="doc-content"
-                       data-turbo-action="advance">
-                        <span class="text-[0.95rem] font-semibold text-[#14b8a6]">@link.Title</span>
-                        <span class="text-[0.82rem] leading-[1.45] text-slate-400">@link.Description</span>
-                    </a>
-                }
-                else
-                {
-                    <a class="@FailureLinkClass"
-                       href="@resolvedHref"
-                       data-turbo-frame="_top">
-                        <span class="text-[0.95rem] font-semibold text-[#14b8a6]">@link.Title</span>
-                        <span class="text-[0.82rem] leading-[1.45] text-slate-400">@link.Description</span>
-                    </a>
-                }
-            }
         </div>
     </template>
 

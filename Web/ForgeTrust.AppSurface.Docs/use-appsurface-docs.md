@@ -269,7 +269,8 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Add sidecar metadata for repository and package README files.
 - Feature the first consumer paths through `featured_page_groups`.
 - Configure `AppSurfaceDocs:Localization` and `translation_key` metadata before adding translated files at scale.
-- Verify `/docs`, `/docs/search`, and `/docs/search-index.json`.
+- Verify `/docs`, `/docs/search`, and `/docs/search-index.json`. The search page is server-rendered and should still expose starter query URLs plus browse links before the client index loads; a blocked or missing index must degrade to those links, not to a blank page.
+- For custom docs roots, path bases, or static exports, inspect the generated `search.html` and confirm its search index URL plus fallback anchors point at the mounted root.
 - Run the standalone host or export pipeline in CI before publishing a public docs surface.
 
 ## Where to go next

@@ -482,6 +482,8 @@ var healthJson = routes.HealthJson;
 
 `AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, and `HealthJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
+The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; keep `Routes.SearchIndexRefresh` for authenticated operator refresh flows.
+
 ### Document route identity
 
 AppSurface Docs assigns each cached snapshot a route identity catalog. The catalog keeps source identity separate from browser-facing route identity, so authors can keep Markdown source links portable while readers see structured URLs.
@@ -874,6 +876,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 
 - `index.html` at the tree root
 - `search.html` at the tree root
+  - The shell should contain useful server-rendered anchors before JavaScript runs: starter query URLs and browse recovery links for the strongest available docs entry points.
 - `search-index.json` at the tree root
   - The payload must remain valid JSON with a top-level `documents` array so version-local search can load safely.
   - Every `documents[]` entry must include non-empty string `path` and `title` properties.

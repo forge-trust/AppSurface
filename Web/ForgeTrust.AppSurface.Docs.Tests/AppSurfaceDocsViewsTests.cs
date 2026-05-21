@@ -171,6 +171,9 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
         Assert.Contains("docs-search-result-meta-line", searchClient);
         Assert.Contains("docs-search-page-starter-docs", searchClient);
+        Assert.Contains("page.recovery.hidden = false;", searchClient);
+        Assert.Contains("setStatus(page.status, 'Search index could not be loaded.');", searchClient);
+        Assert.Contains("event.preventDefault();", searchClient);
         Assert.DoesNotContain("title.append(link);", searchClient);
     }
 
@@ -3208,9 +3211,12 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("id=\"docs-search-page-starter\"", html);
         Assert.Contains("id=\"docs-search-page-starter-docs\"", html);
         Assert.Contains("data-rw-search-suggestion=\"getting started\"", html);
+        Assert.Contains("href=\"/docs/search?q=getting%20started\"", html);
         Assert.Contains("data-rw-search-suggestion=\"API reference\"", html);
         Assert.Contains("data-rw-search-suggestion=\"release notes\"", html);
         Assert.Contains("data-rw-search-suggestion=\"troubleshooting\"", html);
+        Assert.Contains("id=\"docs-search-page-recovery\"", html);
+        Assert.Contains("Browse while search loads", html);
         Assert.Contains("id=\"docs-search-page-failure\"", html);
         Assert.Contains("id=\"docs-search-page-failure-template\"", html);
         Assert.Contains("id=\"docs-search-page-retry\"", html);
@@ -3224,6 +3230,7 @@ public class AppSurfaceDocsViewsTests
 
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         Assert.Equal(string.Empty, document.QuerySelector("#docs-search-page-failure")?.TextContent.Trim());
+        Assert.NotNull(document.QuerySelector("#docs-search-page-recovery a[href]"));
     }
 
     [Fact]
@@ -3239,6 +3246,7 @@ public class AppSurfaceDocsViewsTests
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         Assert.Matches("<a[^>]*href=\"/docs\"[^>]*data-turbo-frame=\"_top\"", html);
         Assert.Equal(string.Empty, document.QuerySelector("#docs-search-page-failure")?.TextContent.Trim());
+        Assert.Contains("Documentation index", document.QuerySelector("#docs-search-page-recovery")!.TextContent);
     }
 
     [Fact]
@@ -3310,6 +3318,7 @@ public class AppSurfaceDocsViewsTests
         Assert.Matches(
             "href=\"/some-base/docs/v/1.2.3/guides/quickstart\"[\\s\\S]*data-turbo-frame=\"_top\"",
             html);
+        Assert.Contains("href=\"/some-base/docs/next/search?q=getting%20started\"", html);
     }
 
     [Fact]
