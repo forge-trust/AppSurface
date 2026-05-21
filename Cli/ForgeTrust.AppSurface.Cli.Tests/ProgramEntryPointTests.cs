@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.RazorWire.Cli;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -736,6 +737,210 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Open_Docs_Url_When_Host_Is_Ready()
+    {
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
+        var host = new TrackingHost("http://127.0.0.1:61236");
+        var starter = new ImmediatePreviewHostStarter(host);
+        var browserLauncher = new CapturingBrowserLauncher();
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            browserLauncher,
+            starter);
+
+        var runTask = runner.RunAsync(
+            [
+                "--AppSurfaceDocs:Routing:DocsRootPath",
+                "/reference/next",
+                "--environment",
+                "Development"
+            ],
+            TimeSpan.FromSeconds(10),
+            CancellationToken.None);
+
+        await browserLauncher.Opened.WaitAsync(TimeSpan.FromSeconds(1));
+        host.Lifetime.StopApplication();
+        await runTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Equal("http://127.0.0.1:61236/reference/next", browserLauncher.Url?.AbsoluteUri);
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
+        Assert.Contains(
+            loggerProvider.GetMessages(),
+            message => message.Contains("AppSurface Docs is ready at http://127.0.0.1:61236/reference/next", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Log_CommandOwned_Harvest_Summary()
+    {
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
+        var host = new TrackingHost("http://127.0.0.1:61245");
+        var browserLauncher = new CapturingBrowserLauncher();
+        var harvestSummaryReader = new CapturingHarvestSummaryReader(
+            new AppSurfaceDocsHarvestSummary(
+                DocHarvestHealthStatus.Healthy,
+                TotalDocs: 534,
+                TotalHarvesters: 3,
+                SuccessfulHarvesters: 3,
+                DiagnosticCount: 0));
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            browserLauncher,
+            new ImmediatePreviewHostStarter(host),
+            harvestSummaryReader);
+
+        var runTask = runner.RunAsync(["--environment", "Development"], TimeSpan.FromSeconds(10), CancellationToken.None);
+        await harvestSummaryReader.Read.WaitAsync(TimeSpan.FromSeconds(1));
+        host.Lifetime.StopApplication();
+        await runTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Contains(
+            loggerProvider.GetMessages(),
+            message => message.Contains("Harvested 534 docs from 3/3 active harvesters. Status: Healthy.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Log_When_Browser_Launch_Fails()
+    {
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
+        var host = new TrackingHost("http://127.0.0.1:61237");
+        var browserLauncher = new CapturingBrowserLauncher(AppSurfaceDocsBrowserLaunchResult.Failure("no browser"));
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            browserLauncher,
+            new ImmediatePreviewHostStarter(host));
+
+        var runTask = runner.RunAsync(["--environment", "Development"], TimeSpan.FromSeconds(10), CancellationToken.None);
+        await browserLauncher.Opened.WaitAsync(TimeSpan.FromSeconds(1));
+        host.Lifetime.StopApplication();
+        await runTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Contains(
+            loggerProvider.GetMessages(),
+            message => message.Contains("browser could not be opened automatically: no browser", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Timeout_When_Host_Build_Does_Not_Complete()
+    {
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(loggerProvider));
+        var starter = new ControllablePreviewHostStarter();
+        var browserLauncher = new CapturingBrowserLauncher();
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            browserLauncher,
+            starter);
+
+        var runTask = runner.RunAsync(["--environment", "Development"], TimeSpan.FromMilliseconds(50), CancellationToken.None);
+        await starter.Started.WaitAsync(TimeSpan.FromSeconds(1));
+
+        try
+        {
+            var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(2)));
+            Assert.Same(runTask, completedTask);
+            var ex = await Assert.ThrowsAsync<TimeoutException>(() => runTask);
+
+            Assert.Contains("AppSurface Docs preview host did not start within 0.05 seconds.", ex.Message, StringComparison.Ordinal);
+            Assert.True(starter.StartupToken.IsCancellationRequested);
+            Assert.Null(browserLauncher.Url);
+
+            var lateHost = new TrackingHost();
+            starter.Complete(lateHost);
+
+            await lateHost.Disposed.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.True(lateHost.StopCalled);
+        }
+        finally
+        {
+            starter.Complete(new TrackingHost());
+        }
+    }
+
+    [Fact]
+    public void AppSurfaceDocsCliHost_Should_Suppress_Routine_Preview_Host_Logs()
+    {
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Information);
+            AppSurfaceDocsCliHost.ConfigureQuietPreviewLogging(builder);
+            builder.AddProvider(loggerProvider);
+        });
+
+        loggerFactory.CreateLogger("Microsoft.Hosting.Lifetime").LogInformation("Now listening on: http://localhost:6189");
+        loggerFactory.CreateLogger("ForgeTrust.AppSurface.Web.Startup").LogInformation("Endpoint fallback enabled.");
+        loggerFactory.CreateLogger("ForgeTrust.AppSurface.Docs.Services.DocAggregator").LogInformation("Generated docs snapshot.");
+        loggerFactory.CreateLogger("ForgeTrust.AppSurface.Docs.Services.DocAggregator").LogWarning("Docs harvest warning.");
+        loggerFactory.CreateLogger("ForgeTrust.AppSurface.Cli.DocsCommand").LogInformation("Starting AppSurface Docs preview.");
+
+        var messages = loggerProvider.GetMessages();
+        Assert.DoesNotContain(messages, message => message.Contains("Now listening on", StringComparison.Ordinal));
+        Assert.DoesNotContain(messages, message => message.Contains("Endpoint fallback enabled.", StringComparison.Ordinal));
+        Assert.DoesNotContain(messages, message => message.Contains("Generated docs snapshot.", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("Docs harvest warning.", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("Starting AppSurface Docs preview.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Select_Loopback_Address_For_Browser()
+    {
+        var addresses = new ServerAddressesFeature();
+        addresses.Addresses.Add("http://*:61238");
+        addresses.Addresses.Add("http://127.0.0.1:61238");
+
+        var baseUrl = AppSurfaceDocsPreviewUrlResolver.ResolveBoundBaseUrl(addresses.Addresses);
+
+        Assert.Equal("http://127.0.0.1:61238", baseUrl);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Replace_Wildcard_Address_For_Browser()
+    {
+        var addresses = new ServerAddressesFeature();
+        addresses.Addresses.Add("http://*:61239");
+
+        var baseUrl = AppSurfaceDocsPreviewUrlResolver.ResolveBoundBaseUrl(addresses.Addresses);
+
+        Assert.Equal("http://localhost:61239", baseUrl);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Use_RouteRoot_When_DocsRoot_Is_Not_Configured()
+    {
+        var docsUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDocsUrl(
+            "http://127.0.0.1:61241",
+            [
+                "--AppSurfaceDocs:Routing:RouteRootPath",
+                "/reference"
+            ]);
+
+        Assert.Equal("http://127.0.0.1:61241/reference", docsUrl.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsPreviewUrlResolver_Should_Not_Default_When_Appsettings_Configures_Endpoint()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
+        await File.WriteAllTextAsync(
+            Path.Combine(repository.Path, "appsettings.Development.json"),
+            """
+            {
+              "urls": "http://127.0.0.1:61240"
+            }
+            """);
+
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(
+            ["--environment", "Development"],
+            repository.Path);
+
+        Assert.Null(defaultUrl);
+    }
+
+    [Fact]
     public async Task AppSurfaceDocsInProcessExportRunner_Should_Not_Translate_Exporter_Cancellation_To_Startup_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
@@ -1096,6 +1301,72 @@ public sealed class ProgramEntryPointTests
         }
     }
 
+    private sealed class CapturingBrowserLauncher(AppSurfaceDocsBrowserLaunchResult? result = null) : IAppSurfaceDocsBrowserLauncher
+    {
+        private readonly AppSurfaceDocsBrowserLaunchResult _result = result ?? AppSurfaceDocsBrowserLaunchResult.Success;
+        private readonly TaskCompletionSource<object?> _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Opened => _opened.Task;
+
+        public Uri? Url { get; private set; }
+
+        public Task<AppSurfaceDocsBrowserLaunchResult> TryOpenAsync(Uri url, CancellationToken cancellationToken)
+        {
+            Url = url;
+            _opened.TrySetResult(null);
+            return Task.FromResult(_result);
+        }
+    }
+
+    private sealed class CapturingHarvestSummaryReader(AppSurfaceDocsHarvestSummary? summary) : IAppSurfaceDocsHarvestSummaryReader
+    {
+        private readonly TaskCompletionSource<object?> _read = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Read => _read.Task;
+
+        public Task<AppSurfaceDocsHarvestSummary?> ReadAsync(IHost host, CancellationToken cancellationToken)
+        {
+            _read.TrySetResult(null);
+            return Task.FromResult(summary);
+        }
+    }
+
+    private sealed class ImmediatePreviewHostStarter(IHost host) : IAppSurfaceDocsPreviewHostStarter
+    {
+        public AppSurfaceDocsPreviewHostArgs? Args { get; private set; }
+
+        public CancellationToken StartupToken { get; private set; }
+
+        public Task<IHost> BuildAndStartAsync(AppSurfaceDocsPreviewHostArgs args, CancellationToken cancellationToken)
+        {
+            Args = args;
+            StartupToken = cancellationToken;
+            return Task.FromResult(host);
+        }
+    }
+
+    private sealed class ControllablePreviewHostStarter : IAppSurfaceDocsPreviewHostStarter
+    {
+        private readonly TaskCompletionSource<IHost> _hostCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<object?> _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public CancellationToken StartupToken { get; private set; }
+
+        public Task<IHost> BuildAndStartAsync(AppSurfaceDocsPreviewHostArgs args, CancellationToken cancellationToken)
+        {
+            StartupToken = cancellationToken;
+            _started.TrySetResult(null);
+            return _hostCompletion.Task;
+        }
+
+        public void Complete(IHost host)
+        {
+            _hostCompletion.TrySetResult(host);
+        }
+    }
+
     private sealed class ImmediateExportHostStarter(IHost host) : IAppSurfaceDocsExportHostStarter
     {
         public string? EnvironmentName { get; private set; }
@@ -1166,12 +1437,16 @@ public sealed class ProgramEntryPointTests
         public TrackingHost(string boundAddress = "http://127.0.0.1:51234", bool throwOnStop = false)
         {
             _throwOnStop = throwOnStop;
+            Lifetime = new FakeHostApplicationLifetime();
             _services = new ServiceCollection()
                 .AddSingleton<IServer>(new FakeServer(boundAddress))
+                .AddSingleton<IHostApplicationLifetime>(Lifetime)
                 .BuildServiceProvider();
         }
 
         public IServiceProvider Services => _services;
+
+        public FakeHostApplicationLifetime Lifetime { get; }
 
         public bool StopCalled { get; private set; }
 
@@ -1200,6 +1475,30 @@ public sealed class ProgramEntryPointTests
             DisposeCalled = true;
             _services.Dispose();
             _disposed.TrySetResult(null);
+        }
+    }
+
+    private sealed class FakeHostApplicationLifetime : IHostApplicationLifetime
+    {
+        private readonly CancellationTokenSource _started = new();
+        private readonly CancellationTokenSource _stopping = new();
+        private readonly CancellationTokenSource _stopped = new();
+
+        public FakeHostApplicationLifetime()
+        {
+            _started.Cancel();
+        }
+
+        public CancellationToken ApplicationStarted => _started.Token;
+
+        public CancellationToken ApplicationStopping => _stopping.Token;
+
+        public CancellationToken ApplicationStopped => _stopped.Token;
+
+        public void StopApplication()
+        {
+            _stopping.Cancel();
+            _stopped.Cancel();
         }
     }
 

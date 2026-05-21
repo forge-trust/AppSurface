@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using CliFx;
@@ -6,6 +7,7 @@ using CliFx.Exceptions;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs;
+using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web;
@@ -13,6 +15,7 @@ using ForgeTrust.RazorWire.Cli;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -298,7 +301,14 @@ internal abstract class AppSurfaceDocsPreviewCommand : AppSurfaceDocsRepositoryC
         var hostArgs = BuildHostArgs(Urls, Port, defaultEnvironmentName: Environments.Development);
         _logger.LogInformation("Starting AppSurface Docs preview for {RepositoryRoot}.", hostArgs.RepositoryRoot);
         using var currentDirectory = CurrentDirectoryScope.ChangeTo(hostArgs.RepositoryRoot);
-        await _hostRunner.RunAsync(hostArgs.Args, hostArgs.StartupTimeout, cancellationToken);
+        try
+        {
+            await _hostRunner.RunAsync(hostArgs.Args, hostArgs.StartupTimeout, cancellationToken);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new CommandException(ex.Message);
+        }
     }
 }
 
@@ -552,6 +562,12 @@ internal readonly record struct AppSurfaceDocsExportArgs(
 /// </summary>
 internal static class AppSurfaceDocsCliHost
 {
+    private const string AspNetCoreCategory = "Microsoft.AspNetCore";
+    private const string HostLifetimeCategory = "Microsoft.Hosting.Lifetime";
+    private const string InternalHostCategory = "Microsoft.Extensions.Hosting.Internal.Host";
+    private const string DocsCategory = "ForgeTrust.AppSurface.Docs";
+    private const string WebStartupCategory = "ForgeTrust.AppSurface.Web";
+
     /// <summary>
     /// Configures the standalone AppSurface Docs host shape used by packaged preview and export commands.
     /// </summary>
@@ -565,6 +581,27 @@ internal static class AppSurfaceDocsCliHost
         // fallbacks serve embedded assets instead so global/local tool distributions remain self-contained.
         options.StaticFiles.EnableStaticWebAssets = false;
         options.StartupTimeout = startupTimeout;
+    }
+
+    /// <summary>
+    /// Suppresses routine ASP.NET Core host lifecycle output for interactive AppSurface Docs preview runs.
+    /// </summary>
+    /// <param name="logging">Logging builder for the preview host.</param>
+    /// <remarks>
+    /// The CLI prints the resolved docs URL itself after Kestrel starts, so routine messages such as
+    /// <c>Now listening on</c>, <c>Application started</c>, AppSurface Web's endpoint fallback note, and routine docs
+    /// harvest summaries would duplicate that command-owned status. Warnings and errors remain visible so startup and
+    /// request failures are not hidden.
+    /// </remarks>
+    public static void ConfigureQuietPreviewLogging(ILoggingBuilder logging)
+    {
+        ArgumentNullException.ThrowIfNull(logging);
+
+        logging.AddFilter(AspNetCoreCategory, LogLevel.Warning);
+        logging.AddFilter(HostLifetimeCategory, LogLevel.Warning);
+        logging.AddFilter(InternalHostCategory, LogLevel.Warning);
+        logging.AddFilter(DocsCategory, LogLevel.Warning);
+        logging.AddFilter(WebStartupCategory, LogLevel.Warning);
     }
 }
 
@@ -623,15 +660,755 @@ internal interface IRazorWireStaticExporter
 /// translation without starting Kestrel. The type is internal and sealed because callers should depend on
 /// <see cref="IAppSurfaceDocsHostRunner"/> rather than subclassing host lifetime behavior.
 /// </remarks>
-[ExcludeFromCodeCoverage(
-    Justification = "Production adapter delegates into the long-running standalone web host; command tests cover argument and option construction before this boundary.")]
 internal sealed class AppSurfaceDocsStandaloneHostRunner : IAppSurfaceDocsHostRunner
 {
+    private readonly ILogger<AppSurfaceDocsStandaloneHostRunner> _logger;
+    private readonly IAppSurfaceDocsBrowserLauncher _browserLauncher;
+    private readonly IAppSurfaceDocsPreviewHostStarter _hostStarter;
+    private readonly IAppSurfaceDocsHarvestSummaryReader _harvestSummaryReader;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsStandaloneHostRunner"/> class.
+    /// </summary>
+    /// <param name="logger">Logger used for preview lifecycle diagnostics.</param>
+    /// <param name="browserLauncher">Browser launcher used after the docs host is listening.</param>
+    public AppSurfaceDocsStandaloneHostRunner(
+        ILogger<AppSurfaceDocsStandaloneHostRunner> logger,
+        IAppSurfaceDocsBrowserLauncher browserLauncher)
+        : this(logger, browserLauncher, new AppSurfaceDocsStandalonePreviewHostStarter(), new AppSurfaceDocsHarvestSummaryReader())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsStandaloneHostRunner"/> class with an explicit starter.
+    /// </summary>
+    /// <param name="logger">Logger used for preview lifecycle diagnostics.</param>
+    /// <param name="browserLauncher">Browser launcher used after the docs host is listening.</param>
+    /// <param name="hostStarter">Host starter used to build and start the preview application.</param>
+    internal AppSurfaceDocsStandaloneHostRunner(
+        ILogger<AppSurfaceDocsStandaloneHostRunner> logger,
+        IAppSurfaceDocsBrowserLauncher browserLauncher,
+        IAppSurfaceDocsPreviewHostStarter hostStarter)
+        : this(logger, browserLauncher, hostStarter, new AppSurfaceDocsHarvestSummaryReader())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsStandaloneHostRunner"/> class with explicit test seams.
+    /// </summary>
+    /// <param name="logger">Logger used for preview lifecycle diagnostics.</param>
+    /// <param name="browserLauncher">Browser launcher used after the docs host is listening.</param>
+    /// <param name="hostStarter">Host starter used to build and start the preview application.</param>
+    /// <param name="harvestSummaryReader">Reader used to produce command-owned harvest summary output.</param>
+    internal AppSurfaceDocsStandaloneHostRunner(
+        ILogger<AppSurfaceDocsStandaloneHostRunner> logger,
+        IAppSurfaceDocsBrowserLauncher browserLauncher,
+        IAppSurfaceDocsPreviewHostStarter hostStarter,
+        IAppSurfaceDocsHarvestSummaryReader harvestSummaryReader)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(browserLauncher);
+        ArgumentNullException.ThrowIfNull(hostStarter);
+        ArgumentNullException.ThrowIfNull(harvestSummaryReader);
+
+        _logger = logger;
+        _browserLauncher = browserLauncher;
+        _hostStarter = hostStarter;
+        _harvestSummaryReader = harvestSummaryReader;
+    }
+
     /// <inheritdoc />
-    public Task RunAsync(string[] args, TimeSpan? startupTimeout, CancellationToken cancellationToken)
+    public async Task RunAsync(string[] args, TimeSpan? startupTimeout, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return AppSurfaceDocsStandaloneHost.RunAsync(args, options => AppSurfaceDocsCliHost.ConfigurePackagedToolHost(options, startupTimeout));
+        IHost? host = null;
+
+        try
+        {
+            var previewArgs = new AppSurfaceDocsPreviewHostArgs(args, startupTimeout);
+            host = await BuildAndStartHostWithTimeoutAsync(previewArgs, cancellationToken);
+            var baseUrl = AppSurfaceDocsPreviewUrlResolver.ResolveBoundBaseUrl(host);
+            var docsUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDocsUrl(baseUrl, args);
+
+            _logger.LogInformation("AppSurface Docs is ready at {DocsUrl}.", docsUrl);
+            var browserLaunch = await _browserLauncher.TryOpenAsync(docsUrl, cancellationToken);
+            if (!browserLaunch.Succeeded)
+            {
+                _logger.LogWarning("AppSurface Docs is ready, but the browser could not be opened automatically: {Reason}", browserLaunch.FailureReason);
+            }
+
+            await LogHarvestSummaryAsync(host, cancellationToken);
+            await host.WaitForShutdownAsync(cancellationToken);
+        }
+        finally
+        {
+            if (host is not null)
+            {
+                await StopAndDisposeHostAsync(host);
+            }
+        }
+    }
+
+    private async Task LogHarvestSummaryAsync(IHost host, CancellationToken cancellationToken)
+    {
+        AppSurfaceDocsHarvestSummary? summary;
+        try
+        {
+            summary = await _harvestSummaryReader.ReadAsync(host, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsNonFatalException(ex))
+        {
+            _logger.LogWarning(ex, "AppSurface Docs harvest summary could not be read.");
+            return;
+        }
+
+        if (summary is null)
+        {
+            return;
+        }
+
+        if (summary.DiagnosticCount > 0)
+        {
+            _logger.LogInformation(
+                "Harvested {DocCount} docs from {SuccessfulHarvesters}/{TotalHarvesters} active harvesters. Status: {HarvestStatus}; diagnostics: {DiagnosticCount}.",
+                summary.TotalDocs,
+                summary.SuccessfulHarvesters,
+                summary.TotalHarvesters,
+                summary.Status,
+                summary.DiagnosticCount);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Harvested {DocCount} docs from {SuccessfulHarvesters}/{TotalHarvesters} active harvesters. Status: {HarvestStatus}.",
+            summary.TotalDocs,
+            summary.SuccessfulHarvesters,
+            summary.TotalHarvesters,
+            summary.Status);
+    }
+
+    private async Task<IHost> BuildAndStartHostWithTimeoutAsync(
+        AppSurfaceDocsPreviewHostArgs args,
+        CancellationToken cancellationToken)
+    {
+        if (args.StartupTimeout is null)
+        {
+            return await _hostStarter.BuildAndStartAsync(args, cancellationToken);
+        }
+
+        using var startupTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var startupToken = startupTimeoutCts.Token;
+        var startTask = Task.Run(
+            () => _hostStarter.BuildAndStartAsync(args, startupToken),
+            CancellationToken.None);
+
+        try
+        {
+            var completedTask = await Task.WhenAny(startTask, Task.Delay(args.StartupTimeout.Value, cancellationToken));
+            if (completedTask == startTask)
+            {
+                return await startTask;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (startTask.IsCompleted)
+            {
+                return await startTask;
+            }
+
+            await startupTimeoutCts.CancelAsync();
+            ObserveLateStartupTask(startTask);
+            throw CreateStartupTimeoutException(args.StartupTimeout.Value, innerException: null);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw CreateStartupTimeoutException(args.StartupTimeout.Value, ex);
+        }
+    }
+
+    private void ObserveLateStartupTask(Task<IHost> startTask)
+    {
+        _ = ObserveLateStartupTaskAsync(startTask);
+    }
+
+    private async Task ObserveLateStartupTaskAsync(Task<IHost> startTask)
+    {
+        try
+        {
+            var startedHost = await startTask.ConfigureAwait(false);
+            await StopAndDisposeHostAsync(startedHost).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsNonFatalException(ex))
+        {
+            _logger.LogDebug(ex, "AppSurface Docs preview host startup task completed after the startup timeout.");
+        }
+    }
+
+    private static TimeoutException CreateStartupTimeoutException(TimeSpan startupTimeout, Exception? innerException)
+    {
+        var seconds = startupTimeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+        return new TimeoutException($"AppSurface Docs preview host did not start within {seconds} seconds.", innerException);
+    }
+
+    private async Task StopAndDisposeHostAsync(IHost host)
+    {
+        using var disposableHost = host;
+
+        try
+        {
+            await host.StopAsync(CancellationToken.None);
+        }
+        catch (Exception ex) when (IsNonFatalException(ex))
+        {
+            _logger.LogWarning(ex, "AppSurface Docs preview host failed during shutdown.");
+        }
+    }
+
+    private static bool IsNonFatalException(Exception ex)
+    {
+        return ex is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException
+            and not BadImageFormatException
+            and not CannotUnloadAppDomainException
+            and not InvalidProgramException
+            and not ThreadAbortException;
+    }
+}
+
+/// <summary>
+/// Reads a command-owned harvest summary from a started AppSurface Docs preview host.
+/// </summary>
+internal interface IAppSurfaceDocsHarvestSummaryReader
+{
+    /// <summary>
+    /// Reads the current docs harvest summary if the started host exposes the AppSurface Docs aggregator.
+    /// </summary>
+    /// <param name="host">Started preview host.</param>
+    /// <param name="cancellationToken">Token observed while waiting for the first cached docs snapshot.</param>
+    /// <returns>A summary when available; otherwise <see langword="null" />.</returns>
+    Task<AppSurfaceDocsHarvestSummary?> ReadAsync(IHost host, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Concise harvest summary emitted by the AppSurface Docs CLI preview command.
+/// </summary>
+/// <param name="Status">Aggregate harvest status.</param>
+/// <param name="TotalDocs">Number of final documentation nodes in the cached snapshot.</param>
+/// <param name="TotalHarvesters">Number of active harvesters that participated in the snapshot.</param>
+/// <param name="SuccessfulHarvesters">Number of harvesters that completed successfully.</param>
+/// <param name="DiagnosticCount">Number of structured harvest diagnostics in the snapshot.</param>
+internal sealed record AppSurfaceDocsHarvestSummary(
+    DocHarvestHealthStatus Status,
+    int TotalDocs,
+    int TotalHarvesters,
+    int SuccessfulHarvesters,
+    int DiagnosticCount);
+
+/// <summary>
+/// Production <see cref="IAppSurfaceDocsHarvestSummaryReader"/> that reads <see cref="DocAggregator"/> health.
+/// </summary>
+internal sealed class AppSurfaceDocsHarvestSummaryReader : IAppSurfaceDocsHarvestSummaryReader
+{
+    /// <inheritdoc />
+    public async Task<AppSurfaceDocsHarvestSummary?> ReadAsync(IHost host, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+
+        var aggregator = host.Services.GetService<DocAggregator>();
+        if (aggregator is null)
+        {
+            return null;
+        }
+
+        var health = await aggregator.GetHarvestHealthAsync(cancellationToken);
+        return new AppSurfaceDocsHarvestSummary(
+            health.Status,
+            health.TotalDocs,
+            health.TotalHarvesters,
+            health.SuccessfulHarvesters,
+            health.Diagnostics.Count);
+    }
+}
+
+/// <summary>
+/// Describes a preview AppSurface Docs host startup request.
+/// </summary>
+/// <param name="Args">Arguments forwarded to the standalone AppSurface Docs host.</param>
+/// <param name="StartupTimeout">Startup watchdog timeout, or <see langword="null"/> when disabled.</param>
+internal readonly record struct AppSurfaceDocsPreviewHostArgs(string[] Args, TimeSpan? StartupTimeout);
+
+/// <summary>
+/// Builds and starts the AppSurface Docs preview host.
+/// </summary>
+internal interface IAppSurfaceDocsPreviewHostStarter
+{
+    /// <summary>
+    /// Builds the standalone docs host, starts Kestrel, and returns the started host for preview.
+    /// </summary>
+    /// <param name="args">Resolved preview arguments.</param>
+    /// <param name="cancellationToken">Token observed while starting the host.</param>
+    /// <returns>The started host.</returns>
+    Task<IHost> BuildAndStartAsync(AppSurfaceDocsPreviewHostArgs args, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Production <see cref="IAppSurfaceDocsPreviewHostStarter"/> that uses the AppSurface Docs standalone host builder.
+/// </summary>
+[ExcludeFromCodeCoverage(
+    Justification = "Production adapter delegates into the real standalone host builder and Kestrel; runner tests cover behavior before this boundary.")]
+internal sealed class AppSurfaceDocsStandalonePreviewHostStarter : IAppSurfaceDocsPreviewHostStarter
+{
+    /// <inheritdoc />
+    public async Task<IHost> BuildAndStartAsync(AppSurfaceDocsPreviewHostArgs args, CancellationToken cancellationToken)
+    {
+        var builder = AppSurfaceDocsStandaloneHost.CreateBuilder(
+            args.Args,
+            environmentProvider: null,
+            options => AppSurfaceDocsCliHost.ConfigurePackagedToolHost(options, args.StartupTimeout));
+
+        builder.ConfigureLogging(AppSurfaceDocsCliHost.ConfigureQuietPreviewLogging);
+
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(args.Args, Directory.GetCurrentDirectory());
+        if (defaultUrl is not null)
+        {
+            builder.ConfigureWebHost(webHost => webHost.UseUrls(defaultUrl));
+        }
+
+        var host = builder.Build();
+        try
+        {
+            await host.StartAsync(cancellationToken);
+            return host;
+        }
+        catch (Exception ex) when (IsNonFatalException(ex))
+        {
+            host.Dispose();
+            throw;
+        }
+    }
+
+    private static bool IsNonFatalException(Exception ex)
+    {
+        return ex is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException
+            and not BadImageFormatException
+            and not CannotUnloadAppDomainException
+            and not InvalidProgramException
+            and not ThreadAbortException;
+    }
+}
+
+/// <summary>
+/// Attempts to open the preview docs URL in the user's browser.
+/// </summary>
+internal interface IAppSurfaceDocsBrowserLauncher
+{
+    /// <summary>
+    /// Attempts to open <paramref name="url"/> in the user's browser without failing the preview command.
+    /// </summary>
+    /// <param name="url">Absolute docs URL to open.</param>
+    /// <param name="cancellationToken">Token observed before launch.</param>
+    /// <returns>The browser launch outcome.</returns>
+    Task<AppSurfaceDocsBrowserLaunchResult> TryOpenAsync(Uri url, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Describes the outcome of an attempted browser launch.
+/// </summary>
+/// <param name="Succeeded">Whether a platform launch command was started successfully.</param>
+/// <param name="FailureReason">User-facing failure detail when <paramref name="Succeeded"/> is <see langword="false"/>.</param>
+internal readonly record struct AppSurfaceDocsBrowserLaunchResult(bool Succeeded, string? FailureReason)
+{
+    /// <summary>
+    /// Gets a successful browser-launch result.
+    /// </summary>
+    public static AppSurfaceDocsBrowserLaunchResult Success { get; } = new(true, null);
+
+    /// <summary>
+    /// Creates a failed browser-launch result.
+    /// </summary>
+    /// <param name="reason">User-facing failure detail.</param>
+    /// <returns>A failed browser-launch result.</returns>
+    public static AppSurfaceDocsBrowserLaunchResult Failure(string reason)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        return new AppSurfaceDocsBrowserLaunchResult(false, reason);
+    }
+}
+
+/// <summary>
+/// Browser launcher that uses the current operating system's conventional URL opener.
+/// </summary>
+[ExcludeFromCodeCoverage(
+    Justification = "Platform process launch depends on the interactive user environment; command tests cover the launcher seam.")]
+internal sealed class SystemAppSurfaceDocsBrowserLauncher : IAppSurfaceDocsBrowserLauncher
+{
+    /// <inheritdoc />
+    public Task<AppSurfaceDocsBrowserLaunchResult> TryOpenAsync(Uri url, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(url);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        try
+        {
+            using var process = Process.Start(CreateStartInfo(url));
+            return Task.FromResult(AppSurfaceDocsBrowserLaunchResult.Success);
+        }
+        catch (Exception ex) when (IsNonFatalException(ex))
+        {
+            return Task.FromResult(AppSurfaceDocsBrowserLaunchResult.Failure(ex.Message));
+        }
+    }
+
+    private static ProcessStartInfo CreateStartInfo(Uri url)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return new ProcessStartInfo(url.AbsoluteUri)
+            {
+                UseShellExecute = true
+            };
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = OperatingSystem.IsMacOS() ? "open" : "xdg-open",
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(url.AbsoluteUri);
+        return startInfo;
+    }
+
+    private static bool IsNonFatalException(Exception ex)
+    {
+        return ex is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException
+            and not BadImageFormatException
+            and not CannotUnloadAppDomainException
+            and not InvalidProgramException
+            and not ThreadAbortException;
+    }
+}
+
+/// <summary>
+/// Resolves browser-facing URLs for AppSurface Docs preview hosts.
+/// </summary>
+internal static class AppSurfaceDocsPreviewUrlResolver
+{
+    private const int DevelopmentPortBase = 5600;
+    private const int DevelopmentPortRange = 1000;
+
+    /// <summary>
+    /// Resolves the default preview listener when the CLI invocation did not configure an endpoint explicitly.
+    /// </summary>
+    /// <param name="args">Arguments forwarded to the standalone host.</param>
+    /// <param name="repositoryRoot">Repository root used as the deterministic-port seed.</param>
+    /// <returns>A localhost URL, or <see langword="null"/> when explicit endpoint configuration should win.</returns>
+    internal static string? ResolveDefaultPreviewUrl(IReadOnlyList<string> args, string repositoryRoot)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+
+        var environmentName = ResolveEnvironmentName(args);
+        if (!string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase)
+            || HasExplicitEndpointArgument(args)
+            || HasExplicitEndpointEnvironmentVariable()
+            || HasExplicitEndpointConfigurationSource(args, repositoryRoot, environmentName))
+        {
+            return null;
+        }
+
+        var port = ComputeDeterministicPort(NormalizePath(repositoryRoot));
+        return $"http://localhost:{port.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    /// <summary>
+    /// Resolves the browser-facing base URL from Kestrel's published server addresses.
+    /// </summary>
+    /// <param name="host">Started host that exposes Kestrel server addresses.</param>
+    /// <returns>The scheme and authority that should be opened in the browser.</returns>
+    internal static string ResolveBoundBaseUrl(IHost host)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+
+        var addresses = host.Services
+            .GetRequiredService<IServer>()
+            .Features
+            .Get<IServerAddressesFeature>()
+            ?.Addresses;
+
+        return ResolveBoundBaseUrl(addresses);
+    }
+
+    /// <summary>
+    /// Resolves the browser-facing base URL from Kestrel's published server addresses.
+    /// </summary>
+    /// <param name="addresses">Published server addresses.</param>
+    /// <returns>The scheme and authority that should be opened in the browser.</returns>
+    internal static string ResolveBoundBaseUrl(ICollection<string>? addresses)
+    {
+        if (addresses is null || addresses.Count == 0)
+        {
+            throw new InvalidOperationException("AppSurface Docs preview host did not publish a listening URL. No addresses were published.");
+        }
+
+        var candidates = addresses
+            .Select(TryCreateBrowserUri)
+            .Where(candidate => candidate is not null)
+            .Cast<PreviewUriCandidate>()
+            .ToArray();
+
+        if (candidates.Length == 0)
+        {
+            throw new InvalidOperationException($"AppSurface Docs preview host did not publish a valid listening URL. Values: '{string.Join("', '", addresses)}'.");
+        }
+
+        var uri = candidates.FirstOrDefault(candidate => !candidate.IsWildcard && candidate.Uri.IsLoopback).Uri
+                  ?? candidates.FirstOrDefault(candidate => candidate.Uri.IsLoopback).Uri
+                  ?? candidates.FirstOrDefault(candidate => IsAnyHostAddress(candidate.Uri)).Uri
+                  ?? candidates[0].Uri;
+
+        var builder = new UriBuilder(uri)
+        {
+            Host = IsAnyHostAddress(uri) ? "localhost" : uri.Host,
+            Path = string.Empty,
+            Query = string.Empty,
+            Fragment = string.Empty
+        };
+
+        return builder.Uri.GetLeftPart(UriPartial.Authority);
+    }
+
+    /// <summary>
+    /// Combines the bound host base URL with the configured AppSurface Docs root path.
+    /// </summary>
+    /// <param name="baseUrl">Bound host base URL.</param>
+    /// <param name="args">Arguments forwarded to the standalone host.</param>
+    /// <returns>The absolute docs page URL to open.</returns>
+    internal static Uri ResolveDocsUrl(string baseUrl, IReadOnlyList<string> args)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        ArgumentNullException.ThrowIfNull(args);
+
+        var routeRootPath = ResolveOptionValue(args, "--AppSurfaceDocs:Routing:RouteRootPath");
+        var docsRootPath = ResolveOptionValue(args, "--AppSurfaceDocs:Routing:DocsRootPath");
+        var docsUrlBuilder = new DocsUrlBuilder(new AppSurfaceDocsOptions
+        {
+            Routing = new AppSurfaceDocsRoutingOptions
+            {
+                RouteRootPath = routeRootPath,
+                DocsRootPath = docsRootPath
+            }
+        });
+
+        return new Uri(
+            new Uri(EnsureTrailingSlash(baseUrl)),
+            docsUrlBuilder.CurrentDocsRootPath.TrimStart('/'));
+    }
+
+    private static string ResolveEnvironmentName(IReadOnlyList<string> args)
+    {
+        return ResolveOptionValue(args, "--environment")
+               ?? System.Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+               ?? System.Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
+               ?? Environments.Production;
+    }
+
+    private static string? ResolveOptionValue(IReadOnlyList<string> args, string optionName)
+    {
+        for (var index = 0; index < args.Count; index++)
+        {
+            var arg = args[index];
+            var prefix = optionName + "=";
+            if (arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return arg[prefix.Length..];
+            }
+
+            if (string.Equals(arg, optionName, StringComparison.OrdinalIgnoreCase)
+                && index + 1 < args.Count
+                && !args[index + 1].StartsWith("-", StringComparison.Ordinal))
+            {
+                return args[index + 1];
+            }
+        }
+
+        return null;
+    }
+
+    private static bool HasExplicitEndpointArgument(IReadOnlyList<string> args)
+    {
+        return args.Any(arg =>
+            string.Equals(arg, "--port", StringComparison.OrdinalIgnoreCase)
+            || arg.StartsWith("--port=", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(arg, "--urls", StringComparison.OrdinalIgnoreCase)
+            || arg.StartsWith("--urls=", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasExplicitEndpointEnvironmentVariable()
+    {
+        return HasEnvironmentValue("ASPNETCORE_URLS")
+               || HasEnvironmentValue("URLS")
+               || HasEnvironmentValue("ASPNETCORE_HTTP_PORTS")
+               || HasEnvironmentValue("DOTNET_HTTP_PORTS")
+               || HasEnvironmentValue("HTTP_PORTS")
+               || HasEnvironmentValue("ASPNETCORE_HTTPS_PORTS")
+               || HasEnvironmentValue("DOTNET_HTTPS_PORTS")
+               || HasEnvironmentValue("HTTPS_PORTS")
+               || System.Environment
+                   .GetEnvironmentVariables()
+                   .Keys
+                   .Cast<string>()
+                   .Any(variableName =>
+                       variableName.StartsWith("Kestrel__Endpoints__", StringComparison.OrdinalIgnoreCase)
+                       && variableName.EndsWith("__Url", StringComparison.OrdinalIgnoreCase)
+                       && HasEnvironmentValue(variableName));
+    }
+
+    private static bool HasExplicitEndpointConfigurationSource(
+        IReadOnlyList<string> args,
+        string repositoryRoot,
+        string environmentName)
+    {
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(repositoryRoot)
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+            .AddJsonFile($"appsettings.{environmentName}.json", optional: true, reloadOnChange: false)
+            .AddCommandLine(BuildEndpointProbeArguments(args))
+            .Build();
+
+        return HasConfigurationValue(configuration, "urls")
+               || HasConfigurationValue(configuration, "http_ports")
+               || HasConfigurationValue(configuration, "https_ports")
+               || configuration
+                   .GetSection("Kestrel:Endpoints")
+                   .GetChildren()
+                   .Any(endpoint => HasConfigurationValue(endpoint, "Url"));
+    }
+
+    private static string[] BuildEndpointProbeArguments(IReadOnlyList<string> args)
+    {
+        var probeArgs = new List<string>(args.Count);
+        for (var index = 0; index < args.Count; index++)
+        {
+            var arg = args[index];
+            if (arg.StartsWith("--environment=", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.Equals(arg, "--environment", StringComparison.OrdinalIgnoreCase))
+            {
+                if (index + 1 >= args.Count)
+                {
+                    continue;
+                }
+
+                var candidate = args[index + 1];
+                if (!candidate.StartsWith("-", StringComparison.Ordinal))
+                {
+                    index++;
+                }
+
+                continue;
+            }
+
+            probeArgs.Add(arg);
+        }
+
+        return [.. probeArgs];
+    }
+
+    private static bool HasConfigurationValue(
+        IConfiguration configuration,
+        string key)
+    {
+        return !string.IsNullOrWhiteSpace(configuration[key]);
+    }
+
+    private static bool HasEnvironmentValue(string variableName)
+    {
+        return !string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable(variableName));
+    }
+
+    private static bool IsAnyHostAddress(Uri uri)
+    {
+        return string.Equals(uri.Host, "*", StringComparison.Ordinal)
+               || string.Equals(uri.Host, "+", StringComparison.Ordinal)
+               || string.Equals(uri.Host, "0.0.0.0", StringComparison.Ordinal)
+               || string.Equals(uri.Host, "[::]", StringComparison.Ordinal)
+               || string.Equals(uri.Host, "::", StringComparison.Ordinal);
+    }
+
+    private static PreviewUriCandidate? TryCreateBrowserUri(string address)
+    {
+        if (Uri.TryCreate(address, UriKind.Absolute, out var uri))
+        {
+            return new PreviewUriCandidate(uri, IsAnyHostAddress(uri));
+        }
+
+        var isWildcard = address.Contains("://*:", StringComparison.Ordinal)
+                         || address.Contains("://+:", StringComparison.Ordinal);
+        var normalized = address
+            .Replace("://*:", "://localhost:", StringComparison.Ordinal)
+            .Replace("://+:", "://localhost:", StringComparison.Ordinal);
+
+        return Uri.TryCreate(normalized, UriKind.Absolute, out uri)
+            ? new PreviewUriCandidate(uri, isWildcard)
+            : null;
+    }
+
+    private readonly record struct PreviewUriCandidate(Uri Uri, bool IsWildcard);
+
+    private static string EnsureTrailingSlash(string value)
+    {
+        return value.EndsWith("/", StringComparison.Ordinal)
+            ? value
+            : value + "/";
+    }
+
+    private static string NormalizePath(string path)
+    {
+        var normalized = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (OperatingSystem.IsWindows())
+        {
+            normalized = normalized.ToUpperInvariant();
+        }
+
+        return normalized.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+    }
+
+    private static int ComputeDeterministicPort(string seedPath)
+    {
+        var hash = ComputeFnv1aHash(seedPath);
+        return DevelopmentPortBase + (int)(hash % DevelopmentPortRange);
+    }
+
+    private static uint ComputeFnv1aHash(string value)
+    {
+        const uint offsetBasis = 2166136261;
+        const uint prime = 16777619;
+
+        var hash = offsetBasis;
+        foreach (var currentByte in System.Text.Encoding.UTF8.GetBytes(value))
+        {
+            hash ^= currentByte;
+            hash *= prime;
+        }
+
+        return hash;
     }
 }
 

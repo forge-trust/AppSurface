@@ -17,7 +17,7 @@ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs --repo .
 dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs export --repo . --output ./dist/docs --mode cdn --strict
 ```
 
-The CLI delegates to this standalone host, so the host remains the source of truth for AppSurface Docs startup, static web assets, routes, and configuration binding. Preview runs this host until shutdown. Export starts it in-process through `AppSurfaceDocsStandaloneHost.CreateBuilder`, binds `http://127.0.0.1:0`, crawls the resolved loopback address with RazorWire export, then stops and disposes the host.
+The CLI delegates to this standalone host, so the host remains the source of truth for AppSurface Docs startup, static web assets, routes, and configuration binding. Preview starts it in-process, keeps routine ASP.NET Core lifecycle output quiet, opens the resolved docs URL after Kestrel is listening, and then runs until shutdown. Export starts it in-process through `AppSurfaceDocsStandaloneHost.CreateBuilder`, binds `http://127.0.0.1:0`, crawls the resolved loopback address with RazorWire export, then stops and disposes the host.
 
 ## Entry Point
 

@@ -67,6 +67,7 @@ internal static class AppSurfaceCliApp
         services.AddSingleton(context.EnvironmentProvider);
         services.AddSingleton<IOptionSuggester, LevenshteinOptionSuggester>();
         services.AddSingleton<IAppSurfaceDocsHostRunner, AppSurfaceDocsStandaloneHostRunner>();
+        services.AddSingleton<IAppSurfaceDocsBrowserLauncher, SystemAppSurfaceDocsBrowserLauncher>();
         services.AddSingleton<IAppSurfaceDocsExportRunner, AppSurfaceDocsInProcessExportRunner>();
         services.AddSingleton<IRazorWireStaticExporter, RazorWireExportEngineAdapter>();
         services.AddSingleton<ExportEngine>();
