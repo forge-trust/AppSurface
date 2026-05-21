@@ -81,7 +81,7 @@
                 {
                     <img class="docs-brand-mark docs-brand-mark--sm" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
                 }
-                <span class="docs-wordmark text-xl">@docsIdentity.DisplayName</span>
+                @ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsWordmarkHtml.Render(docsIdentity, "docs-wordmark text-xl")
             </a>
             <button id="docs-sidebar-close"
                     type="button"
@@ -100,7 +100,7 @@
                     <img class="docs-brand-mark" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
                 }
                 <span class="min-w-0">
-                    <span class="docs-wordmark block text-2xl">@docsIdentity.DisplayName</span>
+                    @ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsWordmarkHtml.Render(docsIdentity, "docs-wordmark block text-lg")
                 </span>
             </a>
         </div>
@@ -125,7 +125,7 @@
         <nav class="flex-grow overflow-y-auto px-4 pb-4 space-y-1 min-h-0" aria-label="Documentation navigation">
             @await Component.InvokeAsync("Sidebar")
         </nav>
-        <div class="p-4 border-t border-[#1b2a43] text-xs text-slate-500 text-center">
+        <div id="docs-sidebar-footer" class="p-4 border-t border-[#1b2a43] text-xs text-slate-500 text-center">
             @docsIdentity.DisplayName
         </div>
     </aside>
@@ -152,7 +152,7 @@
                 {
                     <img class="docs-brand-mark docs-brand-mark--sm" src="@docsBrandIconUrl" alt="" aria-hidden="true" />
                 }
-                <span class="docs-wordmark truncate text-lg">@docsIdentity.DisplayName</span>
+                @ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsWordmarkHtml.Render(docsIdentity, "docs-wordmark truncate text-lg")
             </a>
             <a href="@docsSearchUrl" class="ml-auto inline-flex items-center gap-2 rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-3 py-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-[#bfdbfe] hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
                 <span>Search</span>

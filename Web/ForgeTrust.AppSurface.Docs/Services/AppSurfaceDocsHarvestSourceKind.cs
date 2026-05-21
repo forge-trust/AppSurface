@@ -13,5 +13,10 @@ internal enum AppSurfaceDocsHarvestSourceKind
     /// <summary>
     /// C# source files used to generate API reference content.
     /// </summary>
-    CSharp
+    CSharp,
+
+    /// <summary>
+    /// JavaScript source files used to generate browser API reference content.
+    /// </summary>
+    JavaScript
 }

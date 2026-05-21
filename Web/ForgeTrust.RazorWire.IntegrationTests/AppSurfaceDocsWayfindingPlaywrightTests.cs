@@ -638,6 +638,11 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             """,
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
+        await page.EvaluateAsync("() => document.scrollingElement?.scrollTo(0, 0)");
+        await page.WaitForFunctionAsync(
+            "() => Math.round(document.scrollingElement?.scrollTop ?? window.scrollY) <= 1",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
 
         await page.EvaluateAsync(ScrollMainContentToBottomScript);
         var scrollState = await page.EvaluateAsync<DetailsScrollState>(

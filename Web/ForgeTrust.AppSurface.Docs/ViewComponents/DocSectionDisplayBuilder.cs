@@ -25,9 +25,10 @@ internal static class DocSectionDisplayBuilder
     /// Editorial sections stay flat and task-oriented, while <see cref="DocPublicSection.ApiReference"/> delegates to the
     /// namespace-aware grouping path so API reference content stays organized by family. API-reference groups intentionally
     /// omit generated type-anchor children from these global navigation models, and deeper namespace children are nested
-    /// under their nearest useful parent so repeated namespace prefixes do not dominate the primary sidebar. Readers
-    /// reach type and member anchors from the namespace page's local outline, source links, or search instead of loading
-    /// every symbol into the primary sidebar.
+    /// under their nearest useful parent so repeated namespace prefixes do not dominate the primary sidebar. Non-namespace
+    /// API pages, such as JavaScript public API groups, remain visible under their own family groups. Readers reach type,
+    /// member, and item anchors from the page-local outline, source links, or search instead of loading every symbol into
+    /// the primary sidebar.
     /// </remarks>
     internal static IReadOnlyList<DocSectionGroupViewModel> BuildGroups(
         DocSectionSnapshot snapshot,
@@ -78,8 +79,7 @@ internal static class DocSectionDisplayBuilder
             .ToList();
 
         var groups = new List<DocSectionGroupViewModel>();
-        var namespaceRoot = rootItems.FirstOrDefault(
-            doc => doc.Path.Trim(' ', '/').Equals("Namespaces", StringComparison.OrdinalIgnoreCase));
+        var namespaceRoot = rootItems.FirstOrDefault(IsNamespaceRoot);
         if (namespaceRoot is not null)
         {
             groups.Add(
@@ -97,8 +97,13 @@ internal static class DocSectionDisplayBuilder
                 });
         }
 
+        var nonNamespaceApiNodes = rootItems
+            .Where(doc => !IsNamespaceRoot(doc) && !IsNamespaceRoute(doc))
+            .ToList();
+        groups.AddRange(BuildNonNamespaceApiGroups(nonNamespaceApiNodes, currentHref, docsRootPath));
+
         var namespaceNodes = rootItems
-            .Where(doc => doc.Path.Trim(' ', '/').StartsWith("Namespaces/", StringComparison.OrdinalIgnoreCase))
+            .Where(IsNamespaceRoute)
             .ToList();
         var namespaceNodesByName = namespaceNodes
             .GroupBy(SidebarDisplayHelper.GetFullNamespaceName, StringComparer.OrdinalIgnoreCase)
@@ -152,6 +157,33 @@ internal static class DocSectionDisplayBuilder
                     }));
 
         return groups;
+    }
+
+    private static IReadOnlyList<DocSectionGroupViewModel> BuildNonNamespaceApiGroups(
+        IReadOnlyList<DocNode> apiNodes,
+        string? currentHref,
+        string docsRootPath)
+    {
+        return apiNodes
+            .GroupBy(GetApiReferenceFamilyTitle, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Min(doc => doc.Metadata?.Order ?? int.MaxValue))
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(
+                group => new DocSectionGroupViewModel
+                {
+                    Title = group.Key,
+                    Links = group
+                        .OrderBy(doc => doc.Metadata?.Order ?? int.MaxValue)
+                        .ThenBy(doc => doc.Title, StringComparer.OrdinalIgnoreCase)
+                        .Select(doc => CreateLink(
+                            doc,
+                            apiNodes,
+                            currentHref,
+                            docsRootPath,
+                            includeTypeAnchorChildren: false))
+                        .ToList()
+                })
+            .ToList();
     }
 
     private static DocSectionLinkViewModel CreateLink(
@@ -265,6 +297,37 @@ internal static class DocSectionDisplayBuilder
     {
         var separatorIndex = fullNamespace.LastIndexOf('.');
         return fullNamespace[(separatorIndex + 1)..];
+    }
+
+    private static bool IsNamespaceRoot(DocNode doc)
+    {
+        return NormalizePath(doc.Path)?.Equals("Namespaces", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static bool IsNamespaceRoute(DocNode doc)
+    {
+        return NormalizePath(doc.Path)?.StartsWith("Namespaces/", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static string GetApiReferenceFamilyTitle(DocNode doc)
+    {
+        if (doc.Metadata?.PageType?.StartsWith("javascript-", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return "JavaScript";
+        }
+
+        var breadcrumbFamily = doc.Metadata?.Breadcrumbs?
+            .Select(label => label.Trim())
+            .FirstOrDefault(label =>
+                !string.IsNullOrWhiteSpace(label)
+                && !label.Equals("API Reference", StringComparison.OrdinalIgnoreCase)
+                && !label.Equals(doc.Title, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(breadcrumbFamily))
+        {
+            return breadcrumbFamily;
+        }
+
+        return "API Reference";
     }
 
     private static bool IsCurrentLink(string? currentHref, string href)

@@ -122,7 +122,7 @@ public sealed class AppSurfaceDocsIdentityOptions
     /// <summary>
     /// Gets the default display name used when <see cref="DisplayName"/> is omitted or blank.
     /// </summary>
-    public const string DefaultDisplayName = "AppSurface Docs";
+    public const string DefaultDisplayName = "Documentation";
 
     /// <summary>
     /// Gets or sets the visible product name rendered in titles and navigation chrome.
@@ -149,9 +149,46 @@ public sealed class AppSurfaceDocsIdentityOptions
     public AppSurfaceDocsLogoOptions Logo { get; set; } = new();
 
     /// <summary>
+    /// Gets wordmark presentation settings used by the built-in navigation chrome.
+    /// </summary>
+    public AppSurfaceDocsWordmarkOptions Wordmark { get; set; } = new();
+
+    /// <summary>
     /// Gets favicon settings emitted into the document head.
     /// </summary>
     public AppSurfaceDocsFaviconOptions Favicon { get; set; } = new();
+}
+
+/// <summary>
+/// Wordmark presentation settings for AppSurface Docs browser chrome.
+/// </summary>
+/// <remarks>
+/// Wordmark settings are intentionally opt-in so the built-in docs chrome stays short, bounded, and plain text by
+/// default. Use them when the publishing repository needs a specific product wordmark, shorter display treatment, or
+/// substring highlight color. The highlighted text must appear in the resolved display name, and the color accepts only
+/// CSS hex values so configuration cannot inject arbitrary style declarations into the package layout.
+/// </remarks>
+public sealed class AppSurfaceDocsWordmarkOptions
+{
+    /// <summary>
+    /// Gets or sets the display-name substring highlighted by the built-in docs chrome.
+    /// </summary>
+    /// <remarks>
+    /// Blank values disable wordmark highlighting. Non-blank values must match part of the resolved
+    /// <see cref="AppSurfaceDocsIdentityOptions.DisplayName"/> using ordinal comparison. Only the first occurrence is
+    /// highlighted; choose a more specific substring if the display name repeats the same word.
+    /// </remarks>
+    public string? HighlightText { get; set; }
+
+    /// <summary>
+    /// Gets or sets the CSS hex color used for the highlighted wordmark substring.
+    /// </summary>
+    /// <remarks>
+    /// Valid values are CSS hex colors such as <c>#3b82f6</c> or <c>#38bdf8</c>. Blank values leave the highlighted
+    /// substring in the surrounding text color. Supplying a color without <see cref="HighlightText"/> is rejected because
+    /// it has no visible effect.
+    /// </remarks>
+    public string? HighlightColor { get; set; }
 }
 
 /// <summary>
@@ -256,7 +293,7 @@ public sealed class AppSurfaceDocsSourceOptions
 /// <remarks>
 /// The default policy is tolerant so public runtime hosts can continue serving even when source harvesting has a
 /// transient problem. Enable <see cref="FailOnFailure"/> in CI or export hosts that should fail closed when every
-/// configured harvester fails, times out, or cancels. Use <see cref="Paths"/>, <see cref="Markdown"/>, and
+/// active harvester fails, times out, or cancels. Use <see cref="Paths"/>, <see cref="Markdown"/>, and
 /// <see cref="CSharp"/> to define the repository-relative public documentation boundary shared by runtime hosts,
 /// export flows, and hygiene checks.
 /// </remarks>
@@ -296,6 +333,11 @@ public sealed class AppSurfaceDocsHarvestOptions
     /// Gets C# API-reference path policy settings that refine the global path policy.
     /// </summary>
     public AppSurfaceDocsCSharpHarvestOptions CSharp { get; set; } = new();
+
+    /// <summary>
+    /// Gets JavaScript public API path policy and parser settings.
+    /// </summary>
+    public AppSurfaceDocsJavaScriptHarvestOptions JavaScript { get; set; } = new();
 }
 
 /// <summary>
@@ -775,6 +817,35 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                     allowDocsHomeDefault: false);
             }
 
+            if (identity.Wordmark is null)
+            {
+                failures.Add("AppSurfaceDocs:Identity:Wordmark must not be null.");
+            }
+            else
+            {
+                var highlightText = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(identity.Wordmark.HighlightText);
+                var highlightColor = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(identity.Wordmark.HighlightColor);
+                if (highlightColor is not null
+                    && !AppSurfaceDocsIdentityPath.TryNormalizeCssHexColor(highlightColor, out _, out var colorError))
+                {
+                    failures.Add($"AppSurfaceDocs:Identity:Wordmark:HighlightColor {colorError}");
+                }
+
+                if (highlightColor is not null && highlightText is null)
+                {
+                    failures.Add(
+                        "AppSurfaceDocs:Identity:Wordmark:HighlightColor requires AppSurfaceDocs:Identity:Wordmark:HighlightText.");
+                }
+
+                if (highlightText is not null
+                    && !AppSurfaceDocsIdentityPath.NormalizeDisplayName(identity.DisplayName)
+                        .Contains(highlightText, StringComparison.Ordinal))
+                {
+                    failures.Add(
+                        "AppSurfaceDocs:Identity:Wordmark:HighlightText must match part of the resolved AppSurfaceDocs:Identity:DisplayName.");
+                }
+            }
+
             if (identity.Favicon is null)
             {
                 failures.Add("AppSurfaceDocs:Identity:Favicon must not be null.");
@@ -836,6 +907,21 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
             ValidateHarvestPathOptions(harvest.Paths, "AppSurfaceDocs:Harvest:Paths", failures);
             ValidateHarvestSourceOptions(harvest.Markdown, "AppSurfaceDocs:Harvest:Markdown", failures);
             ValidateHarvestSourceOptions(harvest.CSharp, "AppSurfaceDocs:Harvest:CSharp", failures);
+            ValidateHarvestSourceOptions(harvest.JavaScript, "AppSurfaceDocs:Harvest:JavaScript", failures);
+            if (harvest.JavaScript is not null)
+            {
+                if (harvest.JavaScript.MaxFileSizeBytes <= 0)
+                {
+                    failures.Add("AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes must be greater than zero.");
+                }
+
+                if (harvest.JavaScript.Enabled
+                    && (harvest.JavaScript.IncludeGlobs is null
+                        || !harvest.JavaScript.IncludeGlobs.Any(static include => !string.IsNullOrWhiteSpace(include))))
+                {
+                    failures.Add("AppSurface Docs JavaScript harvesting requires at least one AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs glob when enabled.");
+                }
+            }
         }
 
         if (bundle is null)
@@ -1126,6 +1212,22 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
 
     private static void ValidateHarvestSourceOptions(
         AppSurfaceDocsCSharpHarvestOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
+        ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
+        ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+    }
+
+    private static void ValidateHarvestSourceOptions(
+        AppSurfaceDocsJavaScriptHarvestOptions? options,
         string configurationPath,
         List<string> failures)
     {

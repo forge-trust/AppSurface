@@ -34,11 +34,33 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
     }
 
     [Theory]
+    [MemberData(nameof(DefaultJavaScriptExcludedPaths))]
+    public void Evaluate_WithDefaultPolicyExcludesJavaScriptDefaultGroups(
+        string relativePath,
+        string[] expectedGroups)
+    {
+        var decision = AppSurfaceDocsHarvestPathPolicy.CreateDefault()
+            .Evaluate(relativePath, AppSurfaceDocsHarvestSourceKind.JavaScript);
+
+        Assert.False(decision.Included);
+        if (expectedGroups.Length == 0)
+        {
+            Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedBySourceExclude, decision.Code);
+        }
+        else
+        {
+            Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedByDefaultGroup, decision.Code);
+            Assert.All(expectedGroups, group => Assert.Contains(group, decision.MatchedDefaultGroups));
+        }
+    }
+
+    [Theory]
     [InlineData("docs/readme.md", "Markdown")]
     [InlineData(".hidden.md", "Markdown")]
     [InlineData("examples/web-app/README.md", "Markdown")]
     [InlineData(".hidden.cs", "CSharp")]
     [InlineData("src/Contests/Fixture.cs", "CSharp")]
+    [InlineData("src/browser/runtime.js", "JavaScript")]
     public void Evaluate_WithDefaultPolicyIncludesNormalCandidates(
         string relativePath,
         string sourceKind)
@@ -94,6 +116,7 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
                 options.Harvest.Paths.IncludeGlobs = ["docs/**", "src/public/**"];
                 options.Harvest.Markdown.IncludeGlobs = ["docs/guides/**"];
                 options.Harvest.CSharp.IncludeGlobs = ["src/public/api/**"];
+                options.Harvest.JavaScript.IncludeGlobs = ["src/public/api/**"];
             });
 
         AssertDecision(
@@ -114,6 +137,10 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
             AppSurfaceDocsHarvestPathDecisionCode.ExcludedBySourceIncludeMiss);
         AssertDecision(
             policy.Evaluate("src/public/api/Widget.cs", AppSurfaceDocsHarvestSourceKind.CSharp),
+            included: true,
+            AppSurfaceDocsHarvestPathDecisionCode.IncludedBySourceInclude);
+        AssertDecision(
+            policy.Evaluate("src/public/api/widget.js", AppSurfaceDocsHarvestSourceKind.JavaScript),
             included: true,
             AppSurfaceDocsHarvestPathDecisionCode.IncludedBySourceInclude);
     }
@@ -425,6 +452,17 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
             { "Web/ForgeTrust.AppSurface.Web.Tests/Fixture.cs", ["TestProjects"] },
             { "src/bin/Generated.cs", ["BuildOutput"] },
             { ".codex/Agent.cs", ["HiddenDirectories"] }
+        };
+    }
+
+    public static TheoryData<string, string[]> DefaultJavaScriptExcludedPaths()
+    {
+        return new TheoryData<string, string[]>
+        {
+            { "wwwroot/app.min.js", [] },
+            { "src/bin/generated.js", ["BuildOutput"] },
+            { "src/Tests/browser.js", ["TestProjects"] },
+            { ".config/browser.js", ["HiddenDirectories"] }
         };
     }
 

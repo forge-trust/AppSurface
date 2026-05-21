@@ -83,6 +83,152 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void Extract_ShouldParseOutlineMetadata()
+    {
+        var markdown = """
+            ---
+            outline:
+              max_heading_level: 2
+              repeated_heading_policy: h2_only
+            ---
+            # Guide
+            """;
+
+        var (_, metadata) = MarkdownFrontMatterParser.Extract(markdown);
+
+        Assert.Equal(2, metadata?.Outline?.MaxHeadingLevel);
+        Assert.Equal("h2_only", metadata?.Outline?.RepeatedHeadingPolicy);
+    }
+
+    [Fact]
+    public void Extract_ShouldParseCaseInsensitiveOutlineKeys_AndNormalizeQuotedValues()
+    {
+        var markdown = """
+            ---
+            outline:
+              MAX_HEADING_LEVEL: "3"
+              REPEATED_HEADING_POLICY: h2-only
+            ---
+            # Guide
+            """;
+
+        var (_, metadata) = MarkdownFrontMatterParser.Extract(markdown);
+
+        Assert.Equal(3, metadata?.Outline?.MaxHeadingLevel);
+        Assert.Equal("h2_only", metadata?.Outline?.RepeatedHeadingPolicy);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldIgnoreInvalidOutlineMaxHeadingLevel_AndKeepValidPolicy()
+    {
+        var markdown = """
+            ---
+            outline:
+              max_heading_level: two
+              repeated_heading_policy: include
+            ---
+            # Guide
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata?.Outline?.MaxHeadingLevel);
+        Assert.Equal("include", result.Metadata?.Outline?.RepeatedHeadingPolicy);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("invalid-outline-max-heading-level", diagnostic.Code);
+        Assert.Equal("outline.max_heading_level", diagnostic.FieldPath);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldIgnoreInvalidOutlinePolicy_AndKeepValidMaxHeadingLevel()
+    {
+        var markdown = """
+            ---
+            outline:
+              max_heading_level: 2
+              repeated_heading_policy: sometimes
+            ---
+            # Guide
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Equal(2, result.Metadata?.Outline?.MaxHeadingLevel);
+        Assert.Null(result.Metadata?.Outline?.RepeatedHeadingPolicy);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("invalid-outline-repeated-heading-policy", diagnostic.Code);
+        Assert.Equal("outline.repeated_heading_policy", diagnostic.FieldPath);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldReportNonStringOutlinePolicy()
+    {
+        var markdown = """
+            ---
+            outline:
+              repeated_heading_policy: 2
+            ---
+            # Guide
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata?.Outline);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("invalid-outline-repeated-heading-policy", diagnostic.Code);
+        Assert.Equal("outline.repeated_heading_policy", diagnostic.FieldPath);
+    }
+
+    [Fact]
+    public void TryConvertOutlineMaxHeadingLevel_ShouldConvertIntegerValues()
+    {
+        var result = MarkdownFrontMatterParser.TryConvertOutlineMaxHeadingLevel(2, out var maxHeadingLevel);
+
+        Assert.True(result);
+        Assert.Equal(2, maxHeadingLevel);
+    }
+
+    [Fact]
+    public void TryConvertOutlineMaxHeadingLevel_ShouldConvertLongValuesInsideIntegerRange()
+    {
+        var result = MarkdownFrontMatterParser.TryConvertOutlineMaxHeadingLevel(3L, out var maxHeadingLevel);
+
+        Assert.True(result);
+        Assert.Equal(3, maxHeadingLevel);
+    }
+
+    [Fact]
+    public void TryConvertOutlineMaxHeadingLevel_ShouldRejectLongValuesOutsideIntegerRange()
+    {
+        var result = MarkdownFrontMatterParser.TryConvertOutlineMaxHeadingLevel((long)int.MaxValue + 1, out var maxHeadingLevel);
+
+        Assert.False(result);
+        Assert.Equal(0, maxHeadingLevel);
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("[]")]
+    public void ExtractWithDiagnostics_ShouldIgnoreMalformedOutlineMetadata_AndKeepOtherMetadata(string outlineValue)
+    {
+        var markdown = string.Join(
+            "\n",
+            "---",
+            "title: Guide",
+            $"outline: {outlineValue}",
+            "---",
+            "# Guide");
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Equal("Guide", result.Metadata?.Title);
+        Assert.Null(result.Metadata?.Outline);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("invalid-outline-metadata", diagnostic.Code);
+        Assert.Equal("outline", diagnostic.FieldPath);
+    }
+
+    [Fact]
     public void ExtractWithDiagnostics_ShouldReportInvalidLocaleFallback()
     {
         var markdown = """
@@ -212,6 +358,263 @@ public sealed class MarkdownFrontMatterParserTests
                 Assert.Null(second.SupportingCopy);
                 Assert.Equal(30, second.Order);
             });
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldParseNamespaceEntryPoints()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: AddRazorWire(...)
+                summary: Register RazorWire services.
+                target: "#ForgeTrust-RazorWire-AddRazorWire"
+                keywords:
+                  - register RazorWire
+                  - services
+                order: 10
+              - label: API guide
+                href: /docs/guides/api
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Collection(
+            result.Metadata!.EntryPoints!,
+            first =>
+            {
+                Assert.Equal("AddRazorWire(...)", first.Label);
+                Assert.Equal("Register RazorWire services.", first.Summary);
+                Assert.Equal("ForgeTrust-RazorWire-AddRazorWire", first.Target);
+                Assert.Null(first.Href);
+                Assert.Equal(["register RazorWire", "services"], first.Keywords);
+                Assert.Equal(10, first.Order);
+            },
+            second =>
+            {
+                Assert.Equal("API guide", second.Label);
+                Assert.Null(second.Target);
+                Assert.Equal("/docs/guides/api", second.Href);
+            });
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldSkipInvalidNamespaceEntryPoints_AndKeepUsableRows()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - summary: Missing label
+              - label: Good
+                target: "../bad"
+                href: "#fallback"
+                keywords:
+                  - useful
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("Good", entry.Label);
+        Assert.Null(entry.Target);
+        Assert.Equal("#fallback", entry.Href);
+        Assert.Equal(["useful"], entry.Keywords);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-label");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-target");
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldNormalizeNamespaceEntryPointSharpOnlyTarget_AsTextEntry()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: Overview
+                target: " # "
+                href: /docs/overview
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("Overview", entry.Label);
+        Assert.Null(entry.Target);
+        Assert.Equal("/docs/overview", entry.Href);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldKeepCaseSensitiveNamespaceEntryPointTargets()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: AddWeb
+                target: ForgeTrust.Web.AddWeb
+              - label: AddWeb
+                target: ForgeTrust.Web.addweb
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Collection(
+            result.Metadata!.EntryPoints!,
+            first => Assert.Equal("ForgeTrust.Web.AddWeb", first.Target),
+            second => Assert.Equal("ForgeTrust.Web.addweb", second.Target));
+        Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Code == "duplicate-namespace-entry-point");
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldPreferNamespaceEntryPointTarget_AndDropEmptyKeywords()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: AddWeb
+                target: Known.Anchor
+                href: /docs/ignored
+                keywords:
+                  - ""
+                  - "   "
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("Known.Anchor", entry.Target);
+        Assert.Null(entry.Href);
+        Assert.Null(entry.Keywords);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldRejectDecodedBlankNamespaceEntryPointLabels()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: "&#32;"
+                href: /docs/ignored
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata!.EntryPoints);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-label");
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldSkipNullDuplicateAndOverlongNamespaceEntryPoints()
+    {
+        var longLabel = new string('L', 81);
+        var longSummary = new string('S', 221);
+        var markdown = $"""
+            ---
+            entry_points:
+              - null
+              - label: {longLabel}
+              - label: AddWeb
+                summary: {longSummary}
+                order: -1
+                keywords:
+                  - useful
+                  - useful
+                  - {new string('K', 81)}
+              - label: AddWeb
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("AddWeb", entry.Label);
+        Assert.Null(entry.Summary);
+        Assert.Null(entry.Order);
+        Assert.Equal(["useful"], entry.Keywords);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "null-namespace-entry-point");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-label");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-summary");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-order");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-keyword");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "duplicate-namespace-entry-point");
+    }
+
+    [Theory]
+    [InlineData("#")]
+    [InlineData("##bad")]
+    [InlineData("/docs/bad path")]
+    [InlineData("/docs/search?query=api")]
+    [InlineData("//docs.example.test/path")]
+    [InlineData("https://example.test/docs")]
+    public void ExtractWithDiagnostics_ShouldDropUnsupportedNamespaceEntryPointHrefs(string href)
+    {
+        var markdown = $"""
+            ---
+            entry_points:
+              - label: Bad href
+                href: "{href}"
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("Bad href", entry.Label);
+        Assert.Null(entry.Href);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-href");
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldAllowNamespaceEntryPointHrefUnderCustomDocsRoot()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: Custom root
+                href: /foo/bar/guide
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("/foo/bar/guide", entry.Href);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldReturnNullEntryPoints_WhenAllNamespaceEntryPointsAreInvalid()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - null
+              - label: ""
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata!.EntryPoints);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "null-namespace-entry-point");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-label");
     }
 
     [Fact]

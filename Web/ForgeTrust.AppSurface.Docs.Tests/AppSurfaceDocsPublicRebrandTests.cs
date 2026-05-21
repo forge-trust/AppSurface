@@ -74,8 +74,12 @@ public sealed class AppSurfaceDocsPublicRebrandTests
     public void PublicConfigurationExamples_ShouldUseCanonicalAppSurfaceDocsRoot()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var offenders = PublicSurfaceRoots
+        var publicSurfacePaths = PublicSurfaceRoots
             .Select(root => CombineUnderRepoRoot(repoRoot, root))
+            .ToArray();
+        AssertPublicSurfaceRootsExist(repoRoot, publicSurfacePaths);
+
+        var offenders = publicSurfacePaths
             .SelectMany(EnumerateTextFiles)
             .SelectMany(file => FindSpacedAppSurfaceDocsConfigRoots(repoRoot, file))
             .Order(StringComparer.Ordinal)
@@ -86,6 +90,21 @@ public sealed class AppSurfaceDocsPublicRebrandTests
             "Public configuration examples should use the canonical AppSurfaceDocs config root:"
             + Environment.NewLine
             + string.Join(Environment.NewLine, offenders));
+    }
+
+    private static void AssertPublicSurfaceRootsExist(string repoRoot, IEnumerable<string> publicSurfacePaths)
+    {
+        var missingRoots = publicSurfacePaths
+            .Where(path => !File.Exists(path) && !Directory.Exists(path))
+            .Select(path => Path.GetRelativePath(repoRoot, path))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            missingRoots.Length == 0,
+            "PublicSurfaceRoots contains missing repository paths:"
+            + Environment.NewLine
+            + string.Join(Environment.NewLine, missingRoots));
     }
 
     [Fact]
