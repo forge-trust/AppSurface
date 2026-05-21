@@ -1039,6 +1039,8 @@ internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsE
 
         foreach (var entry in routeManifest.Entries)
         {
+            context.AddSeedRoute(entry.CanonicalLiveUrl);
+
             foreach (var alias in entry.RecoveryAliases.Concat(entry.DeclaredAliases))
             {
                 context.AddRedirectArtifact(alias.LiveUrl, entry.CanonicalLiveUrl);

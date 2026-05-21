@@ -19,6 +19,8 @@ public class ExportContext
     /// </remarks>
     public string? SeedRoutesPath { get; }
 
+    private readonly List<string> _additionalSeedRoutes = [];
+
     /// <summary>
     /// Gets optional in-memory seed routes used when <see cref="SeedRoutesPath"/> is not configured.
     /// </summary>
@@ -28,6 +30,17 @@ public class ExportContext
     /// seed remains, the engine falls back to the root route (<c>/</c>).
     /// </remarks>
     public IReadOnlyList<string> InitialSeedRoutes { get; }
+
+    /// <summary>
+    /// Gets host-registered seed routes that should be crawled in addition to configured seed-file or in-memory seeds.
+    /// </summary>
+    /// <remarks>
+    /// Host-specific export integrations can register routes discovered from their own route graph before crawling starts.
+    /// These routes are validated by the export engine with the same normalization rules as configured seeds. They do not
+    /// replace <see cref="SeedRoutesPath"/> or <see cref="InitialSeedRoutes"/>; they make known public routes explicit so
+    /// exports do not depend on every page being linked from the initial crawl roots.
+    /// </remarks>
+    public IReadOnlyList<string> AdditionalSeedRoutes => _additionalSeedRoutes;
 
     /// <summary>
     /// Gets the base URL of the source application being exported.
@@ -115,6 +128,22 @@ public class ExportContext
             new ExportRedirectArtifact(
                 NormalizeRedirectArtifactRoute(aliasRoute, nameof(aliasRoute)),
                 NormalizeRedirectArtifactRoute(canonicalRoute, nameof(canonicalRoute))));
+    }
+
+    /// <summary>
+    /// Registers an additional route for the export crawler to visit before validation.
+    /// </summary>
+    /// <param name="seedRoute">Root-relative or same-origin route to crawl.</param>
+    /// <remarks>
+    /// Use this when a host already knows its public route graph. The export engine validates, normalizes, and de-duplicates
+    /// registered routes during the seed queue phase. Query strings and fragments follow the same rules as other seed
+    /// sources, but host-specific route manifests should generally register clean canonical paths.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="seedRoute"/> is blank.</exception>
+    public void AddSeedRoute(string seedRoute)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(seedRoute);
+        _additionalSeedRoutes.Add(seedRoute);
     }
 
     /// <summary>

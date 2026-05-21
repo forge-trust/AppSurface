@@ -86,7 +86,8 @@ Exactly one source option is required: `--url`, `--project`, or `--dll`.
 - `/docs/start` is emitted as `docs/start.html` and internal references rewrite to `/docs/start.html`.
 - Dotted page slugs still follow page-route rules: `/docs/web/forgetrust.razorwire` is emitted as `docs/web/forgetrust.razorwire.html`, while assets that return non-HTML content keep their real extension.
 - AppSurface Docs content frames also emit `.partial.html` artifacts when a `doc-content` frame exists, so static frame navigation can fetch the content island.
-- Redirect alias artifacts registered by the host are emitted after their canonical route. They contain redirect metadata and a canonical link to the emitted static artifact, but they do not duplicate the canonical page body.
+- Host-registered seed routes are crawled in addition to configured seed files or in-memory defaults. This lets a host with its own route graph export public pages that are not linked from the initial crawl roots.
+- Redirect alias artifacts registered by the host are emitted after their canonical route. They contain redirect metadata and a canonical link to the emitted static artifact, but they do not duplicate the canonical page body. If a host registers aliases, it should also register or otherwise expose their canonical routes as crawl seeds so validation can prove the canonical artifacts exist.
 - Assets that already have extensions, such as `/css/site.css`, `/img/logo.png`, or `/_content/.../razorwire.js`, keep their path. Cache-busting query strings on assets are allowed only when the query-free path maps to an exported file.
 - The conventional `/_appsurface/errors/404` page, when available, is emitted as `404.html` and participates in the same CDN validation and URL rewriting.
 

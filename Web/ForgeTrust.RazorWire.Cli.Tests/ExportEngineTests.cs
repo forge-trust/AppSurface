@@ -869,6 +869,35 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_CdnMode_Should_Crawl_Registered_Seed_Routes_Before_Redirect_Validation()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, ["/"], "http://localhost:5000");
+            context.AddSeedRoute("/docs/other");
+            context.AddRedirectArtifact("/docs/other/README.md.html", "/docs/other");
+
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Combine(tempDir, "docs", "other.html")));
+            Assert.True(File.Exists(Path.Combine(tempDir, "docs", "other", "README.md.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Redirect_Alias_Canonical_Artifact_Is_Missing()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());

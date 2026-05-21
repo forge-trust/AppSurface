@@ -283,6 +283,7 @@ public class ExportEngine
                 EnqueueRoute(context, "/");
             }
 
+            QueueAdditionalSeedRoutes(context, cancellationToken);
             return;
         }
 
@@ -297,10 +298,22 @@ public class ExportEngine
                 EnqueueRoute(context, "/");
             }
 
+            QueueAdditionalSeedRoutes(context, cancellationToken);
             return;
         }
 
         EnqueueRoute(context, "/");
+        QueueAdditionalSeedRoutes(context, cancellationToken);
+    }
+
+    private void QueueAdditionalSeedRoutes(ExportContext context, CancellationToken cancellationToken)
+    {
+        if (context.AdditionalSeedRoutes.Count == 0)
+        {
+            return;
+        }
+
+        QueueSeedRoutes(context, context.AdditionalSeedRoutes, cancellationToken);
     }
 
     /// <summary>

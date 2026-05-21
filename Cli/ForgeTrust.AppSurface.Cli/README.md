@@ -86,7 +86,7 @@ Options:
 - `--environment`, `-e`: Host environment forwarded to the AppSurface Docs host. Defaults to `Production` for export.
 - `--startup-timeout-seconds`: Seconds to wait for the in-process AppSurface Docs host to start before failing fast. Defaults to `10`; use `0` to disable while investigating intentional pre-bind delays.
 
-Export does not expose `--port` or `--urls`. It binds `http://127.0.0.1:0` internally, resolves the actual Kestrel listener, crawls that URL, then stops the host. Before crawling, it reads the AppSurface Docs route manifest from the in-process host and registers redirect artifacts for source-shaped Markdown URLs and declared aliases. Use the generic `razorwire export` command when exporting arbitrary RazorWire apps via `--url`, `--project`, or `--dll`; use `appsurface docs export` when AppSurface owns the AppSurface Docs repository host.
+Export does not expose `--port` or `--urls`. It binds `http://127.0.0.1:0` internally, resolves the actual Kestrel listener, crawls that URL, then stops the host. Before crawling, it reads the AppSurface Docs route manifest from the in-process host, registers every public canonical docs route as an export seed, and registers redirect artifacts for source-shaped Markdown URLs and declared aliases. This keeps unlinked-but-public docs pages exportable and gives each alias artifact a proven canonical target. Use the generic `razorwire export` command when exporting arbitrary RazorWire apps via `--url`, `--project`, or `--dll`; use `appsurface docs export` when AppSurface owns the AppSurface Docs repository host.
 
 Migration map for repo-owned AppSurface Docs export:
 
