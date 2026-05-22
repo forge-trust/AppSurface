@@ -116,11 +116,11 @@ public class ExportContext
     /// <param name="canonicalRoute">Root-relative canonical route that owns the real exported page body.</param>
     /// <remarks>
     /// This API is intended for hosts that know route aliases before crawling starts. The export engine validates registered
-    /// aliases in CDN mode, writes normal HTML/CSS bodies first, then writes redirect artifacts so source-shaped aliases do
-    /// not become duplicate public pages.
+    /// aliases in every export mode so collisions and missing canonical artifacts fail early. CDN mode then writes normal
+    /// HTML/CSS bodies first, followed by redirect artifacts, so source-shaped aliases do not become duplicate public pages.
     /// </remarks>
     /// <exception cref="ArgumentException">
-    /// Thrown when either route is blank, is not root-relative, or contains a query string or fragment.
+    /// Thrown when either route is blank, is not root-relative, is protocol-relative, or contains a query string or fragment.
     /// </exception>
     public void AddRedirectArtifact(string aliasRoute, string canonicalRoute)
     {

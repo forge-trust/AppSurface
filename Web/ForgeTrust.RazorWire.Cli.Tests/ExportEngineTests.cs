@@ -2348,7 +2348,7 @@ public class ExportEngineTests
                 return Html("<html><body><h1>Stale alias body</h1></body></html>");
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return Text(string.Empty, "text/plain", HttpStatusCode.NotFound);
         }
     }
 

@@ -691,7 +691,7 @@ public class ExportEngine
     {
         return new ExportDiagnostic(
             "RWEXPORT005",
-            problem + " Ensure the canonical docs route is exported before alias artifacts are written.",
+            problem + " Review redirect artifact registration so aliases map to exported canonical routes without colliding with existing artifacts.",
             route);
     }
 
