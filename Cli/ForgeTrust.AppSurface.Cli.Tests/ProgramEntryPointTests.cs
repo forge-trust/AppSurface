@@ -1063,6 +1063,8 @@ public sealed class ProgramEntryPointTests
 
         try
         {
+            var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(2)));
+            Assert.Same(runTask, completedTask);
             await Assert.ThrowsAsync<OperationCanceledException>(() => runTask);
 
             Assert.True(starter.StartupToken.IsCancellationRequested);
@@ -1289,6 +1291,31 @@ public sealed class ProgramEntryPointTests
             repository.Path);
 
         Assert.Null(defaultUrl);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Use_Forwarded_Repository_Root()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-preview-repo-");
+        using var fallback = TempDirectory.Create("appsurface-docs-preview-fallback-");
+
+        var repositoryRoot = AppSurfaceDocsPreviewUrlResolver.ResolveRepositoryRoot(
+            ["--AppSurfaceDocs:Source:RepositoryRoot", repository.Path],
+            fallback.Path);
+
+        Assert.Equal(repository.Path, repositoryRoot);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsPreviewUrlResolver_Should_Fallback_When_Repository_Root_Is_Not_Forwarded()
+    {
+        using var fallback = TempDirectory.Create("appsurface-docs-preview-fallback-");
+
+        var repositoryRoot = AppSurfaceDocsPreviewUrlResolver.ResolveRepositoryRoot(
+            ["--environment", "Development"],
+            fallback.Path);
+
+        Assert.Equal(fallback.Path, repositoryRoot);
     }
 
     [Fact]

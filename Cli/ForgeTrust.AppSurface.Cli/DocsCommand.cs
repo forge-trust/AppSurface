@@ -991,7 +991,8 @@ internal sealed class AppSurfaceDocsStandalonePreviewHostStarter : IAppSurfaceDo
 
         builder.ConfigureLogging(AppSurfaceDocsCliHost.ConfigureQuietPreviewLogging);
 
-        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(args.Args, Directory.GetCurrentDirectory());
+        var repositoryRoot = AppSurfaceDocsPreviewUrlResolver.ResolveRepositoryRoot(args.Args, Directory.GetCurrentDirectory());
+        var defaultUrl = AppSurfaceDocsPreviewUrlResolver.ResolveDefaultPreviewUrl(args.Args, repositoryRoot);
         if (defaultUrl is not null)
         {
             builder.ConfigureWebHost(webHost => webHost.UseUrls(defaultUrl));
@@ -1143,6 +1144,20 @@ internal sealed class CliWrapAppSurfaceDocsBrowserOpenCommandRunner : IAppSurfac
 /// </summary>
 internal static class AppSurfaceDocsPreviewUrlResolver
 {
+    /// <summary>
+    /// Resolves the repository root forwarded to the standalone host.
+    /// </summary>
+    /// <param name="args">Arguments forwarded to the standalone host.</param>
+    /// <param name="fallbackRoot">Fallback root used when the forwarded arguments do not contain a repository root.</param>
+    /// <returns>The forwarded repository root when present; otherwise <paramref name="fallbackRoot"/>.</returns>
+    internal static string ResolveRepositoryRoot(IReadOnlyList<string> args, string fallbackRoot)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fallbackRoot);
+
+        return ResolveOptionValue(args, "--AppSurfaceDocs:Source:RepositoryRoot") ?? fallbackRoot;
+    }
+
     /// <summary>
     /// Resolves the default preview listener when the CLI invocation did not configure an endpoint explicitly.
     /// </summary>
