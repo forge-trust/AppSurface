@@ -614,7 +614,7 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task AppSurfaceDocsExportContextConfigurator_Should_Register_RouteManifest_Seeds()
+    public async Task AppSurfaceDocsExportContextConfigurator_Should_Register_RouteManifest_Seeds_And_Redirects()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
         var docs = new[]
@@ -638,6 +638,22 @@ public sealed class ProgramEntryPointTests
 
         Assert.Contains("/docs/packages", context.AdditionalSeedRoutes);
         Assert.Contains("/docs/start-here/intro", context.AdditionalSeedRoutes);
+        Assert.Contains(
+            context.RedirectArtifacts,
+            artifact => artifact.AliasRoute == "/docs/packages/README.md"
+                        && artifact.CanonicalRoute == "/docs/packages");
+        Assert.Contains(
+            context.RedirectArtifacts,
+            artifact => artifact.AliasRoute == "/docs/packages/README.md.html"
+                        && artifact.CanonicalRoute == "/docs/packages");
+        Assert.Contains(
+            context.RedirectArtifacts,
+            artifact => artifact.AliasRoute == "/docs/docs/intro.md.html"
+                        && artifact.CanonicalRoute == "/docs/start-here/intro");
+        Assert.Contains(
+            context.RedirectArtifacts,
+            artifact => artifact.AliasRoute == "/docs/legacy/intro"
+                        && artifact.CanonicalRoute == "/docs/start-here/intro");
     }
 
     [Fact]
