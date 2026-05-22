@@ -27,7 +27,7 @@ public sealed class DocsExportWorkflowContractTests
             .Cast<YamlMappingNode>()
             .ToArray();
         var checkout = FindStep(steps, "Checkout code");
-        Assert.Equal("actions/checkout@v5", GetScalar(checkout, "uses"));
+        Assert.Equal("actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd", GetScalar(checkout, "uses"));
         Assert.Equal("0", GetScalar(GetMapping(checkout, "with"), "fetch-depth"));
 
         var exportStep = FindStep(steps, "Export AppSurface Docs static site with CDN validation");
@@ -51,7 +51,7 @@ public sealed class DocsExportWorkflowContractTests
 
         var uploadStep = FindStep(steps, "Upload Pages artifact");
         Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(uploadStep, "if"));
-        Assert.Equal("actions/upload-pages-artifact@v4", GetScalar(uploadStep, "uses"));
+        Assert.Equal("actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b", GetScalar(uploadStep, "uses"));
         Assert.Equal("${{ runner.temp }}/appsurface-docs-pages", GetScalar(GetMapping(uploadStep, "with"), "path"));
 
         var deployJob = GetMapping(jobs, "deploy-appsurface-docs");
