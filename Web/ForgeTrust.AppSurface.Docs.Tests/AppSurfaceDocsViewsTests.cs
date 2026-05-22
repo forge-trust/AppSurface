@@ -2330,9 +2330,13 @@ public class AppSurfaceDocsViewsTests
             "<p>Guide body</p>");
 
         var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var breadcrumbLinks = document.QuerySelectorAll("nav[aria-label='Breadcrumb'] a")
+            .Select(node => node.GetAttribute("href"))
+            .ToArray();
 
         Assert.Contains(">quickstart.md</span>", html);
-        Assert.DoesNotContain("href=\"/docs/quickstart\"", html);
+        Assert.Empty(breadcrumbLinks);
     }
 
     [Fact]
