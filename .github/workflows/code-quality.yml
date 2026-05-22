@@ -1,0 +1,43 @@
+name: Code Quality
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet-format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Verify generated package chooser
+        run: dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify
+
+      - name: Verify generated Markdown snippets
+        run: dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj -- verify
+
+      - name: Restore packages
+        run: dotnet restore ForgeTrust.AppSurface.slnx --locked-mode
+
+      - name: Build project
+        run: dotnet build ForgeTrust.AppSurface.slnx --configuration Release --no-restore
+
+      - name: Verify formatting
+        run: dotnet format ForgeTrust.AppSurface.slnx --verify-no-changes --no-restore --verbosity diagnostic
