@@ -381,6 +381,23 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsExportCommand_Should_Reject_NonEmpty_Output_Directory()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-output-");
+        await File.WriteAllTextAsync(Path.Join(output.Path, "README.md.html"), "<html>stale</html>");
+        var runner = new CapturingAppSurfaceDocsExportRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "export", "--repo", repository.Path, "--output", output.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("must be empty before export starts", result.AllText, StringComparison.Ordinal);
+        Assert.Null(runner.Args);
+    }
+
+    [Fact]
     public async Task DocsExportCommand_Should_Derive_Default_Seed_From_Custom_DocsRoot()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
@@ -611,6 +628,49 @@ public sealed class ProgramEntryPointTests
         {
             Directory.SetCurrentDirectory(previousDirectory);
         }
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsExportContextConfigurator_Should_Register_RouteManifest_Seeds_And_Redirects()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        var docs = new[]
+        {
+            new DocNode("Package", "packages/README.md", "<p>Package</p>"),
+            new DocNode(
+                "Intro",
+                "docs/intro.md",
+                "<p>Intro</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "start-here/intro",
+                    RedirectAliases = ["legacy/intro"]
+                })
+        };
+        using var host = new TrackingHost(
+            configureServices: services => AddDocsAggregatorServices(services, repository.Path, docs));
+        var context = new ExportContext("dist", seedRoutesPath: null, baseUrl: "http://127.0.0.1:51234");
+
+        await new AppSurfaceDocsExportContextConfigurator().ConfigureAsync(host, context, CancellationToken.None);
+
+        Assert.Contains("/docs/packages", context.AdditionalSeedRoutes);
+        Assert.Contains("/docs/start-here/intro", context.AdditionalSeedRoutes);
+        Assert.Contains(
+            context.RedirectArtifacts,
+            artifact => artifact.AliasRoute == "/docs/packages/README.md"
+                        && artifact.CanonicalRoute == "/docs/packages");
+        Assert.Contains(
+            context.RedirectArtifacts,
+            artifact => artifact.AliasRoute == "/docs/packages/README.md.html"
+                        && artifact.CanonicalRoute == "/docs/packages");
+        Assert.Contains(
+            context.RedirectArtifacts,
+            artifact => artifact.AliasRoute == "/docs/docs/intro.md.html"
+                        && artifact.CanonicalRoute == "/docs/start-here/intro");
+        Assert.Contains(
+            context.RedirectArtifacts,
+            artifact => artifact.AliasRoute == "/docs/legacy/intro"
+                        && artifact.CanonicalRoute == "/docs/start-here/intro");
     }
 
     [Fact]
@@ -1688,6 +1748,27 @@ public sealed class ProgramEntryPointTests
             InitialSeedRoutes: ["/"],
             ExportMode.Cdn,
             "http://127.0.0.1:0");
+    }
+
+    private static void AddDocsAggregatorServices(
+        IServiceCollection services,
+        string repositoryPath,
+        IReadOnlyList<DocNode> docs)
+    {
+        services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment(repositoryPath));
+        services.AddSingleton<IMemoryCache>(_ => new MemoryCache(new MemoryCacheOptions()));
+        services.AddSingleton<IMemo, Memo>();
+        services.AddSingleton<IAppSurfaceDocsHtmlSanitizer, PassthroughDocsHtmlSanitizer>();
+        services.AddSingleton<IDocHarvester>(new StaticDocHarvester(docs));
+        services.AddSingleton(new AppSurfaceDocsOptions
+        {
+            Source = new AppSurfaceDocsSourceOptions
+            {
+                RepositoryRoot = repositoryPath
+            }
+        });
+        services.AddSingleton<ILogger<DocAggregator>>(NullLogger<DocAggregator>.Instance);
+        services.AddSingleton<DocAggregator>();
     }
 
     private static async Task WaitForLogMessageAsync(InMemoryLoggerProvider loggerProvider, string expectedMessage)

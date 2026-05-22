@@ -3,6 +3,7 @@
 @inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrlBuilder
 @{
     ViewData["Title"] = Model.Title;
+    ViewData["CanonicalUrl"] = Model.CanonicalUrl;
     var trust = Model.Document.Metadata?.Trust;
     var trustStatus = string.IsNullOrWhiteSpace(trust?.Status) ? null : trust!.Status!.Trim();
     var trustSummary = string.IsNullOrWhiteSpace(trust?.Summary) ? null : trust!.Summary!.Trim();

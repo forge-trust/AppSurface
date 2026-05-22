@@ -86,6 +86,8 @@ Exactly one source option is required: `--url`, `--project`, or `--dll`.
 - `/docs/start` is emitted as `docs/start.html` and internal references rewrite to `/docs/start.html`.
 - Dotted page slugs still follow page-route rules: `/docs/web/forgetrust.razorwire` is emitted as `docs/web/forgetrust.razorwire.html`, while assets that return non-HTML content keep their real extension.
 - AppSurface Docs content frames also emit `.partial.html` artifacts when a `doc-content` frame exists, so static frame navigation can fetch the content island.
+- Host-registered seed routes are crawled in addition to configured seed files or in-memory defaults. This lets a host with its own route graph export public pages that are not linked from the initial crawl roots.
+- Redirect alias artifacts registered by the host are emitted after their canonical route. They contain redirect metadata and a canonical link to the emitted static artifact, but they do not duplicate the canonical page body. If a host registers aliases, it should also register or otherwise expose their canonical routes as crawl seeds so validation can prove the canonical artifacts exist.
 - Assets that already have extensions, such as `/css/site.css`, `/img/logo.png`, or `/_content/.../razorwire.js`, keep their path. Cache-busting query strings on assets are allowed only when the query-free path maps to an exported file.
 - The conventional `/_appsurface/errors/404` page, when available, is emitted as `404.html` and participates in the same CDN validation and URL rewriting.
 
@@ -95,10 +97,11 @@ CDN validation fails the export when exporter-managed dependencies cannot be rep
 - `RWEXPORT002`: a query-bearing frame route cannot be represented as one static artifact.
 - `RWEXPORT003`: a required internal asset did not materialize.
 - `RWEXPORT004`: a managed internal URL could not be rewritten to an emitted artifact URL.
+- `RWEXPORT005`: a registered redirect alias artifact cannot safely point at its canonical artifact, collides with another route, or was already crawled as a normal HTML page.
 
 `hybrid` mode preserves the older application-style URL behavior. Use it when the exported directory will still be served by infrastructure that resolves extensionless URLs, dynamic frame endpoints, or other live-server behavior. Hybrid mode logs missing discovered dependencies but does not enforce CDN static-safety validation.
 
-CDN mode validates the URLs the exporter owns and can see while crawling HTML and CSS: discovered page links, Turbo Frame sources, supported HTML asset references, `<img>` and `<source>` `srcset` candidates, and CSS `url(...)` references. It does not prove arbitrary app-authored JavaScript `fetch` calls, form posts, Server-Sent Events, import maps, or other runtime behavior that is not represented as exporter-managed markup or CSS URLs.
+CDN mode validates the URLs the exporter owns and can see while crawling HTML and CSS: discovered page links, Turbo Frame sources, supported HTML asset references, `<link rel="canonical">` values that point at managed app routes, `<img>` and `<source>` `srcset` candidates, and CSS `url(...)` references. It does not prove arbitrary app-authored JavaScript `fetch` calls, form posts, Server-Sent Events, import maps, or other runtime behavior that is not represented as exporter-managed markup or CSS URLs.
 
 CDN export skips relative anchors that point at common source or project file extensions, such as `./Program.cs` or `../Project.csproj`, because those links are usually for GitHub and editor navigation rather than static-site dependencies. For other authoring-only anchors in app-rendered HTML, use `data-rw-export-ignore`; the anchor remains rendered and clickable, but CDN export will not crawl, validate, or rewrite its `href`.
 

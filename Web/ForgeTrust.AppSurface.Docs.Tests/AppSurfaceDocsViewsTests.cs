@@ -91,6 +91,23 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task Layout_ShouldRenderCanonicalLink_WhenDetailsPageProvidesCanonicalUrl()
+    {
+        using var services = CreateServiceProvider(CreateDocsWithOverrides(
+        [
+            new("Intro", "guides/intro.md", "<p>Start here.</p>")
+        ]));
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Details",
+            controller => controller.Details("guides/intro"),
+            pathBase: "/some-base");
+
+        Assert.Contains("<link rel=\"canonical\" href=\"/some-base/docs/guides/intro\" />", html);
+    }
+
+    [Fact]
     public async Task Layout_ShouldRenderDefaultNeutralDocsIdentity()
     {
         using var services = CreateServiceProvider(CreateDocs());
@@ -100,6 +117,8 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("<title>Documentation Index - Documentation</title>", html);
         Assert.Contains(">Documentation</span>", html);
         Assert.DoesNotContain("docs-wordmark-highlight", html);
+        AssertDocsSidebarFooterText(html, "Documentation");
+        Assert.DoesNotContain("Powered by RazorWire", html);
         Assert.Contains("rel=\"icon\" type=\"image/svg+xml\" href=\"/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg\"", html);
         Assert.DoesNotContain("<img src=\"/brand", html);
     }
@@ -134,6 +153,8 @@ public class AppSurfaceDocsViewsTests
             html);
         Assert.Contains("href=\"/some-base/reference\"", html);
         Assert.Contains("src=\"/some-base/brand/logo.svg\"", html);
+        AssertDocsSidebarFooterText(html, "Acme Docs");
+        Assert.DoesNotContain("Powered by RazorWire", html);
         Assert.Contains("alt=\"\" aria-hidden=\"true\"", html);
         Assert.DoesNotContain("alt=\"Acme logo\"", html);
         Assert.Contains("href=\"/some-base/brand/favicon.svg\"", html);
@@ -144,6 +165,15 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("type=\"image/png\"", html);
         Assert.DoesNotContain("href=\"/some-base/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg\"", html);
         Assert.Contains("\"docsRootPath\":\"/some-base/docs\"", html);
+    }
+
+    private static void AssertDocsSidebarFooterText(string html, string expectedText)
+    {
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var footer = document.QuerySelector("#docs-sidebar-footer");
+
+        Assert.NotNull(footer);
+        Assert.Equal(expectedText, footer.TextContent.Trim());
     }
 
     [Fact]
@@ -171,6 +201,9 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
         Assert.Contains("docs-search-result-meta-line", searchClient);
         Assert.Contains("docs-search-page-starter-docs", searchClient);
+        Assert.Contains("page.recovery.hidden = false;", searchClient);
+        Assert.Contains("setStatus(page.status, 'Search index could not be loaded.');", searchClient);
+        Assert.Contains("event.preventDefault();", searchClient);
         Assert.DoesNotContain("title.append(link);", searchClient);
     }
 
@@ -2379,9 +2412,13 @@ public class AppSurfaceDocsViewsTests
             "<p>Guide body</p>");
 
         var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var breadcrumbLinks = document.QuerySelectorAll("nav[aria-label='Breadcrumb'] a")
+            .Select(node => node.GetAttribute("href"))
+            .ToArray();
 
         Assert.Contains(">quickstart.md</span>", html);
-        Assert.DoesNotContain("href=\"/docs/quickstart\"", html);
+        Assert.Empty(breadcrumbLinks);
     }
 
     [Fact]
@@ -3208,9 +3245,12 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("id=\"docs-search-page-starter\"", html);
         Assert.Contains("id=\"docs-search-page-starter-docs\"", html);
         Assert.Contains("data-rw-search-suggestion=\"getting started\"", html);
+        Assert.Contains("href=\"/docs/search?q=getting%20started\"", html);
         Assert.Contains("data-rw-search-suggestion=\"API reference\"", html);
         Assert.Contains("data-rw-search-suggestion=\"release notes\"", html);
         Assert.Contains("data-rw-search-suggestion=\"troubleshooting\"", html);
+        Assert.Contains("id=\"docs-search-page-recovery\"", html);
+        Assert.Contains("Browse while search loads", html);
         Assert.Contains("id=\"docs-search-page-failure\"", html);
         Assert.Contains("id=\"docs-search-page-failure-template\"", html);
         Assert.Contains("id=\"docs-search-page-retry\"", html);
@@ -3224,6 +3264,7 @@ public class AppSurfaceDocsViewsTests
 
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         Assert.Equal(string.Empty, document.QuerySelector("#docs-search-page-failure")?.TextContent.Trim());
+        Assert.NotNull(document.QuerySelector("#docs-search-page-recovery a[href]"));
     }
 
     [Fact]
@@ -3239,6 +3280,7 @@ public class AppSurfaceDocsViewsTests
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         Assert.Matches("<a[^>]*href=\"/docs\"[^>]*data-turbo-frame=\"_top\"", html);
         Assert.Equal(string.Empty, document.QuerySelector("#docs-search-page-failure")?.TextContent.Trim());
+        Assert.Contains("Documentation index", document.QuerySelector("#docs-search-page-recovery")!.TextContent);
     }
 
     [Fact]
@@ -3310,6 +3352,7 @@ public class AppSurfaceDocsViewsTests
         Assert.Matches(
             "href=\"/some-base/docs/v/1.2.3/guides/quickstart\"[\\s\\S]*data-turbo-frame=\"_top\"",
             html);
+        Assert.Contains("href=\"/some-base/docs/next/search?q=getting%20started\"", html);
     }
 
     [Fact]

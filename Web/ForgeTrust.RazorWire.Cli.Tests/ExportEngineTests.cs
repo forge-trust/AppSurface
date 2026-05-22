@@ -70,6 +70,23 @@ public class ExportEngineTests
         Assert.False(result);
     }
 
+    [Theory]
+    [InlineData("//docs/example", "/docs/example", "aliasRoute")]
+    [InlineData("/docs/example/README.md", "//docs/example", "canonicalRoute")]
+    public void AddRedirectArtifact_Should_Reject_Protocol_Relative_Routes(
+        string aliasRoute,
+        string canonicalRoute,
+        string expectedParamName)
+    {
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => context.AddRedirectArtifact(aliasRoute, canonicalRoute));
+
+        Assert.Equal(expectedParamName, exception.ParamName);
+        Assert.Contains("not protocol-relative", exception.Message);
+    }
+
     [Fact]
     public void ExtractAssets_Should_Find_Css_Urls()
     {
@@ -802,7 +819,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DottedPageRouteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new DottedPageRouteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -818,6 +835,230 @@ public class ExportEngineTests
 
             var packageHtml = await File.ReadAllTextAsync(packageHtmlPath);
             Assert.Contains("href=\"/docs/web/forgetrust.razorwire/docs.html\"", packageHtml);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Write_Redirect_Alias_Artifacts_After_Canonical_Routes()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, ["/"], "http://localhost:5000");
+            context.AddRedirectArtifact("/docs/example/README.md", "/docs/example");
+            context.AddRedirectArtifact("/docs/example/README.md.html", "/docs/example");
+
+            await _sut.RunAsync(context);
+
+            var canonicalHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "docs", "example.html"));
+            Assert.Contains("""<link rel="canonical" href="/docs/example.html">""", canonicalHtml);
+
+            var aliasArtifactPath = Path.Join(tempDir, "docs", "example", "README.md.html");
+            Assert.True(File.Exists(aliasArtifactPath));
+
+            var aliasHtml = await File.ReadAllTextAsync(aliasArtifactPath);
+            Assert.Contains("""<meta name="appsurface-docs-redirect-alias" content="1">""", aliasHtml);
+            Assert.Contains("""<meta name="appsurface-docs-canonical-artifact" content="/docs/example.html">""", aliasHtml);
+            Assert.Contains("""<link rel="canonical" href="/docs/example.html">""", aliasHtml);
+            Assert.DoesNotContain("<h1>Example</h1>", aliasHtml);
+            Assert.True(context.RouteOutcomes["/docs/example/README.md"].IsRedirectAliasArtifact);
+            Assert.True(context.RouteOutcomes["/docs/example/README.md.html"].IsRedirectAliasArtifact);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Crawl_Registered_Seed_Routes_Before_Redirect_Validation()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, ["/"], "http://localhost:5000");
+            context.AddSeedRoute("/docs/other");
+            context.AddRedirectArtifact("/docs/other/README.md.html", "/docs/other");
+
+            await _sut.RunAsync(context);
+
+            Assert.True(File.Exists(Path.Join(tempDir, "docs", "other.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs", "other", "README.md.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Redirect_Alias_Canonical_Artifact_Is_Missing()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, ["/"], "http://localhost:5000");
+            context.AddRedirectArtifact("/docs/missing/README.md.html", "/docs/missing");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
+            Assert.Equal("/docs/missing/README.md.html", diagnostic.Route);
+            Assert.Contains("could not resolve canonical artifact", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Redirect_Alias_Is_Crawled_As_Html_Body()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler(aliasReturnsBody: true)) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/", "/docs/example/README.md.html"],
+                baseUrl: "http://localhost:5000");
+            context.AddRedirectArtifact("/docs/example/README.md.html", "/docs/example");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
+            Assert.Equal("/docs/example/README.md.html", diagnostic.Route);
+            Assert.Contains("normal HTML page body", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Redirect_Alias_Would_Overwrite_Another_Artifact()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/", "/docs/other"],
+                baseUrl: "http://localhost:5000");
+            context.AddRedirectArtifact("/docs/example.html", "/docs/other");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
+            Assert.Equal("/docs/example.html", diagnostic.Route);
+            Assert.Contains("would overwrite the artifact for exported route '/docs/example'", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Redirect_Alias_Would_Overwrite_Docs_Partial_Artifact()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/", "/docs/other"],
+                baseUrl: "http://localhost:5000");
+            context.AddRedirectArtifact("/docs/example.partial", "/docs/other");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
+            Assert.Equal("/docs/example.partial", diagnostic.Route);
+            Assert.Contains("would overwrite the artifact for exported route '/docs/example partial'", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Fail_When_Redirect_Alias_Would_Overwrite_Another_Artifact()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/", "/docs/other"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid);
+            context.AddRedirectArtifact("/docs/example.html", "/docs/other");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
+            Assert.Equal("/docs/example.html", diagnostic.Route);
+            Assert.Contains("would overwrite the artifact for exported route '/docs/example'", diagnostic.Message);
         }
         finally
         {
@@ -1575,7 +1816,7 @@ public class ExportEngineTests
                 return Html("<html><body><h1>API docs</h1></body></html>");
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return Html(string.Empty, HttpStatusCode.NotFound);
         }
     }
 
@@ -1738,14 +1979,17 @@ public class ExportEngineTests
         }
     }
 
-    private static Task<HttpResponseMessage> Html(string html)
+    private static Task<HttpResponseMessage> Html(string html, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
-        return Text(html, "text/html");
+        return Text(html, "text/html", statusCode);
     }
 
-    private static Task<HttpResponseMessage> Text(string content, string mediaType)
+    private static Task<HttpResponseMessage> Text(
+        string content,
+        string mediaType,
+        HttpStatusCode statusCode = HttpStatusCode.OK)
     {
-        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        return Task.FromResult(new HttpResponseMessage(statusCode)
         {
             Content = new StringContent(content, Encoding.UTF8, mediaType)
         });
@@ -2053,6 +2297,52 @@ public class ExportEngineTests
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class DocsRedirectArtifactHandler : HttpMessageHandler
+    {
+        private readonly bool _aliasReturnsBody;
+
+        public DocsRedirectArtifactHandler(bool aliasReturnsBody = false)
+        {
+            _aliasReturnsBody = aliasReturnsBody;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""<html><body><a href="/docs/example">Example</a></body></html>""");
+            }
+
+            if (path == "/docs/example")
+            {
+                return Html("""
+                    <html>
+                    <head>
+                      <link rel="canonical" href="/docs/example">
+                    </head>
+                    <body>
+                      <h1>Example</h1>
+                      <turbo-frame id="doc-content"><article>Example content</article></turbo-frame>
+                    </body>
+                    </html>
+                    """);
+            }
+
+            if (path == "/docs/other")
+            {
+                return Html("<html><body><h1>Other</h1></body></html>");
+            }
+
+            if (_aliasReturnsBody && path == "/docs/example/README.md.html")
+            {
+                return Html("<html><body><h1>Stale alias body</h1></body></html>");
+            }
+
+            return Text(string.Empty, "text/plain", HttpStatusCode.NotFound);
         }
     }
 

@@ -15,6 +15,7 @@
     var docsMiniSearchUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "minisearch.min.js"));
     var docsSearchClientUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "search-client.js"));
     var docsBrandIconUrl = Url.Content(AssetPathResolver.BrandIconPath);
+    var canonicalUrl = ViewData["CanonicalUrl"] as string;
     var docsClientConfigJson = JsonSerializer.Serialize(
         new
         {
@@ -34,6 +35,10 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>@ViewData["Title"] - @docsIdentity.DisplayName</title>
+    @if (!string.IsNullOrWhiteSpace(canonicalUrl))
+    {
+        <link rel="canonical" href="@Url.PathBaseAware(canonicalUrl)" />
+    }
     @if (docsIdentity.Favicons.Count == 0)
     {
         <link rel="icon" type="image/svg+xml" href="@docsBrandIconUrl" />
@@ -125,8 +130,8 @@
         <nav class="flex-grow overflow-y-auto px-4 pb-4 space-y-1 min-h-0" aria-label="Documentation navigation">
             @await Component.InvokeAsync("Sidebar")
         </nav>
-        <div class="p-4 border-t border-[#1b2a43] text-xs text-slate-500 text-center">
-            Powered by RazorWire
+        <div id="docs-sidebar-footer" class="p-4 border-t border-[#1b2a43] text-xs text-slate-500 text-center">
+            @docsIdentity.DisplayName
         </div>
     </aside>
 

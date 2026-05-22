@@ -58,6 +58,7 @@ internal static class DocMetadataFactory
         var defaults = new DocMetadata
         {
             Title = resolvedTitle,
+            TitleIsDerived = string.IsNullOrWhiteSpace(explicitMetadata?.Title),
             Summary = derivedSummary,
             SummaryIsDerived = string.IsNullOrWhiteSpace(derivedSummary) ? null : true,
             PageType = GetDefaultMarkdownPageType(path),
@@ -104,6 +105,7 @@ internal static class DocMetadataFactory
 
         return merged with
         {
+            TitleIsDerived = string.IsNullOrWhiteSpace(explicitMetadata?.Title),
             NavGroup = normalizedNavGroup,
             NavGroupIsDerived = normalizedExplicitNavGroup is not null ? false : true,
             SummaryIsDerived = summaryIsDerived,
@@ -124,6 +126,7 @@ internal static class DocMetadataFactory
         return new DocMetadata
         {
             Title = title,
+            TitleIsDerived = false,
             PageType = "api-reference",
             PageTypeIsDerived = false,
             Audience = "developer",

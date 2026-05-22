@@ -361,6 +361,263 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void ExtractWithDiagnostics_ShouldParseNamespaceEntryPoints()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: AddRazorWire(...)
+                summary: Register RazorWire services.
+                target: "#ForgeTrust-RazorWire-AddRazorWire"
+                keywords:
+                  - register RazorWire
+                  - services
+                order: 10
+              - label: API guide
+                href: /docs/guides/api
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Collection(
+            result.Metadata!.EntryPoints!,
+            first =>
+            {
+                Assert.Equal("AddRazorWire(...)", first.Label);
+                Assert.Equal("Register RazorWire services.", first.Summary);
+                Assert.Equal("ForgeTrust-RazorWire-AddRazorWire", first.Target);
+                Assert.Null(first.Href);
+                Assert.Equal(["register RazorWire", "services"], first.Keywords);
+                Assert.Equal(10, first.Order);
+            },
+            second =>
+            {
+                Assert.Equal("API guide", second.Label);
+                Assert.Null(second.Target);
+                Assert.Equal("/docs/guides/api", second.Href);
+            });
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldSkipInvalidNamespaceEntryPoints_AndKeepUsableRows()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - summary: Missing label
+              - label: Good
+                target: "../bad"
+                href: "#fallback"
+                keywords:
+                  - useful
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("Good", entry.Label);
+        Assert.Null(entry.Target);
+        Assert.Equal("#fallback", entry.Href);
+        Assert.Equal(["useful"], entry.Keywords);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-label");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-target");
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldNormalizeNamespaceEntryPointSharpOnlyTarget_AsTextEntry()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: Overview
+                target: " # "
+                href: /docs/overview
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("Overview", entry.Label);
+        Assert.Null(entry.Target);
+        Assert.Equal("/docs/overview", entry.Href);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldKeepCaseSensitiveNamespaceEntryPointTargets()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: AddWeb
+                target: ForgeTrust.Web.AddWeb
+              - label: AddWeb
+                target: ForgeTrust.Web.addweb
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Collection(
+            result.Metadata!.EntryPoints!,
+            first => Assert.Equal("ForgeTrust.Web.AddWeb", first.Target),
+            second => Assert.Equal("ForgeTrust.Web.addweb", second.Target));
+        Assert.DoesNotContain(result.Diagnostics, diagnostic => diagnostic.Code == "duplicate-namespace-entry-point");
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldPreferNamespaceEntryPointTarget_AndDropEmptyKeywords()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: AddWeb
+                target: Known.Anchor
+                href: /docs/ignored
+                keywords:
+                  - ""
+                  - "   "
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("Known.Anchor", entry.Target);
+        Assert.Null(entry.Href);
+        Assert.Null(entry.Keywords);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldRejectDecodedBlankNamespaceEntryPointLabels()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: "&#32;"
+                href: /docs/ignored
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata!.EntryPoints);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-label");
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldSkipNullDuplicateAndOverlongNamespaceEntryPoints()
+    {
+        var longLabel = new string('L', 81);
+        var longSummary = new string('S', 221);
+        var markdown = $"""
+            ---
+            entry_points:
+              - null
+              - label: {longLabel}
+              - label: AddWeb
+                summary: {longSummary}
+                order: -1
+                keywords:
+                  - useful
+                  - useful
+                  - {new string('K', 81)}
+              - label: AddWeb
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("AddWeb", entry.Label);
+        Assert.Null(entry.Summary);
+        Assert.Null(entry.Order);
+        Assert.Equal(["useful"], entry.Keywords);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "null-namespace-entry-point");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-label");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-summary");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-order");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-keyword");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "duplicate-namespace-entry-point");
+    }
+
+    [Theory]
+    [InlineData("#")]
+    [InlineData("##bad")]
+    [InlineData("/docs/bad path")]
+    [InlineData("/docs/search?query=api")]
+    [InlineData("//docs.example.test/path")]
+    [InlineData("https://example.test/docs")]
+    public void ExtractWithDiagnostics_ShouldDropUnsupportedNamespaceEntryPointHrefs(string href)
+    {
+        var markdown = $"""
+            ---
+            entry_points:
+              - label: Bad href
+                href: "{href}"
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("Bad href", entry.Label);
+        Assert.Null(entry.Href);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-href");
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldAllowNamespaceEntryPointHrefUnderCustomDocsRoot()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - label: Custom root
+                href: /foo/bar/guide
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        var entry = Assert.Single(result.Metadata!.EntryPoints!);
+        Assert.Equal("/foo/bar/guide", entry.Href);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldReturnNullEntryPoints_WhenAllNamespaceEntryPointsAreInvalid()
+    {
+        var markdown = """
+            ---
+            entry_points:
+              - null
+              - label: ""
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata!.EntryPoints);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "null-namespace-entry-point");
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "invalid-namespace-entry-point-label");
+    }
+
+    [Fact]
     public void Extract_ShouldIgnoreNullFeaturedPageGroupPageEntries()
     {
         var markdown = """
