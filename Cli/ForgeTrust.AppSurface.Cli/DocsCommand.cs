@@ -1,10 +1,10 @@
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using CliFx;
 using CliFx.Attributes;
 using CliFx.Exceptions;
 using CliFx.Infrastructure;
+using CliWrap;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Docs.Models;
@@ -15,10 +15,10 @@ using ForgeTrust.RazorWire.Cli;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using CliCommand = CliWrap.Cli;
 
 namespace ForgeTrust.AppSurface.Cli;
 
@@ -760,7 +760,7 @@ internal sealed class AppSurfaceDocsStandaloneHostRunner : IAppSurfaceDocsHostRu
         {
             throw;
         }
-        catch (Exception ex) when (IsNonFatalException(ex))
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             _logger.LogWarning(ex, "AppSurface Docs harvest summary could not be read.");
             return;
@@ -821,30 +821,35 @@ internal sealed class AppSurfaceDocsStandaloneHostRunner : IAppSurfaceDocsHostRu
             }
 
             await startupTimeoutCts.CancelAsync();
-            ObserveLateStartupTask(startTask);
+            ObserveLateStartupTask(startTask, "AppSurface Docs preview host startup task completed after the startup timeout.");
             throw CreateStartupTimeoutException(args.StartupTimeout.Value, innerException: null);
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             throw CreateStartupTimeoutException(args.StartupTimeout.Value, ex);
         }
+        catch (OperationCanceledException)
+        {
+            ObserveLateStartupTask(startTask, "AppSurface Docs preview host startup task completed after external cancellation.");
+            throw;
+        }
     }
 
-    private void ObserveLateStartupTask(Task<IHost> startTask)
+    private void ObserveLateStartupTask(Task<IHost> startTask, string lateCompletionMessage)
     {
-        _ = ObserveLateStartupTaskAsync(startTask);
+        _ = ObserveLateStartupTaskAsync(startTask, lateCompletionMessage);
     }
 
-    private async Task ObserveLateStartupTaskAsync(Task<IHost> startTask)
+    private async Task ObserveLateStartupTaskAsync(Task<IHost> startTask, string lateCompletionMessage)
     {
         try
         {
             var startedHost = await startTask.ConfigureAwait(false);
             await StopAndDisposeHostAsync(startedHost).ConfigureAwait(false);
         }
-        catch (Exception ex) when (IsNonFatalException(ex))
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
-            _logger.LogDebug(ex, "AppSurface Docs preview host startup task completed after the startup timeout.");
+            _logger.LogDebug(ex, lateCompletionMessage);
         }
     }
 
@@ -862,13 +867,25 @@ internal sealed class AppSurfaceDocsStandaloneHostRunner : IAppSurfaceDocsHostRu
         {
             await host.StopAsync(CancellationToken.None);
         }
-        catch (Exception ex) when (IsNonFatalException(ex))
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             _logger.LogWarning(ex, "AppSurface Docs preview host failed during shutdown.");
         }
     }
 
-    private static bool IsNonFatalException(Exception ex)
+}
+
+/// <summary>
+/// Shared exception classification helpers used by command cleanup and best-effort diagnostics.
+/// </summary>
+internal static class ExceptionFilters
+{
+    /// <summary>
+    /// Determines whether an exception is safe to catch for cleanup, fallback logging, or diagnostic reporting.
+    /// </summary>
+    /// <param name="ex">Exception to classify.</param>
+    /// <returns><see langword="true"/> when the exception is non-fatal and can be handled locally.</returns>
+    internal static bool IsNonFatal(Exception ex)
     {
         return ex is not OutOfMemoryException
             and not StackOverflowException
@@ -986,24 +1003,13 @@ internal sealed class AppSurfaceDocsStandalonePreviewHostStarter : IAppSurfaceDo
             await host.StartAsync(cancellationToken);
             return host;
         }
-        catch (Exception ex) when (IsNonFatalException(ex))
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             host.Dispose();
             throw;
         }
     }
 
-    private static bool IsNonFatalException(Exception ex)
-    {
-        return ex is not OutOfMemoryException
-            and not StackOverflowException
-            and not AccessViolationException
-            and not AppDomainUnloadedException
-            and not BadImageFormatException
-            and not CannotUnloadAppDomainException
-            and not InvalidProgramException
-            and not ThreadAbortException;
-    }
 }
 
 /// <summary>
@@ -1047,56 +1053,88 @@ internal readonly record struct AppSurfaceDocsBrowserLaunchResult(bool Succeeded
 /// <summary>
 /// Browser launcher that uses the current operating system's conventional URL opener.
 /// </summary>
-[ExcludeFromCodeCoverage(
-    Justification = "Platform process launch depends on the interactive user environment; command tests cover the launcher seam.")]
 internal sealed class SystemAppSurfaceDocsBrowserLauncher : IAppSurfaceDocsBrowserLauncher
 {
+    private readonly IAppSurfaceDocsBrowserOpenCommandRunner _commandRunner;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SystemAppSurfaceDocsBrowserLauncher"/> class.
+    /// </summary>
+    public SystemAppSurfaceDocsBrowserLauncher()
+        : this(new CliWrapAppSurfaceDocsBrowserOpenCommandRunner())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SystemAppSurfaceDocsBrowserLauncher"/> class with an explicit command runner.
+    /// </summary>
+    /// <param name="commandRunner">Runner that invokes the platform URL opener.</param>
+    internal SystemAppSurfaceDocsBrowserLauncher(IAppSurfaceDocsBrowserOpenCommandRunner commandRunner)
+    {
+        ArgumentNullException.ThrowIfNull(commandRunner);
+        _commandRunner = commandRunner;
+    }
+
     /// <inheritdoc />
-    public Task<AppSurfaceDocsBrowserLaunchResult> TryOpenAsync(Uri url, CancellationToken cancellationToken)
+    public async Task<AppSurfaceDocsBrowserLaunchResult> TryOpenAsync(Uri url, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(url);
         cancellationToken.ThrowIfCancellationRequested();
 
         try
         {
-            using var process = Process.Start(CreateStartInfo(url));
-            return Task.FromResult(AppSurfaceDocsBrowserLaunchResult.Success);
+            await _commandRunner.OpenAsync(url, cancellationToken);
+            return AppSurfaceDocsBrowserLaunchResult.Success;
         }
-        catch (Exception ex) when (IsNonFatalException(ex))
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return Task.FromResult(AppSurfaceDocsBrowserLaunchResult.Failure(ex.Message));
+            throw;
+        }
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+        {
+            return AppSurfaceDocsBrowserLaunchResult.Failure(ex.Message);
         }
     }
+}
 
-    private static ProcessStartInfo CreateStartInfo(Uri url)
+/// <summary>
+/// Runs the platform command that asks the operating system to open a browser URL.
+/// </summary>
+internal interface IAppSurfaceDocsBrowserOpenCommandRunner
+{
+    /// <summary>
+    /// Opens the given URL with the platform opener command.
+    /// </summary>
+    /// <param name="url">Absolute URL to open.</param>
+    /// <param name="cancellationToken">Token observed while starting the opener command.</param>
+    /// <returns>A task that completes when the opener command exits.</returns>
+    Task OpenAsync(Uri url, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// CliWrap-backed <see cref="IAppSurfaceDocsBrowserOpenCommandRunner"/> implementation.
+/// </summary>
+[ExcludeFromCodeCoverage(
+    Justification = "Platform URL opener commands depend on the interactive user environment; launcher tests cover the runner seam.")]
+internal sealed class CliWrapAppSurfaceDocsBrowserOpenCommandRunner : IAppSurfaceDocsBrowserOpenCommandRunner
+{
+    /// <inheritdoc />
+    public async Task OpenAsync(Uri url, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(url);
+        await CreateCommand(url).ExecuteAsync(cancellationToken);
+    }
+
+    private static Command CreateCommand(Uri url)
     {
         if (OperatingSystem.IsWindows())
         {
-            return new ProcessStartInfo(url.AbsoluteUri)
-            {
-                UseShellExecute = true
-            };
+            return CliCommand.Wrap("cmd")
+                .WithArguments(["/c", "start", string.Empty, url.AbsoluteUri]);
         }
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = OperatingSystem.IsMacOS() ? "open" : "xdg-open",
-            UseShellExecute = false
-        };
-        startInfo.ArgumentList.Add(url.AbsoluteUri);
-        return startInfo;
-    }
-
-    private static bool IsNonFatalException(Exception ex)
-    {
-        return ex is not OutOfMemoryException
-            and not StackOverflowException
-            and not AccessViolationException
-            and not AppDomainUnloadedException
-            and not BadImageFormatException
-            and not CannotUnloadAppDomainException
-            and not InvalidProgramException
-            and not ThreadAbortException;
+        return CliCommand.Wrap(OperatingSystem.IsMacOS() ? "open" : "xdg-open")
+            .WithArguments([url.AbsoluteUri]);
     }
 }
 
@@ -1105,9 +1143,6 @@ internal sealed class SystemAppSurfaceDocsBrowserLauncher : IAppSurfaceDocsBrows
 /// </summary>
 internal static class AppSurfaceDocsPreviewUrlResolver
 {
-    private const int DevelopmentPortBase = 5600;
-    private const int DevelopmentPortRange = 1000;
-
     /// <summary>
     /// Resolves the default preview listener when the CLI invocation did not configure an endpoint explicitly.
     /// </summary>
@@ -1119,17 +1154,18 @@ internal static class AppSurfaceDocsPreviewUrlResolver
         ArgumentNullException.ThrowIfNull(args);
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        var environmentName = ResolveEnvironmentName(args);
-        if (!string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase)
-            || HasExplicitEndpointArgument(args)
-            || HasExplicitEndpointEnvironmentVariable()
-            || HasExplicitEndpointConfigurationSource(args, repositoryRoot, environmentName))
+        var resolution = AppSurfaceWebDevelopmentPortDefaults.Resolve(
+            [.. args],
+            repositoryRoot,
+            repositoryRoot,
+            System.Environment.GetEnvironmentVariable,
+            System.Environment.GetEnvironmentVariables().Keys.Cast<string>());
+        if (resolution.AppliedPort is null)
         {
             return null;
         }
 
-        var port = ComputeDeterministicPort(NormalizePath(repositoryRoot));
-        return $"http://localhost:{port.ToString(CultureInfo.InvariantCulture)}";
+        return $"http://localhost:{resolution.AppliedPort.Value.ToString(CultureInfo.InvariantCulture)}";
     }
 
     /// <summary>
@@ -1216,14 +1252,6 @@ internal static class AppSurfaceDocsPreviewUrlResolver
             docsUrlBuilder.CurrentDocsRootPath.TrimStart('/'));
     }
 
-    private static string ResolveEnvironmentName(IReadOnlyList<string> args)
-    {
-        return ResolveOptionValue(args, "--environment")
-               ?? System.Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
-               ?? System.Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
-               ?? Environments.Production;
-    }
-
     private static string? ResolveOptionValue(IReadOnlyList<string> args, string optionName)
     {
         for (var index = 0; index < args.Count; index++)
@@ -1244,101 +1272,6 @@ internal static class AppSurfaceDocsPreviewUrlResolver
         }
 
         return null;
-    }
-
-    private static bool HasExplicitEndpointArgument(IReadOnlyList<string> args)
-    {
-        return args.Any(arg =>
-            string.Equals(arg, "--port", StringComparison.OrdinalIgnoreCase)
-            || arg.StartsWith("--port=", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(arg, "--urls", StringComparison.OrdinalIgnoreCase)
-            || arg.StartsWith("--urls=", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool HasExplicitEndpointEnvironmentVariable()
-    {
-        return HasEnvironmentValue("ASPNETCORE_URLS")
-               || HasEnvironmentValue("URLS")
-               || HasEnvironmentValue("ASPNETCORE_HTTP_PORTS")
-               || HasEnvironmentValue("DOTNET_HTTP_PORTS")
-               || HasEnvironmentValue("HTTP_PORTS")
-               || HasEnvironmentValue("ASPNETCORE_HTTPS_PORTS")
-               || HasEnvironmentValue("DOTNET_HTTPS_PORTS")
-               || HasEnvironmentValue("HTTPS_PORTS")
-               || System.Environment
-                   .GetEnvironmentVariables()
-                   .Keys
-                   .Cast<string>()
-                   .Any(variableName =>
-                       variableName.StartsWith("Kestrel__Endpoints__", StringComparison.OrdinalIgnoreCase)
-                       && variableName.EndsWith("__Url", StringComparison.OrdinalIgnoreCase)
-                       && HasEnvironmentValue(variableName));
-    }
-
-    private static bool HasExplicitEndpointConfigurationSource(
-        IReadOnlyList<string> args,
-        string repositoryRoot,
-        string environmentName)
-    {
-        var configuration = new ConfigurationBuilder()
-            .SetBasePath(repositoryRoot)
-            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
-            .AddJsonFile($"appsettings.{environmentName}.json", optional: true, reloadOnChange: false)
-            .AddCommandLine(BuildEndpointProbeArguments(args))
-            .Build();
-
-        return HasConfigurationValue(configuration, "urls")
-               || HasConfigurationValue(configuration, "http_ports")
-               || HasConfigurationValue(configuration, "https_ports")
-               || configuration
-                   .GetSection("Kestrel:Endpoints")
-                   .GetChildren()
-                   .Any(endpoint => HasConfigurationValue(endpoint, "Url"));
-    }
-
-    private static string[] BuildEndpointProbeArguments(IReadOnlyList<string> args)
-    {
-        var probeArgs = new List<string>(args.Count);
-        for (var index = 0; index < args.Count; index++)
-        {
-            var arg = args[index];
-            if (arg.StartsWith("--environment=", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (string.Equals(arg, "--environment", StringComparison.OrdinalIgnoreCase))
-            {
-                if (index + 1 >= args.Count)
-                {
-                    continue;
-                }
-
-                var candidate = args[index + 1];
-                if (!candidate.StartsWith("-", StringComparison.Ordinal))
-                {
-                    index++;
-                }
-
-                continue;
-            }
-
-            probeArgs.Add(arg);
-        }
-
-        return [.. probeArgs];
-    }
-
-    private static bool HasConfigurationValue(
-        IConfiguration configuration,
-        string key)
-    {
-        return !string.IsNullOrWhiteSpace(configuration[key]);
-    }
-
-    private static bool HasEnvironmentValue(string variableName)
-    {
-        return !string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable(variableName));
     }
 
     private static bool IsAnyHostAddress(Uri uri)
@@ -1377,39 +1310,6 @@ internal static class AppSurfaceDocsPreviewUrlResolver
             : value + "/";
     }
 
-    private static string NormalizePath(string path)
-    {
-        var normalized = Path.GetFullPath(path)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-        if (OperatingSystem.IsWindows())
-        {
-            normalized = normalized.ToUpperInvariant();
-        }
-
-        return normalized.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
-    }
-
-    private static int ComputeDeterministicPort(string seedPath)
-    {
-        var hash = ComputeFnv1aHash(seedPath);
-        return DevelopmentPortBase + (int)(hash % DevelopmentPortRange);
-    }
-
-    private static uint ComputeFnv1aHash(string value)
-    {
-        const uint offsetBasis = 2166136261;
-        const uint prime = 16777619;
-
-        var hash = offsetBasis;
-        foreach (var currentByte in System.Text.Encoding.UTF8.GetBytes(value))
-        {
-            hash ^= currentByte;
-            hash *= prime;
-        }
-
-        return hash;
-    }
 }
 
 /// <summary>
@@ -1651,7 +1551,7 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
             var startedHost = await startTask.ConfigureAwait(false);
             await StopAndDisposeHostAsync(startedHost).ConfigureAwait(false);
         }
-        catch (Exception ex) when (IsNonFatalException(ex))
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             _logger.LogDebug(ex, lateCompletionMessage);
         }
@@ -1682,27 +1582,10 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
         {
             await host.StopAsync(CancellationToken.None);
         }
-        catch (Exception ex) when (IsNonFatalException(ex))
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             _logger.LogWarning(ex, "AppSurface Docs export host failed during shutdown.");
         }
-    }
-
-    /// <summary>
-    /// Determines whether an exception is safe to catch for cleanup or diagnostic logging.
-    /// </summary>
-    /// <param name="ex">Exception to classify.</param>
-    /// <returns><see langword="true"/> when the exception is non-fatal and can be handled locally.</returns>
-    private static bool IsNonFatalException(Exception ex)
-    {
-        return ex is not OutOfMemoryException
-            and not StackOverflowException
-            and not AccessViolationException
-            and not AppDomainUnloadedException
-            and not BadImageFormatException
-            and not CannotUnloadAppDomainException
-            and not InvalidProgramException
-            and not ThreadAbortException;
     }
 
     /// <summary>
@@ -1807,23 +1690,11 @@ internal sealed class AppSurfaceDocsStandaloneExportHostStarter : IAppSurfaceDoc
             await host.StartAsync(cancellationToken);
             return host;
         }
-        catch (Exception ex) when (IsNonFatalException(ex))
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
         {
             host.Dispose();
             throw;
         }
-    }
-
-    private static bool IsNonFatalException(Exception ex)
-    {
-        return ex is not OutOfMemoryException
-            and not StackOverflowException
-            and not AccessViolationException
-            and not AppDomainUnloadedException
-            and not BadImageFormatException
-            and not CannotUnloadAppDomainException
-            and not InvalidProgramException
-            and not ThreadAbortException;
     }
 
     /// <summary>

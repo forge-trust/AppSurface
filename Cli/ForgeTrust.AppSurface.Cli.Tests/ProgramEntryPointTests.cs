@@ -1046,6 +1046,42 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task AppSurfaceDocsStandaloneHostRunner_Should_Preserve_External_Cancellation_During_Startup()
+    {
+        using var cts = new CancellationTokenSource();
+        var starter = new ControllablePreviewHostStarter();
+        var browserLauncher = new CapturingBrowserLauncher();
+        using var loggerFactory = LoggerFactory.Create(static builder => { });
+        var runner = new AppSurfaceDocsStandaloneHostRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsStandaloneHostRunner>(),
+            browserLauncher,
+            starter);
+
+        var runTask = runner.RunAsync(["--environment", "Development"], TimeSpan.FromSeconds(30), cts.Token);
+        await starter.Started.WaitAsync(TimeSpan.FromSeconds(1));
+        await cts.CancelAsync();
+
+        try
+        {
+            await Assert.ThrowsAsync<OperationCanceledException>(() => runTask);
+
+            Assert.True(starter.StartupToken.IsCancellationRequested);
+            Assert.Null(browserLauncher.Url);
+
+            var lateHost = new TrackingHost();
+            starter.Complete(lateHost);
+
+            await lateHost.Disposed.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.True(lateHost.StopCalled);
+            Assert.True(lateHost.DisposeCalled);
+        }
+        finally
+        {
+            starter.Complete(new TrackingHost());
+        }
+    }
+
+    [Fact]
     public async Task AppSurfaceDocsStandaloneHostRunner_Should_Translate_Startup_Cancellation_To_Startup_Timeout()
     {
         using var loggerFactory = LoggerFactory.Create(static builder => { });
@@ -1059,6 +1095,42 @@ public sealed class ProgramEntryPointTests
 
         Assert.Contains("AppSurface Docs preview host did not start within 30 seconds.", ex.Message, StringComparison.Ordinal);
         Assert.IsType<OperationCanceledException>(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task SystemAppSurfaceDocsBrowserLauncher_Should_Open_Through_Command_Runner()
+    {
+        var commandRunner = new CapturingBrowserOpenCommandRunner();
+        var launcher = new SystemAppSurfaceDocsBrowserLauncher(commandRunner);
+        var url = new Uri("http://127.0.0.1:61251/docs");
+
+        var result = await launcher.TryOpenAsync(url, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Null(result.FailureReason);
+        Assert.Equal(url, commandRunner.Url);
+    }
+
+    [Fact]
+    public async Task SystemAppSurfaceDocsBrowserLauncher_Should_Return_Failure_When_Command_Runner_Fails()
+    {
+        var launcher = new SystemAppSurfaceDocsBrowserLauncher(
+            new CapturingBrowserOpenCommandRunner(new InvalidOperationException("opener failed")));
+
+        var result = await launcher.TryOpenAsync(new Uri("http://127.0.0.1:61251/docs"), CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("opener failed", result.FailureReason);
+    }
+
+    [Fact]
+    public async Task SystemAppSurfaceDocsBrowserLauncher_Should_Preserve_Cancellation_When_Command_Runner_Is_Canceled()
+    {
+        using var cts = new CancellationTokenSource();
+        var launcher = new SystemAppSurfaceDocsBrowserLauncher(new CancelingBrowserOpenCommandRunner(cts));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => launcher.TryOpenAsync(new Uri("http://127.0.0.1:61251/docs"), cts.Token));
     }
 
     [Fact]
@@ -1723,6 +1795,32 @@ public sealed class ProgramEntryPointTests
             Url = url;
             _opened.TrySetResult(null);
             return Task.FromResult(_result);
+        }
+    }
+
+    private sealed class CapturingBrowserOpenCommandRunner(Exception? exception = null) : IAppSurfaceDocsBrowserOpenCommandRunner
+    {
+        public Uri? Url { get; private set; }
+
+        public CancellationToken CancellationToken { get; private set; }
+
+        public Task OpenAsync(Uri url, CancellationToken cancellationToken)
+        {
+            Url = url;
+            CancellationToken = cancellationToken;
+
+            return exception is null
+                ? Task.CompletedTask
+                : Task.FromException(exception);
+        }
+    }
+
+    private sealed class CancelingBrowserOpenCommandRunner(CancellationTokenSource cancellationTokenSource) : IAppSurfaceDocsBrowserOpenCommandRunner
+    {
+        public Task OpenAsync(Uri url, CancellationToken cancellationToken)
+        {
+            cancellationTokenSource.Cancel();
+            return Task.FromException(new OperationCanceledException(cancellationTokenSource.Token));
         }
     }
 
