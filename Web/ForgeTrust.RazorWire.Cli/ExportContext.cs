@@ -19,6 +19,8 @@ public class ExportContext
     /// </remarks>
     public string? SeedRoutesPath { get; }
 
+    private readonly List<string> _additionalSeedRoutes = [];
+
     /// <summary>
     /// Gets optional in-memory seed routes used when <see cref="SeedRoutesPath"/> is not configured.
     /// </summary>
@@ -28,6 +30,17 @@ public class ExportContext
     /// seed remains, the engine falls back to the root route (<c>/</c>).
     /// </remarks>
     public IReadOnlyList<string> InitialSeedRoutes { get; }
+
+    /// <summary>
+    /// Gets host-registered seed routes that should be crawled in addition to configured seed-file or in-memory seeds.
+    /// </summary>
+    /// <remarks>
+    /// Host-specific export integrations can register routes discovered from their own route graph before crawling starts.
+    /// These routes are validated by the export engine with the same normalization rules as configured seeds. They do not
+    /// replace <see cref="SeedRoutesPath"/> or <see cref="InitialSeedRoutes"/>; they make known public routes explicit so
+    /// exports do not depend on every page being linked from the initial crawl roots.
+    /// </remarks>
+    public IReadOnlyList<string> AdditionalSeedRoutes => _additionalSeedRoutes;
 
     /// <summary>
     /// Gets the base URL of the source application being exported.
@@ -92,6 +105,48 @@ public class ExportContext
     internal Dictionary<string, string> PartialArtifactUrls { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// Gets redirect fallback artifacts registered by host-specific exporters.
+    /// </summary>
+    internal List<ExportRedirectArtifact> RedirectArtifacts { get; } = [];
+
+    /// <summary>
+    /// Registers a route whose static output should be a tiny redirect artifact to an already-exported canonical route.
+    /// </summary>
+    /// <param name="aliasRoute">Root-relative alias route that should write the redirect artifact.</param>
+    /// <param name="canonicalRoute">Root-relative canonical route that owns the real exported page body.</param>
+    /// <remarks>
+    /// This API is intended for hosts that know route aliases before crawling starts. The export engine validates registered
+    /// aliases in every export mode so collisions and missing canonical artifacts fail early. CDN mode then writes normal
+    /// HTML/CSS bodies first, followed by redirect artifacts, so source-shaped aliases do not become duplicate public pages.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// Thrown when either route is blank, is not root-relative, is protocol-relative, or contains a query string or fragment.
+    /// </exception>
+    public void AddRedirectArtifact(string aliasRoute, string canonicalRoute)
+    {
+        RedirectArtifacts.Add(
+            new ExportRedirectArtifact(
+                NormalizeRedirectArtifactRoute(aliasRoute, nameof(aliasRoute)),
+                NormalizeRedirectArtifactRoute(canonicalRoute, nameof(canonicalRoute))));
+    }
+
+    /// <summary>
+    /// Registers an additional route for the export crawler to visit before validation.
+    /// </summary>
+    /// <param name="seedRoute">Root-relative or same-origin route to crawl.</param>
+    /// <remarks>
+    /// Use this when a host already knows its public route graph. The export engine validates, normalizes, and de-duplicates
+    /// registered routes during the seed queue phase. Query strings and fragments follow the same rules as other seed
+    /// sources, but host-specific route manifests should generally register clean canonical paths.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="seedRoute"/> is blank.</exception>
+    public void AddSeedRoute(string seedRoute)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(seedRoute);
+        _additionalSeedRoutes.Add(seedRoute);
+    }
+
+    /// <summary>
     /// Initializes a new instance of <see cref="ExportContext"/> with the specified configuration.
     /// </summary>
     /// <param name="outputPath">The target directory for export.</param>
@@ -146,5 +201,23 @@ public class ExportContext
         InitialSeedRoutes = initialSeedRoutes?.ToArray() ?? [];
         BaseUrl = baseUrl.TrimEnd('/');
         Mode = mode;
+    }
+
+    private static string NormalizeRedirectArtifactRoute(string route, string paramName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(route, paramName);
+        var normalized = route.Trim().Replace('\\', '/');
+        if (!normalized.StartsWith("/", StringComparison.Ordinal)
+            || normalized.StartsWith("//", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Redirect artifact routes must be root-relative and not protocol-relative.", paramName);
+        }
+
+        if (normalized.Contains('?') || normalized.Contains('#'))
+        {
+            throw new ArgumentException("Redirect artifact routes must not contain query strings or fragments.", paramName);
+        }
+
+        return normalized.Length == 1 ? normalized : normalized.TrimEnd('/');
     }
 }

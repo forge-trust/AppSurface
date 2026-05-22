@@ -181,6 +181,11 @@ internal sealed class DocsExportCommand : AppSurfaceDocsRepositoryCommand, IComm
             throw new CommandException($"The --output value must point to an export directory, but an existing file was found: {outputPath}");
         }
 
+        if (Directory.Exists(outputPath) && Directory.EnumerateFileSystemEntries(outputPath).Any())
+        {
+            throw new CommandException($"The --output directory must be empty before export starts: {outputPath}");
+        }
+
         var hostArgs = BuildHostArgs(defaultEnvironmentName: Environments.Production);
         var seedRoutesPath = string.IsNullOrWhiteSpace(SeedRoutesPath)
             ? null
@@ -616,6 +621,21 @@ internal interface IRazorWireStaticExporter
 }
 
 /// <summary>
+/// Adds AppSurface Docs-specific export graph state after the host starts and before RazorWire crawls it.
+/// </summary>
+internal interface IAppSurfaceDocsExportContextConfigurator
+{
+    /// <summary>
+    /// Configures the export context using services from the started docs host.
+    /// </summary>
+    /// <param name="host">Started AppSurface Docs host.</param>
+    /// <param name="context">Export context to configure.</param>
+    /// <param name="cancellationToken">Token observed while resolving host state.</param>
+    /// <returns>A task that completes after context configuration.</returns>
+    Task ConfigureAsync(IHost host, ExportContext context, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// Production <see cref="IAppSurfaceDocsHostRunner"/> that delegates to the standalone AppSurface Docs web host.
 /// </summary>
 /// <remarks>
@@ -643,6 +663,7 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
     private readonly ILogger<AppSurfaceDocsInProcessExportRunner> _logger;
     private readonly IRazorWireStaticExporter _exporter;
     private readonly IAppSurfaceDocsExportHostStarter _hostStarter;
+    private readonly IAppSurfaceDocsExportContextConfigurator _contextConfigurator;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AppSurfaceDocsInProcessExportRunner"/> class.
@@ -652,7 +673,7 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
     public AppSurfaceDocsInProcessExportRunner(
         ILogger<AppSurfaceDocsInProcessExportRunner> logger,
         IRazorWireStaticExporter exporter)
-        : this(logger, exporter, new AppSurfaceDocsStandaloneExportHostStarter())
+        : this(logger, exporter, new AppSurfaceDocsStandaloneExportHostStarter(), new AppSurfaceDocsExportContextConfigurator())
     {
     }
 
@@ -666,14 +687,32 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
         ILogger<AppSurfaceDocsInProcessExportRunner> logger,
         IRazorWireStaticExporter exporter,
         IAppSurfaceDocsExportHostStarter hostStarter)
+        : this(logger, exporter, hostStarter, NoOpAppSurfaceDocsExportContextConfigurator.Instance)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsInProcessExportRunner"/> class with explicit test seams.
+    /// </summary>
+    /// <param name="logger">Logger used for host lifecycle diagnostics.</param>
+    /// <param name="exporter">Static exporter invoked after the in-process host starts.</param>
+    /// <param name="hostStarter">Host starter used to build and start the docs application.</param>
+    /// <param name="contextConfigurator">Configurator that registers docs-specific export graph state.</param>
+    internal AppSurfaceDocsInProcessExportRunner(
+        ILogger<AppSurfaceDocsInProcessExportRunner> logger,
+        IRazorWireStaticExporter exporter,
+        IAppSurfaceDocsExportHostStarter hostStarter,
+        IAppSurfaceDocsExportContextConfigurator contextConfigurator)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(exporter);
         ArgumentNullException.ThrowIfNull(hostStarter);
+        ArgumentNullException.ThrowIfNull(contextConfigurator);
 
         _logger = logger;
         _exporter = exporter;
         _hostStarter = hostStarter;
+        _contextConfigurator = contextConfigurator;
     }
 
     /// <inheritdoc />
@@ -698,6 +737,8 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
                 args.InitialSeedRoutes,
                 baseUrl,
                 args.Mode);
+
+            await _contextConfigurator.ConfigureAsync(host, context, cancellationToken);
 
             await _exporter.ExportAsync(context, cancellationToken);
         }
@@ -979,6 +1020,51 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
         }
     }
 
+}
+
+/// <summary>
+/// Default AppSurface Docs export configurator that publishes docs route aliases into RazorWire's export graph.
+/// </summary>
+internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsExportContextConfigurator
+{
+    /// <inheritdoc />
+    public async Task ConfigureAsync(IHost host, ExportContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var routeManifest = await host.Services
+            .GetRequiredService<DocAggregator>()
+            .GetRouteManifestAsync(cancellationToken);
+
+        foreach (var entry in routeManifest.Entries)
+        {
+            context.AddSeedRoute(entry.CanonicalLiveUrl);
+
+            foreach (var alias in entry.RecoveryAliases.Concat(entry.DeclaredAliases))
+            {
+                context.AddRedirectArtifact(alias.LiveUrl, entry.CanonicalLiveUrl);
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Test-seam configurator used when unit tests provide a fake host that does not contain AppSurface Docs services.
+/// </summary>
+internal sealed class NoOpAppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsExportContextConfigurator
+{
+    public static readonly NoOpAppSurfaceDocsExportContextConfigurator Instance = new();
+
+    private NoOpAppSurfaceDocsExportContextConfigurator()
+    {
+    }
+
+    /// <inheritdoc />
+    public Task ConfigureAsync(IHost host, ExportContext context, CancellationToken cancellationToken)
+    {
+        return Task.CompletedTask;
+    }
 }
 
 /// <summary>

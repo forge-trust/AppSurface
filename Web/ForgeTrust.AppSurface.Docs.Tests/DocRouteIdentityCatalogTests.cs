@@ -126,6 +126,93 @@ public sealed class DocRouteIdentityCatalogTests
     }
 
     [Fact]
+    public void BuildRouteManifest_ShouldPublishFinalPublicWinnersAndAliases()
+    {
+        var catalog = CreateCatalog(
+            new DocNode("Package", "packages/README.md", "<p>Package</p>"),
+            new DocNode("Agents", "AGENTS.md", "<p>Agents</p>"),
+            new DocNode(
+                "Intro",
+                "docs/intro.md",
+                "<p>Intro</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "start-here/intro",
+                    RedirectAliases = ["legacy/intro"]
+                }),
+            new DocNode("Search", "search.md", "<p>Reserved</p>"),
+            new DocNode("First", "guides/same-a.md", "<p>First</p>", Metadata: new DocMetadata { CanonicalSlug = "guides/same" }),
+            new DocNode("Second", "guides/same-b.md", "<p>Second</p>", Metadata: new DocMetadata { CanonicalSlug = "guides/same" }));
+
+        var manifest = catalog.BuildRouteManifest();
+
+        Assert.DoesNotContain(manifest.Entries, entry => entry.SourcePath == "search.md");
+        Assert.DoesNotContain(manifest.Entries, entry => entry.SourcePath == "guides/same-b.md");
+
+        var package = Assert.Single(manifest.Entries, entry => entry.SourcePath == "packages/README.md");
+        Assert.Equal("packages", package.CanonicalRoutePath);
+        Assert.Equal("/docs/packages", package.CanonicalLiveUrl);
+        Assert.Equal(
+            [
+                new AppSurfaceDocsRouteAlias("packages/README.md", "/docs/packages/README.md", AppSurfaceDocsRouteAliasKind.MarkdownSource),
+                new AppSurfaceDocsRouteAlias("packages/README.md.html", "/docs/packages/README.md.html", AppSurfaceDocsRouteAliasKind.MarkdownSourceHtml)
+            ],
+            package.RecoveryAliases);
+
+        var agents = Assert.Single(manifest.Entries, entry => entry.SourcePath == "AGENTS.md");
+        Assert.Equal("agents", agents.CanonicalRoutePath);
+        Assert.Contains(
+            agents.RecoveryAliases,
+            alias => alias.RoutePath == "AGENTS.md.html"
+                     && alias.LiveUrl == "/docs/AGENTS.md.html"
+                     && alias.Kind == AppSurfaceDocsRouteAliasKind.MarkdownSourceHtml);
+
+        var intro = Assert.Single(manifest.Entries, entry => entry.SourcePath == "docs/intro.md");
+        Assert.Equal("start-here/intro", intro.CanonicalRoutePath);
+        Assert.Equal("/docs/start-here/intro", intro.CanonicalLiveUrl);
+        Assert.Contains(
+            intro.RecoveryAliases,
+            alias => alias.RoutePath == "docs/intro.md.html"
+                     && alias.LiveUrl == "/docs/docs/intro.md.html"
+                     && alias.Kind == AppSurfaceDocsRouteAliasKind.MarkdownSourceHtml);
+        var declaredAlias = Assert.Single(intro.DeclaredAliases);
+        Assert.Equal(new AppSurfaceDocsRouteAlias("legacy/intro", "/docs/legacy/intro", AppSurfaceDocsRouteAliasKind.DeclaredRedirect), declaredAlias);
+    }
+
+    [Fact]
+    public void BuildRouteManifest_ShouldSkipImplicitRecoveryAlias_WhenPublicRouteOwnsSamePath()
+    {
+        var catalog = CreateCatalog(
+            new DocNode(
+                "Intro",
+                "docs/intro.md",
+                "<p>Intro</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "start-here/intro"
+                }),
+            new DocNode(
+                "Literal Route",
+                "literal-route.md",
+                "<p>Literal</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "docs/intro.md"
+                }));
+
+        var manifest = catalog.BuildRouteManifest();
+
+        var intro = Assert.Single(manifest.Entries, entry => entry.SourcePath == "docs/intro.md");
+        Assert.DoesNotContain(intro.RecoveryAliases, alias => alias.RoutePath == "docs/intro.md");
+        Assert.Contains(intro.RecoveryAliases, alias => alias.RoutePath == "docs/intro.md.html");
+        var diagnostic = Assert.Single(
+            manifest.Diagnostics,
+            item => item.Code == DocHarvestDiagnosticCodes.DocImplicitRecoveryAliasCollision);
+        Assert.Contains("docs/intro.md", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("literal-route.md", diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Create_ShouldPreserveLiteralRedirectAliasRouteShape()
     {
         var catalog = CreateCatalog(

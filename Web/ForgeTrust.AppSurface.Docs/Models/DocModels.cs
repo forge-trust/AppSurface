@@ -984,6 +984,11 @@ public static class DocHarvestDiagnosticCodes
     public const string DocRedirectAliasCollision = "appsurfacedocs.routes.redirect_alias_collision";
 
     /// <summary>
+    /// An implicit source-shaped recovery alias was skipped because it collided with a public doc route.
+    /// </summary>
+    public const string DocImplicitRecoveryAliasCollision = "appsurfacedocs.routes.implicit_recovery_alias_collision";
+
+    /// <summary>
     /// A declared canonical slug was invalid for public route identity.
     /// </summary>
     public const string DocInvalidCanonicalSlug = "appsurfacedocs.routes.invalid_canonical_slug";
@@ -1641,6 +1646,20 @@ public sealed record DocDetailsViewModel
     /// Gets the resolved display title for the page.
     /// </summary>
     public string Title { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the app-relative canonical URL for the current details page.
+    /// </summary>
+    /// <remarks>
+    /// Expected shape is a URL-encoded, app-relative docs path that starts with <c>/</c>, such as
+    /// <c>/docs/guide.html</c>. Do not include a scheme, host, query string, or fragment identifier; callers should pass
+    /// the normalized canonical public route for the rendered page. The default empty string means no canonical URL is set,
+    /// and layout chrome ignores it instead of emitting a canonical link.
+    ///
+    /// Pitfall: avoid source-shaped aliases or other non-canonical routes here, because they can create conflicting
+    /// canonical signals between live docs pages and static exports.
+    /// </remarks>
+    public string CanonicalUrl { get; init; } = string.Empty;
 
     /// <summary>
     /// Gets the authored summary that should be rendered under the title when available.

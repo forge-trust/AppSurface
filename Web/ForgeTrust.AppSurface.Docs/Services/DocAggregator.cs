@@ -281,6 +281,7 @@ public class DocAggregator
         Dictionary<string, DocNode> DocsByPath,
         DocPathResolver PathResolver,
         DocRouteIdentityCatalog RouteIdentityCatalog,
+        AppSurfaceDocsRouteManifest RouteManifest,
         LocalizedDocsGraph LocalizedGraph,
         IReadOnlyList<DocSectionSnapshot> PublicSections,
         DocsSearchIndexProjectionCache SearchIndexProjections,
@@ -622,6 +623,22 @@ public class DocAggregator
     }
 
     /// <summary>
+    /// Gets the route manifest for the current cached docs snapshot.
+    /// </summary>
+    /// <param name="cancellationToken">Token observed while waiting for the snapshot.</param>
+    /// <returns>The final public route manifest derived from the same catalog used for live docs routing.</returns>
+    /// <remarks>
+    /// The manifest is produced from the final route identity catalog after namespace README merging and duplicate path
+    /// resolution. Export consumes this in-process so it can write source-shaped redirect artifacts without crawling an
+    /// HTTP manifest endpoint or duplicating route rules.
+    /// </remarks>
+    internal async Task<AppSurfaceDocsRouteManifest> GetRouteManifestAsync(CancellationToken cancellationToken = default)
+    {
+        var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
+        return snapshot.RouteManifest;
+    }
+
+    /// <summary>
     /// Builds the typed details view model for the specified documentation page.
     /// </summary>
     /// <param name="path">The documentation path to resolve.</param>
@@ -855,9 +872,10 @@ public class DocAggregator
                            publicSections,
                            finalRouteIdentityCatalog);
                        var searchIndexProjections = new DocsSearchIndexProjectionCache(searchIndexPayload, localizedGraph);
+                       var routeManifest = finalRouteIdentityCatalog.BuildRouteManifest();
                        var harvestHealth = BuildHarvestHealthSnapshot(
                            harvesterResults,
-                           finalRouteIdentityCatalog.Diagnostics
+                           routeManifest.Diagnostics
                                .Concat(localizedGraph.Diagnostics)
                                .Concat(namespaceReadmeDiagnostics)
                                .ToArray(),
@@ -878,6 +896,7 @@ public class DocAggregator
                            docsByPath,
                            pathResolver,
                            finalRouteIdentityCatalog,
+                           routeManifest,
                            localizedGraph,
                            publicSections,
                            searchIndexProjections,

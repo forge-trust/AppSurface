@@ -91,6 +91,23 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task Layout_ShouldRenderCanonicalLink_WhenDetailsPageProvidesCanonicalUrl()
+    {
+        using var services = CreateServiceProvider(CreateDocsWithOverrides(
+        [
+            new("Intro", "guides/intro.md", "<p>Start here.</p>")
+        ]));
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Details",
+            controller => controller.Details("guides/intro"),
+            pathBase: "/some-base");
+
+        Assert.Contains("<link rel=\"canonical\" href=\"/some-base/docs/guides/intro\" />", html);
+    }
+
+    [Fact]
     public async Task Layout_ShouldRenderDefaultNeutralDocsIdentity()
     {
         using var services = CreateServiceProvider(CreateDocs());
@@ -2395,9 +2412,13 @@ public class AppSurfaceDocsViewsTests
             "<p>Guide body</p>");
 
         var html = await RenderDetailsViewAsync(doc);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var breadcrumbLinks = document.QuerySelectorAll("nav[aria-label='Breadcrumb'] a")
+            .Select(node => node.GetAttribute("href"))
+            .ToArray();
 
         Assert.Contains(">quickstart.md</span>", html);
-        Assert.DoesNotContain("href=\"/docs/quickstart\"", html);
+        Assert.Empty(breadcrumbLinks);
     }
 
     [Fact]

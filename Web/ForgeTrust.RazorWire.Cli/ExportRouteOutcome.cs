@@ -15,7 +15,8 @@ internal sealed class ExportRouteOutcome
         string? artifactPath,
         string? artifactUrl,
         string? textBody,
-        Exception? exception)
+        Exception? exception,
+        bool isRedirectAliasArtifact)
     {
         Route = route;
         Succeeded = succeeded;
@@ -25,6 +26,7 @@ internal sealed class ExportRouteOutcome
         ArtifactUrl = artifactUrl;
         TextBody = textBody;
         Exception = exception;
+        IsRedirectAliasArtifact = isRedirectAliasArtifact;
     }
 
     /// <summary>Gets the normalized root-relative route that was fetched.</summary>
@@ -50,6 +52,9 @@ internal sealed class ExportRouteOutcome
 
     /// <summary>Gets the exception that prevented the route from being fetched or written.</summary>
     public Exception? Exception { get; }
+
+    /// <summary>Gets a value indicating whether this outcome was written as a redirect alias artifact.</summary>
+    public bool IsRedirectAliasArtifact { get; }
 
     /// <summary>Gets a value indicating whether the route was fetched as HTML.</summary>
     public bool IsHtml => MediaTypeEquals(ContentType, "text/html");
@@ -79,7 +84,7 @@ internal sealed class ExportRouteOutcome
         ArgumentException.ThrowIfNullOrWhiteSpace(artifactPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(artifactUrl);
 
-        return new ExportRouteOutcome(route, true, contentType, null, artifactPath, artifactUrl, textBody, null);
+        return new ExportRouteOutcome(route, true, contentType, null, artifactPath, artifactUrl, textBody, null, isRedirectAliasArtifact: false);
     }
 
     /// <summary>
@@ -99,6 +104,31 @@ internal sealed class ExportRouteOutcome
         string artifactUrl)
     {
         return Success(route, contentType, artifactPath, artifactUrl, textBody: null);
+    }
+
+    /// <summary>
+    /// Creates a successful outcome for a generated redirect alias artifact.
+    /// </summary>
+    /// <param name="route">Normalized root-relative alias route.</param>
+    /// <param name="artifactPath">Absolute output file path written for the alias.</param>
+    /// <param name="artifactUrl">Static-host URL that resolves to the alias artifact.</param>
+    /// <returns>A successful HTML outcome marked as a redirect alias artifact.</returns>
+    public static ExportRouteOutcome RedirectAliasArtifact(string route, string artifactPath, string artifactUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(route);
+        ArgumentException.ThrowIfNullOrWhiteSpace(artifactPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(artifactUrl);
+
+        return new ExportRouteOutcome(
+            route,
+            succeeded: true,
+            contentType: "text/html",
+            statusCode: null,
+            artifactPath,
+            artifactUrl,
+            textBody: null,
+            exception: null,
+            isRedirectAliasArtifact: true);
     }
 
     /// <summary>
@@ -123,7 +153,7 @@ internal sealed class ExportRouteOutcome
             throw new ArgumentOutOfRangeException(nameof(statusCode), statusCode, "A non-success route outcome requires a non-2xx HTTP status code.");
         }
 
-        return new ExportRouteOutcome(route, false, null, statusCode, null, null, null, null);
+        return new ExportRouteOutcome(route, false, null, statusCode, null, null, null, null, isRedirectAliasArtifact: false);
     }
 
     /// <summary>
@@ -139,7 +169,7 @@ internal sealed class ExportRouteOutcome
         ArgumentException.ThrowIfNullOrWhiteSpace(route);
         ArgumentNullException.ThrowIfNull(exception);
 
-        return new ExportRouteOutcome(route, false, null, null, null, null, null, exception);
+        return new ExportRouteOutcome(route, false, null, null, null, null, null, exception, isRedirectAliasArtifact: false);
     }
 
     private static bool MediaTypeEquals(string? contentType, string expectedMediaType)
