@@ -259,6 +259,23 @@ internal sealed class DocRouteIdentityCatalog
         return false;
     }
 
+    /// <summary>
+    /// Builds a snapshot-local manifest of public canonical routes and redirect aliases for export consumers.
+    /// </summary>
+    /// <remarks>
+    /// Use this when a downstream component needs a deterministic read model of canonical winners plus alias metadata.
+    /// Prefer <see cref="ResolvePublicRoute(string)" /> for live request-time route decisions.
+    ///
+    /// The returned entries are ordered from <c>_publicIdentityByRoutePath</c> by public route path, then source path,
+    /// using ordinal-ignore-case comparison so export output is stable across runs. Diagnostics start as a snapshot of
+    /// <see cref="Diagnostics" /> and are passed through <see cref="BuildRouteManifestEntry" /> so implicit recovery-alias
+    /// collisions discovered during manifest materialization are included in the returned
+    /// <see cref="AppSurfaceDocsRouteManifest" />.
+    ///
+    /// Pitfall: this method does not mutate catalog state, and callers should not rely on reference equality with external
+    /// diagnostic collections or assume manifest-only diagnostics were computed before this call.
+    /// </remarks>
+    /// <returns>A deterministic route manifest for the current catalog snapshot.</returns>
     internal AppSurfaceDocsRouteManifest BuildRouteManifest()
     {
         var diagnostics = Diagnostics.ToList();

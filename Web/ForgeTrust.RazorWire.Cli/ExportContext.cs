@@ -207,9 +207,10 @@ public class ExportContext
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(route, paramName);
         var normalized = route.Trim().Replace('\\', '/');
-        if (!normalized.StartsWith("/", StringComparison.Ordinal))
+        if (!normalized.StartsWith("/", StringComparison.Ordinal)
+            || normalized.StartsWith("//", StringComparison.Ordinal))
         {
-            throw new ArgumentException("Redirect artifact routes must be root-relative.", paramName);
+            throw new ArgumentException("Redirect artifact routes must be root-relative and not protocol-relative.", paramName);
         }
 
         if (normalized.Contains('?') || normalized.Contains('#'))

@@ -70,6 +70,23 @@ public class ExportEngineTests
         Assert.False(result);
     }
 
+    [Theory]
+    [InlineData("//docs/example", "/docs/example", "aliasRoute")]
+    [InlineData("/docs/example/README.md", "//docs/example", "canonicalRoute")]
+    public void AddRedirectArtifact_Should_Reject_Protocol_Relative_Routes(
+        string aliasRoute,
+        string canonicalRoute,
+        string expectedParamName)
+    {
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => context.AddRedirectArtifact(aliasRoute, canonicalRoute));
+
+        Assert.Equal(expectedParamName, exception.ParamName);
+        Assert.Contains("not protocol-relative", exception.Message);
+    }
+
     [Fact]
     public void ExtractAssets_Should_Find_Css_Urls()
     {
@@ -802,7 +819,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DottedPageRouteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new DottedPageRouteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -831,12 +848,11 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Write_Redirect_Alias_Artifacts_After_Canonical_Routes()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
 
         try
         {
-            var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, ["/"], "http://localhost:5000");
@@ -845,10 +861,10 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            var canonicalHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "docs", "example.html"));
+            var canonicalHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "docs", "example.html"));
             Assert.Contains("""<link rel="canonical" href="/docs/example.html">""", canonicalHtml);
 
-            var aliasArtifactPath = Path.Combine(tempDir, "docs", "example", "README.md.html");
+            var aliasArtifactPath = Path.Join(tempDir, "docs", "example", "README.md.html");
             Assert.True(File.Exists(aliasArtifactPath));
 
             var aliasHtml = await File.ReadAllTextAsync(aliasArtifactPath);
@@ -876,7 +892,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, ["/"], "http://localhost:5000");
@@ -905,7 +921,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, ["/"], "http://localhost:5000");
@@ -934,7 +950,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DocsRedirectArtifactHandler(aliasReturnsBody: true)) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new DocsRedirectArtifactHandler(aliasReturnsBody: true)) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -967,7 +983,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -1000,7 +1016,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -1033,7 +1049,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -1806,7 +1822,7 @@ public class ExportEngineTests
                 return Html("<html><body><h1>API docs</h1></body></html>");
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return Html(string.Empty, HttpStatusCode.NotFound);
         }
     }
 
@@ -1969,14 +1985,17 @@ public class ExportEngineTests
         }
     }
 
-    private static Task<HttpResponseMessage> Html(string html)
+    private static Task<HttpResponseMessage> Html(string html, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
-        return Text(html, "text/html");
+        return Text(html, "text/html", statusCode);
     }
 
-    private static Task<HttpResponseMessage> Text(string content, string mediaType)
+    private static Task<HttpResponseMessage> Text(
+        string content,
+        string mediaType,
+        HttpStatusCode statusCode = HttpStatusCode.OK)
     {
-        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        return Task.FromResult(new HttpResponseMessage(statusCode)
         {
             Content = new StringContent(content, Encoding.UTF8, mediaType)
         });

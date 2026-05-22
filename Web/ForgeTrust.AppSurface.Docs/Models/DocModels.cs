@@ -1650,6 +1650,15 @@ public sealed record DocDetailsViewModel
     /// <summary>
     /// Gets the app-relative canonical URL for the current details page.
     /// </summary>
+    /// <remarks>
+    /// Expected shape is a URL-encoded, app-relative docs path that starts with <c>/</c>, such as
+    /// <c>/docs/guide.html</c>. Do not include a scheme, host, query string, or fragment identifier; callers should pass
+    /// the normalized canonical public route for the rendered page. The default empty string means no canonical URL is set,
+    /// and layout chrome ignores it instead of emitting a canonical link.
+    ///
+    /// Pitfall: avoid source-shaped aliases or other non-canonical routes here, because they can create conflicting
+    /// canonical signals between live docs pages and static exports.
+    /// </remarks>
     public string CanonicalUrl { get; init; } = string.Empty;
 
     /// <summary>
