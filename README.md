@@ -5,6 +5,7 @@
 [![Package Artifacts](https://github.com/forge-trust/AppSurface/actions/workflows/package-artifacts.yml/badge.svg)](https://github.com/forge-trust/AppSurface/actions/workflows/package-artifacts.yml)
 [![Codecov](https://codecov.io/gh/forge-trust/AppSurface/branch/main/graph/badge.svg)](https://codecov.io/gh/forge-trust/AppSurface)
 [![NuGet Packages](https://img.shields.io/badge/NuGet-package%20chooser-004880?logo=nuget&logoColor=white)](./packages/README.md)
+[![Security Policy](https://img.shields.io/badge/security-private%20reporting-2ea44f?logo=github)](./SECURITY.md)
 [![License](https://img.shields.io/badge/license-Polyform%20Small%20Business-blue)](./licensing.md)
 
 > ⚠️ **Under Construction:** This library is actively being developed and is not intended for production use yet.
