@@ -26,6 +26,11 @@ internal enum AppSurfaceDocsHarvestPathDecisionCode
     IncludedByDefaultGroupAllow,
 
     /// <summary>
+    /// A Git ignore negation rule matched and restored the path inside VCS-ignore evaluation.
+    /// </summary>
+    MatchedVcsIgnoreNegation,
+
+    /// <summary>
     /// The path was rejected because it was not a safe normalized repository-relative path.
     /// </summary>
     ExcludedByInvalidPath,
@@ -49,6 +54,11 @@ internal enum AppSurfaceDocsHarvestPathDecisionCode
     /// The path matched an enabled default exclusion group without a matching group allow.
     /// </summary>
     ExcludedByDefaultGroup,
+
+    /// <summary>
+    /// The path matched a repository-owned Git ignore rule.
+    /// </summary>
+    ExcludedByVcsIgnore,
 
     /// <summary>
     /// The path matched a global exclude glob after include and default-group processing.

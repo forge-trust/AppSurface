@@ -410,6 +410,44 @@ AppSurface Docs keeps four package-defined default exclusion groups active when 
 
 Use `DefaultExclusions:DisabledGroups` when an entire default group should stop applying for a scope. Use `DefaultExclusions:AllowGlobs` when only selected files inside a default group should come back. Group IDs are the names above, not enum ordinals; numeric values such as `0` fail validation instead of mapping to a group. Allows are group-aware: if a path matches both `HiddenDirectories` and `BuildOutput`, it needs an allow for both groups, or one of the groups must be disabled. Configured excludes still win after an allow.
 
+AppSurface Docs also reads repository-owned Git `.gitignore` files by default. This keeps legacy package-manager and generated trees such as `bower_components/`, `dist/`, and `build/` from becoming public docs just because they contain Markdown, C#, or JavaScript files. The ignore policy is loaded lazily for each docs snapshot, follows nested `.gitignore` files only when traversal reaches that directory, and prunes obvious ignored subtrees without enumerating all their files.
+
+VCS ignore rules sit after AppSurface include boundaries and default exclusion groups, but before configured AppSurface excludes. Git negation can only neutralize a previous Git ignore rule. `VcsIgnore:AllowGlobs` can also restore selected VCS-ignored candidates, but those allow globs use AppSurface's normal repository-relative glob syntax, not Git-ignore syntax, and cannot override AppSurface default exclusions or configured excludes.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Paths": {
+        "VcsIgnore": {
+          "AllowGlobs": [
+            "docs/generated-public/**"
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+Disable VCS ignore integration only when the host intentionally wants pre-existing AppSurface behavior:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Paths": {
+        "VcsIgnore": {
+          "Enabled": false
+        }
+      }
+    }
+  }
+}
+```
+
+AppSurface Docs reads only repository-owned `.gitignore` files under the resolved source root. It does not read `.git/info/exclude`, global Git excludes, or machine-local ignore state, so source-backed docs are reproducible in CI, static export, and packaged hosts. Tracked files that match `.gitignore` are still ignored by AppSurface Docs; use `VcsIgnore:AllowGlobs` for intentional public docs under ignored paths.
+
 Traversal uses the same policy for Markdown and C#. AppSurface Docs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file. The root `LICENSE` file is a Markdown candidate, but when global includes are configured it still needs to match an include such as `LICENSE`.
 
 To host the same live source surface somewhere else, set the route-family root. With versioning disabled, the live docs root defaults to the route root:
@@ -696,6 +734,14 @@ Pitfalls:
   - Defaults to an empty dictionary.
   - Maps a default group ID to repository-relative globs that opt matching files back into that group.
   - Allows are group-aware. A path matching multiple enabled groups needs an allow for every matched group, and configured excludes still win afterward.
+- `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled`
+  - Defaults to `true`.
+  - Reads repository-owned Git `.gitignore` files under the resolved source root during each cached docs snapshot.
+  - Does not read `.git/info/exclude`, global Git excludes, or machine-local ignore state.
+- `AppSurfaceDocs:Harvest:Paths:VcsIgnore:AllowGlobs`
+  - Defaults to an empty array.
+  - Uses AppSurface repository-relative glob syntax, not Git-ignore syntax.
+  - Restores selected candidates excluded only by VCS ignore rules; AppSurface default exclusions and configured excludes still win.
 - `AppSurfaceDocs:Harvest:Markdown:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Defaults mirror the global path option shape, but apply only to Markdown candidates and the root `LICENSE` candidate.
   - Source-specific includes are evaluated after global includes, so they narrow Markdown rather than widening it.

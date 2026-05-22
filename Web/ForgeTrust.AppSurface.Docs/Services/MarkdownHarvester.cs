@@ -152,14 +152,29 @@ public class MarkdownHarvester : IDocHarvester
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
     {
+        return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
+    }
+
+    internal async Task<IReadOnlyList<DocNode>> HarvestAsync(DocHarvestContext context, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<DocNode>> HarvestAsync(
+        string rootPath,
+        IHarvestPathPolicy pathPolicy,
+        CancellationToken cancellationToken)
+    {
         var nodes = new List<DocNode>();
-        foreach (var file in EnumerateMarkdownSourceFiles(rootPath, cancellationToken))
+        foreach (var file in EnumerateMarkdownSourceFiles(rootPath, pathPolicy, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var relativePath = Path.GetRelativePath(rootPath, file).Replace('\\', '/');
-                if (!_pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.Markdown))
+                if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.Markdown))
                 {
                     continue;
                 }
@@ -207,9 +222,10 @@ public class MarkdownHarvester : IDocHarvester
 
     private IEnumerable<string> EnumerateMarkdownSourceFiles(
         string rootPath,
+        IHarvestPathPolicy pathPolicy,
         CancellationToken cancellationToken)
     {
-        foreach (var file in _pathPolicy.EnumerateCandidateFiles(
+        foreach (var file in pathPolicy.EnumerateCandidateFiles(
                      rootPath,
                      AppSurfaceDocsHarvestSourceKind.Markdown,
                      "*.md",

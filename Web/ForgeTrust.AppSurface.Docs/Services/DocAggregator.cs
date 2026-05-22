@@ -244,6 +244,7 @@ public class DocAggregator
     private readonly ILogger<DocAggregator> _logger;
     private readonly AppSurfaceDocsContributorOptions _contributorOptions;
     private readonly AppSurfaceDocsLocalizationOptions _localizationOptions;
+    private readonly AppSurfaceDocsHarvestPathPolicySnapshotFactory _pathPolicySnapshotFactory;
     private readonly Func<string, CancellationToken, Task<DateTimeOffset?>> _resolveGitLastUpdatedUtcAsync;
     private readonly TimeSpan _harvesterTimeout;
     private readonly TimeSpan _contributorFreshnessTimeout;
@@ -464,6 +465,7 @@ public class DocAggregator
         _logger = logger;
         _contributorOptions = options.Contributor ?? throw new ArgumentNullException(nameof(options.Contributor));
         _localizationOptions = options.Localization ?? throw new ArgumentNullException(nameof(options.Localization));
+        _pathPolicySnapshotFactory = new AppSurfaceDocsHarvestPathPolicySnapshotFactory(options, logger);
         SnapshotCacheDuration = ResolveSnapshotCacheDuration(options);
         _docsCachePolicy = CachePolicy.Absolute(SnapshotCacheDuration);
         _harvesterTimeout = ResolveHarvesterTimeout(harvesterTimeout);
@@ -778,9 +780,11 @@ public class DocAggregator
                    async (_, _, _) =>
                    {
                        var sw = System.Diagnostics.Stopwatch.StartNew();
+                       var harvestPathPolicy = _pathPolicySnapshotFactory.Create(repositoryRoot);
+                       var harvestContext = new DocHarvestContext(repositoryRoot, harvestPathPolicy);
                        var harvesterResults = await RunHarvestersAsync(
                            harvesters,
-                           repositoryRoot,
+                           harvestContext,
                            harvesterTimeout,
                            logger);
                        var allNodes = harvesterResults
@@ -882,6 +886,7 @@ public class DocAggregator
                            docsByPath.Count,
                            repositoryRoot,
                            utcNow(),
+                           harvestPathPolicy.CreateVcsIgnoreHealthDiagnostics(),
                            logger);
 
                        sw.Stop();
@@ -909,7 +914,7 @@ public class DocAggregator
 
     private static async Task<IReadOnlyList<HarvesterRunResult>> RunHarvestersAsync(
         IReadOnlyList<IDocHarvester> harvesters,
-        string repositoryRoot,
+        DocHarvestContext context,
         TimeSpan harvesterTimeout,
         ILogger logger)
     {
@@ -919,7 +924,7 @@ public class DocAggregator
         }
 
         var tasks = harvesters.Select(
-            harvester => RunHarvesterAsync(harvester, repositoryRoot, harvesterTimeout, logger));
+            harvester => RunHarvesterAsync(harvester, context, harvesterTimeout, logger));
         return await Task.WhenAll(tasks);
     }
 
@@ -930,7 +935,7 @@ public class DocAggregator
 
     private static async Task<HarvesterRunResult> RunHarvesterAsync(
         IDocHarvester harvester,
-        string repositoryRoot,
+        DocHarvestContext context,
         TimeSpan harvesterTimeout,
         ILogger logger)
     {
@@ -939,7 +944,7 @@ public class DocAggregator
         timeoutCts.CancelAfter(harvesterTimeout);
         try
         {
-            var harvestTask = harvester.HarvestAsync(repositoryRoot, timeoutCts.Token);
+            var harvestTask = HarvestWithContextAsync(harvester, context, timeoutCts.Token);
             var docs = await harvestTask.WaitAsync(harvesterTimeout) ?? [];
             var additionalDiagnostics = CollectHarvestDiagnostics(harvester, harvesterType, logger);
             var status = docs.Count == 0
@@ -955,7 +960,7 @@ public class DocAggregator
                 "Harvester {HarvesterType} timed out after {TimeoutSeconds}s at {RepositoryRoot}. Skipping its docs.",
                 harvesterType,
                 harvesterTimeout.TotalSeconds,
-                repositoryRoot);
+                context.RepositoryRoot);
 
             return CreateTimedOutHarvesterRunResult(harvesterType);
         }
@@ -966,7 +971,7 @@ public class DocAggregator
                 "Harvester {HarvesterType} timed out after {TimeoutSeconds}s at {RepositoryRoot}. Skipping its docs.",
                 harvesterType,
                 harvesterTimeout.TotalSeconds,
-                repositoryRoot);
+                context.RepositoryRoot);
 
             return CreateTimedOutHarvesterRunResult(harvesterType);
         }
@@ -976,7 +981,7 @@ public class DocAggregator
                 ex,
                 "Harvester {HarvesterType} canceled at {RepositoryRoot}. Skipping its docs.",
                 harvesterType,
-                repositoryRoot);
+                context.RepositoryRoot);
 
             return new HarvesterRunResult(
                 harvesterType,
@@ -996,7 +1001,7 @@ public class DocAggregator
                 ex,
                 "Harvester {HarvesterType} failed at {RepositoryRoot}",
                 harvesterType,
-                repositoryRoot);
+                context.RepositoryRoot);
 
             return new HarvesterRunResult(
                 harvesterType,
@@ -1010,6 +1015,20 @@ public class DocAggregator
                     "The harvester threw while scanning the docs repository, so AppSurface Docs skipped its docs for this snapshot.",
                     "Inspect the host logs for exception details, then fix the harvester configuration, repository root, or source content."));
         }
+    }
+
+    private static Task<IReadOnlyList<DocNode>> HarvestWithContextAsync(
+        IDocHarvester harvester,
+        DocHarvestContext context,
+        CancellationToken cancellationToken)
+    {
+        return harvester switch
+        {
+            MarkdownHarvester markdownHarvester => markdownHarvester.HarvestAsync(context, cancellationToken),
+            CSharpDocHarvester csharpDocHarvester => csharpDocHarvester.HarvestAsync(context, cancellationToken),
+            JavaScriptDocHarvester javaScriptDocHarvester => javaScriptDocHarvester.HarvestAsync(context, cancellationToken),
+            _ => harvester.HarvestAsync(context.RepositoryRoot, cancellationToken)
+        };
     }
 
     private static IReadOnlyList<DocHarvestDiagnostic> CollectHarvestDiagnostics(
@@ -1068,6 +1087,7 @@ public class DocAggregator
         int totalDocs,
         string repositoryRoot,
         DateTimeOffset generatedUtc,
+        IReadOnlyList<DocHarvestDiagnostic> pathPolicyDiagnostics,
         ILogger logger)
     {
         var harvesters = harvesterResults
@@ -1084,6 +1104,16 @@ public class DocAggregator
             .ToList();
         diagnostics.AddRange(harvesterResults.SelectMany(result => result.AdditionalDiagnostics ?? []));
         diagnostics.AddRange(routeDiagnostics);
+        diagnostics.AddRange(pathPolicyDiagnostics);
+
+        foreach (var diagnostic in pathPolicyDiagnostics)
+        {
+            logger.Log(
+                diagnostic.Severity >= DocHarvestDiagnosticSeverity.Error ? LogLevel.Error : LogLevel.Information,
+                "AppSurface Docs harvest path diagnostic {DiagnosticCode}: {Problem}",
+                diagnostic.Code,
+                diagnostic.Problem);
+        }
 
         if (harvesters.Length == 0)
         {

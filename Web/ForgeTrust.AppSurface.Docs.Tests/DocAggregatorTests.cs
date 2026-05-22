@@ -9,6 +9,7 @@ using Ganss.Xss;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -4583,9 +4584,91 @@ public class DocAggregatorTests : IDisposable
             chooser.Content);
     }
 
+    [Fact]
+    public async Task GetDocsAsync_WithBuiltInMarkdownHarvesterAppliesVcsIgnoreSnapshotAndHealthDiagnostic()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-docaggregator-vcs-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, ".gitignore"), "ignored/\n");
+            Directory.CreateDirectory(Path.Combine(root, "ignored"));
+            await File.WriteAllTextAsync(Path.Combine(root, "ignored", "Hidden.md"), "# Hidden");
+            await File.WriteAllTextAsync(Path.Combine(root, "Visible.md"), "# Visible");
+
+            using var cache = new MemoryCache(new MemoryCacheOptions());
+            var memo = new Memo(cache);
+            var env = A.Fake<IWebHostEnvironment>();
+            A.CallTo(() => env.ContentRootPath).Returns(root);
+            var aggregator = new DocAggregator(
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, NullLoggerFactory.Instance)],
+                new AppSurfaceDocsOptions
+                {
+                    Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = root }
+                },
+                env,
+                memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var docs = await aggregator.GetDocsAsync();
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            Assert.Contains(docs, doc => doc.Path == "Visible.md");
+            Assert.DoesNotContain(docs, doc => doc.Path == "ignored/Hidden.md");
+            Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.VcsIgnoreSummary);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetDocsAsync_WithLegacyCustomHarvesterKeepsPublicHarvestContract()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-docaggregator-custom-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, ".gitignore"), "ignored/\n");
+            var harvester = new StaticHarvester([new DocNode("Ignored", "ignored/Custom.md", "<p>custom</p>")]);
+            using var cache = new MemoryCache(new MemoryCacheOptions());
+            var memo = new Memo(cache);
+            var env = A.Fake<IWebHostEnvironment>();
+            A.CallTo(() => env.ContentRootPath).Returns(root);
+            var aggregator = new DocAggregator(
+                [harvester],
+                new AppSurfaceDocsOptions
+                {
+                    Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = root }
+                },
+                env,
+                memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var docs = await aggregator.GetDocsAsync();
+
+            Assert.Contains(docs, doc => doc.Path == "ignored/Custom.md");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     public void Dispose()
     {
         (_memo as IDisposable)?.Dispose();
         _cache.Dispose();
+    }
+
+    private sealed class StaticHarvester(IReadOnlyList<DocNode> docs) : IDocHarvester
+    {
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(docs);
+        }
     }
 }

@@ -1192,6 +1192,7 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
         ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
         ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+        ValidateVcsIgnoreOptions(options.VcsIgnore, $"{configurationPath}:VcsIgnore", failures);
     }
 
     private static void ValidateHarvestSourceOptions(
@@ -1294,6 +1295,20 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
             ValidateDefaultGroupId(groupId, $"{configurationPath}:AllowGlobs", failures);
             ValidateGlobPatterns(patterns, $"{configurationPath}:AllowGlobs:{groupId}", failures);
         }
+    }
+
+    private static void ValidateVcsIgnoreOptions(
+        AppSurfaceDocsHarvestVcsIgnoreOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        ValidateGlobPatterns(options.AllowGlobs, $"{configurationPath}:AllowGlobs", failures);
     }
 
     private static void ValidateDefaultGroupId(

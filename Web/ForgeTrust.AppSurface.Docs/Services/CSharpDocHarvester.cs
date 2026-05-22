@@ -54,10 +54,27 @@ public class CSharpDocHarvester : IDocHarvester
         string rootPath,
         CancellationToken cancellationToken = default)
     {
+        return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
+    }
+
+    internal async Task<IReadOnlyList<DocNode>> HarvestAsync(
+        DocHarvestContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<DocNode>> HarvestAsync(
+        string rootPath,
+        IHarvestPathPolicy pathPolicy,
+        CancellationToken cancellationToken)
+    {
         var nodes = new List<DocNode>();
         var stubNodes = new List<DocNode>();
         var namespacePages = new Dictionary<string, NamespaceDocPage>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in EnumerateEligibleCSharpFiles(rootPath, cancellationToken))
+        foreach (var file in EnumerateEligibleCSharpFiles(rootPath, pathPolicy, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -282,9 +299,10 @@ public class CSharpDocHarvester : IDocHarvester
 
     private IEnumerable<string> EnumerateEligibleCSharpFiles(
         string rootPath,
+        IHarvestPathPolicy pathPolicy,
         CancellationToken cancellationToken)
     {
-        foreach (var file in _pathPolicy.EnumerateCandidateFiles(
+        foreach (var file in pathPolicy.EnumerateCandidateFiles(
                      rootPath,
                      AppSurfaceDocsHarvestSourceKind.CSharp,
                      "*.cs",

@@ -1,0 +1,266 @@
+using System.Diagnostics;
+using ForgeTrust.AppSurface.Docs.Services;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace ForgeTrust.AppSurface.Docs.Tests;
+
+public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
+{
+    private readonly string _root = Directory.CreateTempSubdirectory("appsurface-vcs-ignore-").FullName;
+
+    [Fact]
+    public async Task Evaluate_WhenRootIgnoreExcludesVendorDirectoryExcludesCandidateWithTrace()
+    {
+        await WriteAsync(".gitignore", "bower_components/\n");
+        var snapshot = CreateSnapshot();
+
+        var decision = snapshot.Evaluate("bower_components/jquery/README.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.False(decision.Included);
+        Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore, decision.Code);
+        var trace = Assert.Single(decision.Trace, trace => trace.Code == AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore);
+        Assert.Equal(".gitignore", trace.SourcePath);
+        Assert.Equal(1, trace.LineNumber);
+        Assert.Equal("bower_components/", trace.Pattern);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenVcsIgnoreAllowGlobMatchesRestoresOnlyVcsIgnoreExclusion()
+    {
+        await WriteAsync(".gitignore", "generated/\n");
+        var snapshot = CreateSnapshot(
+            options =>
+            {
+                options.Harvest.Paths.VcsIgnore.AllowGlobs = ["generated/public/**"];
+                options.Harvest.Paths.ExcludeGlobs = ["generated/public/private.md"];
+            });
+
+        var restored = snapshot.Evaluate("generated/public/index.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+        var excluded = snapshot.Evaluate("generated/public/private.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.True(restored.Included);
+        Assert.False(excluded.Included);
+        Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedByGlobalExclude, excluded.Code);
+    }
+
+    [Fact]
+    public async Task ShouldPruneDirectory_WhenIgnoredDirectoryHasNoReachableNegationPrunesSubtree()
+    {
+        await WriteAsync(".gitignore", "bower_components/\n");
+        var snapshot = CreateSnapshot();
+
+        Assert.True(snapshot.ShouldPruneDirectory("bower_components", AppSurfaceDocsHarvestSourceKind.JavaScript));
+    }
+
+    [Fact]
+    public async Task ShouldPruneDirectory_WhenIgnoredDirectoryHasUnrelatedSlashlessNegationPrunesSubtree()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            bower_components/
+            !README.md
+            """);
+        var snapshot = CreateSnapshot();
+
+        var decision = snapshot.Evaluate("bower_components/README.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.True(snapshot.ShouldPruneDirectory("bower_components", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.False(decision.Included);
+    }
+
+    [Fact]
+    public async Task ShouldPruneDirectory_WhenDoubleStarSubtreeIgnoreHasNoNegationPrunesSubtree()
+    {
+        await WriteAsync(".gitignore", "/dist/**\n");
+        var snapshot = CreateSnapshot();
+
+        Assert.True(snapshot.ShouldPruneDirectory("dist", AppSurfaceDocsHarvestSourceKind.Markdown));
+    }
+
+    [Fact]
+    public async Task ShouldPruneDirectory_WhenDoubleStarSubtreeIgnoreHasReachableNegationKeepsDirectoryEnumerable()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            /dist/**
+            !README.md
+            """);
+        var snapshot = CreateSnapshot();
+
+        Assert.False(snapshot.ShouldPruneDirectory("dist", AppSurfaceDocsHarvestSourceKind.Markdown));
+    }
+
+    [Fact]
+    public async Task ShouldPruneDirectory_WhenRootNegationCanReachDescendantKeepsDirectoryEnumerable()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            build/
+            !build/
+            !build/public.md
+            """);
+        var snapshot = CreateSnapshot();
+
+        Assert.False(snapshot.ShouldPruneDirectory("build", AppSurfaceDocsHarvestSourceKind.Markdown));
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenIgnoredParentIsNotUnignoredDoesNotRestoreChildNegation()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            build/
+            !build/public.md
+            """);
+        var snapshot = CreateSnapshot();
+
+        var decision = snapshot.Evaluate("build/public.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.False(decision.Included);
+        Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore, decision.Code);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenParentAndChildAreUnignoredRestoresChild()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            build/
+            !build/
+            !build/public.md
+            """);
+        var snapshot = CreateSnapshot();
+
+        var decision = snapshot.Evaluate("build/public.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.True(decision.Included);
+        Assert.Contains(decision.Trace, trace => trace.Code == AppSurfaceDocsHarvestPathDecisionCode.MatchedVcsIgnoreNegation);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenNestedIgnoreExistsAppliesRelativeToNestedDirectory()
+    {
+        await WriteAsync("src/.gitignore", "/generated/\n");
+        var snapshot = CreateSnapshot();
+
+        var ignored = snapshot.Evaluate("src/generated/guide.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+        var outsideNestedBase = snapshot.Evaluate("generated/guide.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.False(ignored.Included);
+        Assert.True(outsideNestedBase.Included);
+    }
+
+    [Fact]
+    public async Task Evaluate_GitParityFixtureMatchesCheckIgnoreWhenGitIsAvailable()
+    {
+        if (!await IsGitAvailableAsync())
+        {
+            return;
+        }
+
+        await RunGitAsync("init");
+        await WriteAsync(
+            ".gitignore",
+            """
+            bower_components/
+            /dist/**
+            *.generated.md
+            """);
+        var snapshot = CreateSnapshot();
+        var paths = new[]
+        {
+            "bower_components/pkg/readme.md",
+            "src/bower_components/pkg/readme.md",
+            "dist/app.md",
+            "src/dist/app.md",
+            "docs/api.generated.md",
+            "docs/public.md"
+        };
+        foreach (var path in paths)
+        {
+            await WriteAsync(path, "# candidate");
+        }
+
+        foreach (var path in paths)
+        {
+            var gitIgnored = await IsIgnoredByGitAsync(path);
+            var decision = snapshot.Evaluate(path, AppSurfaceDocsHarvestSourceKind.Markdown);
+
+            var appSurfaceIgnored = decision.Code == AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore;
+            Assert.True(
+                gitIgnored == appSurfaceIgnored,
+                $"Path '{path}' expected Git ignored={gitIgnored} but AppSurface decision was {decision.Code}.");
+        }
+    }
+
+    private AppSurfaceDocsHarvestPathPolicySnapshot CreateSnapshot(Action<AppSurfaceDocsOptions>? configure = null)
+    {
+        var options = new AppSurfaceDocsOptions();
+        configure?.Invoke(options);
+        return new AppSurfaceDocsHarvestPathPolicySnapshotFactory(options, NullLogger.Instance).Create(_root);
+    }
+
+    private async Task WriteAsync(string relativePath, string content)
+    {
+        var fullPath = Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        await File.WriteAllTextAsync(fullPath, content);
+    }
+
+    private static async Task<bool> IsGitAvailableAsync()
+    {
+        try
+        {
+            var result = await RunProcessAsync(Directory.GetCurrentDirectory(), "git", "--version");
+            return result.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task RunGitAsync(string arguments)
+    {
+        var result = await RunProcessAsync(_root, "git", arguments);
+        Assert.Equal(0, result.ExitCode);
+    }
+
+    private async Task<bool> IsIgnoredByGitAsync(string relativePath)
+    {
+        var result = await RunProcessAsync(_root, "git", $"check-ignore --verbose -- {relativePath}");
+        return result.ExitCode == 0;
+    }
+
+    private static async Task<(int ExitCode, string Output)> RunProcessAsync(string workingDirectory, string fileName, string arguments)
+    {
+        var startInfo = new ProcessStartInfo(fileName, arguments)
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start process.");
+        var output = await process.StandardOutput.ReadToEndAsync();
+        output += await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        return (process.ExitCode, output);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+        catch
+        {
+            // Best effort cleanup for temp fixture directories.
+        }
+    }
+}

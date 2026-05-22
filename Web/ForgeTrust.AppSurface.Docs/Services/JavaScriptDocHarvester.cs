@@ -71,6 +71,23 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string rootPath,
         CancellationToken cancellationToken = default)
     {
+        return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
+    }
+
+    internal async Task<IReadOnlyList<DocNode>> HarvestAsync(
+        DocHarvestContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<DocNode>> HarvestAsync(
+        string rootPath,
+        IHarvestPathPolicy pathPolicy,
+        CancellationToken cancellationToken)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
 
         var diagnostics = new List<DocHarvestDiagnostic>();
@@ -94,12 +111,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             }
 
             var harvestedItems = new List<JavaScriptApiItem>();
-            foreach (var filePath in EnumerateJavaScriptFiles(rootPath, javaScriptOptions, cancellationToken))
+            foreach (var filePath in EnumerateJavaScriptFiles(rootPath, javaScriptOptions, pathPolicy, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var relativePath = NormalizeRelativePath(Path.GetRelativePath(rootPath, filePath));
-                if (!_pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.JavaScript))
+                if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.JavaScript))
                 {
                     continue;
                 }
@@ -844,6 +861,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     private IEnumerable<string> EnumerateJavaScriptFiles(
         string rootPath,
         AppSurfaceDocsJavaScriptHarvestOptions options,
+        IHarvestPathPolicy pathPolicy,
         CancellationToken cancellationToken)
     {
         var fullRoot = Path.GetFullPath(rootPath);
@@ -875,7 +893,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 continue;
             }
 
-            foreach (var file in EnumerateJavaScriptFilesUnderRoot(fullRoot, includeRoot, includeMatcher, yielded, cancellationToken))
+            foreach (var file in EnumerateJavaScriptFilesUnderRoot(fullRoot, includeRoot, includeMatcher, pathPolicy, yielded, cancellationToken))
             {
                 yield return file;
             }
@@ -886,6 +904,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string repositoryRoot,
         string traversalRoot,
         AppSurfaceDocsHarvestPathMatcher includeMatcher,
+        IHarvestPathPolicy pathPolicy,
         HashSet<string> yielded,
         CancellationToken cancellationToken)
     {
@@ -910,7 +929,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             foreach (var directory in EnumerateDirectoriesSafely(current))
             {
                 var relativeDirectory = NormalizeRelativePath(Path.GetRelativePath(repositoryRoot, directory));
-                if (ShouldPruneDirectory(relativeDirectory, directory)
+                if (ShouldPruneDirectory(relativeDirectory, directory, pathPolicy)
                     || includeMatcher.MatchFileInDirectoryOrDescendant(relativeDirectory) is null)
                 {
                     continue;
@@ -990,7 +1009,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private bool ShouldPruneDirectory(
         string relativeDirectory,
-        string directory)
+        string directory,
+        IHarvestPathPolicy pathPolicy)
     {
         var directoryInfo = new DirectoryInfo(directory);
         if (AlwaysPrunedDirectoryNames.Contains(directoryInfo.Name, StringComparer.OrdinalIgnoreCase)
@@ -999,7 +1019,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return true;
         }
 
-        return _pathPolicy.ShouldPruneDirectory(relativeDirectory, AppSurfaceDocsHarvestSourceKind.JavaScript);
+        return pathPolicy.ShouldPruneDirectory(relativeDirectory, AppSurfaceDocsHarvestSourceKind.JavaScript);
     }
 
     private static IReadOnlyList<string> EnumerateFilesSafely(string directory)

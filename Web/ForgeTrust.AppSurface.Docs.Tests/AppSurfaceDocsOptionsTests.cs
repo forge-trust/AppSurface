@@ -57,6 +57,8 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.harvest.harvester_failed", DocHarvestDiagnosticCodes.HarvesterFailed);
         Assert.Equal("appsurfacedocs.harvest.no_harvesters", DocHarvestDiagnosticCodes.NoHarvesters);
         Assert.Equal("appsurfacedocs.harvest.all_failed", DocHarvestDiagnosticCodes.AllFailed);
+        Assert.Equal("appsurfacedocs.harvest.vcs_ignore_summary", DocHarvestDiagnosticCodes.VcsIgnoreSummary);
+        Assert.Equal("appsurfacedocs.harvest.vcs_ignore_warning", DocHarvestDiagnosticCodes.VcsIgnoreWarning);
         Assert.Equal("appsurfacedocs.javascript.file_too_large", DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
         Assert.Equal("appsurfacedocs.javascript.parse_failed", DocHarvestDiagnosticCodes.JavaScriptParseFailed);
         Assert.Equal("appsurfacedocs.javascript.missing_include", DocHarvestDiagnosticCodes.JavaScriptMissingInclude);
@@ -78,6 +80,15 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.localization.locale_folder_conflict", DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict);
         Assert.Equal("appsurfacedocs.localization.fallback_disabled_missing_variant", DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant);
         Assert.Equal("appsurfacedocs.localization.fallback_conflict", DocHarvestDiagnosticCodes.LocalizationFallbackConflict);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsOptions_ShouldEnableVcsIgnoreByDefault()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.True(options.Harvest.Paths.VcsIgnore.Enabled);
+        Assert.Empty(options.Harvest.Paths.VcsIgnore.AllowGlobs);
     }
 
     [Fact]
@@ -432,6 +443,9 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Harvest:Paths:IncludeGlobs:1"] = "docs/**",
                         ["AppSurfaceDocs:Harvest:Paths:IncludeGlobs:2"] = " ",
                         ["AppSurfaceDocs:Harvest:Paths:ExcludeGlobs:0"] = " artifacts\\TestResults\\** ",
+                        ["AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled"] = "false",
+                        ["AppSurfaceDocs:Harvest:Paths:VcsIgnore:AllowGlobs:0"] = " docs\\generated-public\\** ",
+                        ["AppSurfaceDocs:Harvest:Paths:VcsIgnore:AllowGlobs:1"] = "docs/generated-public/**",
                         ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups:0"] = " testprojects ",
                         ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups:1"] = "TestProjects",
                         ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:AllowGlobs:HiddenDirectories:0"] = " .github\\workflows\\** ",
@@ -458,6 +472,8 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Equal(["docs/**"], options.Harvest.Paths.IncludeGlobs);
         Assert.Equal(["artifacts/TestResults/**"], options.Harvest.Paths.ExcludeGlobs);
+        Assert.False(options.Harvest.Paths.VcsIgnore.Enabled);
+        Assert.Equal(["docs/generated-public/**"], options.Harvest.Paths.VcsIgnore.AllowGlobs);
         Assert.Equal(["TestProjects"], options.Harvest.Paths.DefaultExclusions.DisabledGroups);
         Assert.Equal([".github/workflows/**"], options.Harvest.Paths.DefaultExclusions.AllowGlobs["HiddenDirectories"]);
         Assert.Equal(["docs/guides/**"], options.Harvest.Markdown.IncludeGlobs);
@@ -1400,6 +1416,10 @@ public sealed class AppSurfaceDocsOptionsTests
                 Paths = new AppSurfaceDocsHarvestPathOptions
                 {
                     IncludeGlobs = [invalidPattern],
+                    VcsIgnore = new AppSurfaceDocsHarvestVcsIgnoreOptions
+                    {
+                        AllowGlobs = [invalidPattern]
+                    },
                     DefaultExclusions = new AppSurfaceDocsHarvestDefaultExclusionOptions
                     {
                         AllowGlobs = new Dictionary<string, string[]>
