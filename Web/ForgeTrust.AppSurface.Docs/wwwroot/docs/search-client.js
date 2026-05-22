@@ -119,6 +119,7 @@
       activeFilters: document.getElementById('docs-search-page-active-filters'),
       starter: document.getElementById('docs-search-page-starter'),
       starterDocs: document.getElementById('docs-search-page-starter-docs'),
+      recovery: document.getElementById('docs-search-page-recovery'),
       failure: document.getElementById('docs-search-page-failure'),
       failureTemplate: document.getElementById('docs-search-page-failure-template'),
       resultsMeta: document.getElementById('docs-search-page-results-meta'),
@@ -1754,6 +1755,26 @@
     page.failure?.replaceChildren();
   }
 
+  function isPlainPrimaryClick(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function shouldEnhanceSearchSuggestionClick(event) {
+    if (!event.isTrusted) {
+      return false;
+    }
+
+    if (!isPlainPrimaryClick(event)) {
+      return false;
+    }
+
+    return searchPageState.loadState === 'ready' && Boolean(searchData.index);
+  }
+
   function renderSearchPageFilters(page, view) {
     if (!page.filters) {
       return;
@@ -1905,7 +1926,10 @@
       setStatus(page.status, 'Loading search index...');
       clearSearchPageFailureContent(page);
       page.failure.hidden = true;
-      page.starter.hidden = true;
+      page.starter.hidden = false;
+      if (page.recovery) {
+        page.recovery.hidden = false;
+      }
       page.starterDocs?.replaceChildren();
       if (page.starterDocs) {
         page.starterDocs.hidden = true;
@@ -1917,10 +1941,13 @@
     }
 
     if (searchPageState.loadState === 'error' && !searchData.index) {
-      setStatus(page.status, 'Search is temporarily unavailable.');
+      setStatus(page.status, 'Search index could not be loaded.');
       ensureSearchPageFailureContent(page);
       page.failure.hidden = false;
-      page.starter.hidden = true;
+      page.starter.hidden = false;
+      if (page.recovery) {
+        page.recovery.hidden = false;
+      }
       page.starterDocs?.replaceChildren();
       if (page.starterDocs) {
         page.starterDocs.hidden = true;
@@ -1942,6 +1969,9 @@
     clearSearchPageFailureContent(page);
     page.failure.hidden = true;
     page.starter.hidden = !view.isStarter;
+    if (page.recovery) {
+      page.recovery.hidden = !view.isStarter;
+    }
     setSearchPageBusy(page, false);
 
     if (view.isStarter) {
@@ -2089,7 +2119,12 @@
     });
 
     suggestionButtons.forEach((button) => {
-      button.addEventListener('click', () => {
+      button.addEventListener('click', (event) => {
+        if (!shouldEnhanceSearchSuggestionClick(event)) {
+          return;
+        }
+
+        event.preventDefault();
         const query = normalizeQuery(button.dataset.rwSearchSuggestion);
         setSearchPageState({ q: query }, 'push');
         input.focus();

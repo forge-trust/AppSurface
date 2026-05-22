@@ -114,6 +114,8 @@ jobs:
           AppSurfaceDocs__Identity__DisplayName: AppSurface
           AppSurfaceDocs__Identity__Wordmark__HighlightText: Surface
           AppSurfaceDocs__Identity__Wordmark__HighlightColor: "#3b82f6"
+          AppSurfaceDocs__Harvest__JavaScript__Enabled: "true"
+          AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js
         run: |
           printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/appsurface-docs-seeds.txt"
           dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \

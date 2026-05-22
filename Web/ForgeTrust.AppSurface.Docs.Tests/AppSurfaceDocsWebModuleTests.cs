@@ -108,6 +108,7 @@ public class AppSurfaceDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>());
         Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is MarkdownHarvester);
+        Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is JavaScriptDocHarvester);
         Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is CSharpDocHarvester);
         Assert.Equal(AppSurfaceDocsAssetPathResolver.PackagedStylesheetPath, assetPathResolver.StylesheetPath);
         Assert.Contains("section", sanitizer.InnerSanitizer.AllowedTags);
@@ -132,7 +133,7 @@ public class AppSurfaceDocsWebModuleTests
         services.AddAppSurfaceDocs();
         services.AddAppSurfaceDocs();
 
-        Assert.Equal(2, services.Count(service => service.ServiceType == typeof(IDocHarvester)));
+        Assert.Equal(3, services.Count(service => service.ServiceType == typeof(IDocHarvester)));
     }
 
     [Fact]

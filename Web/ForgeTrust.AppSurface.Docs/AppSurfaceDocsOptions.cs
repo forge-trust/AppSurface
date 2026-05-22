@@ -293,7 +293,7 @@ public sealed class AppSurfaceDocsSourceOptions
 /// <remarks>
 /// The default policy is tolerant so public runtime hosts can continue serving even when source harvesting has a
 /// transient problem. Enable <see cref="FailOnFailure"/> in CI or export hosts that should fail closed when every
-/// configured harvester fails, times out, or cancels. Use <see cref="Paths"/>, <see cref="Markdown"/>, and
+/// active harvester fails, times out, or cancels. Use <see cref="Paths"/>, <see cref="Markdown"/>, and
 /// <see cref="CSharp"/> to define the repository-relative public documentation boundary shared by runtime hosts,
 /// export flows, and hygiene checks.
 /// </remarks>
@@ -333,6 +333,11 @@ public sealed class AppSurfaceDocsHarvestOptions
     /// Gets C# API-reference path policy settings that refine the global path policy.
     /// </summary>
     public AppSurfaceDocsCSharpHarvestOptions CSharp { get; set; } = new();
+
+    /// <summary>
+    /// Gets JavaScript public API path policy and parser settings.
+    /// </summary>
+    public AppSurfaceDocsJavaScriptHarvestOptions JavaScript { get; set; } = new();
 }
 
 /// <summary>
@@ -902,6 +907,21 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
             ValidateHarvestPathOptions(harvest.Paths, "AppSurfaceDocs:Harvest:Paths", failures);
             ValidateHarvestSourceOptions(harvest.Markdown, "AppSurfaceDocs:Harvest:Markdown", failures);
             ValidateHarvestSourceOptions(harvest.CSharp, "AppSurfaceDocs:Harvest:CSharp", failures);
+            ValidateHarvestSourceOptions(harvest.JavaScript, "AppSurfaceDocs:Harvest:JavaScript", failures);
+            if (harvest.JavaScript is not null)
+            {
+                if (harvest.JavaScript.MaxFileSizeBytes <= 0)
+                {
+                    failures.Add("AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes must be greater than zero.");
+                }
+
+                if (harvest.JavaScript.Enabled
+                    && (harvest.JavaScript.IncludeGlobs is null
+                        || !harvest.JavaScript.IncludeGlobs.Any(static include => !string.IsNullOrWhiteSpace(include))))
+                {
+                    failures.Add("AppSurface Docs JavaScript harvesting requires at least one AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs glob when enabled.");
+                }
+            }
         }
 
         if (bundle is null)
@@ -1192,6 +1212,22 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
 
     private static void ValidateHarvestSourceOptions(
         AppSurfaceDocsCSharpHarvestOptions? options,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (options is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
+        ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
+        ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+    }
+
+    private static void ValidateHarvestSourceOptions(
+        AppSurfaceDocsJavaScriptHarvestOptions? options,
         string configurationPath,
         List<string> failures)
     {

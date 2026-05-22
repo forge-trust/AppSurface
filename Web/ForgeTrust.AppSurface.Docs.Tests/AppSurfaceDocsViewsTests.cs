@@ -117,6 +117,8 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("<title>Documentation Index - Documentation</title>", html);
         Assert.Contains(">Documentation</span>", html);
         Assert.DoesNotContain("docs-wordmark-highlight", html);
+        AssertDocsSidebarFooterText(html, "Documentation");
+        Assert.DoesNotContain("Powered by RazorWire", html);
         Assert.Contains("rel=\"icon\" type=\"image/svg+xml\" href=\"/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg\"", html);
         Assert.DoesNotContain("<img src=\"/brand", html);
     }
@@ -151,6 +153,8 @@ public class AppSurfaceDocsViewsTests
             html);
         Assert.Contains("href=\"/some-base/reference\"", html);
         Assert.Contains("src=\"/some-base/brand/logo.svg\"", html);
+        AssertDocsSidebarFooterText(html, "Acme Docs");
+        Assert.DoesNotContain("Powered by RazorWire", html);
         Assert.Contains("alt=\"\" aria-hidden=\"true\"", html);
         Assert.DoesNotContain("alt=\"Acme logo\"", html);
         Assert.Contains("href=\"/some-base/brand/favicon.svg\"", html);
@@ -161,6 +165,15 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("type=\"image/png\"", html);
         Assert.DoesNotContain("href=\"/some-base/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg\"", html);
         Assert.Contains("\"docsRootPath\":\"/some-base/docs\"", html);
+    }
+
+    private static void AssertDocsSidebarFooterText(string html, string expectedText)
+    {
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var footer = document.QuerySelector("#docs-sidebar-footer");
+
+        Assert.NotNull(footer);
+        Assert.Equal(expectedText, footer.TextContent.Trim());
     }
 
     [Fact]
@@ -188,6 +201,9 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
         Assert.Contains("docs-search-result-meta-line", searchClient);
         Assert.Contains("docs-search-page-starter-docs", searchClient);
+        Assert.Contains("page.recovery.hidden = false;", searchClient);
+        Assert.Contains("setStatus(page.status, 'Search index could not be loaded.');", searchClient);
+        Assert.Contains("event.preventDefault();", searchClient);
         Assert.DoesNotContain("title.append(link);", searchClient);
     }
 
@@ -1380,6 +1396,72 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains(
             groups.SelectMany(group => group.Links),
             link => string.Equals(link.Href, "/docs/Namespaces/Foo.html", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildGroups_ShouldGroupNonNamespaceApiPagesByBreadcrumbFamily()
+    {
+        var snapshot = new DocSectionSnapshot
+        {
+            Section = DocPublicSection.ApiReference,
+            Label = "API Reference",
+            Slug = "api-reference",
+            VisiblePages =
+            [
+                new(
+                    "Health Endpoint",
+                    "api/health",
+                    "<p>Health endpoint.</p>",
+                    Metadata: new DocMetadata
+                    {
+                        PageType = "endpoint",
+                        Breadcrumbs =
+                        [
+                            "API Reference",
+                            "Operations",
+                            "Health Endpoint"
+                        ],
+                        Order = 10
+                    })
+            ]
+        };
+
+        var group = Assert.Single(DocSectionDisplayBuilder.BuildGroups(snapshot));
+        var link = Assert.Single(group.Links);
+
+        Assert.Equal("Operations", group.Title);
+        Assert.Equal("Health Endpoint", link.Title);
+        Assert.Equal("/docs/api/health", link.Href);
+    }
+
+    [Fact]
+    public void BuildGroups_ShouldFallbackNonNamespaceApiPagesToApiReferenceGroup()
+    {
+        var snapshot = new DocSectionSnapshot
+        {
+            Section = DocPublicSection.ApiReference,
+            Label = "API Reference",
+            Slug = "api-reference",
+            VisiblePages =
+            [
+                new(
+                    "Health Endpoint",
+                    "api/health",
+                    "<p>Health endpoint.</p>",
+                    Metadata: new DocMetadata
+                    {
+                        PageType = "endpoint",
+                        Order = 10
+                    })
+            ]
+        };
+
+        var group = Assert.Single(DocSectionDisplayBuilder.BuildGroups(snapshot));
+        var link = Assert.Single(group.Links);
+
+        Assert.Equal("API Reference", group.Title);
+        Assert.Equal("Health Endpoint", link.Title);
+        Assert.Equal("/docs/api/health", link.Href);
     }
 
     [Fact]
@@ -3163,9 +3245,12 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("id=\"docs-search-page-starter\"", html);
         Assert.Contains("id=\"docs-search-page-starter-docs\"", html);
         Assert.Contains("data-rw-search-suggestion=\"getting started\"", html);
+        Assert.Contains("href=\"/docs/search?q=getting%20started\"", html);
         Assert.Contains("data-rw-search-suggestion=\"API reference\"", html);
         Assert.Contains("data-rw-search-suggestion=\"release notes\"", html);
         Assert.Contains("data-rw-search-suggestion=\"troubleshooting\"", html);
+        Assert.Contains("id=\"docs-search-page-recovery\"", html);
+        Assert.Contains("Browse while search loads", html);
         Assert.Contains("id=\"docs-search-page-failure\"", html);
         Assert.Contains("id=\"docs-search-page-failure-template\"", html);
         Assert.Contains("id=\"docs-search-page-retry\"", html);
@@ -3179,6 +3264,7 @@ public class AppSurfaceDocsViewsTests
 
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         Assert.Equal(string.Empty, document.QuerySelector("#docs-search-page-failure")?.TextContent.Trim());
+        Assert.NotNull(document.QuerySelector("#docs-search-page-recovery a[href]"));
     }
 
     [Fact]
@@ -3194,6 +3280,7 @@ public class AppSurfaceDocsViewsTests
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         Assert.Matches("<a[^>]*href=\"/docs\"[^>]*data-turbo-frame=\"_top\"", html);
         Assert.Equal(string.Empty, document.QuerySelector("#docs-search-page-failure")?.TextContent.Trim());
+        Assert.Contains("Documentation index", document.QuerySelector("#docs-search-page-recovery")!.TextContent);
     }
 
     [Fact]
@@ -3265,6 +3352,7 @@ public class AppSurfaceDocsViewsTests
         Assert.Matches(
             "href=\"/some-base/docs/v/1.2.3/guides/quickstart\"[\\s\\S]*data-turbo-frame=\"_top\"",
             html);
+        Assert.Contains("href=\"/some-base/docs/next/search?q=getting%20started\"", html);
     }
 
     [Fact]

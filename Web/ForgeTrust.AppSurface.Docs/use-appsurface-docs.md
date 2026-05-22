@@ -33,6 +33,7 @@ The result is a docs surface with:
 
 - section-first navigation such as Start Here, Examples, Releases, Troubleshooting, and API Reference
 - source-derived C# API pages
+- opt-in source-derived JavaScript public API pages for browser events and globals
 - a search index that includes titles, summaries, headings, aliases, keywords, and page types
 - optional trust bars for release notes, policies, and provenance-heavy pages
 - optional `Source of truth` links back to the exact files readers should inspect or edit
@@ -139,6 +140,7 @@ Start with pages that answer adoption questions before you tune visuals:
 - `examples/.../README.md` for exportable proof paths.
 - `releases/README.md`, `CHANGELOG.md`, or upgrade-policy pages when release risk matters.
 - Troubleshooting pages for the failure modes your users actually hit.
+- Namespace README files under a docs-owned namespace folder, such as `Docs/ForgeTrust.RazorWire/README.md`, when generated API reference needs human orientation above the symbol list.
 
 Use sidecar metadata for portability-sensitive files such as README pages:
 
@@ -170,6 +172,23 @@ aliases:
 ---
 ```
 
+For namespace API pages, keep the README as normal Markdown and put entry-point metadata in the sidecar:
+
+```yaml
+# Docs/ForgeTrust.RazorWire/README.md.yml
+title: ForgeTrust.RazorWire
+summary: Start here for registration, endpoint mapping, and options.
+entry_points:
+  - label: AddRazorWire(...)
+    summary: Register RazorWire services and package-owned options.
+    target: ForgeTrust-RazorWire-RazorWireServiceCollectionExtensions-AddRazorWire-method-group
+  - label: RazorWireOptions
+    summary: Configure stream paths, caching policy names, and form behavior.
+    target: ForgeTrust-RazorWire-RazorWireOptions
+```
+
+The README is consumed into `Namespaces/{Dotted.Namespace}` and removed as a standalone page. Copied source-shaped README URLs redirect to the namespace page. Entry-point `target` values are generated anchors on that namespace page; stale targets render as unlinked rows and produce harvest-health warnings instead of breaking the docs site.
+
 For troubleshooting pages that repeat the same H3 headings under each issue, AppSurface Docs automatically keeps the `On this page` outline focused on the H2 issue headings while leaving the H3 headings and hash targets in the rendered page body. Override that only when the repeated H3 entries are genuinely useful as reader waypoints:
 
 ```yaml
@@ -198,11 +217,12 @@ The important part is that curation stays authored content. If the product story
 Once the first pages render, improve the docs in layers:
 
 1. Add XML docs to public C# APIs so generated reference pages are useful.
-2. Add `summary`, `page_type`, `nav_group`, `aliases`, and `keywords` metadata to high-traffic pages.
-3. Add troubleshooting pages for the first support questions people ask.
-4. Add release notes and trust metadata when adoption depends on upgrade confidence.
-5. Add localization metadata when users need more than one language.
-6. Add versioned published trees only after the live source-backed docs are useful.
+2. Add narrow JavaScript harvesting for intentional browser contracts such as public custom events or globals.
+3. Add `summary`, `page_type`, `nav_group`, `aliases`, and `keywords` metadata to high-traffic pages.
+4. Add troubleshooting pages for the first support questions people ask.
+5. Add release notes and trust metadata when adoption depends on upgrade confidence.
+6. Add localization metadata when users need more than one language.
+7. Add versioned published trees only after the live source-backed docs are useful.
 
 That order matters. A beautiful archive of weak docs is still weak docs.
 
@@ -245,10 +265,12 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Configure `AppSurfaceDocs:Source:RepositoryRoot` for the repository to harvest.
 - Configure `AppSurfaceDocs:Harvest:Paths` so only intentional public source paths are eligible.
 - Keep `AppSurfaceDocs:Mode` set to `Source` unless a later bundle-hosting slice changes that contract.
+- If browser runtime contracts matter, enable `AppSurfaceDocs:Harvest:JavaScript` with one or more narrow `IncludeGlobs` entries and explicit `@public` doclets.
 - Add sidecar metadata for repository and package README files.
 - Feature the first consumer paths through `featured_page_groups`.
 - Configure `AppSurfaceDocs:Localization` and `translation_key` metadata before adding translated files at scale.
-- Verify `/docs`, `/docs/search`, and `/docs/search-index.json`.
+- Verify `/docs`, `/docs/search`, and `/docs/search-index.json`. The search page is server-rendered and should still expose starter query URLs plus browse links before the client index loads; a blocked or missing index must degrade to those links, not to a blank page.
+- For custom docs roots, path bases, or static exports, inspect the generated `search.html` and confirm its search index URL plus fallback anchors point at the mounted root.
 - Run the standalone host or export pipeline in CI before publishing a public docs surface.
 
 ## Where to go next

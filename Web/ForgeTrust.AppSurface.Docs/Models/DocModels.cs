@@ -13,6 +13,12 @@ public sealed record DocMetadata
     public string? Title { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether <see cref="Title"/> was derived from page content or source path instead of
+    /// authored explicitly.
+    /// </summary>
+    internal bool? TitleIsDerived { get; init; }
+
+    /// <summary>
     /// Gets a short summary describing the documentation node.
     /// </summary>
     public string? Summary { get; init; }
@@ -119,6 +125,17 @@ public sealed record DocMetadata
     public IReadOnlyList<DocFeaturedPageGroupDefinition>? FeaturedPageGroups { get; init; }
 
     /// <summary>
+    /// Gets optional namespace-page entry points rendered as a compact editorial index above generated API detail.
+    /// </summary>
+    /// <remarks>
+    /// This metadata is currently consumed only from namespace <c>README.md</c> front matter or paired sidecar files
+    /// that merge into generated namespace pages. Each entry needs a valid <see cref="DocNamespaceEntryPoint.Label"/>.
+    /// Authors may provide a generated anchor <see cref="DocNamespaceEntryPoint.Target"/> or a constrained
+    /// <see cref="DocNamespaceEntryPoint.Href"/> escape hatch. Blank, invalid, or empty entry lists render no panel.
+    /// </remarks>
+    public IReadOnlyList<DocNamespaceEntryPoint>? EntryPoints { get; init; }
+
+    /// <summary>
     /// Gets optional page-local outline behavior for Markdown documents.
     /// </summary>
     /// <remarks>
@@ -210,9 +227,16 @@ public sealed record DocMetadata
             fallback.Breadcrumbs,
             fallback.BreadcrumbsMatchPathTargets);
 
+        var (title, titleIsDerived) = MergeTextWithFlag(
+            primary.Title,
+            primary.TitleIsDerived,
+            fallback.Title,
+            fallback.TitleIsDerived);
+
         return new DocMetadata
         {
-            Title = DocTrustMergeHelpers.PreferNonBlank(primary.Title, fallback.Title),
+            Title = title,
+            TitleIsDerived = titleIsDerived,
             Summary = summary,
             SummaryIsDerived = summaryIsDerived,
             PageType = pageType,
@@ -237,6 +261,7 @@ public sealed record DocMetadata
             Breadcrumbs = breadcrumbs,
             BreadcrumbsMatchPathTargets = breadcrumbsMatchPathTargets,
             FeaturedPageGroups = MergeLists(primary.FeaturedPageGroups, fallback.FeaturedPageGroups),
+            EntryPoints = MergeLists(primary.EntryPoints, fallback.EntryPoints),
             Outline = DocOutlineMetadata.Merge(primary.Outline, fallback.Outline),
             Trust = DocTrustMetadata.Merge(primary.Trust, fallback.Trust),
             Contributor = DocContributorMetadata.Merge(primary.Contributor, fallback.Contributor),
@@ -287,6 +312,53 @@ public sealed record DocMetadata
             ? (fallbackValue, fallbackFlag)
             : (null, null);
     }
+}
+
+/// <summary>
+/// Authored namespace-page entry point metadata parsed from Markdown front matter or a paired sidecar file.
+/// </summary>
+/// <remarks>
+/// Entry points are intentionally small reader-orientation links, not a full symbol index. A valid entry renders when
+/// <see cref="Label"/> is non-blank after normalization. <see cref="Target"/> is a generated anchor ID on the merged
+/// namespace page; <see cref="Href"/> is used only when no syntactically valid target is present. Keywords participate
+/// in the namespace search payload but are not rendered directly.
+/// </remarks>
+public sealed record DocNamespaceEntryPoint
+{
+    /// <summary>
+    /// Gets the concise reader-facing label, usually a type or method name.
+    /// </summary>
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets optional supporting copy shown under the label.
+    /// </summary>
+    public string? Summary { get; init; }
+
+    /// <summary>
+    /// Gets the normalized generated anchor ID for the entry point, without a leading <c>#</c>.
+    /// </summary>
+    public string? Target { get; init; }
+
+    /// <summary>
+    /// Gets an optional explicit fragment or app-relative docs URL used only when <see cref="Target"/> is absent.
+    /// </summary>
+    public string? Href { get; init; }
+
+    /// <summary>
+    /// Gets additional search terms associated with this entry point.
+    /// </summary>
+    public IReadOnlyList<string>? Keywords { get; init; }
+
+    /// <summary>
+    /// Gets an optional non-negative ordering value. Entries with an order sort before unordered entries.
+    /// </summary>
+    public int? Order { get; init; }
+
+    /// <summary>
+    /// Gets the zero-based authoring position used as a stable tie breaker.
+    /// </summary>
+    internal int SourceIndex { get; init; }
 }
 
 /// <summary>
@@ -680,7 +752,7 @@ public record DocNode(
 public enum DocHarvestHealthStatus
 {
     /// <summary>
-    /// At least one configured harvester returned documentation and no harvester failed.
+    /// At least one active harvester returned documentation and no harvester failed.
     /// </summary>
     Healthy = 0,
 
@@ -695,13 +767,13 @@ public enum DocHarvestHealthStatus
     Degraded = 2,
 
     /// <summary>
-    /// Every configured harvester failed, timed out, or canceled.
+    /// Every active harvester failed, timed out, or canceled.
     /// </summary>
     Failed = 3
 }
 
 /// <summary>
-/// Describes one configured harvester's contribution to an AppSurface Docs harvest snapshot.
+/// Describes one active harvester's contribution to an AppSurface Docs harvest snapshot.
 /// </summary>
 /// <remarks>
 /// Numeric values are a stable public compatibility contract for persisted and serialized representations. Do not
@@ -760,7 +832,7 @@ public enum DocHarvestDiagnosticSeverity
     Error = 2,
 
     /// <summary>
-    /// Aggregate failure that means AppSurface Docs could not harvest any configured source successfully.
+    /// Aggregate failure that means AppSurface Docs could not run any active harvester successfully.
     /// </summary>
     Critical = 3
 }
@@ -771,12 +843,12 @@ public enum DocHarvestDiagnosticSeverity
 /// <param name="Status">Overall health rollup for the snapshot.</param>
 /// <param name="GeneratedUtc">UTC timestamp when the snapshot was generated.</param>
 /// <param name="RepositoryRoot">
-/// Repository root passed to configured harvesters. Treat this as server-only operational data because it can contain
+/// Repository root passed to active harvesters. Treat this as server-only operational data because it can contain
 /// sensitive or environment-specific filesystem paths; redact or omit it before sending snapshots to clients.
 /// </param>
-/// <param name="TotalHarvesters">Number of harvesters configured for the snapshot.</param>
-/// <param name="SuccessfulHarvesters">Number of harvesters that completed with either docs or a valid empty result.</param>
-/// <param name="FailedHarvesters">Number of harvesters that failed, timed out, or canceled.</param>
+/// <param name="TotalHarvesters">Number of active harvesters that participated in the snapshot.</param>
+/// <param name="SuccessfulHarvesters">Number of active harvesters that completed with either docs or a valid empty result.</param>
+/// <param name="FailedHarvesters">Number of active harvesters that failed, timed out, or canceled.</param>
 /// <param name="TotalDocs">Number of documentation nodes published by the final cached docs snapshot.</param>
 /// <param name="Harvesters">Per-harvester health entries. Never <see langword="null" /> in AppSurface Docs-created snapshots.</param>
 /// <param name="Diagnostics">Structured diagnostics for failed, degraded, or noteworthy states. Never <see langword="null" /> in AppSurface Docs-created snapshots.</param>
@@ -797,7 +869,7 @@ public sealed record DocHarvestHealthSnapshot(
     IReadOnlyList<DocHarvestDiagnostic> Diagnostics);
 
 /// <summary>
-/// Captures one configured harvester's status inside an AppSurface Docs harvest snapshot.
+/// Captures one active harvester's status inside an AppSurface Docs harvest snapshot.
 /// </summary>
 /// <param name="HarvesterType">Concrete harvester type name used in logs and diagnostics.</param>
 /// <param name="Status">Harvester-level health status.</param>
@@ -857,9 +929,44 @@ public static class DocHarvestDiagnosticCodes
     public const string NoHarvesters = "appsurfacedocs.harvest.no_harvesters";
 
     /// <summary>
-    /// Every configured harvester failed, timed out, or canceled for the snapshot.
+    /// Every active harvester failed, timed out, or canceled for the snapshot.
     /// </summary>
     public const string AllFailed = "appsurfacedocs.harvest.all_failed";
+
+    /// <summary>
+    /// A JavaScript source file matched the configured include set but exceeded the configured parse size limit.
+    /// </summary>
+    public const string JavaScriptFileTooLarge = "appsurfacedocs.javascript.file_too_large";
+
+    /// <summary>
+    /// A JavaScript source file could not be parsed and was skipped while other files continued harvesting.
+    /// </summary>
+    public const string JavaScriptParseFailed = "appsurfacedocs.javascript.parse_failed";
+
+    /// <summary>
+    /// JavaScript harvesting is enabled but is missing a usable include configuration.
+    /// </summary>
+    public const string JavaScriptMissingInclude = "appsurfacedocs.javascript.missing_include";
+
+    /// <summary>
+    /// A public JavaScript doclet used a shape outside the v1 harvester contract and was skipped.
+    /// </summary>
+    public const string JavaScriptUnsupportedPublicShape = "appsurfacedocs.javascript.unsupported_public_shape";
+
+    /// <summary>
+    /// A public JavaScript doclet was malformed or incomplete and could not be safely rendered.
+    /// </summary>
+    public const string JavaScriptMalformedPublicDoclet = "appsurfacedocs.javascript.malformed_public_doclet";
+
+    /// <summary>
+    /// A rendered JavaScript API item is missing recommended documentation fields.
+    /// </summary>
+    public const string JavaScriptIncompletePublicDoclet = "appsurfacedocs.javascript.incomplete_public_doclet";
+
+    /// <summary>
+    /// Multiple JavaScript API items normalized to the same anchor and required deterministic suffixes.
+    /// </summary>
+    public const string JavaScriptDuplicateAnchor = "appsurfacedocs.javascript.duplicate_anchor";
 
     /// <summary>
     /// A documentation page resolved to a route owned by AppSurface Docs chrome, search, health, versions, sections, or assets.
@@ -895,6 +1002,11 @@ public static class DocHarvestDiagnosticCodes
     /// AppSurface Docs had to drop or fold characters while normalizing a public route slug.
     /// </summary>
     public const string DocLossySlugNormalization = "appsurfacedocs.routes.lossy_slug_normalization";
+
+    /// <summary>
+    /// A namespace README entry point references a generated anchor that was not found on the merged namespace page.
+    /// </summary>
+    public const string NamespaceEntryPointTargetUnresolved = "appsurfacedocs.namespace.entry_point_target_unresolved";
 
     /// <summary>
     /// A localized document variant declared or inferred an unsupported locale.

@@ -22,6 +22,7 @@ public class DocsController : Controller
     private const string NeutralLandingDescription = "Start with the strongest proof path, then branch into guides, examples, and reference once you know where you want to go deeper.";
     private const string CuratedLandingDescription = "Start with the proof path that answers the first evaluator questions, then move into the sections that fit your next decision.";
     private const string SectionUnavailableHeading = "Section unavailable";
+    private const int SearchFallbackBucketCount = 5;
     private static readonly string[] DefaultProofPathStageLabels = ["Understand", "See Proof", "Adopt Next"];
     private static readonly TimeSpan SearchShellFallbackBudget = TimeSpan.FromMilliseconds(500);
 
@@ -1165,68 +1166,94 @@ public class DocsController : Controller
 
     private IReadOnlyList<SearchPageFallbackLink> BuildSearchFallbackLinks(IReadOnlyList<DocNode> docs)
     {
-        var pathResolver = DocPathResolver.Create(docs);
         var links = new List<SearchPageFallbackLink>();
 
-        TryAddFallbackLink(
+        TryAddFallbackBucket(
             links,
-            pathResolver,
-            SelectFallbackDoc(
-                docs,
-                doc => HasPageType(doc, "guide", "concept", "tutorial", "troubleshooting")
-                       || doc.Path.StartsWith("guides/", StringComparison.OrdinalIgnoreCase)),
-            "Browse guides",
-            "Open a high-signal guide while search is unavailable.");
+            docs,
+            "Start Here",
+            "Orient quickly and follow the strongest first-read path.",
+            DocPublicSection.StartHere,
+            doc => HasPageType(doc, "guide", "concept", "tutorial")
+                   || doc.Path.StartsWith("guides/", StringComparison.OrdinalIgnoreCase));
 
-        TryAddFallbackLink(
+        TryAddFallbackBucket(
             links,
-            pathResolver,
-            SelectFallbackDoc(
-                docs,
-                doc => HasPageType(doc, "example")
-                       || doc.Path.StartsWith("examples/", StringComparison.OrdinalIgnoreCase)),
-            "Open an example",
-            "Jump into a working example to keep moving.");
+            docs,
+            "Examples",
+            "Inspect concrete proof and working examples.",
+            DocPublicSection.Examples,
+            doc => HasPageType(doc, "example")
+                   || doc.Path.StartsWith("examples/", StringComparison.OrdinalIgnoreCase));
 
-        TryAddFallbackLink(
+        TryAddFallbackBucket(
             links,
-            pathResolver,
-            SelectFallbackDoc(
-                docs,
-                doc => HasPageType(doc, "api-reference", "api")
-                       || doc.Path.StartsWith("Namespaces/", StringComparison.OrdinalIgnoreCase)),
-            "Explore API reference",
-            "Browse the reference surface directly while search recovers.");
+            docs,
+            "Packages",
+            "Review package entry points and installation-facing docs.",
+            section: null,
+            doc => IsPackageFallbackDoc(doc));
 
-        if (links.Count < 3)
+        TryAddFallbackBucket(
+            links,
+            docs,
+            "Troubleshooting",
+            "Recover from failures and check operational fixes.",
+            DocPublicSection.Troubleshooting,
+            doc => HasPageType(doc, "troubleshooting")
+                   || doc.Path.Contains("troubleshoot", StringComparison.OrdinalIgnoreCase));
+
+        TryAddFallbackBucket(
+            links,
+            docs,
+            "API Reference",
+            "Browse namespaces and type-level detail directly.",
+            DocPublicSection.ApiReference,
+            doc => HasPageType(doc, "api-reference", "api")
+                   || doc.Path.StartsWith("Namespaces/", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(doc.Path, "Namespaces", StringComparison.OrdinalIgnoreCase));
+
+        if (links.Count < SearchFallbackBucketCount)
         {
-            var namespacesRoot = SelectFallbackDoc(
-                docs,
-                doc => string.Equals(doc.Path, "Namespaces", StringComparison.OrdinalIgnoreCase));
             TryAddFallbackLink(
                 links,
-                pathResolver,
-                namespacesRoot,
-                "Browse namespaces",
-                "Use the namespace index when you need the reference map.");
-        }
-
-        if (links.Count < 3)
-        {
-            links.Add(
-                new SearchPageFallbackLink(
-                    "Documentation index",
-                    _docsUrlBuilder.BuildHomeUrl(),
-                    "Return to the docs index and keep exploring from there.",
-                    UsesDocsFrame: false));
+                _docsUrlBuilder.BuildHomeUrl(),
+                "Documentation index",
+                "Return to the docs index and keep exploring from there.",
+                usesDocsFrame: false);
         }
 
         return links;
     }
 
+    private void TryAddFallbackBucket(
+        ICollection<SearchPageFallbackLink> links,
+        IReadOnlyList<DocNode> docs,
+        string title,
+        string description,
+        DocPublicSection? section,
+        Func<DocNode, bool> representativePredicate)
+    {
+        if (section is not null && HasPublicSectionDocs(docs, section.Value))
+        {
+            TryAddFallbackLink(
+                links,
+                _docsUrlBuilder.BuildSectionUrl(section.Value),
+                title,
+                description,
+                usesDocsFrame: true);
+            return;
+        }
+
+        TryAddFallbackLink(
+            links,
+            SelectFallbackDoc(docs, representativePredicate),
+            title,
+            description);
+    }
+
     private void TryAddFallbackLink(
         ICollection<SearchPageFallbackLink> links,
-        DocPathResolver pathResolver,
         DocNode? doc,
         string title,
         string description)
@@ -1237,6 +1264,16 @@ public class DocsController : Controller
         }
 
         var href = DocAggregator.BuildSearchDocUrl(_docsUrlBuilder.CurrentDocsRootPath, GetSnapshotCanonicalPath(doc));
+        TryAddFallbackLink(links, href, title, description, usesDocsFrame: true);
+    }
+
+    private static void TryAddFallbackLink(
+        ICollection<SearchPageFallbackLink> links,
+        string href,
+        string title,
+        string description,
+        bool usesDocsFrame)
+    {
         if (links.Any(link => string.Equals(link.Href, href, StringComparison.OrdinalIgnoreCase)))
         {
             return;
@@ -1247,7 +1284,7 @@ public class DocsController : Controller
                 title,
                 href,
                 description,
-                UsesDocsFrame: ShouldUseDocsFrame(href, pathResolver)));
+                UsesDocsFrame: usesDocsFrame));
     }
 
     private bool ShouldUseDocsFrame(string? href, DocPathResolver pathResolver)
@@ -1284,14 +1321,39 @@ public class DocsController : Controller
     {
         return docs
             .Where(
-                doc => !doc.IsDirectory
-                       && doc.Metadata?.HideFromPublicNav != true
-                       && doc.Metadata?.HideFromSearch != true
+                doc => IsPublicFallbackCandidate(doc)
                        && predicate(doc))
-            .OrderBy(doc => doc.Metadata?.Order ?? int.MaxValue)
+            .OrderByDescending(doc => doc.Metadata?.SectionLanding == true)
+            .ThenBy(doc => doc.Metadata?.Order ?? int.MaxValue)
             .ThenBy(doc => doc.Title, StringComparer.OrdinalIgnoreCase)
             .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
+    }
+
+    private static bool HasPublicSectionDocs(IEnumerable<DocNode> docs, DocPublicSection section)
+    {
+        return docs.Any(doc => IsPublicFallbackCandidate(doc) && BelongsToPublicSection(doc, section));
+    }
+
+    private static bool BelongsToPublicSection(DocNode doc, DocPublicSection section)
+    {
+        return DocPublicSectionCatalog.TryResolve(doc.Metadata?.NavGroup, out var resolvedSection)
+               && resolvedSection == section;
+    }
+
+    private static bool IsPackageFallbackDoc(DocNode doc)
+    {
+        return string.Equals(doc.Metadata?.NavGroup, "Packages", StringComparison.OrdinalIgnoreCase)
+               || doc.Path.StartsWith("packages/", StringComparison.OrdinalIgnoreCase)
+               || doc.Path.Contains("/packages/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPublicFallbackCandidate(DocNode doc)
+    {
+        return !doc.IsDirectory
+               && !string.IsNullOrWhiteSpace(doc.CanonicalPath)
+               && doc.Metadata?.HideFromPublicNav != true
+               && doc.Metadata?.HideFromSearch != true;
     }
 
     private static string GetSupportStateLabel(AppSurfaceDocsVersionSupportState supportState)

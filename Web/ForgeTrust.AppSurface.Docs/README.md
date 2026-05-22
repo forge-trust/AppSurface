@@ -22,7 +22,7 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 
 Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands.
 
-`--strict` and `--mode cdn` check different things. `--strict` fails host startup when every configured harvester fails. `--mode cdn` validates the emitted static artifact and preserves RazorWire `RWEXPORT00x` diagnostics for missing or unrewritable managed URLs.
+`--strict` and `--mode cdn` check different things. `--strict` fails host startup when every active harvester fails. `--mode cdn` validates the emitted static artifact and preserves RazorWire `RWEXPORT00x` diagnostics for missing or unrewritable managed URLs.
 
 Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `--project`, or `--dll`. Use `appsurface docs export` when AppSurface owns the AppSurface Docs repository host.
 
@@ -30,7 +30,7 @@ Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `
 
 - `AppSurfaceDocsWebModule` for wiring the docs UI into an AppSurface web host
 - `AddAppSurfaceDocs()` for typed options binding and core service registration
-- `DocAggregator` plus the built-in Markdown and C# harvesters, including structured harvest health diagnostics
+- `DocAggregator` plus the built-in Markdown, C# API, and opt-in JavaScript public API harvesters, including structured harvest health diagnostics
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by AppSurface Docs consumers
 - `DocsUrlBuilder` plus the MVC surface used by AppSurface Docs consumers so the live docs root, search shell, and archive routes stay in one shared contract
 - `AppSurfaceDocsVersionCatalog` plus `AppSurfaceDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
@@ -204,19 +204,19 @@ The returned `DocHarvestHealthSnapshot` includes:
 - `Status`: the aggregate `DocHarvestHealthStatus`.
 - `GeneratedUtc`: the timestamp for the cached snapshot generation.
 - `RepositoryRoot`: the resolved source root passed to harvesters. Treat this as server-only operational data; redact or omit it before forwarding harvest health to client-visible UI or public APIs.
-- `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for the configured harvesters.
+- `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for active harvesters that participated in the snapshot. Disabled optional harvesters, such as the JavaScript harvester when `AppSurfaceDocs:Harvest:JavaScript:Enabled=false`, are omitted from these totals.
 - `TotalDocs`: the number of documentation nodes in the final cached docs snapshot after AppSurface Docs post-processing.
-- `Harvesters`: one `DocHarvesterHealth` entry per configured harvester, including its concrete type name, `DocHarvesterHealthStatus`, raw returned doc count, and optional diagnostic.
+- `Harvesters`: one `DocHarvesterHealth` entry per active harvester, including its concrete type name, `DocHarvesterHealthStatus`, raw returned doc count, and optional diagnostic.
 - `Diagnostics`: structured `DocHarvestDiagnostic` entries for harvester-level and aggregate states. AppSurface Docs-created snapshots never expose raw exception messages in diagnostics; exception details stay in host logs.
 
 ### Status Contract
 
 `DocHarvestHealthStatus` is intentionally distinct from HTTP or process health:
 
-- `Healthy`: at least one configured harvester returned documentation and no harvester failed.
+- `Healthy`: at least one active harvester returned documentation and no harvester failed.
 - `Empty`: harvesting completed without failures, but the final docs corpus is empty. This can be valid for an empty repository, a disabled source set, or a host with no registered harvesters.
 - `Degraded`: at least one harvester succeeded or returned a valid empty result while another failed, timed out, or canceled. Docs remain usable, but the corpus may be incomplete.
-- `Failed`: every configured harvester failed, timed out, or canceled. AppSurface Docs returns an empty corpus for compatibility, but the snapshot should be treated as an operational failure.
+- `Failed`: every active harvester failed, timed out, or canceled. AppSurface Docs returns an empty corpus for compatibility, but the snapshot should be treated as an operational failure.
 
 `DocHarvesterHealthStatus` describes each source contribution:
 
@@ -316,6 +316,8 @@ Set `AppSurfaceDocs:Harvest:FailOnFailure` to `true` when a host should fail dur
 Strict mode is built for CI and export hosts that publish docs artifacts. It prevents an all-failed harvest from becoming an empty or untrustworthy release tree. Leave it off for general public runtime hosts unless failing the whole application is the right operational posture for that host.
 
 The startup preflight calls `DocAggregator.GetHarvestHealthAsync(CancellationToken)` and reuses the normal cached docs snapshot. It does not run a second harvester pipeline. `Healthy`, `Empty`, and `Degraded` snapshots continue startup; only aggregate `Failed` throws `AppSurfaceDocsHarvestFailedException`.
+
+Disabled optional harvesters do not count as successful empty harvesters for strict mode. For example, a disabled JavaScript harvester cannot mask Markdown and C# harvesters that both failed.
 
 `AppSurfaceDocsHarvestFailedException` exposes a redacted `DocHarvestFailureSummary` with status, counts, timestamp, and diagnostic code/severity/problem/fix fields. It omits `RepositoryRoot`, raw exception messages, stack traces, and diagnostic `Cause` text. Host logs can still contain lower-level harvester diagnostics because those logs are operator data, not public exception payload.
 
@@ -480,6 +482,8 @@ var healthJson = routes.HealthJson;
 ```
 
 `AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, and `HealthJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
+
+The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; keep `Routes.SearchIndexRefresh` for authenticated operator refresh flows.
 
 ### Document route identity
 
@@ -675,7 +679,7 @@ Pitfalls:
   - If routes are hidden for the current environment, the sidebar renders status-only chrome without an `href`.
 - `AppSurfaceDocs:Harvest:Paths:IncludeGlobs`
   - Defaults to an empty array, which means every built-in harvester starts from its normal candidate set.
-  - When nonempty, this is the global source boundary for all built-in harvesters. Markdown and C# source-specific includes can narrow it but cannot bypass it.
+  - When nonempty, this is the global source boundary for all built-in harvesters. Markdown, C#, and JavaScript source-specific includes can narrow it but cannot bypass it.
   - Patterns are repository-relative `Microsoft.Extensions.FileSystemGlobbing` globs with `/` separators. `AddAppSurfaceDocs()` trims, slash-normalizes, removes blanks, and deduplicates them.
 - `AppSurfaceDocs:Harvest:Paths:ExcludeGlobs`
   - Defaults to an empty array.
@@ -695,6 +699,19 @@ Pitfalls:
 - `AppSurfaceDocs:Harvest:CSharp:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Defaults mirror the global path option shape, but apply only to C# API-reference candidates.
   - `CSharpExampleSource` is only a C# default group. Markdown example READMEs stay eligible unless excluded by other policy.
+- `AppSurfaceDocs:Harvest:JavaScript:Enabled`
+  - Defaults to `false`.
+  - Turns on the JavaScript public API harvester. Enabling it without at least one JavaScript include glob is invalid because AppSurface Docs never crawls all repository JavaScript implicitly.
+- `AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
+  - Include globs default to an empty list; exclude globs default to `**/*.min.js`; default-exclusion controls mirror the global path option shape.
+  - Start with one authored runtime file, such as `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js`, before expanding to a directory.
+  - Global path rules apply first, then JavaScript-specific includes, default exclusions, and excludes refine the candidate set.
+- `AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag`
+  - Defaults to `true`.
+  - Requires harvested doclets to carry `@public`. `@internal`, `@private`, and `@ignore` always exclude a doclet.
+- `AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes`
+  - Defaults to `262144`.
+  - Files above this limit are skipped with a structured harvest diagnostic so generated bundles do not dominate docs snapshot time.
 - `AppSurfaceDocs:Routing:RouteRootPath`
   - Controls the route-family root for stable entry, archive, and exact-version routes.
   - Defaults to `/docs` when versioning is on.
@@ -745,6 +762,68 @@ Pitfalls:
   - Required when versioning is enabled.
   - Points to the JSON catalog that describes the published exact-version trees and the recommended release alias.
   - Relative paths resolve from the app content root.
+
+### JavaScript public API harvesting
+
+JavaScript harvesting is for intentional browser runtime contracts: custom events, globals, small public helpers, constants, and typedefs that application authors need to consume. It is disabled by default because most repositories contain browser assets, generated bundles, and internal glue that should not become public documentation merely because it exists.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "JavaScript": {
+        "Enabled": true,
+        "IncludeGlobs": [
+          "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js"
+        ]
+      }
+    }
+  }
+}
+```
+
+The v1 harvester parses configured `.js` files with Acornima and reads JSDoc-shaped block comments. It renders group pages such as `api/javascript/razorwire`, adds fragment-addressable search stubs for each item, and uses `@namespace` or `@module` as the group name. Without an explicit group, `window.RazorWire` groups under `RazorWire`; otherwise the source file name is used.
+
+Supported public shapes:
+
+- attached `function name(...) {}` doclets
+- attached `const name = (...) => ...` and `const name = function (...) { ... }` doclets, with one declarator per statement
+- attached `const name = value` doclets, with one declarator per statement
+- attached `window.Name = ...` or `window["Name"] = ...` doclets
+- standalone `@event event:name` doclets
+- standalone `@typedef {Type} Name` doclets
+
+Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, detail payload fields through `@property detail.name`, and an `@example`. Use `@detail none` only when the event deliberately carries no payload.
+
+```js
+/**
+ * A RazorWire-enhanced form submission failed and custom UI may handle the failure.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form:failure
+ * @target form[data-rw-form="true"]
+ * @firesWhen a RazorWire-enhanced form receives an unhandled failure response or a network error.
+ * @bubbles true
+ * @cancelable true
+ * @property {HTMLFormElement} detail.form - Submitted form.
+ * @property {number|null} detail.statusCode - HTTP status code when a response was received.
+ * @example
+ * form.addEventListener('razorwire:form:failure', event => {
+ *   event.preventDefault();
+ * });
+ */
+```
+
+Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially.
+
+Pitfalls:
+
+- Do not enable JavaScript harvesting with a broad `**/*.js` include on a production repo. Start with the narrow runtime file whose public events or globals you want to publish.
+- Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
+- Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
+- Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
+- Do not put `@public` on classes, default exports, or CommonJS exports until a later harvester slice supports those shapes.
+- Do not treat Acornima as a runtime JavaScript execution engine. AppSurface Docs uses it only to parse configured source for documentation, and `ForgeTrust.AppSurface.Docs` carries `THIRD-PARTY-NOTICES.md` for the redistributed package.
 
 ### Published version catalog
 
@@ -802,6 +881,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 
 - `index.html` at the tree root
 - `search.html` at the tree root
+  - The shell should contain useful server-rendered anchors before JavaScript runs: starter query URLs and browse recovery links for the strongest available docs entry points.
 - `search-index.json` at the tree root
   - The payload must remain valid JSON with a top-level `documents` array so version-local search can load safely.
   - Every `documents[]` entry must include non-empty string `path` and `title` properties.
@@ -999,13 +1079,44 @@ Negative examples:
 ### Merge behavior
 
 - The generated namespace page keeps its `Namespaces/{Dotted.Namespace}` route.
-- README HTML is inserted into the namespace page as the namespace intro.
+- Child namespace links render first when the generated page has them, then README HTML is inserted as the namespace intro, then any `Common entry points` panel renders before generated type and member detail.
 - A leading README H1 is suppressed during merge because the namespace page shell already renders the page H1.
 - The standalone README node is removed after a successful merge so readers do not see duplicate pages.
-- README metadata can override the namespace page metadata, but derived Markdown defaults are ignored when they would accidentally replace API-reference classification.
+- README metadata can override the namespace page metadata only when the field is meaningful for the merged namespace page. Authored `title`, `summary`, `aliases`, `keywords`, `related_pages`, `breadcrumbs`, contributor provenance, and `entry_points` transfer. Derived Markdown defaults, README visibility flags, canonical slugs, authored redirect aliases, trust metadata, localization metadata, section landing metadata, sequence metadata, and featured-page groups do not transfer.
 - README-relative links are resolved from the README source path before the standalone README page is removed.
-- Links that target the removed README page itself are not rewritten to a published page. Avoid self-links such as `./README.md` inside namespace intros because the standalone README route disappears after merge.
+- Source-shaped requests for the consumed README path redirect to the generated namespace page, including paths such as `docs/ForgeTrust.AppSurface.Web/README.md` and `docs/ForgeTrust.AppSurface.Web/README`.
 - Contributor provenance points at the README source, while symbol-level source links still point at the generated API declarations.
+
+### Common entry points
+
+Namespace README metadata can define a compact `Common entry points` panel. Prefer sidecar YAML so the README stays clean in source control:
+
+```yaml
+# docs/ForgeTrust.RazorWire/README.md.yml
+title: ForgeTrust.RazorWire
+summary: Start here for RazorWire registration, endpoint mapping, options, and stream-result entry points.
+entry_points:
+  - label: AddRazorWire(...)
+    summary: Register RazorWire services and package-owned options.
+    target: ForgeTrust-RazorWire-RazorWireServiceCollectionExtensions-AddRazorWire-method-group
+    keywords:
+      - register RazorWire
+      - services
+  - label: RazorWireOptions
+    summary: Configure package behavior without replacing the rendering pipeline.
+    target: ForgeTrust-RazorWire-RazorWireOptions
+```
+
+Entry-point fields:
+
+- `label` is required, decoded, trimmed, and limited to 80 characters.
+- `summary` is optional, decoded, trimmed, and limited to 220 characters.
+- `target` is an anchor ID from the generated namespace page. Authors may include one leading `#`; AppSurface Docs stores it without the hash and allows only letters, digits, `_`, `-`, `.`, and `:`.
+- `href` is an escape hatch used only when `target` is absent or invalid. It must be a fragment such as `#anchor` or an app-relative docs URL under the active docs root, for example `/docs/...` or `/foo/bar/...`.
+- `keywords` are distinct search terms, up to 20 values of 80 characters each.
+- `order` is an optional non-negative integer. Ordered entries render first, then unordered entries keep author order.
+
+When `target` resolves, the whole editorial row is one real anchor to the generated API section. When `target` is valid but stale, the row renders as unlinked text with `Target unavailable`, AppSurface Docs logs a warning, and harvest health includes `DocHarvestDiagnosticCodes.NamespaceEntryPointTargetUnresolved`. A stale entry point does not fail the docs site.
 
 ### Decision guidance
 
@@ -1020,8 +1131,8 @@ Future dual-use package and namespace docs should use an explicit opt-in contrac
 - Do not move package READMEs under package folders expecting them to merge into namespace pages.
 - Do not rely on the final folder name alone. A path needs a docs-owned prefix before the namespace directory.
 - Do not expect a README to create a namespace API page. It only merges into a namespace page produced by the C# harvester.
-- Do not include README self-links such as `./README.md` in a namespace intro. Link to surviving guide pages, generated namespace anchors, or package docs instead.
-- Do not use namespace README merging as a general redirect or alias mechanism. Use explicit metadata and link authoring for those behaviors.
+- Do not use entry points as a full symbol resolver. V1 targets generated anchor IDs on the same namespace page.
+- Do not rely on `hide_from_search` or `hide_from_public_nav` in a consumed namespace README to hide the namespace page. Those flags apply to the standalone README node and are dropped during transfer.
 
 ## Usage
 
@@ -1315,7 +1426,10 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `publicSection` for the normalized built-in section slug when the page is publicly visible
 - `publicSectionLabel` for the reader-facing section label
 - `isSectionLanding` for authored section landing entry points
+- `entryPoints` for namespace README entry-point labels, summaries, targets, hrefs, and keywords when a README is consumed into a generated namespace page
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
+
+Search runtime note: the current bundled `minisearch.min.js` asset is a small AppSurface-owned shim that primarily scores `title`, `headings`, and `bodyText`. Entry-point terms are emitted in the payload and duplicated into namespace `bodyText`, but full field-specific scoring for `entryPoints`, `aliases`, `keywords`, and `summary` is tracked separately in GitHub issue #331.
 
 When authored metadata uses `release-note` or `release-notes`, AppSurface Docs keeps the raw `pageType` metadata value in the payload but emits `pageTypeLabel = "Release"` and `pageTypeVariant = "release"` so built-in and custom clients can present release pages consistently.
 

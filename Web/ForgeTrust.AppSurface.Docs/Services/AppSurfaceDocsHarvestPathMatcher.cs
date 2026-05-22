@@ -85,15 +85,35 @@ internal sealed class AppSurfaceDocsHarvestPathMatcher
     }
 
     /// <summary>
+    /// Returns the first pattern that could match a file directly inside <paramref name="relativeDirectory"/> or below
+    /// one of its descendants.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="MatchDirectoryOrDescendant"/>, this helper is allowed to rule out nested directories when the
+    /// remaining glob pattern can only match a file in the current directory, such as <c>src/public*.js</c>. Harvesters
+    /// use it to avoid walking subtrees that cannot contribute matching files.
+    /// </remarks>
+    public string? MatchFileInDirectoryOrDescendant(string relativeDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(relativeDirectory);
+
+        var normalizedDirectory = relativeDirectory.TrimEnd('/');
+        return _matchers
+            .FirstOrDefault(matcher => matcher.CouldMatchFileInDirectoryOrDescendant(normalizedDirectory))?.Pattern;
+    }
+
+    /// <summary>
     /// Wraps a single configured glob pattern and exposes case-insensitive match helpers.
     /// </summary>
     private sealed class PatternMatcher
     {
         private readonly Matcher _matcher = new(StringComparison.OrdinalIgnoreCase);
+        private readonly string[] _segments;
 
         public PatternMatcher(string pattern)
         {
             Pattern = pattern;
+            _segments = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries);
             _matcher.AddInclude(pattern);
         }
 
@@ -148,6 +168,69 @@ internal sealed class AppSurfaceDocsHarvestPathMatcher
             return literalDirectoryPrefix.Equals(relativeDirectory, StringComparison.OrdinalIgnoreCase)
                    || literalDirectoryPrefix.StartsWith($"{relativeDirectory}/", StringComparison.OrdinalIgnoreCase)
                    || relativeDirectory.StartsWith($"{literalDirectoryPrefix}/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Returns whether <see cref="Pattern"/> could match a file under <paramref name="relativeDirectory"/>.
+        /// </summary>
+        public bool CouldMatchFileInDirectoryOrDescendant(string relativeDirectory)
+        {
+            var directorySegments = relativeDirectory.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            return CouldMatchDirectoryPrefix(_segments, directorySegments, patternIndex: 0, directoryIndex: 0);
+        }
+
+        private static bool CouldMatchDirectoryPrefix(
+            IReadOnlyList<string> patternSegments,
+            IReadOnlyList<string> directorySegments,
+            int patternIndex,
+            int directoryIndex)
+        {
+            if (directoryIndex >= directorySegments.Count)
+            {
+                return PatternSuffixCanMatchTail(patternSegments, patternIndex, minimumSegments: 1);
+            }
+
+            if (patternIndex >= patternSegments.Count)
+            {
+                return false;
+            }
+
+            var patternSegment = patternSegments[patternIndex];
+            if (patternSegment.Equals("**", StringComparison.Ordinal))
+            {
+                return CouldMatchDirectoryPrefix(patternSegments, directorySegments, patternIndex + 1, directoryIndex)
+                       || CouldMatchDirectoryPrefix(patternSegments, directorySegments, patternIndex, directoryIndex + 1);
+            }
+
+            return SegmentCouldMatch(patternSegment, directorySegments[directoryIndex])
+                   && CouldMatchDirectoryPrefix(patternSegments, directorySegments, patternIndex + 1, directoryIndex + 1);
+        }
+
+        private static bool PatternSuffixCanMatchTail(
+            IReadOnlyList<string> patternSegments,
+            int patternIndex,
+            int minimumSegments)
+        {
+            var requiredSegments = 0;
+            var hasRecursiveSegment = false;
+            for (var index = patternIndex; index < patternSegments.Count; index++)
+            {
+                if (patternSegments[index].Equals("**", StringComparison.Ordinal))
+                {
+                    hasRecursiveSegment = true;
+                    continue;
+                }
+
+                requiredSegments++;
+            }
+
+            return requiredSegments >= minimumSegments || hasRecursiveSegment;
+        }
+
+        private static bool SegmentCouldMatch(string patternSegment, string directorySegment)
+        {
+            return HasGlobSyntax(patternSegment)
+                   || patternSegment.Equals(directorySegment, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool HasGlobSyntax(string pattern)

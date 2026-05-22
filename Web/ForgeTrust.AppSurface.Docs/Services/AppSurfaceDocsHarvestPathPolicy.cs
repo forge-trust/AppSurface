@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Applies AppSurface Docs harvest path rules for source-backed Markdown and C# documentation.
+/// Applies AppSurface Docs harvest path rules for source-backed Markdown, C#, and JavaScript documentation.
 /// </summary>
 /// <remarks>
 /// Policy order is intentionally fixed: built-in source candidates are checked first, then global includes,
@@ -37,6 +37,7 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
     private readonly AppSurfaceDocsHarvestPathMatcher _globalExcludeMatcher;
     private readonly SourceScopePolicy _markdownPolicy;
     private readonly SourceScopePolicy _csharpPolicy;
+    private readonly SourceScopePolicy _javascriptPolicy;
     private readonly HashSet<AppSurfaceDocsHarvestDefaultExclusionGroup> _globalDisabledGroups;
     private readonly Dictionary<AppSurfaceDocsHarvestDefaultExclusionGroup, AppSurfaceDocsHarvestPathMatcher> _globalAllowMatchers;
 
@@ -64,6 +65,9 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
         _csharpPolicy = CreateScopePolicy(
             harvest.CSharp,
             AppSurfaceDocsHarvestSourceKind.CSharp);
+        _javascriptPolicy = CreateScopePolicy(
+            harvest.JavaScript,
+            AppSurfaceDocsHarvestSourceKind.JavaScript);
     }
 
     private AppSurfaceDocsHarvestPathPolicy(AppSurfaceDocsOptions options)
@@ -411,6 +415,18 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
             CreateAllowMatchers(options?.DefaultExclusions?.AllowGlobs));
     }
 
+    private static SourceScopePolicy CreateScopePolicy(
+        AppSurfaceDocsJavaScriptHarvestOptions? options,
+        AppSurfaceDocsHarvestSourceKind sourceKind)
+    {
+        return new SourceScopePolicy(
+            sourceKind.ToString(),
+            new AppSurfaceDocsHarvestPathMatcher(options?.IncludeGlobs ?? []),
+            new AppSurfaceDocsHarvestPathMatcher(options?.ExcludeGlobs ?? []),
+            CreateDisabledGroupSet(options?.DefaultExclusions?.DisabledGroups),
+            CreateAllowMatchers(options?.DefaultExclusions?.AllowGlobs));
+    }
+
     private static HashSet<AppSurfaceDocsHarvestDefaultExclusionGroup> CreateDisabledGroupSet(
         IEnumerable<string>? disabledGroups)
     {
@@ -488,6 +504,7 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
             AppSurfaceDocsHarvestSourceKind.Markdown => normalizedPath.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
                                                    || normalizedPath.Equals("LICENSE", StringComparison.OrdinalIgnoreCase),
             AppSurfaceDocsHarvestSourceKind.CSharp => normalizedPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
+            AppSurfaceDocsHarvestSourceKind.JavaScript => normalizedPath.EndsWith(".js", StringComparison.OrdinalIgnoreCase),
             _ => false
         };
     }
@@ -550,6 +567,7 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
         {
             AppSurfaceDocsHarvestSourceKind.Markdown => _markdownPolicy,
             AppSurfaceDocsHarvestSourceKind.CSharp => _csharpPolicy,
+            AppSurfaceDocsHarvestSourceKind.JavaScript => _javascriptPolicy,
             _ => throw new ArgumentOutOfRangeException(nameof(sourceKind), sourceKind, null)
         };
     }
