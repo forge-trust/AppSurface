@@ -1,4 +1,10 @@
-import { createMiniSearchConfiguration, createMiniSearchDocument, defaultSearchOptions, normalizeSearchDocument } from './search-core';
+import {
+  createMiniSearchConfiguration,
+  createMiniSearchDocument,
+  defaultSearchOptions,
+  normalizePageTypeAlias,
+  normalizeSearchDocument
+} from './search-core';
 
 declare global {
   interface Window {
@@ -458,17 +464,6 @@ declare global {
 
   function normalizeFacetValue(value) {
     return String(value ?? '').trim();
-  }
-
-  function normalizePageTypeAlias(value) {
-    const normalized = normalizeFacetValue(value)
-      .toLowerCase()
-      .split(/[-_\s]+/)
-      .filter(Boolean)
-      .join('-');
-    return normalized === 'release-note' || normalized === 'release-notes'
-      ? 'release'
-      : normalized;
   }
 
   function formatQueryForStatus(value) {

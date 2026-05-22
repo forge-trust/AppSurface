@@ -19,7 +19,17 @@ importers:
         specifier: 5.9.3
         version: 5.9.3
 
-  ForgeTrust.AppSurface.Docs/assets: {}
+  ForgeTrust.AppSurface.Docs/assets:
+    devDependencies:
+      esbuild:
+        specifier: 0.27.0
+        version: 0.27.0
+      minisearch:
+        specifier: 7.2.0
+        version: 7.2.0
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
 
   ForgeTrust.RazorWire: {}
 

@@ -142,8 +142,13 @@ function normalizeFacetValue(value: any) {
   return String(value ?? '').trim();
 }
 
-function normalizePageTypeAlias(value: any) {
-  const normalized = normalizeFacetValue(value).toLowerCase();
+export function normalizePageTypeAlias(value: any) {
+  const normalized = normalizeFacetValue(value)
+    .toLowerCase()
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .join('-');
+
   if (normalized === 'api' || normalized === 'api-reference' || normalized === 'reference') {
     return 'api-reference';
   }

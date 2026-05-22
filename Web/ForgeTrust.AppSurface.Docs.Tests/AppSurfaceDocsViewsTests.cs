@@ -169,7 +169,7 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("function renderPageTypeBadge(item)", searchClient);
         Assert.Contains("docs-search-option-title-row", searchClient);
         Assert.Contains("docs-page-badge", searchClient);
-        Assert.Contains("function normalizePageTypeAlias(value)", searchClient);
+        Assert.Contains("export function normalizePageTypeAlias(value: any)", searchClient);
         Assert.Contains("function isPageTypeInGroup(doc, group)", searchClient);
         Assert.Contains("function getPageTypeDisplayLabel(doc)", searchClient);
         Assert.Contains("function createSearchResultArticle(doc, queryTokens, options: any = {})", searchClient);

@@ -7,5 +7,10 @@
     "test": "node --test test/*.test.mjs",
     "build": "node scripts/build.mjs",
     "verify-generated": "node scripts/verify-generated.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.0",
+    "minisearch": "7.2.0",
+    "typescript": "5.9.3"
   }
 }

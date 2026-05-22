@@ -29,6 +29,22 @@ test('normalizeSearchDocument handles missing and unsupported entryPoints', asyn
   assert.equal(normalizeSearchDocument({ id: 'c', path: '/c', title: 'C', entryPoints: null }).entryPoints, '');
 });
 
+test('normalizePageTypeAlias keeps client filters aligned with indexed docs', async () => {
+  const { normalizePageTypeAlias, normalizeSearchDocument } = await loadSearchCore();
+
+  for (const alias of ['api', 'API', 'reference', 'api-reference', 'api_reference', 'api reference']) {
+    assert.equal(normalizePageTypeAlias(alias), 'api-reference');
+    assert.equal(
+      normalizeSearchDocument({ id: alias, path: `/${alias}`, title: alias, pageType: alias }).pageType,
+      'api-reference'
+    );
+  }
+
+  for (const alias of ['release-note', 'release-notes', 'release_notes', 'release notes']) {
+    assert.equal(normalizePageTypeAlias(alias), 'release');
+  }
+});
+
 test('createMiniSearchConfiguration includes all searchable and stored fields', async () => {
   const { createMiniSearchConfiguration } = await loadSearchCore();
 
