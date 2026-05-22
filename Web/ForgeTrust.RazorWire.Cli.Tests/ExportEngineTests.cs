@@ -887,8 +887,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Crawl_Registered_Seed_Routes_Before_Redirect_Validation()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
 
         try
         {
@@ -901,8 +900,8 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs", "other.html")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs", "other", "README.md.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs", "other.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs", "other", "README.md.html")));
         }
         finally
         {
@@ -916,8 +915,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Redirect_Alias_Canonical_Artifact_Is_Missing()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
 
         try
         {
@@ -945,8 +943,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Redirect_Alias_Is_Crawled_As_Html_Body()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
 
         try
         {
@@ -978,8 +975,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Redirect_Alias_Would_Overwrite_Another_Artifact()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
 
         try
         {
@@ -1011,8 +1007,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Redirect_Alias_Would_Overwrite_Docs_Partial_Artifact()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
 
         try
         {
@@ -1044,8 +1039,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_Should_Fail_When_Redirect_Alias_Would_Overwrite_Another_Artifact()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
 
         try
         {

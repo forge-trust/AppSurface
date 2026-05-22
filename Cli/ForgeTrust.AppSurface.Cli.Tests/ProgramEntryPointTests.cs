@@ -1,12 +1,19 @@
 using System.Collections.Concurrent;
 using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Docs;
+using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.RazorWire.Cli;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -607,6 +614,33 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task AppSurfaceDocsExportContextConfigurator_Should_Register_RouteManifest_Seeds()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        var docs = new[]
+        {
+            new DocNode("Package", "packages/README.md", "<p>Package</p>"),
+            new DocNode(
+                "Intro",
+                "docs/intro.md",
+                "<p>Intro</p>",
+                Metadata: new DocMetadata
+                {
+                    CanonicalSlug = "start-here/intro",
+                    RedirectAliases = ["legacy/intro"]
+                })
+        };
+        using var host = new TrackingHost(
+            configureServices: services => AddDocsAggregatorServices(services, repository.Path, docs));
+        var context = new ExportContext("dist", seedRoutesPath: null, baseUrl: "http://127.0.0.1:51234");
+
+        await new AppSurfaceDocsExportContextConfigurator().ConfigureAsync(host, context, CancellationToken.None);
+
+        Assert.Contains("/docs/packages", context.AdditionalSeedRoutes);
+        Assert.Contains("/docs/start-here/intro", context.AdditionalSeedRoutes);
+    }
+
+    [Fact]
     public async Task AppSurfaceDocsInProcessExportRunner_Should_Translate_Startup_Cancellation_To_Startup_Timeout()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
@@ -1002,6 +1036,27 @@ public sealed class ProgramEntryPointTests
             "http://127.0.0.1:0");
     }
 
+    private static void AddDocsAggregatorServices(
+        IServiceCollection services,
+        string repositoryPath,
+        IReadOnlyList<DocNode> docs)
+    {
+        services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment(repositoryPath));
+        services.AddSingleton<IMemoryCache>(_ => new MemoryCache(new MemoryCacheOptions()));
+        services.AddSingleton<IMemo, Memo>();
+        services.AddSingleton<IAppSurfaceDocsHtmlSanitizer, PassthroughDocsHtmlSanitizer>();
+        services.AddSingleton<IDocHarvester>(new StaticDocHarvester(docs));
+        services.AddSingleton(new AppSurfaceDocsOptions
+        {
+            Source = new AppSurfaceDocsSourceOptions
+            {
+                RepositoryRoot = repositoryPath
+            }
+        });
+        services.AddSingleton<ILogger<DocAggregator>>(NullLogger<DocAggregator>.Instance);
+        services.AddSingleton<DocAggregator>();
+    }
+
     private static async Task WaitForLogMessageAsync(InMemoryLoggerProvider loggerProvider, string expectedMessage)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(1);
@@ -1180,12 +1235,16 @@ public sealed class ProgramEntryPointTests
         private readonly ServiceProvider _services;
         private readonly TaskCompletionSource<object?> _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public TrackingHost(string boundAddress = "http://127.0.0.1:51234", bool throwOnStop = false)
+        public TrackingHost(
+            string boundAddress = "http://127.0.0.1:51234",
+            bool throwOnStop = false,
+            Action<IServiceCollection>? configureServices = null)
         {
             _throwOnStop = throwOnStop;
-            _services = new ServiceCollection()
-                .AddSingleton<IServer>(new FakeServer(boundAddress))
-                .BuildServiceProvider();
+            var services = new ServiceCollection()
+                .AddSingleton<IServer>(new FakeServer(boundAddress));
+            configureServices?.Invoke(services);
+            _services = services.BuildServiceProvider();
         }
 
         public IServiceProvider Services => _services;
@@ -1217,6 +1276,37 @@ public sealed class ProgramEntryPointTests
             DisposeCalled = true;
             _services.Dispose();
             _disposed.TrySetResult(null);
+        }
+    }
+
+    private sealed class TestWebHostEnvironment(string contentRootPath) : IWebHostEnvironment
+    {
+        public string WebRootPath { get; set; } = contentRootPath;
+
+        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
+
+        public string ApplicationName { get; set; } = "ForgeTrust.AppSurface.Cli.Tests";
+
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+
+        public string ContentRootPath { get; set; } = contentRootPath;
+
+        public string EnvironmentName { get; set; } = Environments.Production;
+    }
+
+    private sealed class StaticDocHarvester(IReadOnlyList<DocNode> docs) : IDocHarvester
+    {
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(docs);
+        }
+    }
+
+    private sealed class PassthroughDocsHtmlSanitizer : IAppSurfaceDocsHtmlSanitizer
+    {
+        public string Sanitize(string html)
+        {
+            return html;
         }
     }
 
