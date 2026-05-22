@@ -4,7 +4,7 @@
 [![Package Gate](https://github.com/forge-trust/AppSurface/actions/workflows/package-gate.yml/badge.svg?branch=main)](https://github.com/forge-trust/AppSurface/actions/workflows/package-gate.yml)
 [![Package Artifacts](https://github.com/forge-trust/AppSurface/actions/workflows/package-artifacts.yml/badge.svg)](https://github.com/forge-trust/AppSurface/actions/workflows/package-artifacts.yml)
 [![Code Quality](https://github.com/forge-trust/AppSurface/actions/workflows/code-quality.yml/badge.svg?branch=main)](https://github.com/forge-trust/AppSurface/actions/workflows/code-quality.yml)
-[![CodeQL](https://github.com/forge-trust/AppSurface/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/forge-trust/AppSurface/actions/workflows/codeql.yml)
+[![CodeQL](https://img.shields.io/badge/CodeQL-enabled-0f6fff?logo=github&logoColor=white)](https://github.com/forge-trust/AppSurface/security/code-scanning)
 [![Codecov](https://codecov.io/gh/forge-trust/AppSurface/branch/main/graph/badge.svg)](https://codecov.io/gh/forge-trust/AppSurface)
 [![NuGet Packages](https://img.shields.io/badge/NuGet-package%20chooser-004880?logo=nuget&logoColor=white)](./packages/README.md)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c?logo=dependabot&logoColor=white)](./.github/dependabot.yml)
