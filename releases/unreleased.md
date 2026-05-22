@@ -142,6 +142,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs search now keeps failure recovery markup out of the active search shell until the index actually fails to load, so successful searches no longer expose hidden failure copy to text extraction tools.
 - AppSurface Docs search now renders starter query URLs and browse recovery links in the server shell, so no-JS readers, crawlers, static `search.html` exports, and failed `search-index.json` fetches still have real documentation paths to follow.
 - AppSurface Docs search now opens as a richer workspace with representative starter rows, filter-first browsing, stronger no-results recovery, and normalized release badge aliases.
+- AppSurface Docs search now has a first-class pnpm and TypeScript asset workspace, building the generated search client and MiniSearch runtime from typed source with typecheck, test, and generated-file verification gates in CI.
 - AppSurface Docs harvesting now excludes test-project docs and generated example-app API reference from the docs surface while keeping authored example README walkthroughs public.
 - AppSurface Docs now includes a repository root `LICENSE` file as a docs artifact when present, so repo-relative license links remain revision-correct and still pass CDN static export validation.
 - AppSurface Docs now documents the namespace README merge contract with positive and negative examples, while detail-page titles wrap on narrow screens so long package names do not clip on mobile.

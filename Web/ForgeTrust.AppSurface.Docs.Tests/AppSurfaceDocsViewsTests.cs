@@ -3865,21 +3865,15 @@ public class AppSurfaceDocsViewsTests
     private static string ReadSearchClientMarkup()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var searchClientPath = Path.Combine(
-            repoRoot,
+        var searchAssetSourceRelativePath = Path.Combine(
             "Web",
             "ForgeTrust.AppSurface.Docs",
             "assets",
-            "src",
-            "search-client.ts");
+            "src");
+        var searchAssetSourceRoot = Path.Combine(repoRoot, searchAssetSourceRelativePath);
 
-        var searchCorePath = Path.Combine(
-            repoRoot,
-            "Web",
-            "ForgeTrust.AppSurface.Docs",
-            "assets",
-            "src",
-            "search-core.ts");
+        var searchClientPath = Path.Combine(searchAssetSourceRoot, "search-client.ts");
+        var searchCorePath = Path.Combine(searchAssetSourceRoot, "search-core.ts");
 
         return File.ReadAllText(searchClientPath) + Environment.NewLine + File.ReadAllText(searchCorePath);
     }
