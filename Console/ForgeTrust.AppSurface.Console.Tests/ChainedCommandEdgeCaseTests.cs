@@ -31,8 +31,9 @@ public partial class ChainedCommandEdgeCaseTests
         using (provider)
         {
             // Act
+            using var fakeConsole = new FakeConsole();
             var exception = await Assert.ThrowsAsync<CommandException>(async () =>
-                await command.ExecuteAsync(new FakeConsole()));
+                await command.ExecuteAsync(fakeConsole));
 
             // Assert
             Assert.Contains("RequiredChildCommand.Required", exception.Message);
@@ -57,7 +58,8 @@ public partial class ChainedCommandEdgeCaseTests
             command.Metadata = "parent-metadata";
 
             // Act
-            await command.ExecuteAsync(new FakeConsole());
+            using var fakeConsole = new FakeConsole();
+            await command.ExecuteAsync(fakeConsole);
 
             // Assert
             Assert.True(_typeMismatchChildExecuted);
@@ -80,7 +82,8 @@ public partial class ChainedCommandEdgeCaseTests
         using (provider)
         {
             // Act
-            await command.ExecuteAsync(new FakeConsole());
+            using var fakeConsole = new FakeConsole();
+            await command.ExecuteAsync(fakeConsole);
 
             // Assert
             Assert.True(_nullableChildExecuted);
@@ -102,7 +105,8 @@ public partial class ChainedCommandEdgeCaseTests
         using (provider)
         {
             // Act
-            await command.ExecuteAsync(new FakeConsole());
+            using var fakeConsole = new FakeConsole();
+            await command.ExecuteAsync(fakeConsole);
 
             // Assert
             Assert.False(_requiredChildExecuted);
@@ -123,7 +127,8 @@ public partial class ChainedCommandEdgeCaseTests
         using (provider)
         {
             // Act
-            await command.ExecuteAsync(new FakeConsole());
+            using var fakeConsole = new FakeConsole();
+            await command.ExecuteAsync(fakeConsole);
 
             // Assert
             Assert.True(_requiredNonInputChildExecuted);
