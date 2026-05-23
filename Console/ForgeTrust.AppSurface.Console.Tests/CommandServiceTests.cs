@@ -79,7 +79,7 @@ public partial class CommandServiceTests
     [Fact]
     public void CheckForUnknownOptions_WithUnknownOption_ShowsSuggestion()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var suggester = new LevenshteinOptionSuggester();
 
         var noAttrCommand = System.Reflection.DispatchProxy.Create<ICommand, NoAttributeCommandProxy>();
@@ -96,7 +96,7 @@ public partial class CommandServiceTests
     [Fact]
     public void CheckForUnknownOptions_UnknownCommand_EvaluatesToFalse()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var suggester = new LevenshteinOptionSuggester();
 
         // This command name is "unknown-cmd", which does not start with '-' and does not match TestCommand.
@@ -115,7 +115,7 @@ public partial class CommandServiceTests
     [Fact]
     public void CheckForUnknownOptions_WithRootCommand_ShowsSuggestion()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var suggester = new LevenshteinOptionSuggester();
 
         var commands = new ICommand[] { new RootTestCommand() };
@@ -131,7 +131,7 @@ public partial class CommandServiceTests
     [Fact]
     public void CheckForUnknownOptions_WithMultiWordCommand_ShowsCommandSpecificSuggestion()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var suggester = new LevenshteinOptionSuggester();
 
         var commands = new ICommand[] { new RootTestCommand(), new MultiWordCommand() };
@@ -147,7 +147,7 @@ public partial class CommandServiceTests
     [Fact]
     public void CheckForUnknownOptions_WithPartialMultiWordCommandPrefix_ShowsMostSpecificSuggestion()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var suggester = new LevenshteinOptionSuggester();
 
         var commands = new ICommand[] { new RootTestCommand(), new TestCommand(), new MultiWordCommand() };
@@ -162,9 +162,24 @@ public partial class CommandServiceTests
     }
 
     [Fact]
+    public void CheckForUnknownOptions_WithDoubleDashAfterMultiWordCommand_DoesNotSuggestTrailingTokens()
+    {
+        using var console = new FakeInMemoryConsole();
+        var suggester = new LevenshteinOptionSuggester();
+
+        var commands = new ICommand[] { new RootTestCommand(), new MultiWordCommand() };
+        var context = new StartupContext(new[] { "docs", "export", "--", "--formta" }, new TestModule());
+
+        var commandService = new CommandService(commands, context, suggester);
+        commandService.CheckForUnknownOptions(console);
+
+        Assert.Empty(console.ReadErrorString());
+    }
+
+    [Fact]
     public void CheckForUnknownOptions_WithEmptyArgs_DoesNothing()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var suggester = new LevenshteinOptionSuggester();
 
         var noAttrCommand = System.Reflection.DispatchProxy.Create<ICommand, NoAttributeCommandProxy>();
@@ -180,7 +195,7 @@ public partial class CommandServiceTests
     [Fact]
     public void CheckForUnknownOptions_NoRootCommandFallback_DoesNothingIfNoMatch()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var suggester = new LevenshteinOptionSuggester();
 
         // ONLY TestCommand so rootCommand fallback returns null (covers line 139 finding null)
@@ -196,7 +211,7 @@ public partial class CommandServiceTests
     [Fact]
     public void CheckForUnknownOptions_OnlyShowsUpToMaxSuggestions()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var suggester = new LevenshteinOptionSuggester();
 
         // This command will cause many suggestions for "--a"
@@ -218,7 +233,7 @@ public partial class CommandServiceTests
     [Fact]
     public async Task RunAsync_GivenDiConsole_IsUsedAndDisposedProperly()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var suggester = new LevenshteinOptionSuggester();
 
         var commands = new ICommand[] { new RootTestCommand(), new TestCommand() };
