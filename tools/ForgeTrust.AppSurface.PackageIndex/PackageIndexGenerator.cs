@@ -618,14 +618,9 @@ internal sealed class PackageIndexGenerator
 
     private static bool RepositoryFileExists(string repositoryRoot, string repositoryRelativePath)
     {
+        var normalizedRoot = Path.GetFullPath(repositoryRoot);
         var normalizedRelativePath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(normalizedRelativePath))
-        {
-            throw new PackageIndexException($"Chooser link target '{repositoryRelativePath}' must be repository-relative.");
-        }
-
-        var fullPath = Path.GetFullPath(normalizedRelativePath, Path.GetFullPath(repositoryRoot));
-        return File.Exists(fullPath);
+        return File.Exists(Path.GetFullPath(normalizedRelativePath, normalizedRoot));
     }
 
     internal static string ResolveRepositoryFilePath(string repositoryRoot, string repositoryRelativePath, string description)

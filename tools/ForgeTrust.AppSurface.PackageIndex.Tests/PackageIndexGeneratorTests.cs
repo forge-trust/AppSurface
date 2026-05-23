@@ -873,6 +873,54 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateAsync_OmitsOptionalReleaseReadinessLinksWhenTargetsAreMissing()
+    {
+        await WriteCommonChooserFilesAsync(includeUnreleased: false);
+        File.Delete(Path.Combine(_repositoryRoot, "releases", "v0.1-preview.md"));
+        File.Delete(Path.Combine(_repositoryRoot, "releases", "unreleased.md"));
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj",
+                "ForgeTrust.AppSurface.Web.OpenApi"),
+            ["Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj",
+                "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64"),
+            ["Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj",
+                "ForgeTrust.AppSurface.Docs"),
+            ["Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj",
+                "ForgeTrust.RazorWire.Cli",
+                isTool: true,
+                outputType: "Exe")
+        });
+
+        var markdown = await generator.GenerateAsync(CreateRequest());
+
+        Assert.Contains("[Release hub](../releases/README.md)", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("v0.1.0 Release Preview", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Unreleased proof artifact]", markdown, StringComparison.Ordinal);
+        Assert.Contains("Unreleased proof artifact: Not published yet", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveRepositoryFilePath_ThrowsWhenPathIsRooted()
+    {
+        var rootedPath = Path.Combine(_repositoryRoot, "releases", "v0.1-preview.md");
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => PackageIndexGenerator.ResolveRepositoryFilePath(_repositoryRoot, rootedPath, "Release preview"));
+
+        Assert.Contains("repository-relative", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(rootedPath, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GenerateToFileAsync_CreatesOutputDirectoryAndWritesChooser()
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: true);
