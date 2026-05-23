@@ -2156,13 +2156,16 @@ public class DocAggregator
     }
 
     /// <summary>
-    /// Merges README content into the corresponding namespace overview pages.
+    /// Merges authored namespace-intro content into the corresponding namespace overview pages.
     /// </summary>
-    /// <param name="nodes">The list of documentation nodes to process; README nodes used for merging are removed from this list.</param>
+    /// <param name="nodes">
+    /// The list of documentation nodes to process. Consumed namespace README and <c>NAMESPACE.md</c> sources are
+    /// removed from this list, and unresolved <c>NAMESPACE.md</c> sources are hidden after diagnostics are recorded.
+    /// </param>
     /// <param name="repositoryRoot">Repository root used to resolve colocated project files for <c>NAMESPACE.md</c> intros.</param>
     /// <param name="renderEntryPointPanel">Whether to render validated namespace entry-point metadata into the merged namespace content.</param>
     /// <param name="logger">Logger used for namespace entry-point target diagnostics.</param>
-    /// <returns>Non-fatal harvest diagnostics produced while merging namespace README metadata.</returns>
+    /// <returns>Non-fatal harvest diagnostics produced while merging authored namespace-intro metadata.</returns>
     private static IReadOnlyList<DocHarvestDiagnostic> MergeNamespaceReadmes(
         List<DocNode> nodes,
         string repositoryRoot,
@@ -2284,11 +2287,6 @@ public class DocAggregator
 
                 namespaceNodes[namespaceName] = mergedNamespaceNode;
             }
-
-            if (!resolution.ShouldConsumeSource)
-            {
-                nodes.RemoveAll(n => string.Equals(n.Path, readmeNode.Path, StringComparison.OrdinalIgnoreCase));
-            }
         }
 
         return diagnostics;
@@ -2345,13 +2343,12 @@ public class DocAggregator
 
         if (projectFiles.Length == 1)
         {
-            foreach (var candidate in EnumerateProjectNamespaceCandidates(projectFiles[0]))
+            var matched = EnumerateProjectNamespaceCandidates(projectFiles[0])
+                .Select(candidate => MatchKnownNamespace(candidate, knownNames))
+                .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
+            if (!string.IsNullOrWhiteSpace(matched))
             {
-                var matched = MatchKnownNamespace(candidate, knownNames);
-                if (!string.IsNullOrWhiteSpace(matched))
-                {
-                    return new NamespaceIntroTargetResolution(matched, ShouldConsumeSource: true, Diagnostic: null);
-                }
+                return new NamespaceIntroTargetResolution(matched, ShouldConsumeSource: true, Diagnostic: null);
             }
         }
 
@@ -2386,7 +2383,7 @@ public class DocAggregator
         var relativeDirectory = Path.GetDirectoryName(normalizedPath);
         var introDirectory = string.IsNullOrWhiteSpace(relativeDirectory)
             ? repositoryRoot
-            : Path.Combine(repositoryRoot, relativeDirectory);
+            : Path.Join(repositoryRoot, NormalizeRelativeDirectory(relativeDirectory));
         if (!Directory.Exists(introDirectory))
         {
             return [];
@@ -2396,6 +2393,27 @@ public class DocAggregator
             .EnumerateFiles(introDirectory, "*.csproj", SearchOption.TopDirectoryOnly)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static string NormalizeRelativeDirectory(string relativeDirectory)
+    {
+        var normalized = relativeDirectory.Trim();
+        while (Path.IsPathRooted(normalized))
+        {
+            var root = Path.GetPathRoot(normalized);
+            if (string.IsNullOrEmpty(root))
+            {
+                break;
+            }
+
+            normalized = normalized[root.Length..];
+        }
+
+        return normalized.TrimStart(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar,
+            '/',
+            '\\');
     }
 
     private static IEnumerable<string> EnumerateProjectNamespaceCandidates(string projectFile)
@@ -2421,7 +2439,15 @@ public class DocAggregator
         {
             document = XDocument.Load(projectFile);
         }
-        catch
+        catch (IOException)
+        {
+            yield break;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            yield break;
+        }
+        catch (System.Xml.XmlException)
         {
             yield break;
         }

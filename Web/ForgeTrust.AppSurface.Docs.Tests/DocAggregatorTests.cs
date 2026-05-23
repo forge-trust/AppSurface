@@ -4017,10 +4017,10 @@ public class DocAggregatorTests : IDisposable
         var repositoryRoot = CreateTempRepositoryRoot();
         try
         {
-            var projectDirectory = Path.Combine(repositoryRoot, "Web", "ForgeTrust.RazorWire");
+            var projectDirectory = Path.Join(repositoryRoot, "Web", "ForgeTrust.RazorWire");
             Directory.CreateDirectory(projectDirectory);
             await File.WriteAllTextAsync(
-                Path.Combine(projectDirectory, "ForgeTrust.RazorWire.csproj"),
+                Path.Join(projectDirectory, "ForgeTrust.RazorWire.csproj"),
                 """
                 <Project Sdk="Microsoft.NET.Sdk">
                   <PropertyGroup>
@@ -4091,10 +4091,10 @@ public class DocAggregatorTests : IDisposable
         var repositoryRoot = CreateTempRepositoryRoot();
         try
         {
-            var projectDirectory = Path.Combine(repositoryRoot, "Web", "ForgeTrust.RazorWire");
+            var projectDirectory = Path.Join(repositoryRoot, "Web", "ForgeTrust.RazorWire");
             Directory.CreateDirectory(projectDirectory);
-            await File.WriteAllTextAsync(Path.Combine(projectDirectory, "First.csproj"), "<Project />");
-            await File.WriteAllTextAsync(Path.Combine(projectDirectory, "Second.csproj"), "<Project />");
+            await File.WriteAllTextAsync(Path.Join(projectDirectory, "First.csproj"), "<Project />");
+            await File.WriteAllTextAsync(Path.Join(projectDirectory, "Second.csproj"), "<Project />");
             var harvestedDocs = new List<DocNode>
             {
                 new("RazorWire", "Namespaces/ForgeTrust.RazorWire", "<section class='doc-type'>Generated API body</section>"),
@@ -4111,6 +4111,69 @@ public class DocAggregatorTests : IDisposable
             Assert.Contains(
                 health.Diagnostics,
                 diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.NamespaceIntroTargetAmbiguous
+                              && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetDocsAsync_ShouldTreatRootedNamespaceMdPathAsRepositoryRelative_WhenInferringProject()
+    {
+        var repositoryRoot = CreateTempRepositoryRoot();
+        try
+        {
+            var projectDirectory = Path.Join(repositoryRoot, "Web", "ForgeTrust.RazorWire");
+            Directory.CreateDirectory(projectDirectory);
+            await File.WriteAllTextAsync(Path.Join(projectDirectory, "ForgeTrust.RazorWire.csproj"), "<Project />");
+            var harvestedDocs = new List<DocNode>
+            {
+                new("RazorWire", "Namespaces/ForgeTrust.RazorWire", "<section class='doc-type'>Generated API body</section>"),
+                new("Namespace", "/Web/ForgeTrust.RazorWire/NAMESPACE.md", "<p>Rooted namespace intro.</p>")
+            };
+            var harvester = A.Fake<IDocHarvester>();
+            A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+            var aggregator = CreateAggregatorWithRepositoryRoot(harvester, repositoryRoot);
+
+            var docs = (await aggregator.GetDocsAsync()).ToList();
+
+            Assert.DoesNotContain(docs, d => d.Path == "/Web/ForgeTrust.RazorWire/NAMESPACE.md");
+            var namespaceDoc = docs.Single(d => d.Path == "Namespaces/ForgeTrust.RazorWire");
+            Assert.Contains("Rooted namespace intro.", namespaceDoc.Content);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldWarnAndHideNamespaceMd_WhenColocatedProjectFileIsInvalidXml()
+    {
+        var repositoryRoot = CreateTempRepositoryRoot();
+        try
+        {
+            var projectDirectory = Path.Join(repositoryRoot, "Web", "Package");
+            Directory.CreateDirectory(projectDirectory);
+            await File.WriteAllTextAsync(Path.Join(projectDirectory, "Package.csproj"), "<Project");
+            var harvestedDocs = new List<DocNode>
+            {
+                new("RazorWire", "Namespaces/ForgeTrust.RazorWire", "<section class='doc-type'>Generated API body</section>"),
+                new("Namespace", "Web/Package/NAMESPACE.md", "<p>Namespace intro.</p>")
+            };
+            var harvester = A.Fake<IDocHarvester>();
+            A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+            var aggregator = CreateAggregatorWithRepositoryRoot(harvester, repositoryRoot);
+
+            var docs = await aggregator.GetDocsAsync();
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            Assert.DoesNotContain(docs, d => d.Path == "Web/Package/NAMESPACE.md");
+            Assert.Contains(
+                health.Diagnostics,
+                diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.NamespaceIntroTargetMissing
                               && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning);
         }
         finally
@@ -4731,9 +4794,15 @@ public class DocAggregatorTests : IDisposable
         var repositoryRoot = CreateTempRepositoryRoot();
         try
         {
-            var projectDirectory = Path.Combine(repositoryRoot, "Web", "ForgeTrust.RazorWire");
+            var projectDirectory = Path.Join(repositoryRoot, "Web", "ForgeTrust.RazorWire");
             Directory.CreateDirectory(projectDirectory);
-            await File.WriteAllTextAsync(Path.Combine(projectDirectory, projectFileName), projectContent);
+            var safeProjectFileName = Path.GetFileName(projectFileName);
+            if (!string.Equals(safeProjectFileName, projectFileName, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Project file name must not contain directory segments.", nameof(projectFileName));
+            }
+
+            await File.WriteAllTextAsync(Path.Join(projectDirectory, safeProjectFileName), projectContent);
             var harvestedDocs = new List<DocNode>
             {
                 new("RazorWire", "Namespaces/ForgeTrust.RazorWire", "<section class='doc-type'>Generated API body</section>"),
