@@ -58,6 +58,18 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task ShouldPruneDirectory_WhenDirectoryIsRootDoesNotPrune()
+    {
+        await WriteAsync(".gitignore", "*\n");
+        var policy = new AppSurfaceDocsHarvestVcsIgnorePolicy(
+            _root,
+            new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+            NullLogger.Instance);
+
+        Assert.False(policy.ShouldPruneDirectory("/", AppSurfaceDocsHarvestSourceKind.Markdown));
+    }
+
+    [Fact]
     public async Task ShouldPruneDirectory_WhenIgnoredDirectoryHasNoReachableNegationPrunesSubtree()
     {
         await WriteAsync(".gitignore", "bower_components/\n");
@@ -90,6 +102,20 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
 
         Assert.True(snapshot.ShouldPruneDirectory("bower_components", AppSurfaceDocsHarvestSourceKind.Markdown));
         Assert.False(decision.Included);
+    }
+
+    [Fact]
+    public async Task ShouldPruneDirectory_WhenEarlierNegationMatchesIgnoredDirectoryKeepsDirectoryEnumerable()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            !generated/
+            generated/
+            """);
+        var snapshot = CreateSnapshot();
+
+        Assert.False(snapshot.ShouldPruneDirectory("generated", AppSurfaceDocsHarvestSourceKind.Markdown));
     }
 
     [Fact]
@@ -231,11 +257,22 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     [Fact]
     public async Task Evaluate_WhenEscapedTrailingSpacePatternMatchesLiteralSpace()
     {
-        await WriteAsync(".gitignore", "space\\ .md\ntrimmed.md   \n");
+        await WriteAsync(".gitignore", "space\\ .md\nliteral\\ \ntrimmed.md   \n");
         var snapshot = CreateSnapshot();
 
         Assert.False(snapshot.Evaluate("space .md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.False(snapshot.Evaluate("literal ", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
         Assert.False(snapshot.Evaluate("trimmed.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenPatternsBecomeEmptyAfterNegationOrTrimmingIgnoresThoseRules()
+    {
+        await WriteAsync(".gitignore", "!\n/\nvalid.md\n");
+        var snapshot = CreateSnapshot();
+
+        Assert.True(snapshot.Evaluate("other.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.False(snapshot.Evaluate("valid.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
     }
 
     [Fact]
@@ -297,6 +334,41 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         var diagnostics = collector.CreateSnapshot(enabled: true);
 
         Assert.Equal(2, diagnostics.Warnings.Count);
+    }
+
+    [Fact]
+    public void VcsIgnoreRule_WhenPathIsOutsideBaseDoesNotMatch()
+    {
+        var rule = new AppSurfaceDocsHarvestVcsIgnoreRule(
+            "src/.gitignore",
+            1,
+            "*.md",
+            "src",
+            IsNegated: false,
+            DirectoryOnly: false,
+            RootRelative: false,
+            "*.md");
+
+        Assert.False(rule.Matches("README.md", isDirectory: false));
+        Assert.False(rule.CouldMatchDirectoryOrDescendant("docs"));
+    }
+
+    [Fact]
+    public void VcsIgnoreRule_WhenSlashfulLiteralPrefixOverlapsDirectoryCanMatchDescendant()
+    {
+        var rule = new AppSurfaceDocsHarvestVcsIgnoreRule(
+            ".gitignore",
+            1,
+            "src/generated/**",
+            BaseDirectory: string.Empty,
+            IsNegated: true,
+            DirectoryOnly: false,
+            RootRelative: false,
+            "src/generated/**");
+
+        Assert.True(rule.CouldMatchDirectoryOrDescendant("src"));
+        Assert.True(rule.CouldMatchDirectoryOrDescendant("src/generated"));
+        Assert.False(rule.CouldMatchDirectoryOrDescendant("docs"));
     }
 
     [Fact]
