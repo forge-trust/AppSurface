@@ -117,15 +117,6 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
             if (_channels.TryGetValue(channel, out var subscribers))
             {
                 subscribers.TryRemove(writer, out _);
-                if (subscribers.IsEmpty)
-                {
-                    _channels.TryRemove(new KeyValuePair<string, ConcurrentDictionary<ChannelWriter<string>, byte>>(channel, subscribers));
-                    if (!_replayMessages.ContainsKey(channel))
-                    {
-                        _replayLocks.TryRemove(channel, out _);
-                        _replayTouched.TryRemove(channel, out _);
-                    }
-                }
             }
         }
     }
@@ -153,12 +144,6 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
             {
                 _readerToWriter.TryRemove(reader, out _);
             }
-        }
-
-        // Prune only when the channel still maps to this subscriber dictionary.
-        if (subscribersDict.IsEmpty)
-        {
-            _channels.TryRemove(new KeyValuePair<string, ConcurrentDictionary<ChannelWriter<string>, byte>>(channel, subscribersDict));
         }
     }
 
