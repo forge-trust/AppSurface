@@ -57,7 +57,7 @@ These tokens are not a public theming API yet. Hosts should not rely on overridi
 - Prefer layered panels, separators, and subtle fills over heavy boxed cards
 - Result lists should read like an editorial index with strong rows, not isolated product cards
 - Keep shadows minimal; contrast and spacing should carry the layout
-- Homepage navigation rows should use the title and summary as the scan path. Use one quiet trailing affordance for depth, and do not repeat "Open..." labels across Start Here, featured pages, and secondary routes.
+- Homepage navigation rows should use the title and summary as the scan path. Use one quiet trailing chevron or icon affordance for depth, and do not repeat "Open..." labels across Start Here, featured pages, and secondary routes.
 
 ## Styling Boundary
 

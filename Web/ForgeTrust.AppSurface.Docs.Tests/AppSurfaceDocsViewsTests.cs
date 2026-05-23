@@ -780,15 +780,17 @@ public class AppSurfaceDocsViewsTests
 
         Assert.Equal("/docs/sections/start-here", startHereLink.GetAttribute("href"));
         Assert.DoesNotContain("Open Start Here", startHereLink.TextContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("->", startHereLink.TextContent, StringComparison.Ordinal);
         Assert.Contains("Start Here", startHereLink.TextContent, StringComparison.Ordinal);
-        AssertDecorativeArrow(startHereLink);
+        AssertDecorativeChevron(startHereLink);
 
         Assert.Equal("/docs/guides/quickstart", featuredPageLink.GetAttribute("href"));
         Assert.Equal("doc-content", featuredPageLink.GetAttribute("data-turbo-frame"));
         Assert.Equal("advance", featuredPageLink.GetAttribute("data-turbo-action"));
         Assert.DoesNotContain("Open page", featuredPageLink.TextContent, StringComparison.Ordinal);
         Assert.DoesNotContain("Open", featuredPageLink.TextContent, StringComparison.Ordinal);
-        AssertDecorativeArrow(featuredPageLink);
+        Assert.DoesNotContain("->", featuredPageLink.TextContent, StringComparison.Ordinal);
+        AssertDecorativeChevron(featuredPageLink);
 
         Assert.Contains("href=\"/docs/sections/concepts\"", html);
         Assert.Equal("/docs/concepts/deep-dive", routeLink.GetAttribute("href"));
@@ -796,7 +798,8 @@ public class AppSurfaceDocsViewsTests
         Assert.Equal("advance", routeLink.GetAttribute("data-turbo-action"));
         Assert.DoesNotContain("Open page", routeLink.TextContent, StringComparison.Ordinal);
         Assert.DoesNotContain("Open", routeLink.TextContent, StringComparison.Ordinal);
-        AssertDecorativeArrow(routeLink);
+        Assert.DoesNotContain("->", routeLink.TextContent, StringComparison.Ordinal);
+        AssertDecorativeChevron(routeLink);
 
         Assert.Contains("Build the mental model before you choose an implementation path.", html);
         Assert.Contains("Learn the mental model", html);
@@ -4459,11 +4462,17 @@ public class AppSurfaceDocsViewsTests
         return null;
     }
 
-    private static void AssertDecorativeArrow(IElement link)
+    private static void AssertDecorativeChevron(IElement link)
     {
-        var arrow = Assert.Single(link.QuerySelectorAll("span[aria-hidden='true']"));
+        var chevron = Assert.Single(link.QuerySelectorAll("svg[aria-hidden='true']"));
+        var circle = Assert.Single(chevron.QuerySelectorAll("circle"));
+        var path = Assert.Single(chevron.QuerySelectorAll("path"));
 
-        Assert.Contains("->", arrow.TextContent, StringComparison.Ordinal);
+        Assert.Equal("false", chevron.GetAttribute("focusable"));
+        Assert.Equal("10", circle.GetAttribute("cx"));
+        Assert.Equal("10", circle.GetAttribute("cy"));
+        Assert.Equal("7", circle.GetAttribute("r"));
+        Assert.Equal("M8.5 6.75L11.75 10 8.5 13.25", path.GetAttribute("d"));
     }
 
     private sealed class StaticDocHarvester : IDocHarvester
