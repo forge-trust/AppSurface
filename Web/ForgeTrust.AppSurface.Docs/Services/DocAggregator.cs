@@ -2383,7 +2383,12 @@ public class DocAggregator
         var relativeDirectory = Path.GetDirectoryName(normalizedPath);
         var introDirectory = string.IsNullOrWhiteSpace(relativeDirectory)
             ? repositoryRoot
-            : Path.Join(repositoryRoot, NormalizeRelativeDirectory(relativeDirectory));
+            : ResolveRepositoryRelativeDirectory(repositoryRoot, introPath, relativeDirectory);
+        if (string.IsNullOrWhiteSpace(introDirectory))
+        {
+            return [];
+        }
+
         if (!Directory.Exists(introDirectory))
         {
             return [];
@@ -2395,13 +2400,45 @@ public class DocAggregator
             .ToArray();
     }
 
-    private static string NormalizeRelativeDirectory(string relativeDirectory)
+    private static string? ResolveRepositoryRelativeDirectory(
+        string repositoryRoot,
+        string introPath,
+        string relativeDirectory)
     {
-        return relativeDirectory.Trim().TrimStart(
-            Path.DirectorySeparatorChar,
-            Path.AltDirectorySeparatorChar,
-            '/',
-            '\\');
+        if (!IsRepositoryRelativeDocPath(introPath) || HasTraversalSegment(relativeDirectory))
+        {
+            return null;
+        }
+
+        var repositoryFullPath = Path.GetFullPath(repositoryRoot);
+        var candidateFullPath = Path.GetFullPath(Path.Join(repositoryFullPath, relativeDirectory.Trim()));
+        return IsPathUnderDirectory(candidateFullPath, repositoryFullPath)
+            ? candidateFullPath
+            : null;
+    }
+
+    private static bool IsRepositoryRelativeDocPath(string path)
+    {
+        var normalized = path.Trim().Replace('\\', '/');
+        return normalized.Length > 0
+               && !normalized.StartsWith("/", StringComparison.Ordinal)
+               && !Regex.IsMatch(normalized, "^[A-Za-z]:/");
+    }
+
+    private static bool HasTraversalSegment(string relativePath)
+    {
+        return relativePath
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+            .Any(segment => segment is "." or "..");
+    }
+
+    private static bool IsPathUnderDirectory(string candidatePath, string directoryPath)
+    {
+        var directory = Path.TrimEndingDirectorySeparator(directoryPath);
+        return string.Equals(candidatePath, directory, StringComparison.Ordinal)
+               || candidatePath.StartsWith(
+                   directory + Path.DirectorySeparatorChar,
+                   StringComparison.Ordinal);
     }
 
     private static IEnumerable<string> EnumerateProjectNamespaceCandidates(string projectFile)

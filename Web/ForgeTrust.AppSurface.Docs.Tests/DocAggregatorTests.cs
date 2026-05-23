@@ -4135,7 +4135,7 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
-    public async Task GetDocsAsync_ShouldTreatRootedNamespaceMdPathAsRepositoryRelative_WhenInferringProject()
+    public async Task GetHarvestHealthAsync_ShouldWarnAndHideNamespaceMd_WhenInferringProjectFromRootedPath()
     {
         var repositoryRoot = CreateTempRepositoryRoot();
         try
@@ -4152,15 +4152,60 @@ public class DocAggregatorTests : IDisposable
             A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
             var aggregator = CreateAggregatorWithRepositoryRoot(harvester, repositoryRoot);
 
-            var docs = (await aggregator.GetDocsAsync()).ToList();
+            var docs = await aggregator.GetDocsAsync();
+            var health = await aggregator.GetHarvestHealthAsync();
 
             Assert.DoesNotContain(docs, d => d.Path == "/Web/ForgeTrust.RazorWire/NAMESPACE.md");
             var namespaceDoc = docs.Single(d => d.Path == "Namespaces/ForgeTrust.RazorWire");
-            Assert.Contains("Rooted namespace intro.", namespaceDoc.Content);
+            Assert.DoesNotContain("Rooted namespace intro.", namespaceDoc.Content);
+            Assert.Contains(
+                health.Diagnostics,
+                diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.NamespaceIntroTargetMissing
+                              && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning);
         }
         finally
         {
             Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldWarnAndHideNamespaceMd_WhenInferringProjectFromTraversalPath()
+    {
+        var repositoryRoot = CreateTempRepositoryRoot();
+        var outsideDirectory = repositoryRoot + "-outside";
+        try
+        {
+            Directory.CreateDirectory(outsideDirectory);
+            await File.WriteAllTextAsync(Path.Join(outsideDirectory, "ForgeTrust.RazorWire.csproj"), "<Project />");
+            var outsideDirectoryName = Path.GetFileName(outsideDirectory);
+            var harvestedDocs = new List<DocNode>
+            {
+                new("RazorWire", "Namespaces/ForgeTrust.RazorWire", "<section class='doc-type'>Generated API body</section>"),
+                new("Namespace", $"../{outsideDirectoryName}/NAMESPACE.md", "<p>Traversal namespace intro.</p>")
+            };
+            var harvester = A.Fake<IDocHarvester>();
+            A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+            var aggregator = CreateAggregatorWithRepositoryRoot(harvester, repositoryRoot);
+
+            var docs = await aggregator.GetDocsAsync();
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            Assert.DoesNotContain(docs, d => d.Path == $"../{outsideDirectoryName}/NAMESPACE.md");
+            var namespaceDoc = docs.Single(d => d.Path == "Namespaces/ForgeTrust.RazorWire");
+            Assert.DoesNotContain("Traversal namespace intro.", namespaceDoc.Content);
+            Assert.Contains(
+                health.Diagnostics,
+                diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.NamespaceIntroTargetMissing
+                              && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+            if (Directory.Exists(outsideDirectory))
+            {
+                Directory.Delete(outsideDirectory, recursive: true);
+            }
         }
     }
 
