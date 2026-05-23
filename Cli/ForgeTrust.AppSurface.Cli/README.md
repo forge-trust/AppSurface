@@ -57,6 +57,7 @@ Options:
 - `--strict`: Enables `AppSurfaceDocs:Harvest:FailOnFailure=true`, which fails startup when every configured harvester fails.
 - `--route-root`: Route-family root for version and archive routes.
 - `--docs-root`: Live docs preview root.
+- `--public-origin`: Public origin used for absolute canonical metadata, such as `https://docs.example.com`. Do not include the docs route path.
 - `--environment`, `-e`: Host environment forwarded to the AppSurface Docs host. Defaults to `Development` so the AppSurface Web deterministic per-workspace localhost URL is used when no endpoint is configured.
 - `--startup-timeout-seconds`: Seconds to wait for the web host to start before failing fast. Defaults to `10`; use `0` to disable while investigating intentional pre-bind delays.
 
@@ -83,6 +84,7 @@ Options:
 - `--strict`: Enables `AppSurfaceDocs:Harvest:FailOnFailure=true`, which fails startup when every configured harvester fails. This is separate from `--mode cdn`, which validates the emitted static artifact and preserves `RWEXPORT00x` diagnostics.
 - `--route-root`: Route-family root for version and archive routes.
 - `--docs-root`: Live docs root. When `--seeds` is omitted, export seeds `/` and this resolved docs root, `/docs` by default.
+- `--public-origin`: Public origin used for absolute canonical metadata in exported pages, such as `https://docs.example.com`. The export host still crawls loopback internally; this option keeps public canonical links from using that private listener.
 - `--environment`, `-e`: Host environment forwarded to the AppSurface Docs host. Defaults to `Production` for export.
 - `--startup-timeout-seconds`: Seconds to wait for the in-process AppSurface Docs host to start before failing fast. Defaults to `10`; use `0` to disable while investigating intentional pre-bind delays.
 
@@ -97,6 +99,7 @@ Migration map for repo-owned AppSurface Docs export:
 | `--mode cdn` | `--mode cdn` |
 | `--seeds <file>` | `--seeds <file>` |
 | `--output <dir>` | `--output <dir>` |
+| `AppSurfaceDocs__Routing__PublicOrigin=https://docs.example.com` | `--public-origin https://docs.example.com` |
 | `--project`, `--dll`, `--url`, `--app-args`, `--no-build`, `--framework` | remain RazorWire-only for arbitrary app export |
 
 ## Development

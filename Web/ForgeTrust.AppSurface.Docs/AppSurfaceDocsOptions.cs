@@ -547,6 +547,18 @@ public sealed class AppSurfaceDocsRoutingOptions
     /// with the route-family root or its reserved archive/exact-version children when versioning is enabled.
     /// </remarks>
     public string? DocsRootPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the public origin used when AppSurface Docs renders absolute canonical metadata.
+    /// </summary>
+    /// <remarks>
+    /// This value is optional. When omitted, details pages keep app-relative canonical links so local preview and unknown
+    /// deployment environments do not leak an inferred host name. When set, it must be an absolute <c>http</c> or
+    /// <c>https</c> origin such as <c>https://docs.example.com</c>. Do not include <see cref="RouteRootPath"/>,
+    /// <see cref="DocsRootPath"/>, a query string, or a fragment; AppSurface Docs joins the origin to the canonical route
+    /// it already knows for the current page.
+    /// </remarks>
+    public string? PublicOrigin { get; set; }
 }
 
 /// <summary>
@@ -977,6 +989,13 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                 failures.Add(
                     "AppSurfaceDocs:Routing:DocsRootPath must be an app-relative path such as '/docs/next', 'docs/next', '/foo/bar/next', or 'foo/bar/next'. It must not end with '/', include a query or fragment, or use an absolute URL.");
                 docsRootPathIsValid = false;
+            }
+
+            if (routing.PublicOrigin is not null
+                && !DocsUrlBuilder.TryNormalizePublicOrigin(routing.PublicOrigin, out _))
+            {
+                failures.Add(
+                    "AppSurfaceDocs:Routing:PublicOrigin must be an absolute http or https origin such as 'https://docs.example.com'. Configure only the origin: do not include a docs path, query string, fragment, userinfo, or unsupported URL scheme.");
             }
 
             if (routeRootPathIsValid && docsRootPathIsValid)

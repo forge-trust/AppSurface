@@ -1292,6 +1292,55 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceDocs_ShouldNormalizeRoutingPublicOrigin()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Routing:PublicOrigin"] = " https://forge-trust.com/ "
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.NotNull(options.Routing);
+        Assert.Equal("https://forge-trust.com", options.Routing.PublicOrigin);
+    }
+
+    [Theory]
+    [InlineData("https://forge-trust.com/docs")]
+    [InlineData("https://forge-trust.com?x=1")]
+    [InlineData("https://forge-trust.com#docs")]
+    [InlineData("https://user@forge-trust.com")]
+    [InlineData("ftp://forge-trust.com")]
+    [InlineData("forge-trust.com")]
+    public void Validator_ShouldRejectInvalidRoutingPublicOrigin(string publicOrigin)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Routing = new AppSurfaceDocsRoutingOptions
+            {
+                PublicOrigin = publicOrigin
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("AppSurfaceDocs:Routing:PublicOrigin", StringComparison.OrdinalIgnoreCase)
+                       && failure.Contains("origin", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Validator_ShouldRejectNullHarvestOptions()
     {
         var validator = new AppSurfaceDocsOptionsValidator();

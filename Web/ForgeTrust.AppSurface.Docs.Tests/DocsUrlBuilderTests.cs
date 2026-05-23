@@ -282,6 +282,89 @@ public sealed class DocsUrlBuilderTests
     }
 
     [Fact]
+    public void BuildCanonicalHref_ShouldPreserveAppRelativeCanonicalUrl_WhenPublicOriginIsUnset()
+    {
+        var builder = new DocsUrlBuilder(new AppSurfaceDocsOptions());
+
+        Assert.Null(builder.PublicOrigin);
+        Assert.Equal("/docs/guides/intro", builder.BuildCanonicalHref("/docs/guides/intro"));
+    }
+
+    [Fact]
+    public void BuildCanonicalHref_ShouldJoinConfiguredPublicOrigin()
+    {
+        var builder = new DocsUrlBuilder(
+            new AppSurfaceDocsOptions
+            {
+                Routing = new AppSurfaceDocsRoutingOptions
+                {
+                    PublicOrigin = " https://forge-trust.com/ "
+                }
+            });
+
+        Assert.Equal("https://forge-trust.com", builder.PublicOrigin);
+        Assert.Equal(
+            "https://forge-trust.com/docs/guides/intro",
+            builder.BuildCanonicalHref("/docs/guides/intro"));
+    }
+
+    [Fact]
+    public void BuildCanonicalHref_ShouldPreserveRootMountedAndVersionedRouteIdentity()
+    {
+        var builder = new DocsUrlBuilder(
+            new AppSurfaceDocsOptions
+            {
+                Routing = new AppSurfaceDocsRoutingOptions
+                {
+                    RouteRootPath = "/",
+                    PublicOrigin = "https://docs.example.com"
+                },
+                Versioning = new AppSurfaceDocsVersioningOptions
+                {
+                    Enabled = true,
+                    CatalogPath = "catalog.json"
+                }
+            });
+
+        Assert.Equal("https://docs.example.com/install", builder.BuildCanonicalHref("/install"));
+        Assert.Equal(
+            "https://docs.example.com/v/0.1/install",
+            builder.BuildCanonicalHref(builder.BuildVersionDocUrl("0.1", "install")));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("docs/guides/intro")]
+    [InlineData("//docs.example.com/guides/intro")]
+    [InlineData("https://docs.example.com/docs/guides/intro")]
+    public void BuildCanonicalHref_ShouldRejectNonAppRelativeCanonicalInput(string canonicalUrl)
+    {
+        var builder = new DocsUrlBuilder(new AppSurfaceDocsOptions());
+
+        Assert.ThrowsAny<ArgumentException>(() => builder.BuildCanonicalHref(canonicalUrl));
+    }
+
+    [Theory]
+    [InlineData("https://forge-trust.com/docs")]
+    [InlineData("https://forge-trust.com?x=1")]
+    [InlineData("https://forge-trust.com#docs")]
+    [InlineData("https://user@forge-trust.com")]
+    [InlineData("ftp://forge-trust.com")]
+    [InlineData("forge-trust.com")]
+    public void Constructor_ShouldRejectInvalidPublicOrigin(string publicOrigin)
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Routing = new AppSurfaceDocsRoutingOptions
+            {
+                PublicOrigin = publicOrigin
+            }
+        };
+
+        Assert.Throws<ArgumentException>(() => new DocsUrlBuilder(options));
+    }
+
+    [Fact]
     public void Builder_ShouldHandleRootMountedDocsSurfaceWithoutDoubleSlashes()
     {
         var builder = new DocsUrlBuilder(

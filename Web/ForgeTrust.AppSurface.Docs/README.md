@@ -472,6 +472,26 @@ Default routing:
 
 AppSurface Docs registers only the configured docs routes. It does not add a generic `{controller}/{action}` fallback to the host application, so custom docs roots stay isolated from other modules and application routes.
 
+### Public canonical origin
+
+Set `AppSurfaceDocs:Routing:PublicOrigin` when a preview or export host listens on one origin but published metadata should name another origin:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Routing": {
+      "PublicOrigin": "https://docs.example.com"
+    }
+  }
+}
+```
+
+`PublicOrigin` affects canonical metadata only. AppSurface Docs still chooses the page route from `RouteRootPath`, `DocsRootPath`, versioning settings, and page metadata before joining that route to the configured origin. For example, `PublicOrigin=https://docs.example.com` and the default docs root render a detail page canonical href such as `https://docs.example.com/docs/guides/intro`.
+
+Use `PublicOrigin` for static export, reverse-proxied docs hosts, and CI hosts that crawl an internal loopback URL while publishing to a stable public domain. Leave it unset for local preview, ephemeral review apps, or deployments where AppSurface Docs should keep app-relative canonical links.
+
+Configure only the origin: scheme, host, and optional port. Values such as `https://docs.example.com/docs`, `https://docs.example.com?x=1`, `https://user:pass@docs.example.com`, or `ftp://docs.example.com` are invalid. Put route paths in `RouteRootPath` and `DocsRootPath`, not in `PublicOrigin`.
+
 ### Route references
 
 Consumers should resolve `DocsUrlBuilder` and use `DocsUrlBuilder.Routes` instead of hardcoding route strings:
@@ -736,6 +756,12 @@ Pitfalls:
   - `/` is supported for single-purpose unversioned docs hosts.
   - The path must be app-relative, must not end with `/` except for `/`, and cannot contain query or fragment segments.
   - When versioning is on, it cannot equal the route root and cannot use the route root's reserved archive or exact-version children, such as `/foo/bar/versions`, `/foo/bar/v`, or `/foo/bar/v/1.2.3`.
+- `AppSurfaceDocs:Routing:PublicOrigin`
+  - Optional public origin used when rendering absolute canonical metadata.
+  - When omitted, details pages render app-relative canonical links.
+  - When set, it must be an absolute `http` or `https` origin such as `https://docs.example.com` or `https://docs.example.com:8443`.
+  - The value is normalized during `AddAppSurfaceDocs()` post-configuration and must not include a docs path, query string, fragment, userinfo, or non-HTTP(S) scheme.
+  - This setting does not move docs routes. Use `RouteRootPath` and `DocsRootPath` for path routing, then use `PublicOrigin` only for the host portion of canonical metadata.
 - `AppSurfaceDocs:Localization:Enabled`
   - Defaults to `false`.
   - When `false`, AppSurface Docs keeps existing routes, visible UI, and search payload behavior.
@@ -1239,6 +1265,7 @@ This means a link is rewritten only when the target exists in the harvested docs
 - If a doc link is not rewritten, first confirm the target file is included by the active harvester and not excluded by directory policy.
 - Public docs-surface links are safe for exported docs, but source-relative Markdown links are usually easier to keep portable in GitHub and editor previews.
 - Details pages emit a canonical link for the clean public route. In CDN export mode, RazorWire rewrites app-relative canonical links to the emitted static artifact URL, such as `/docs/guides/intro.html`, so exported pages and redirect alias artifacts agree on the same static canonical destination.
+- Set `AppSurfaceDocs:Routing:PublicOrigin` before export when the crawl happens on loopback but the artifact will publish under a public origin. Otherwise canonical links stay app-relative instead of naming the production host.
 
 ## Landing Curation
 

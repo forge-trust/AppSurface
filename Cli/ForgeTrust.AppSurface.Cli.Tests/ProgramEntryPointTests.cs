@@ -48,6 +48,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("docs export", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--repo", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--public-origin", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--startup-timeout-seconds", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
@@ -67,6 +68,7 @@ public sealed class ProgramEntryPointTests
                 "--strict",
                 "--route-root", "/reference",
                 "--docs-root", "/reference/next",
+                "--public-origin", "https://forge-trust.com",
                 "--environment", "Development"
             ],
             options => RegisterRunner(options, runner));
@@ -83,6 +85,8 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("/reference", runner.Args);
         Assert.Contains("--AppSurfaceDocs:Routing:DocsRootPath", runner.Args);
         Assert.Contains("/reference/next", runner.Args);
+        Assert.Contains("--AppSurfaceDocs:Routing:PublicOrigin", runner.Args);
+        Assert.Contains("https://forge-trust.com", runner.Args);
         Assert.Contains("--environment", runner.Args);
         Assert.Contains("Development", runner.Args);
         Assert.Equal(TimeSpan.FromSeconds(10), runner.StartupTimeout);
@@ -338,6 +342,7 @@ public sealed class ProgramEntryPointTests
                 "--strict",
                 "--route-root", "/reference",
                 "--docs-root", "/reference/next",
+                "--public-origin", "https://forge-trust.com",
                 "--environment", "Development",
                 "--startup-timeout-seconds", "2"
             ],
@@ -360,6 +365,8 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("/reference", args.HostArgs.Args);
         Assert.Contains("--AppSurfaceDocs:Routing:DocsRootPath", args.HostArgs.Args);
         Assert.Contains("/reference/next", args.HostArgs.Args);
+        Assert.Contains("--AppSurfaceDocs:Routing:PublicOrigin", args.HostArgs.Args);
+        Assert.Contains("https://forge-trust.com", args.HostArgs.Args);
         Assert.Equal(TimeSpan.FromSeconds(2), args.HostArgs.StartupTimeout);
     }
 
@@ -611,6 +618,35 @@ public sealed class ProgramEntryPointTests
         {
             Directory.SetCurrentDirectory(previousDirectory);
         }
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_Render_PublicOrigin_Canonical_From_ExportHost()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        var guidesDirectory = Path.Join(repository.Path, "guides");
+        Directory.CreateDirectory(guidesDirectory);
+        await File.WriteAllTextAsync(Path.Join(repository.Path, "README.md"), "# AppSurface Docs\n");
+        await File.WriteAllTextAsync(Path.Join(guidesDirectory, "intro.md"), "# Intro\n\nStart here.\n");
+        var exporter = new CanonicalInspectingStaticExporter(
+            "/docs/guides/intro",
+            """<link rel="canonical" href="https://forge-trust.com/docs/guides/intro" />""",
+            "127.0.0.1");
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            NullLogger<AppSurfaceDocsInProcessExportRunner>.Instance,
+            exporter);
+
+        await runner.ExportAsync(
+            CreateExportArgs(
+                repository.Path,
+                output.Path,
+                TimeSpan.FromSeconds(10),
+                "--AppSurfaceDocs:Routing:PublicOrigin",
+                "https://forge-trust.com"),
+            CancellationToken.None);
+
+        Assert.True(exporter.Inspected);
     }
 
     [Fact]
@@ -1030,16 +1066,21 @@ public sealed class ProgramEntryPointTests
     private static AppSurfaceDocsExportArgs CreateExportArgs(
         string repositoryPath,
         string outputPath,
-        TimeSpan? startupTimeout)
+        TimeSpan? startupTimeout,
+        params string[] additionalHostArgs)
     {
+        var args = new List<string>
+        {
+            "--AppSurfaceDocs:Source:RepositoryRoot",
+            repositoryPath,
+            "--environment",
+            "Production"
+        };
+        args.AddRange(additionalHostArgs);
+
         var hostArgs = new AppSurfaceDocsHostArgs(
             repositoryPath,
-            [
-                "--AppSurfaceDocs:Source:RepositoryRoot",
-                repositoryPath,
-                "--environment",
-                "Production"
-            ],
+            args.ToArray(),
             startupTimeout,
             "Production");
 
@@ -1181,6 +1222,34 @@ public sealed class ProgramEntryPointTests
             Context = context;
             WorkingDirectoryDuringExport = Directory.GetCurrentDirectory();
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CanonicalInspectingStaticExporter(
+        string route,
+        string expectedCanonicalLink,
+        string forbiddenCanonicalOrigin) : IRazorWireStaticExporter
+    {
+        public bool Inspected { get; private set; }
+
+        public async Task ExportAsync(ExportContext context, CancellationToken cancellationToken)
+        {
+            using var client = new HttpClient
+            {
+                BaseAddress = new Uri(context.BaseUrl)
+            };
+
+            var html = await client.GetStringAsync(route, cancellationToken);
+            Assert.Contains(expectedCanonicalLink, html, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                $"rel=\"canonical\" href=\"http://{forbiddenCanonicalOrigin}",
+                html,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                $"rel=\"canonical\" href=\"https://{forbiddenCanonicalOrigin}",
+                html,
+                StringComparison.Ordinal);
+            Inspected = true;
         }
     }
 

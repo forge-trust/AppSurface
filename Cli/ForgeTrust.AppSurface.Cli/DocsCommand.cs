@@ -358,6 +358,17 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     public string? DocsRootPath { get; init; }
 
     /// <summary>
+    /// Gets the public origin used for absolute AppSurface Docs canonical metadata.
+    /// </summary>
+    /// <remarks>
+    /// Use this for published docs exports when the public host is known, for example
+    /// <c>--public-origin https://docs.example.com</c>. Configure only the origin; route paths such as
+    /// <c>/docs</c> come from <see cref="RouteRootPath"/> and <see cref="DocsRootPath"/>.
+    /// </remarks>
+    [CommandOption("public-origin", Description = "Public origin used for absolute AppSurface Docs canonical metadata.")]
+    public string? PublicOrigin { get; init; }
+
+    /// <summary>
     /// Gets the host environment forwarded to the AppSurface Docs standalone host.
     /// </summary>
     /// <remarks>
@@ -434,6 +445,7 @@ internal abstract class AppSurfaceDocsRepositoryCommand
 
         AddOptional(args, "--AppSurfaceDocs:Routing:RouteRootPath", RouteRootPath);
         AddOptional(args, "--AppSurfaceDocs:Routing:DocsRootPath", DocsRootPath);
+        AddOptional(args, "--AppSurfaceDocs:Routing:PublicOrigin", PublicOrigin);
         AddOptional(args, "--environment", environmentName);
 
         return new AppSurfaceDocsHostArgs(repositoryRoot, args.ToArray(), ResolveStartupTimeout(), environmentName);

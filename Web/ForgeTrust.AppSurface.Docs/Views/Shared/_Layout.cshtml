@@ -16,6 +16,9 @@
     var docsSearchClientUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "search-client.js"));
     var docsBrandIconUrl = Url.Content(AssetPathResolver.BrandIconPath);
     var canonicalUrl = ViewData["CanonicalUrl"] as string;
+    var canonicalHref = string.IsNullOrWhiteSpace(canonicalUrl)
+        ? string.Empty
+        : Url.PathBaseAware(DocsUrlBuilder.BuildCanonicalHref(canonicalUrl));
     var docsClientConfigJson = JsonSerializer.Serialize(
         new
         {
@@ -35,9 +38,9 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>@ViewData["Title"] - @docsIdentity.DisplayName</title>
-    @if (!string.IsNullOrWhiteSpace(canonicalUrl))
+    @if (!string.IsNullOrWhiteSpace(canonicalHref))
     {
-        <link rel="canonical" href="@Url.PathBaseAware(canonicalUrl)" />
+        <link rel="canonical" href="@canonicalHref" />
     }
     @if (docsIdentity.Favicons.Count == 0)
     {

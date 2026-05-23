@@ -142,6 +142,15 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Routing.DocsRootPath = string.IsNullOrWhiteSpace(configuredDocsRootPath)
                         ? DocsUrlBuilder.ResolveDefaultDocsRootPath(options.Routing.RouteRootPath, options.Versioning.Enabled)
                         : normalizedDocsRootPath;
+                    if (DocsUrlBuilder.TryNormalizePublicOrigin(options.Routing.PublicOrigin, out var normalizedPublicOrigin))
+                    {
+                        options.Routing.PublicOrigin = normalizedPublicOrigin;
+                    }
+                    else
+                    {
+                        options.Routing.PublicOrigin = NormalizeOrNull(options.Routing.PublicOrigin);
+                    }
+
                     options.Versioning.CatalogPath = NormalizeOrNull(options.Versioning.CatalogPath);
                     options.Contributor.SymbolSourceUrlTemplate = NormalizeOrNull(options.Contributor.SymbolSourceUrlTemplate);
                     options.Contributor.SourceRef = NormalizeOrNull(options.Contributor.SourceRef);
