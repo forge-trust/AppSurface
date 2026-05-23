@@ -4,6 +4,7 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOLUTION_PATH="${1:-$ROOT_DIR/ForgeTrust.AppSurface.slnx}"
 OUTPUT_DIR="${2:-$ROOT_DIR/TestResults/coverage-merged}"
+BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-Debug}"
 INCLUDE_FILTER="${INCLUDE_FILTER:-[ForgeTrust.AppSurface.*]*}"
 EXCLUDE_FILTER="${EXCLUDE_FILTER:-[*.Tests]*,[*.IntegrationTests]*}"
 EXCLUDE_FILTER="${EXCLUDE_FILTER//,/%2c}"
@@ -32,7 +33,7 @@ if [[ "${#test_projects[@]}" -eq 0 ]]; then
 fi
 
 echo "Building solution..."
-if ! dotnet build "$SOLUTION_PATH" -v minimal; then
+if ! dotnet build "$SOLUTION_PATH" --configuration "$BUILD_CONFIGURATION" -v minimal; then
   echo "Build failed for $SOLUTION_PATH" >&2
   exit 1
 fi
@@ -51,8 +52,11 @@ for i in "${!test_projects[@]}"; do
 
   args=(
     dotnet test "$project_path"
+    --configuration "$BUILD_CONFIGURATION"
     --no-build
     -v minimal
+    "--logger:GitHubActions;report-warnings=false"
+    "--logger:junit;LogFilePath=junit.xml"
     /p:CollectCoverage=true
     "/p:CoverletOutput=$OUTPUT_DIR/coverage"
     "/p:CoverletOutputFormat=json%2ccobertura"
