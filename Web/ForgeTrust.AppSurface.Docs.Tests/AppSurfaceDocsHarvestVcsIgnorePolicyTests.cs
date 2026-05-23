@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -334,6 +335,39 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         var diagnostics = collector.CreateSnapshot(enabled: true);
 
         Assert.Equal(2, diagnostics.Warnings.Count);
+    }
+
+    [Fact]
+    public async Task CreateHealthDiagnostics_WhenIgnoreFileCannotBeReadReturnsWarning()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await WriteAsync(".gitignore", "generated/\n");
+        var ignorePath = Path.Join(_root, ".gitignore");
+        File.SetUnixFileMode(ignorePath, UnixFileMode.UserWrite);
+
+        try
+        {
+            var policy = new AppSurfaceDocsHarvestVcsIgnorePolicy(
+                _root,
+                new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+                NullLogger.Instance);
+
+            var match = policy.EvaluateFile("README.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+            var diagnostics = policy.CreateHealthDiagnostics();
+
+            Assert.Null(match);
+            var warning = Assert.Single(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.VcsIgnoreWarning);
+            Assert.Equal(DocHarvestDiagnosticSeverity.Warning, warning.Severity);
+            Assert.Contains("could not read", warning.Problem, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.SetUnixFileMode(ignorePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
     }
 
     [Fact]

@@ -384,6 +384,27 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceDocs_ShouldDefaultBlankLocalizationDefaultLocaleToEnglish()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Localization:DefaultLocale"] = " "
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal("en", options.Localization.DefaultLocale);
+    }
+
+    [Fact]
     public void AddAppSurfaceDocs_ShouldBindAndNormalizeConfiguredLocalizationOptions()
     {
         var services = new ServiceCollection();

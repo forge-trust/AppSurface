@@ -509,15 +509,16 @@ public class DocAggregator
             return DefaultHarvesterTimeout;
         }
 
-        if (harvesterTimeout <= TimeSpan.Zero)
+        var resolvedHarvesterTimeout = harvesterTimeout.Value;
+        if (resolvedHarvesterTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(harvesterTimeout),
-                harvesterTimeout,
+                resolvedHarvesterTimeout,
                 "AppSurface Docs harvester timeout must be a positive value.");
         }
 
-        return harvesterTimeout.Value;
+        return resolvedHarvesterTimeout;
     }
 
     private static string ResolveRepositoryRoot(
