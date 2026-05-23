@@ -1,11 +1,9 @@
-using System.Text.RegularExpressions;
-
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
 /// Applies page-shell heading rules to harvested documentation HTML at render time.
 /// </summary>
-internal static partial class AppSurfaceDocsHeadingSuppressor
+internal static class AppSurfaceDocsHeadingSuppressor
 {
     /// <summary>
     /// Removes the leading rendered Markdown <c>h1</c> element when the details page shell already renders the page H1.
@@ -30,27 +28,51 @@ internal static partial class AppSurfaceDocsHeadingSuppressor
             return content;
         }
 
-        return StartsWithMarkdownH1Candidate(content)
-            ? LeadingH1Regex().Replace(content, string.Empty, count: 1)
-            : content;
+        var headingStart = GetFirstMeaningfulTokenIndex(content);
+        if (headingStart < 0 || !StartsWithH1StartTag(content, headingStart))
+        {
+            return content;
+        }
+
+        var openTagEnd = content.IndexOf('>', headingStart);
+        if (openTagEnd < 0)
+        {
+            return content;
+        }
+
+        var closeTagStart = content.IndexOf("</h1", openTagEnd + 1, StringComparison.OrdinalIgnoreCase);
+        if (closeTagStart < 0)
+        {
+            return content;
+        }
+
+        var closeTagEnd = content.IndexOf('>', closeTagStart + 4);
+        if (closeTagEnd < 0)
+        {
+            return content;
+        }
+
+        var contentStart = closeTagEnd + 1;
+        while (contentStart < content.Length && char.IsWhiteSpace(content[contentStart]))
+        {
+            contentStart++;
+        }
+
+        return content[contentStart..];
     }
 
-    [GeneratedRegex(@"\A(?:[\uFEFF\s]|<!--.*?-->)*<h1\b[^>]*>.*?</h1>\s*", RegexOptions.IgnoreCase | RegexOptions.Singleline, matchTimeoutMilliseconds: 100)]
-    private static partial Regex LeadingH1Regex();
-
     /// <summary>
-    /// Performs a cheap prefix scan for content that can safely be passed to the leading-H1 regex.
+    /// Finds the first non-trivia token in harvested HTML.
     /// </summary>
-    /// <param name="content">The harvested HTML body that may begin with whitespace, a BOM, comments, or an <c>h1</c>.</param>
+    /// <param name="content">The harvested HTML body that may begin with whitespace, a BOM, comments, or content.</param>
     /// <returns>
-    /// <c>true</c> when the first meaningful token is an <c>h1</c> start tag; otherwise <c>false</c>, including when
-    /// an opening HTML comment is unterminated.
+    /// The index of the first non-trivia token, or <c>-1</c> when the body is empty or contains only ignorable trivia.
     /// </returns>
     /// <remarks>
-    /// This keeps the regex on the intended fast path and preserves authored content that starts with anything other
-    /// than ignorable leading trivia followed by Markdown's rendered page heading.
+    /// Only leading comments are skipped. Other elements, text, or malformed comments remain authored content and are
+    /// preserved by the suppressor.
     /// </remarks>
-    private static bool StartsWithMarkdownH1Candidate(string content)
+    private static int GetFirstMeaningfulTokenIndex(string content)
     {
         var index = 0;
         while (index < content.Length)
@@ -67,16 +89,29 @@ internal static partial class AppSurfaceDocsHeadingSuppressor
                 var commentEnd = content.IndexOf("-->", index + 4, StringComparison.Ordinal);
                 if (commentEnd < 0)
                 {
-                    return false;
+                    return index;
                 }
 
                 index = commentEnd + 3;
                 continue;
             }
 
-            return content.AsSpan(index).StartsWith("<h1", StringComparison.OrdinalIgnoreCase);
+            return index;
         }
 
-        return false;
+        return -1;
+    }
+
+    private static bool StartsWithH1StartTag(string content, int index)
+    {
+        var remaining = content.AsSpan(index);
+        return remaining.StartsWith("<h1", StringComparison.OrdinalIgnoreCase)
+            && remaining.Length > 3
+            && IsTagNameBoundary(remaining[3]);
+    }
+
+    private static bool IsTagNameBoundary(char value)
+    {
+        return char.IsWhiteSpace(value) || value is '>' or '/';
     }
 }

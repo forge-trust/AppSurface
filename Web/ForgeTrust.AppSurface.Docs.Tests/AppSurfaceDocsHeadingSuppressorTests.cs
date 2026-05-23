@@ -45,6 +45,27 @@ public class AppSurfaceDocsHeadingSuppressorTests
     }
 
     [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldKeepH10_WhenBodyStartsWithDifferentElement()
+    {
+        var content = "<h10>Not a page heading</h10>\n<p>Body</p>";
+
+        var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal(content, suppressed);
+    }
+
+    [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldRemoveLargeLeadingH1_WithoutRegexTimeout()
+    {
+        var headingText = new string('A', 200_000);
+        var content = $"<!-- docs:snippet start -->\n<h1>{headingText}</h1>\n<p>Body</p>";
+
+        var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal("<p>Body</p>", suppressed);
+    }
+
+    [Fact]
     public void SuppressLeadingMarkdownH1_ShouldKeepContent_WhenLeadingCommentIsNotFollowedByH1()
     {
         var content = "<!-- docs:snippet start -->\n<p>Intro</p>\n<h1 id=\"deep-cut\">Deep Cut</h1>";
