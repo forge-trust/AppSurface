@@ -62,6 +62,7 @@ jobs:
       - name: Run tests
         run: |
           dotnet test --configuration Release --no-build --verbosity normal \
+          -m:1 \
           /p:CollectCoverage=true \
           /p:CoverletOutputFormat=cobertura \
           /p:CoverletOutput=TestResults/ \
