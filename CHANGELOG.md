@@ -29,6 +29,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs detail pages now expose copy-link actions for outline rows and section headers so readers can share deep links without navigating away from their current position.
 - AppSurface Docs now exposes `DocAggregator.GetHarvestHealthAsync(...)` plus structured harvest health models so hosts can distinguish healthy, empty, degraded, and all-failed source harvest snapshots without parsing logs.
 - AppSurface Docs hosts, preview runs, and static exports can now set a public canonical origin so metadata names the published domain even when the host is crawled through loopback.
+- AppSurface Docs generated C# and JavaScript API documentation now carries source-language metadata, renders language chips, and exposes a searchable `Language` facet.
 - AppSurface Docs cold requests now show a RazorWire-powered harvest observatory while the first source snapshot is being assembled, with background startup warmup, operator-safe progress, and local testing delays for deterministic QA.
 - RazorWire streams now support opt-in bounded replay, letting late subscribers receive the latest retained state snapshots before live stream events.
 - AppSurface Caching now supports absolute stale-while-revalidate memo policies so callers can serve bounded stale data immediately while one background refresh updates the cached value.
