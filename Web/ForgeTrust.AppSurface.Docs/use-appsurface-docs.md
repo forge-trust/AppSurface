@@ -140,7 +140,7 @@ Start with pages that answer adoption questions before you tune visuals:
 - `examples/.../README.md` for exportable proof paths.
 - `releases/README.md`, `CHANGELOG.md`, or upgrade-policy pages when release risk matters.
 - Troubleshooting pages for the failure modes your users actually hit.
-- Namespace README files under a docs-owned namespace folder, such as `Docs/ForgeTrust.RazorWire/README.md`, when generated API reference needs human orientation above the symbol list.
+- `NAMESPACE.md` files beside package/project files when generated API reference needs human orientation above the symbol list. Docs-owned namespace README files such as `docs/ForgeTrust.RazorWire/README.md` are still supported for portable folder-index layouts, but `NAMESPACE.md` is the AppSurface house style.
 
 Use sidecar metadata for portability-sensitive files such as README pages:
 
@@ -172,10 +172,11 @@ aliases:
 ---
 ```
 
-For namespace API pages, keep the README as normal Markdown and put entry-point metadata in the sidecar:
+For namespace API pages, keep the intro as normal Markdown and put the namespace target plus entry-point metadata in the sidecar:
 
 ```yaml
-# Docs/ForgeTrust.RazorWire/README.md.yml
+# Web/ForgeTrust.RazorWire/NAMESPACE.md.yml
+namespace: ForgeTrust.RazorWire
 title: ForgeTrust.RazorWire
 summary: Start here for registration, endpoint mapping, and options.
 entry_points:
@@ -187,7 +188,7 @@ entry_points:
     target: ForgeTrust-RazorWire-RazorWireOptions
 ```
 
-The README is consumed into `Namespaces/{Dotted.Namespace}` and removed as a standalone page. Copied source-shaped README URLs redirect to the namespace page. Entry-point `target` values are generated anchors on that namespace page; stale targets render as unlinked rows and produce harvest-health warnings instead of breaking the docs site.
+The namespace intro is consumed into `Namespaces/{Dotted.Namespace}` and removed as a standalone page. Copied source-shaped intro URLs such as `Web/ForgeTrust.RazorWire/NAMESPACE.md` redirect to the namespace page after a successful merge. Entry-point `target` values are generated anchors on that namespace page; stale targets render as unlinked rows and produce harvest-health warnings instead of breaking the docs site. If `NAMESPACE.md` cannot resolve a generated namespace target, AppSurface Docs hides the standalone source and reports a harvest-health warning so the author can add `namespace: ...` or rename the file to an ordinary guide.
 
 For troubleshooting pages that repeat the same H3 headings under each issue, AppSurface Docs automatically keeps the `On this page` outline focused on the H2 issue headings while leaving the H3 headings and hash targets in the rendered page body. Override that only when the repeated H3 entries are genuinely useful as reader waypoints:
 

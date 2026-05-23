@@ -42,6 +42,36 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void Extract_ShouldParseNamespaceMetadata()
+    {
+        var markdown = """
+            ---
+            namespace: ForgeTrust.RazorWire
+            ---
+            # RazorWire
+            """;
+
+        var (_, metadata) = MarkdownFrontMatterParser.Extract(markdown);
+
+        Assert.Equal("ForgeTrust.RazorWire", metadata?.Namespace);
+    }
+
+    [Fact]
+    public void Extract_ShouldTreatBlankNamespaceMetadataAsAbsent()
+    {
+        var markdown = """
+            ---
+            namespace: "   "
+            ---
+            # RazorWire
+            """;
+
+        var (_, metadata) = MarkdownFrontMatterParser.Extract(markdown);
+
+        Assert.Null(metadata?.Namespace);
+    }
+
+    [Fact]
     public void Extract_ShouldParseFriendlyLocalizationMetadata()
     {
         var markdown = """

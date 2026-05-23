@@ -1191,7 +1191,7 @@ public class DocsController : Controller
             docs,
             "Packages",
             "Review package entry points and installation-facing docs.",
-            section: null,
+            DocPublicSection.Packages,
             doc => IsPackageFallbackDoc(doc));
 
         TryAddFallbackBucket(

@@ -125,7 +125,7 @@ The suppression is intentionally narrow:
 
 - It runs only when the details shell renders the H1. C# API reference pages keep their harvested body heading because the shell hides its top H1 for generated API content.
 - It removes only the first body element when that element is an H1. Later H1 elements remain visible because they are body structure, not duplicated chrome.
-- Namespace README intros apply the same rule before the README HTML is wrapped in `.doc-namespace-intro`, so `# Namespace` stays useful in source while the generated namespace shell remains the only page H1.
+- Namespace intros apply the same rule before the intro HTML is wrapped in `.doc-namespace-intro`, so `# Namespace` stays useful in source while the generated namespace shell remains the only page H1.
 - For ordinary Markdown pages, suppression happens at render time. `DocNode.Content`, search extraction, and outline generation still see the harvested document as produced by the harvester.
 - A leading Markdown H1 still participates in title resolution when explicit metadata `title` is absent, so README-style pages keep their authored title in the shell after the body H1 is suppressed.
 
@@ -1007,7 +1007,7 @@ Custom harvesters can populate `DocNode.SymbolSourceProvenance`, but AppSurface 
 
 AppSurface Docs expands or removes those placeholders during snapshot generation before HTML sanitization runs. If a placeholder has no safe href, if the source path is not repository-relative, if the line number is invalid, if duplicate placeholders make an anchor ambiguous, or if multiple provenance entries claim the same anchor, AppSurface Docs omits the symbol link. A missing link is better than a confident wrong line.
 
-When a namespace README is merged into a generated namespace API page, the page-level strip still points to the README source and uses the label `Namespace intro source`. The generated API symbols on the same page use their own inline `Source` links.
+When a namespace intro is merged into a generated namespace API page, the page-level strip still points to the intro source and uses the label `Namespace intro source`. The generated API symbols on the same page use their own inline `Source` links.
 
 ### Page-level overrides
 
@@ -1047,15 +1047,22 @@ This keeps AppSurface Docs from inventing fake precision for pages that do not h
 - Do not expect shallow CI clones to populate `Last updated`. AppSurface Docs degrades safely by omitting freshness when history is unavailable. In GitHub Actions, prefer `actions/checkout` with `fetch-depth: 0` for pages that should surface git-backed freshness.
 - Do not add `{line}` to `SourceUrlTemplate`; use `SymbolSourceUrlTemplate` for symbol links so Markdown page provenance keeps working.
 - Do not invent additional `SymbolSourceUrlTemplate` tokens. AppSurface Docs rejects unsupported placeholders such as `{commit}` or `{linen}` instead of rendering silently broken links.
-- Do not expect automatic edit links on namespace-synthetic API pages. Symbol links point to source browsing locations, while README-authored namespace intros keep the page-level edit link.
+- Do not expect automatic edit links on namespace-synthetic API pages. Symbol links point to source browsing locations, while authored namespace intros keep the page-level edit link.
 
-## Namespace README Intros
+## Namespace Intros
 
-AppSurface Docs can merge an authored `README.md` into a generated namespace API page so teams can explain a namespace in prose without replacing the generated symbol list.
+AppSurface Docs can merge authored namespace-intro Markdown into a generated namespace API page so teams can explain a namespace in prose without replacing the generated symbol list. AppSurface-authored package/project namespace intros should use `NAMESPACE.md`; docs-owned namespace `README.md` paths remain supported for compatibility.
 
 ### Authoring contract
 
-A README qualifies as a namespace intro only when all of these are true:
+`NAMESPACE.md` qualifies as a namespace intro only when all of these are true:
+
+- The C# API harvester generated a namespace page at `Namespaces/{Dotted.Namespace}`.
+- The authored file is named `NAMESPACE.md`.
+- The file is harvested as a root documentation node, not as a child fragment.
+- `NAMESPACE.md.yml` declares `namespace: Dotted.Namespace`, or exactly one colocated `.csproj` resolves by `RootNamespace`, `AssemblyName`, project filename, or folder name to an existing generated namespace page.
+
+Compatibility README paths qualify only when all of these are true:
 
 - The C# API harvester generated a namespace page at `Namespaces/{Dotted.Namespace}`.
 - The authored file is named `README.md`.
@@ -1065,8 +1072,9 @@ A README qualifies as a namespace intro only when all of these are true:
 
 Positive examples:
 
-| README path | Merged target |
+| Source path | Merged target |
 | --- | --- |
+| `Web/ForgeTrust.RazorWire/NAMESPACE.md` | `Namespaces/ForgeTrust.RazorWire` |
 | `docs/ForgeTrust.AppSurface.Web/README.md` | `Namespaces/ForgeTrust.AppSurface.Web` |
 | `Namespaces/ForgeTrust.AppSurface.Web/README.md` | `Namespaces/ForgeTrust.AppSurface.Web` |
 
@@ -1082,20 +1090,21 @@ Negative examples:
 ### Merge behavior
 
 - The generated namespace page keeps its `Namespaces/{Dotted.Namespace}` route.
-- Child namespace links render first when the generated page has them, then README HTML is inserted as the namespace intro, then any `Common entry points` panel renders before generated type and member detail.
-- A leading README H1 is suppressed during merge because the namespace page shell already renders the page H1.
-- The standalone README node is removed after a successful merge so readers do not see duplicate pages.
-- README metadata can override the namespace page metadata only when the field is meaningful for the merged namespace page. Authored `title`, `summary`, `aliases`, `keywords`, `related_pages`, `breadcrumbs`, contributor provenance, and `entry_points` transfer. Derived Markdown defaults, README visibility flags, canonical slugs, authored redirect aliases, trust metadata, localization metadata, section landing metadata, sequence metadata, and featured-page groups do not transfer.
-- README-relative links are resolved from the README source path before the standalone README page is removed.
-- Source-shaped requests for the consumed README path redirect to the generated namespace page, including paths such as `docs/ForgeTrust.AppSurface.Web/README.md` and `docs/ForgeTrust.AppSurface.Web/README`.
-- Contributor provenance points at the README source, while symbol-level source links still point at the generated API declarations.
+- Child namespace links render first when the generated page has them, then intro HTML is inserted as the namespace intro, then any `Common entry points` panel renders before generated type and member detail.
+- A leading intro H1 is suppressed during merge because the namespace page shell already renders the page H1.
+- The standalone intro node is removed after a successful merge so readers do not see duplicate pages.
+- Intro metadata can override the namespace page metadata only when the field is meaningful for the merged namespace page. Authored `title`, `summary`, `aliases`, `keywords`, `related_pages`, `breadcrumbs`, contributor provenance, and `entry_points` transfer. Derived Markdown defaults, README/package visibility flags, canonical slugs, authored redirect aliases, trust metadata, localization metadata, section landing metadata, sequence metadata, and featured-page groups do not transfer.
+- Intro-relative links are resolved from the source path before the standalone intro page is removed.
+- Source-shaped requests for consumed intro paths redirect to the generated namespace page, including paths such as `Web/ForgeTrust.RazorWire/NAMESPACE.md`, `Web/ForgeTrust.RazorWire/NAMESPACE`, `docs/ForgeTrust.AppSurface.Web/README.md`, and `docs/ForgeTrust.AppSurface.Web/README`.
+- Contributor provenance points at the intro source, while symbol-level source links still point at the generated API declarations.
 
 ### Common entry points
 
-Namespace README metadata can define a compact `Common entry points` panel. Prefer sidecar YAML so the README stays clean in source control:
+Namespace intro metadata can define a compact `Common entry points` panel. AppSurface's own package/project namespace intros should use colocated `NAMESPACE.md` plus `NAMESPACE.md.yml`:
 
 ```yaml
-# docs/ForgeTrust.RazorWire/README.md.yml
+# Web/ForgeTrust.RazorWire/NAMESPACE.md.yml
+namespace: ForgeTrust.RazorWire
 title: ForgeTrust.RazorWire
 summary: Start here for RazorWire registration, endpoint mapping, options, and stream-result entry points.
 entry_points:
@@ -1123,19 +1132,19 @@ When `target` resolves, the whole editorial row is one real anchor to the genera
 
 ### Decision guidance
 
-Use a namespace README when the content is specifically about the namespace API surface: concepts, intended usage, lifecycle notes, or cross-type orientation for that namespace.
+Use `NAMESPACE.md` when AppSurface-authored content is specifically about a namespace API surface: concepts, intended usage, lifecycle notes, or cross-type orientation for that namespace. When `NAMESPACE.md.yml` includes `namespace: Dotted.Namespace`, that explicit target wins; without it, AppSurface Docs infers only from exactly one colocated `.csproj` and an exact generated namespace page match. If inference fails or multiple project files are colocated, the `NAMESPACE.md` source is hidden from public routes and harvest health reports a warning so the author can add explicit metadata.
+
+Docs-owned namespace README paths such as `docs/ForgeTrust.RazorWire/README.md` and `Namespaces/ForgeTrust.RazorWire/README.md` remain supported for compatibility with existing content and portable folder-index README layouts. They are not the internal AppSurface house style for new namespace intros.
 
 Use a package README when the content is about package adoption: installation, package-level configuration, examples, compatibility, and links to broader guides. Package READMEs such as `Web/ForgeTrust.AppSurface.Web/README.md` and `src/ForgeTrust.AppSurface.Web/README.md` do not automatically become namespace intros, even when the folder name matches a namespace. That boundary is intentional so package docs do not disappear into API pages by folder-name coincidence.
-
-Future dual-use package and namespace docs should use an explicit opt-in contract instead of reopening implicit path matching. At the product-contract level, a future design could use a front matter flag that names the target namespace, a paired sidecar mapping a README to `Namespaces/{Dotted.Namespace}`, or a resolver extension point that receives an explicit namespace target. This repository should still prefer sidecar or resolver-based opt-in for authored `README.md` files because repository and package READMEs are expected to stay portable and free of inline front matter. Any future design should require the namespace name to be authored directly, preserve predictable package-doc behavior, and fail closed when the target namespace page does not exist.
 
 ### Pitfalls
 
 - Do not move package READMEs under package folders expecting them to merge into namespace pages.
-- Do not rely on the final folder name alone. A path needs a docs-owned prefix before the namespace directory.
-- Do not expect a README to create a namespace API page. It only merges into a namespace page produced by the C# harvester.
+- Do not rely on the final folder name alone. A README path needs a docs-owned prefix before the namespace directory, and `NAMESPACE.md` inference uses only exact matches.
+- Do not expect a namespace intro to create a namespace API page. It only merges into a namespace page produced by the C# harvester.
 - Do not use entry points as a full symbol resolver. V1 targets generated anchor IDs on the same namespace page.
-- Do not rely on `hide_from_search` or `hide_from_public_nav` in a consumed namespace README to hide the namespace page. Those flags apply to the standalone README node and are dropped during transfer.
+- Do not rely on `hide_from_search` or `hide_from_public_nav` in a consumed namespace intro to hide the namespace page. Those flags apply to the standalone source node and are dropped during transfer.
 
 ## Usage
 
@@ -1155,6 +1164,7 @@ AppSurface Docs now organizes public documentation around a fixed section-first 
 - `Concepts`
 - `How-to Guides`
 - `Examples`
+- `Packages`
 - `API Reference`
 - `Releases`
 - `Troubleshooting`
@@ -1170,6 +1180,7 @@ These sections back the current docs home, the sidebar shell, and the dedicated 
   - repository-root `README.md` and start-like names such as `quickstart` or `getting-started` fall into `Start Here`
   - `examples/` content falls into `Examples`
   - `releases/` content and root changelogs fall into `Releases`
+  - package chooser and AppSurface package-level README paths fall into `Packages`
   - concepts, architecture, explanation, and glossary-style paths fall into `Concepts`
   - troubleshooting, faq, debug, and error-oriented paths fall into `Troubleshooting`
   - internal-oriented paths fall into `Internals`
@@ -1429,7 +1440,7 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `publicSection` for the normalized built-in section slug when the page is publicly visible
 - `publicSectionLabel` for the reader-facing section label
 - `isSectionLanding` for authored section landing entry points
-- `entryPoints` for namespace README entry-point labels, summaries, targets, hrefs, and keywords when a README is consumed into a generated namespace page
+- `entryPoints` for namespace-intro entry-point labels, summaries, targets, hrefs, and keywords when an intro source is consumed into a generated namespace page
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
 Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, and namespace `entryPoints` as first-class MiniSearch fields with field-specific boosts. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.

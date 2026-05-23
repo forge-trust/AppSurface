@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Models;
@@ -813,7 +814,7 @@ public class DocAggregator
                            .ToList();
 
                        var targetNodes = sanitizedNodes.ToList();
-                       MergeNamespaceReadmes(targetNodes, renderEntryPointPanel: false, logger);
+                       MergeNamespaceReadmes(targetNodes, repositoryRoot, renderEntryPointPanel: false, logger);
                        var routeIdentityCatalog = DocRouteIdentityCatalog.Create(targetNodes, _docsUrlBuilder);
                        // Rewrite before the real namespace merge so README-relative links keep their source path
                        // context, while the manifest still reflects only final published docs targets.
@@ -839,6 +840,7 @@ public class DocAggregator
 
                        var namespaceReadmeDiagnostics = MergeNamespaceReadmes(
                            rewrittenNodes,
+                           repositoryRoot,
                            renderEntryPointPanel: true,
                            logger);
 
@@ -2154,14 +2156,19 @@ public class DocAggregator
     }
 
     /// <summary>
-    /// Merges README content into the corresponding namespace overview pages.
+    /// Merges authored namespace-intro content into the corresponding namespace overview pages.
     /// </summary>
-    /// <param name="nodes">The list of documentation nodes to process; README nodes used for merging are removed from this list.</param>
+    /// <param name="nodes">
+    /// The list of documentation nodes to process. Consumed namespace README and <c>NAMESPACE.md</c> sources are
+    /// removed from this list, and unresolved <c>NAMESPACE.md</c> sources are hidden after diagnostics are recorded.
+    /// </param>
+    /// <param name="repositoryRoot">Repository root used to resolve colocated project files for <c>NAMESPACE.md</c> intros.</param>
     /// <param name="renderEntryPointPanel">Whether to render validated namespace entry-point metadata into the merged namespace content.</param>
     /// <param name="logger">Logger used for namespace entry-point target diagnostics.</param>
-    /// <returns>Non-fatal harvest diagnostics produced while merging namespace README metadata.</returns>
+    /// <returns>Non-fatal harvest diagnostics produced while merging authored namespace-intro metadata.</returns>
     private static IReadOnlyList<DocHarvestDiagnostic> MergeNamespaceReadmes(
         List<DocNode> nodes,
+        string repositoryRoot,
         bool renderEntryPointPanel,
         ILogger logger)
     {
@@ -2180,12 +2187,38 @@ public class DocAggregator
                 StringComparer.OrdinalIgnoreCase);
 
         var readmeNodes = nodes
-            .Where(n => string.IsNullOrEmpty(n.ParentPath) && IsReadmePath(n.Path))
+            .Where(
+                n => string.IsNullOrEmpty(n.ParentPath)
+                     && !n.Path.Contains('#')
+                     && (IsReadmePath(n.Path) || IsNamespaceIntroPath(n.Path)))
             .ToList();
 
         foreach (var readmeNode in readmeNodes)
         {
-            var namespaceName = ExtractNamespaceNameFromReadmePath(readmeNode.Path, namespaceNodes.Keys);
+            var resolution = ResolveNamespaceIntroTarget(
+                readmeNode,
+                namespaceNodes.Keys,
+                repositoryRoot);
+            if (resolution.Diagnostic != null)
+            {
+                diagnostics.Add(resolution.Diagnostic);
+                if (renderEntryPointPanel)
+                {
+                    logger.LogWarning(
+                        "AppSurface Docs namespace intro warning {Code}: {Problem} Cause: {Cause} Fix: {Fix}",
+                        resolution.Diagnostic.Code,
+                        resolution.Diagnostic.Problem,
+                        resolution.Diagnostic.Cause,
+                        resolution.Diagnostic.Fix);
+                }
+            }
+
+            if (resolution.ShouldConsumeSource)
+            {
+                nodes.RemoveAll(n => string.Equals(n.Path, readmeNode.Path, StringComparison.OrdinalIgnoreCase));
+            }
+
+            var namespaceName = resolution.NamespaceName;
             if (string.IsNullOrWhiteSpace(namespaceName))
             {
                 continue;
@@ -2254,11 +2287,232 @@ public class DocAggregator
 
                 namespaceNodes[namespaceName] = mergedNamespaceNode;
             }
-
-            nodes.RemoveAll(n => string.Equals(n.Path, readmeNode.Path, StringComparison.OrdinalIgnoreCase));
         }
 
         return diagnostics;
+    }
+
+    private sealed record NamespaceIntroTargetResolution(
+        string? NamespaceName,
+        bool ShouldConsumeSource,
+        DocHarvestDiagnostic? Diagnostic);
+
+    private static NamespaceIntroTargetResolution ResolveNamespaceIntroTarget(
+        DocNode node,
+        IEnumerable<string> knownNamespaceNames,
+        string repositoryRoot)
+    {
+        var knownNames = knownNamespaceNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (!IsNamespaceIntroPath(node.Path))
+        {
+            var namespaceName = ExtractNamespaceNameFromReadmePath(node.Path, knownNames);
+            return new NamespaceIntroTargetResolution(
+                namespaceName,
+                ShouldConsumeSource: !string.IsNullOrWhiteSpace(namespaceName),
+                Diagnostic: null);
+        }
+
+        var explicitNamespace = NormalizeMetadataValue(node.Metadata?.Namespace);
+        if (!string.IsNullOrWhiteSpace(explicitNamespace))
+        {
+            var matched = MatchKnownNamespace(explicitNamespace, knownNames);
+            if (!string.IsNullOrWhiteSpace(matched))
+            {
+                return new NamespaceIntroTargetResolution(matched, ShouldConsumeSource: true, Diagnostic: null);
+            }
+
+            return new NamespaceIntroTargetResolution(
+                null,
+                ShouldConsumeSource: true,
+                CreateNamespaceIntroTargetMissingDiagnostic(
+                    node.Path,
+                    $"The authored namespace target '{explicitNamespace}' does not match any generated namespace page."));
+        }
+
+        var projectFiles = EnumerateColocatedProjectFiles(repositoryRoot, node.Path);
+        if (projectFiles.Length > 1)
+        {
+            return new NamespaceIntroTargetResolution(
+                null,
+                ShouldConsumeSource: true,
+                CreateNamespaceIntroTargetAmbiguousDiagnostic(node.Path));
+        }
+
+        if (projectFiles.Length == 1)
+        {
+            var matched = EnumerateProjectNamespaceCandidates(projectFiles[0])
+                .Select(candidate => MatchKnownNamespace(candidate, knownNames))
+                .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
+            if (!string.IsNullOrWhiteSpace(matched))
+            {
+                return new NamespaceIntroTargetResolution(matched, ShouldConsumeSource: true, Diagnostic: null);
+            }
+        }
+
+        return new NamespaceIntroTargetResolution(
+            null,
+            ShouldConsumeSource: true,
+            CreateNamespaceIntroTargetMissingDiagnostic(
+                node.Path,
+                "No explicit namespace metadata or colocated project file resolved to a generated namespace page."));
+    }
+
+    private static string? MatchKnownNamespace(string candidate, IEnumerable<string> knownNamespaceNames)
+    {
+        var normalizedCandidate = NormalizeMetadataValue(candidate);
+        if (string.IsNullOrWhiteSpace(normalizedCandidate))
+        {
+            return null;
+        }
+
+        return knownNamespaceNames.FirstOrDefault(
+            known => string.Equals(known, normalizedCandidate, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? NormalizeMetadataValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string[] EnumerateColocatedProjectFiles(string repositoryRoot, string introPath)
+    {
+        var normalizedPath = NormalizeLookupPath(introPath);
+        var relativeDirectory = Path.GetDirectoryName(normalizedPath);
+        var introDirectory = string.IsNullOrWhiteSpace(relativeDirectory)
+            ? repositoryRoot
+            : ResolveRepositoryRelativeDirectory(repositoryRoot, introPath, relativeDirectory);
+        if (string.IsNullOrWhiteSpace(introDirectory))
+        {
+            return [];
+        }
+
+        if (!Directory.Exists(introDirectory))
+        {
+            return [];
+        }
+
+        return Directory
+            .EnumerateFiles(introDirectory, "*.csproj", SearchOption.TopDirectoryOnly)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string? ResolveRepositoryRelativeDirectory(
+        string repositoryRoot,
+        string introPath,
+        string relativeDirectory)
+    {
+        if (!IsRepositoryRelativeDocPath(introPath) || HasTraversalSegment(relativeDirectory))
+        {
+            return null;
+        }
+
+        var repositoryFullPath = Path.GetFullPath(repositoryRoot);
+        var candidateFullPath = Path.GetFullPath(Path.Join(repositoryFullPath, relativeDirectory.Trim()));
+        return IsPathUnderDirectory(candidateFullPath, repositoryFullPath)
+            ? candidateFullPath
+            : null;
+    }
+
+    private static bool IsRepositoryRelativeDocPath(string path)
+    {
+        var normalized = path.Trim().Replace('\\', '/');
+        return normalized.Length > 0
+               && !normalized.StartsWith("/", StringComparison.Ordinal)
+               && !Regex.IsMatch(normalized, "^[A-Za-z]:/");
+    }
+
+    private static bool HasTraversalSegment(string relativePath)
+    {
+        return relativePath
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+            .Any(segment => segment is "." or "..");
+    }
+
+    private static bool IsPathUnderDirectory(string candidatePath, string directoryPath)
+    {
+        var directory = Path.TrimEndingDirectorySeparator(directoryPath);
+        return string.Equals(candidatePath, directory, StringComparison.Ordinal)
+               || candidatePath.StartsWith(
+                   directory + Path.DirectorySeparatorChar,
+                   StringComparison.Ordinal);
+    }
+
+    private static IEnumerable<string> EnumerateProjectNamespaceCandidates(string projectFile)
+    {
+        foreach (var candidate in EnumerateProjectPropertyCandidates(projectFile))
+        {
+            yield return candidate;
+        }
+
+        yield return Path.GetFileNameWithoutExtension(projectFile);
+
+        var directoryName = Path.GetFileName(Path.GetDirectoryName(projectFile));
+        if (!string.IsNullOrWhiteSpace(directoryName))
+        {
+            yield return directoryName;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateProjectPropertyCandidates(string projectFile)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Load(projectFile);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            yield break;
+        }
+
+        var rootNamespace = ReadProjectProperty(document, "RootNamespace");
+        if (!string.IsNullOrWhiteSpace(rootNamespace))
+        {
+            yield return rootNamespace;
+        }
+
+        var assemblyName = ReadProjectProperty(document, "AssemblyName");
+        if (!string.IsNullOrWhiteSpace(assemblyName))
+        {
+            yield return assemblyName;
+        }
+    }
+
+    private static string? ReadProjectProperty(XDocument document, string propertyName)
+    {
+        return document
+            .Descendants()
+            .FirstOrDefault(element => element.Name.LocalName.Equals(propertyName, StringComparison.OrdinalIgnoreCase))
+            ?.Value
+            .Trim();
+    }
+
+    private static DocHarvestDiagnostic CreateNamespaceIntroTargetMissingDiagnostic(
+        string introPath,
+        string cause)
+    {
+        return new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.NamespaceIntroTargetMissing,
+            DocHarvestDiagnosticSeverity.Warning,
+            HarvesterType: null,
+            $"Namespace intro source '{introPath}' did not resolve to a generated namespace page.",
+            cause,
+            "Add NAMESPACE.md.yml with namespace: Dotted.Namespace, move the file beside the intended project, or rename it to an ordinary guide filename.");
+    }
+
+    private static DocHarvestDiagnostic CreateNamespaceIntroTargetAmbiguousDiagnostic(string introPath)
+    {
+        return new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.NamespaceIntroTargetAmbiguous,
+            DocHarvestDiagnosticSeverity.Warning,
+            HarvesterType: null,
+            $"Namespace intro source '{introPath}' matched multiple colocated project files.",
+            "AppSurface Docs only infers a namespace target when exactly one project file is colocated with NAMESPACE.md.",
+            "Add NAMESPACE.md.yml with namespace: Dotted.Namespace so the target is explicit.");
     }
 
     private static IReadOnlyList<DocOutlineItem>? CombineOutlines(
@@ -2477,6 +2731,13 @@ public class DocAggregator
         var normalized = NormalizeLookupPath(path);
         var fileName = Path.GetFileName(normalized);
         return string.Equals(fileName, "README.md", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsNamespaceIntroPath(string path)
+    {
+        var normalized = NormalizeLookupPath(path);
+        var fileName = Path.GetFileName(normalized);
+        return string.Equals(fileName, "NAMESPACE.md", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

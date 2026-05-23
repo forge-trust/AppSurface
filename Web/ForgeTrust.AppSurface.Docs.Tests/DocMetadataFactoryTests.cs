@@ -151,6 +151,41 @@ public sealed class DocMetadataFactoryTests
         Assert.Equal(["How-to Guides", "Package Changelog"], metadata.Breadcrumbs);
     }
 
+    [Theory]
+    [InlineData("packages/README.md")]
+    [InlineData("ForgeTrust.AppSurface.Core/README.md")]
+    [InlineData("Config/ForgeTrust.AppSurface.Config/README.md")]
+    [InlineData("Web/ForgeTrust.RazorWire/README.md")]
+    public void CreateMarkdownMetadata_ShouldDerivePackagesSection_ForPackageReadmes(string path)
+    {
+        var metadata = DocMetadataFactory.CreateMarkdownMetadata(path, "Package", null, null);
+
+        Assert.Equal("Packages", metadata.NavGroup);
+        Assert.True(metadata.NavGroupIsDerived);
+        Assert.Equal(["Packages", "Package"], metadata.Breadcrumbs);
+    }
+
+    [Fact]
+    public void CreateMarkdownMetadata_ShouldAcceptPackagesNavGroupWithoutWarning()
+    {
+        var logger = A.Fake<ILogger>();
+        var metadata = DocMetadataFactory.CreateMarkdownMetadata(
+            "docs/package-overview.md",
+            "Package overview",
+            new DocMetadata
+            {
+                NavGroup = "Packages"
+            },
+            null,
+            logger);
+
+        Assert.Equal("Packages", metadata.NavGroup);
+        Assert.False(metadata.NavGroupIsDerived);
+        A.CallTo(logger)
+            .Where(call => call.Method.Name == "Log" && call.GetArgument<LogLevel>(0) == LogLevel.Warning)
+            .MustNotHaveHappened();
+    }
+
     [Fact]
     public void CreateMarkdownMetadata_ShouldNotMarkExplicitBreadcrumbs_WhenTargetCountDoesNotMatch()
     {

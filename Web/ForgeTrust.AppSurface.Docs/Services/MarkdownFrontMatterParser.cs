@@ -131,6 +131,7 @@ internal static class MarkdownFrontMatterParser
             PageType = Normalize(document.PageType),
             Audience = Normalize(document.Audience),
             Component = Normalize(document.Component),
+            Namespace = Normalize(document.Namespace),
             Aliases = NormalizeList(document.Aliases),
             RedirectAliases = NormalizeList(document.RedirectAliases),
             Keywords = NormalizeList(document.Keywords),
@@ -947,6 +948,8 @@ internal static class MarkdownFrontMatterParser
         public string? Audience { get; init; }
 
         public string? Component { get; init; }
+
+        public string? Namespace { get; init; }
 
         public List<string>? Aliases { get; init; }
 
