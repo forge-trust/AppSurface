@@ -41,8 +41,9 @@
             @if (!string.IsNullOrWhiteSpace(Model.StartHereHref))
             {
                 <a href="@Url.PathBaseAware(Model.StartHereHref)"
+                   aria-label="Browse Start Here"
                    class="inline-flex items-center gap-2 self-start rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-4 py-2 text-sm font-semibold text-[#bfdbfe] transition-colors hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
-                    Open Start Here
+                    Start Here
                     <span aria-hidden="true">-&gt;</span>
                 </a>
             }
@@ -68,6 +69,7 @@
                                     <a href="@Url.PathBaseAware(featuredPage.Href)"
                                        data-turbo-frame="doc-content"
                                        data-turbo-action="advance"
+                                       aria-label="View @featuredPage.Title"
                                        class="group block rounded-lg border border-[#1b2a43] bg-[#050b17]/50 px-5 py-4 transition-colors hover:border-[#14b8a6]/45 hover:bg-[#08101e]">
                                         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                             <div class="min-w-0 flex-1">
@@ -86,8 +88,7 @@
                                                     <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-300">@featuredPage.SupportingText</p>
                                                 }
                                             </div>
-                                            <span class="inline-flex items-center gap-2 text-sm font-semibold text-[#bfdbfe] transition-colors group-hover:text-[#ccfbf1]">
-                                                Open page
+                                            <span class="inline-flex items-center text-sm font-semibold text-[#bfdbfe] transition-colors group-hover:text-[#ccfbf1]">
                                                 <span class="transition-transform group-hover:translate-x-1" aria-hidden="true">-&gt;</span>
                                             </span>
                                         </div>
@@ -126,6 +127,7 @@
                                     <a href="@Url.PathBaseAware(route.Href)"
                                        data-turbo-frame="doc-content"
                                        data-turbo-action="advance"
+                                       aria-label="View @route.Title"
                                        class="group flex flex-col gap-2 rounded-lg border border-[#1b2a43] bg-[#050b17]/30 px-4 py-3 transition-colors hover:border-[#14b8a6]/35 hover:bg-[#08101e]/70 sm:flex-row sm:items-start sm:justify-between">
                                         <div class="min-w-0 flex-1">
                                             @if (!string.IsNullOrWhiteSpace(route.Eyebrow))
@@ -146,8 +148,7 @@
                                                 <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-400">@route.Summary</p>
                                             }
                                         </div>
-                                        <span class="inline-flex items-center gap-2 text-sm font-semibold text-[#bfdbfe] transition-colors group-hover:text-[#ccfbf1]">
-                                            Open
+                                        <span class="inline-flex items-center text-sm font-semibold text-[#bfdbfe] transition-colors group-hover:text-[#ccfbf1]">
                                             <span class="transition-transform group-hover:translate-x-1" aria-hidden="true">-&gt;</span>
                                         </span>
                                     </a>

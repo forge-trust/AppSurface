@@ -773,9 +773,31 @@ public class AppSurfaceDocsViewsTests
 
         var html = await RenderDocsViewAsync(services, "Index", c => c.Index());
 
-        Assert.Contains("href=\"/docs/sections/start-here\"", html);
-        Assert.Contains("Open Start Here", html);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var startHereLink = Assert.Single(document.QuerySelectorAll("a[aria-label='Browse Start Here']"));
+        var featuredPageLink = Assert.Single(document.QuerySelectorAll("a[aria-label='View Quickstart']"));
+        var routeLink = Assert.Single(document.QuerySelectorAll("a[aria-label='View Deep Dive']"));
+
+        Assert.Equal("/docs/sections/start-here", startHereLink.GetAttribute("href"));
+        Assert.DoesNotContain("Open Start Here", startHereLink.TextContent, StringComparison.Ordinal);
+        Assert.Contains("Start Here", startHereLink.TextContent, StringComparison.Ordinal);
+        AssertDecorativeArrow(startHereLink);
+
+        Assert.Equal("/docs/guides/quickstart", featuredPageLink.GetAttribute("href"));
+        Assert.Equal("doc-content", featuredPageLink.GetAttribute("data-turbo-frame"));
+        Assert.Equal("advance", featuredPageLink.GetAttribute("data-turbo-action"));
+        Assert.DoesNotContain("Open page", featuredPageLink.TextContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("Open", featuredPageLink.TextContent, StringComparison.Ordinal);
+        AssertDecorativeArrow(featuredPageLink);
+
         Assert.Contains("href=\"/docs/sections/concepts\"", html);
+        Assert.Equal("/docs/concepts/deep-dive", routeLink.GetAttribute("href"));
+        Assert.Equal("doc-content", routeLink.GetAttribute("data-turbo-frame"));
+        Assert.Equal("advance", routeLink.GetAttribute("data-turbo-action"));
+        Assert.DoesNotContain("Open page", routeLink.TextContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("Open", routeLink.TextContent, StringComparison.Ordinal);
+        AssertDecorativeArrow(routeLink);
+
         Assert.Contains("Build the mental model before you choose an implementation path.", html);
         Assert.Contains("Learn the mental model", html);
         Assert.Contains("Guide", html);
@@ -4435,6 +4457,13 @@ public class AppSurfaceDocsViewsTests
         }
 
         return null;
+    }
+
+    private static void AssertDecorativeArrow(IElement link)
+    {
+        var arrow = Assert.Single(link.QuerySelectorAll("span[aria-hidden='true']"));
+
+        Assert.Contains("->", arrow.TextContent, StringComparison.Ordinal);
     }
 
     private sealed class StaticDocHarvester : IDocHarvester
