@@ -48,6 +48,7 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Contains("--strict", exportRun, StringComparison.Ordinal);
         Assert.Contains("--seeds \"$RUNNER_TEMP/appsurface-docs-seeds.txt\"", exportRun, StringComparison.Ordinal);
         Assert.Contains("--output \"$RUNNER_TEMP/appsurface-docs-pages\"", exportRun, StringComparison.Ordinal);
+        Assert.Contains("--public-origin https://forge-trust.com", exportRun, StringComparison.Ordinal);
 
         var uploadStep = FindStep(steps, "Upload Pages artifact");
         Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(uploadStep, "if"));
