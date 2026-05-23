@@ -622,10 +622,8 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
 
             if (character == '[')
             {
-                var end = pattern.IndexOf(']', index + 1);
-                if (end > index)
+                if (TryAppendCharacterClass(pattern, index, builder, out var end))
                 {
-                    builder.Append(pattern[index..(end + 1)]);
                     index = end;
                     continue;
                 }
@@ -636,6 +634,86 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
 
         builder.Append('$');
         return new Regex(builder.ToString(), RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+    }
+
+    private static bool TryAppendCharacterClass(
+        string pattern,
+        int startIndex,
+        StringBuilder builder,
+        out int endIndex)
+    {
+        endIndex = startIndex;
+        var contentStart = startIndex + 1;
+        if (contentStart >= pattern.Length)
+        {
+            return false;
+        }
+
+        var negated = pattern[contentStart] == '!';
+        if (negated)
+        {
+            contentStart++;
+            if (contentStart >= pattern.Length)
+            {
+                return false;
+            }
+        }
+
+        var cursor = contentStart;
+        if (pattern[cursor] == ']')
+        {
+            cursor++;
+        }
+
+        while (cursor < pattern.Length && pattern[cursor] != ']')
+        {
+            cursor++;
+        }
+
+        if (cursor >= pattern.Length)
+        {
+            if (negated)
+            {
+                throw new ArgumentException("Invalid negated character class.", nameof(pattern));
+            }
+
+            return false;
+        }
+
+        if (cursor == contentStart)
+        {
+            return false;
+        }
+
+        builder.Append('[');
+        if (negated)
+        {
+            builder.Append('^');
+        }
+
+        AppendCharacterClassContent(builder, pattern[contentStart..cursor]);
+        builder.Append(']');
+        endIndex = cursor;
+        return true;
+    }
+
+    private static void AppendCharacterClassContent(StringBuilder builder, string content)
+    {
+        for (var index = 0; index < content.Length; index++)
+        {
+            var character = content[index];
+            if (character is '\\' or '[' or ']')
+            {
+                builder.Append('\\');
+            }
+
+            if (character == '^' && index == 0)
+            {
+                builder.Append('\\');
+            }
+
+            builder.Append(character);
+        }
     }
 
     private static string GetLiteralPrefix(string pattern)

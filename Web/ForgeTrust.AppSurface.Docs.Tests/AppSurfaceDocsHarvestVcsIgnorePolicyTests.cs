@@ -277,6 +277,7 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             \!literal.md
             file?.md
             data[0-9].md
+            [!a]*.md
             broken[.md
             trail\
             """);
@@ -286,8 +287,29 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         Assert.False(snapshot.Evaluate("!literal.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
         Assert.False(snapshot.Evaluate("file1.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
         Assert.False(snapshot.Evaluate("data7.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.False(snapshot.Evaluate("banana.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.True(snapshot.Evaluate("apple.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
         Assert.False(snapshot.Evaluate("broken[.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
-        Assert.True(snapshot.Evaluate("comment.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.True(snapshot.Evaluate("acomment.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+    }
+
+    [Fact]
+    public async Task EvaluateFile_WhenNegatedCharacterClassContainsClosingBracketUsesGitStyleClass()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            [!]
+            [!]]
+            """);
+        var policy = new AppSurfaceDocsHarvestVcsIgnorePolicy(
+            _root,
+            new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+            NullLogger.Instance);
+
+        Assert.NotNull(policy.EvaluateFile("!", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.Null(policy.EvaluateFile("]", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.Null(policy.EvaluateFile("[!]", AppSurfaceDocsHarvestSourceKind.Markdown));
     }
 
     [Fact]
