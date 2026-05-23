@@ -35,6 +35,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface now exposes focused GitHub issue forms for bug reports, feature requests, and docs/developer-experience feedback, with the root README and contribution guide pointing developers to that feedback path.
 - Public contribution surfaces now steer suspected vulnerabilities away from issue forms and into a private security reporting path.
 - GitHub issue template support links now point first-time adopters to the package chooser and release/upgrade contract when they are evaluating install path or migration risk.
+- The repository now advertises its trust signals from the root README and backs them with Dependabot updates, a formatting-based code-quality workflow, and the repo's existing CodeQL code-scanning setup.
 
 ### Console and CLI polish
 
@@ -44,6 +45,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorWire CLI now names export seed-route files with `-r|--seeds`, matching the seed terminology used throughout the exporter and docs.
 - The shared console startup seam now exposes `ConsoleOptions` and `ConsoleOutputMode`, so future public AppSurface CLIs can adopt the same behavior without forking startup logic.
 - RazorWire CLI now has a first-class .NET tool package contract with the `razorwire` command, supports exact-version `dnx` execution from published or explicit local package sources, and verifies the installed tool path through help and sample export smoke tests. Public package publishing remains manual until the coordinated release automation tracked in #161 lands.
+- AppSurface Docs preview now starts the standalone host in-process through `appsurface docs`, keeps routine ASP.NET Core lifecycle output quiet, prints the resolved docs URL plus a concise harvest summary, and attempts to open the page in the system browser once Kestrel is listening.
 - RazorWire CLI export now defaults to CDN-safe static output. Managed internal URLs discovered in HTML and CSS are rewritten to emitted artifacts, `<img>` and `<source>` `srcset` candidates are both covered, AppSurface Docs frame content emits static partials, conventional `404.html` participates in the same validation, and CDN validation fails with `RWEXPORT###` diagnostics when required frame or asset dependencies cannot become files.
 - Project exports now disable persistent MSBuild build servers during CLI-controlled publish and assembly-name probes so captured tool output cannot hang on reused build nodes.
 - RazorWire CLI process cleanup now waits for asynchronous stdout and stderr callbacks to flush before disposing launched target processes, which keeps short-lived command output observable in tests and diagnostics.
@@ -144,7 +146,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs search now keeps failure recovery markup out of the active search shell until the index actually fails to load, so successful searches no longer expose hidden failure copy to text extraction tools.
 - AppSurface Docs search now renders starter query URLs and browse recovery links in the server shell, so no-JS readers, crawlers, static `search.html` exports, and failed `search-index.json` fetches still have real documentation paths to follow.
 - AppSurface Docs search now opens as a richer workspace with representative starter rows, filter-first browsing, stronger no-results recovery, and normalized release badge aliases.
-- AppSurface Docs search now has a first-class pnpm and TypeScript asset workspace, building the generated search client and MiniSearch runtime from typed source with typecheck, test, and generated-file verification gates in CI.
+- AppSurface Docs search now has a first-class pnpm and TypeScript asset workspace, building the generated search client and pinned upstream MiniSearch browser runtime from typed source with typecheck, field-search, provenance, and generated-file verification gates in CI.
 - AppSurface Docs harvesting now excludes test-project docs and generated example-app API reference from the docs surface while keeping authored example README walkthroughs public.
 - AppSurface Docs now includes a repository root `LICENSE` file as a docs artifact when present, so repo-relative license links remain revision-correct and still pass CDN static export validation.
 - AppSurface Docs now documents the namespace README merge contract with positive and negative examples, while detail-page titles wrap on narrow screens so long package names do not clip on mobile.

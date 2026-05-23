@@ -219,11 +219,13 @@ public class WebStartupTests
             Environment.ExitCode = 0;
 
             var runTask = startup.RunResolvedAsync(["--urls", "http://127.0.0.1:0"]);
-            var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(1)));
+            await module.Probe.CancellationRegistered.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var completedTask = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(5)));
 
             Assert.Same(runTask, completedTask);
             await runTask;
-            await module.Probe.CancellationStarted.WaitAsync(TimeSpan.FromSeconds(1));
+            await module.Probe.CancellationStarted.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(-100, Environment.ExitCode);
         }
         finally
@@ -1261,6 +1263,7 @@ public class WebStartupTests
         public Task StartAsync(CancellationToken cancellationToken)
         {
             cancellationToken.Register(probe.BlockCancellationUntilReleased);
+            probe.MarkCancellationRegistered();
             return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         }
 
@@ -1272,13 +1275,23 @@ public class WebStartupTests
 
     private sealed class HangingCancellationProbe
     {
+        private readonly TaskCompletionSource<object?> _cancellationRegistered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         private readonly TaskCompletionSource<object?> _cancellationStarted =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         private readonly TaskCompletionSource<object?> _releaseCancellation =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public Task CancellationRegistered => _cancellationRegistered.Task;
+
         public Task CancellationStarted => _cancellationStarted.Task;
+
+        public void MarkCancellationRegistered()
+        {
+            _cancellationRegistered.TrySetResult(null);
+        }
 
         public void BlockCancellationUntilReleased()
         {
