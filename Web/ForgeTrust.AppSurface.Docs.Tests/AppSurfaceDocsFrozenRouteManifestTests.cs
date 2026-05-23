@@ -147,6 +147,30 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
         Assert.Equal("guide", canonicalRoutePath);
     }
 
+    [Fact]
+    public void Load_ShouldIgnoreUnsafeAliases_AndContinueUsingValidAliases()
+    {
+        var manifest = LoadFrozenManifest(
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "guide.md",
+                  "canonicalRoutePath": "guide",
+                  "recoveryAliases": [ "unsafe//alias", "guide.md" ],
+                  "declaredAliases": [ "legacy\\guide" ]
+                }
+              ]
+            }
+            """);
+
+        Assert.False(manifest.TryResolveAlias("unsafe//alias", out _));
+        Assert.False(manifest.TryResolveAlias(@"legacy\guide", out _));
+        Assert.True(manifest.TryResolveAlias("guide.md", out var canonicalRoutePath));
+        Assert.Equal("guide", canonicalRoutePath);
+    }
+
     [Theory]
     [InlineData("null")]
     [InlineData("""{ "schema": "unknown", "entries": [] }""")]
@@ -323,6 +347,29 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
             () => AppSurfaceDocsFrozenRouteManifest.WriteAsync(_tempDirectory, manifest, CancellationToken.None));
 
         Assert.Contains("unsafe canonical route", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("../admin")]
+    [InlineData("guide/../admin")]
+    [InlineData(".hidden/guide")]
+    [InlineData(@"guide\admin")]
+    [InlineData("guide?next=admin")]
+    public async Task WriteAsync_ShouldRejectUnsafeAliases(string aliasRoutePath)
+    {
+        var manifest = new AppSurfaceDocsRouteManifest(
+            [
+                Entry(
+                    sourcePath: "guide.md",
+                    canonicalRoutePath: "guide",
+                    aliases: [aliasRoutePath])
+            ],
+            []);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => AppSurfaceDocsFrozenRouteManifest.WriteAsync(_tempDirectory, manifest, CancellationToken.None));
+
+        Assert.Contains("is unsafe", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

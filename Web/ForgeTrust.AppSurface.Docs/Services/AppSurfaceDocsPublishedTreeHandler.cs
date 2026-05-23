@@ -124,7 +124,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
 
         var relativeRequestPath = GetMountRelativeRequestPath(requestPath, mount.MountRootPath);
         var aliasRoutePath = AppSurfaceDocsFrozenRouteManifest.NormalizeRoutePath(relativeRequestPath);
-        if (string.IsNullOrWhiteSpace(aliasRoutePath) || HasHiddenPathSegment(aliasRoutePath))
+        if (string.IsNullOrWhiteSpace(aliasRoutePath) || !AppSurfaceDocsFrozenRouteManifest.IsSafeRoutePath(aliasRoutePath))
         {
             return false;
         }

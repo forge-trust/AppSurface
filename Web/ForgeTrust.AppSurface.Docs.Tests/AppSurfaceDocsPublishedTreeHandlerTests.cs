@@ -251,6 +251,31 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldNotRedirectUnsafeFrozenManifestAliases()
+    {
+        var tree = CreatePublishedTree("unsafe-frozen-manifest-alias");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "guide.md",
+                  "canonicalRoutePath": "guide",
+                  "recoveryAliases": ["legacy//guide"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/legacy//guide");
+
+        Assert.False(await handler.TryHandleAsync(request));
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldNotRedirectUnsafeFrozenCanonicalRoutes()
     {
         var tree = CreatePublishedTree("unsafe-frozen-canonical-route");

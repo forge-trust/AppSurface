@@ -170,7 +170,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
     }
 
     /// <summary>
-    /// Checks whether a docs-root-relative route path is safe to use as a frozen redirect target.
+    /// Checks whether a docs-root-relative route path is safe to use as a frozen alias or redirect target.
     /// </summary>
     /// <param name="routePath">The docs-root-relative route path, optionally including a canonical fragment.</param>
     /// <returns>
@@ -270,6 +270,17 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
             {
                 if (string.IsNullOrWhiteSpace(aliasRoutePath))
                 {
+                    continue;
+                }
+
+                if (!IsSafeRoutePath(aliasRoutePath))
+                {
+                    if (strict)
+                    {
+                        throw new InvalidOperationException($"Frozen AppSurface Docs route manifest alias '{aliasRoutePath}' is unsafe.");
+                    }
+
+                    ignoredRouteCount++;
                     continue;
                 }
 
