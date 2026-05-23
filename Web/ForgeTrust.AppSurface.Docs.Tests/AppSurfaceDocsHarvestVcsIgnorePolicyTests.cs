@@ -277,6 +277,23 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore, decision.Code);
     }
 
+    [Theory]
+    [InlineData("/dist", "dist/app.md")]
+    [InlineData("src/generated", "src/generated/nested/guide.md")]
+    public async Task Evaluate_WhenDirectoryPatternHasNoTrailingSlashExcludesDescendant(
+        string pattern,
+        string candidatePath)
+    {
+        await WriteAsync(".gitignore", $"{pattern}\n");
+        var snapshot = CreateSnapshot();
+
+        var decision = snapshot.Evaluate(candidatePath, AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.False(decision.Included);
+        Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore, decision.Code);
+        Assert.Contains(decision.Trace, trace => trace.Pattern == pattern);
+    }
+
     [Fact]
     public async Task Evaluate_WhenPatternsUseEscapesAndCharacterGlobsMatchesGitStyleRules()
     {
