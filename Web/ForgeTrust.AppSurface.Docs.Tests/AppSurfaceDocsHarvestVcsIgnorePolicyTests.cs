@@ -318,6 +318,7 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     [InlineData("[]", "[]")]
     [InlineData("[^]", "^")]
     [InlineData("[[]", "[")]
+    [InlineData("[\\\\]", "\\")]
     public async Task EvaluateFile_WhenCharacterClassFallsBackOrEscapesMatchesExpectedLiteral(
         string pattern,
         string candidatePath)
@@ -329,6 +330,18 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             NullLogger.Instance);
 
         Assert.NotNull(policy.EvaluateFile(candidatePath, AppSurfaceDocsHarvestSourceKind.Markdown));
+    }
+
+    [Fact]
+    public async Task EvaluateFile_WhenNegatedCharacterClassIsUnclosedSkipsRule()
+    {
+        await WriteAsync(".gitignore", "[!a\n");
+        var policy = new AppSurfaceDocsHarvestVcsIgnorePolicy(
+            _root,
+            new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+            NullLogger.Instance);
+
+        Assert.Null(policy.EvaluateFile("[!a", AppSurfaceDocsHarvestSourceKind.Markdown));
     }
 
     [Fact]
