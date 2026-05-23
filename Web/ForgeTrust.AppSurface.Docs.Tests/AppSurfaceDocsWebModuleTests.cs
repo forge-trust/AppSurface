@@ -6,6 +6,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Web.Tailwind;
 using ForgeTrust.RazorWire;
+using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -82,6 +83,12 @@ public class AppSurfaceDocsWebModuleTests
             services,
             s => s.ServiceType == typeof(IDocHarvester) && s.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, s => s.ServiceType == typeof(DocAggregator));
+        Assert.Contains(services, s => s.ServiceType == typeof(AppSurfaceDocsHarvestProgressReporter));
+        Assert.Contains(services, s => s.ServiceType == typeof(AppSurfaceDocsHarvestCoordinator));
+        Assert.Contains(
+            services,
+            s => s.ServiceType == typeof(IRazorWireChannelAuthorizer)
+                 && s.ImplementationFactory is not null);
         Assert.Contains(services, s => s.ServiceType == typeof(AppSurfaceDocsHarvestPathPolicy));
         Assert.Contains(
             services,
@@ -106,6 +113,8 @@ public class AppSurfaceDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetRequiredService<IMemoryCache>());
         Assert.NotNull(serviceProvider.GetRequiredService<IMemo>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
+        Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestProgressReporter>());
+        Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestCoordinator>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>());
         Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is MarkdownHarvester);
         Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is JavaScriptDocHarvester);
@@ -122,6 +131,37 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("class", sanitizer.InnerSanitizer.AllowedAttributes);
         Assert.Contains("id", sanitizer.InnerSanitizer.AllowedAttributes);
         Assert.Contains("open", sanitizer.InnerSanitizer.AllowedAttributes);
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostHasCustomChannelAuthorizer_StillEnforcesHarvestVisibility()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Never"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireChannelAuthorizer, AllowAllChannelAuthorizer>();
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+
+        Assert.False(await authorizer.CanSubscribeAsync(
+            new DefaultHttpContext { RequestServices = serviceProvider },
+            AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.True(await authorizer.CanSubscribeAsync(
+            new DefaultHttpContext { RequestServices = serviceProvider },
+            "host-channel"));
     }
 
     [Fact]
@@ -1046,6 +1086,14 @@ public class AppSurfaceDocsWebModuleTests
         public object? GetService(Type serviceType)
         {
             return serviceType == _hiddenServiceType ? null : _inner.GetService(serviceType);
+        }
+    }
+
+    private sealed class AllowAllChannelAuthorizer : IRazorWireChannelAuthorizer
+    {
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            return new ValueTask<bool>(true);
         }
     }
 

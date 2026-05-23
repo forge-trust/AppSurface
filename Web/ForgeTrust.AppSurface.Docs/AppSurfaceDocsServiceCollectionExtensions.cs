@@ -2,6 +2,7 @@ using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.RazorWire.Streams;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -197,11 +198,64 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         TryAddCSharpDocHarvester(services);
         TryAddJavaScriptDocHarvester(services);
         services.TryAddSingleton<DocFeaturedPageResolver>();
+        services.TryAddSingleton<AppSurfaceDocsHarvestProgressReporter>();
         services.TryAddSingleton<DocAggregator>();
+        services.TryAddSingleton<AppSurfaceDocsHarvestCoordinator>();
+        TryAddHarvestChannelAuthorizer(services);
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, AppSurfaceDocsHarvestFailurePreflightService>());
 
         return services;
+    }
+
+    private static void TryAddHarvestChannelAuthorizer(IServiceCollection services)
+    {
+        var existing = services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(IRazorWireChannelAuthorizer));
+        services.RemoveAll<IRazorWireChannelAuthorizer>();
+        var lifetime = existing?.Lifetime ?? ServiceLifetime.Singleton;
+        services.Add(
+            ServiceDescriptor.Describe(
+                typeof(IRazorWireChannelAuthorizer),
+                provider => new AppSurfaceDocsHarvestChannelAuthorizer(
+                    provider.GetRequiredService<AppSurfaceDocsOptions>(),
+                    ResolveHostEnvironment(provider),
+                    CreateInnerChannelAuthorizer(provider, existing)),
+                lifetime));
+    }
+
+    private static IHostEnvironment ResolveHostEnvironment(IServiceProvider provider)
+    {
+        return provider.GetService<IHostEnvironment>()
+               ?? provider.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+    }
+
+    private static IRazorWireChannelAuthorizer? CreateInnerChannelAuthorizer(
+        IServiceProvider provider,
+        ServiceDescriptor? descriptor)
+    {
+        if (descriptor is null || descriptor.ImplementationType == typeof(DefaultRazorWireChannelAuthorizer))
+        {
+            return null;
+        }
+
+        if (descriptor.ImplementationInstance is IRazorWireChannelAuthorizer instance)
+        {
+            return instance;
+        }
+
+        if (descriptor.ImplementationFactory is not null)
+        {
+            return (IRazorWireChannelAuthorizer)descriptor.ImplementationFactory(provider)!;
+        }
+
+        if (descriptor.ImplementationType is not null)
+        {
+            return (IRazorWireChannelAuthorizer)ActivatorUtilities.CreateInstance(
+                provider,
+                descriptor.ImplementationType);
+        }
+
+        return null;
     }
 
     private static void TryAddMarkdownHarvester(IServiceCollection services)

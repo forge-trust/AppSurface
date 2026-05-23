@@ -51,7 +51,12 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     context.Response.Headers.Connection = "keep-alive";
                     context.Response.Headers.Pragma = "no-cache";
 
-                    var reader = hub.Subscribe(channel);
+                    var reader = hub.Subscribe(
+                        channel,
+                        new RazorWireStreamSubscribeOptions
+                        {
+                            Replay = IsReplayRequested(context.Request.Query)
+                        });
 
                     try
                     {
@@ -103,5 +108,17 @@ public static class RazorWireEndpointRouteBuilderExtensions
             .ExcludeFromDescription();
 
         return endpoints;
+    }
+
+    private static bool IsReplayRequested(IQueryCollection query)
+    {
+        if (!query.TryGetValue("replay", out var values))
+        {
+            return false;
+        }
+
+        var replay = values.ToString();
+        return replay == "1"
+               || string.Equals(replay, "true", StringComparison.OrdinalIgnoreCase);
     }
 }

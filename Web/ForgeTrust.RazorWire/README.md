@@ -205,6 +205,11 @@ RazorWire is designed for a fast feedback loop during development:
 ### `IRazorWireStreamHub`
 
 - `PublishAsync(channel, content)` broadcasts a Turbo Stream fragment to every subscriber on a channel.
+- `PublishAsync(channel, content, new RazorWireStreamPublishOptions { Replay = true })` broadcasts the fragment and retains it in the channel's bounded replay buffer.
+- `Subscribe(channel)` receives only live messages published after subscription.
+- `Subscribe(channel, new RazorWireStreamSubscribeOptions { Replay = true })` receives retained replay messages first, then continues with live messages.
+
+Replay is opt in and intentionally small. The in-memory hub keeps a bounded per-channel buffer and drops the oldest retained fragments first. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
 
 ### `this.RazorWireStream()` (controller extension)
 
@@ -261,10 +266,13 @@ Subscribes the page to a RazorWire stream channel.
 
 - `channel`: required channel name.
 - `permanent`: keeps the stream source alive across Turbo visits.
+- `replay`: when `true`, appends `?replay=1` to the stream endpoint so the page receives retained channel messages before live updates.
 
 ```html
 <rw:stream-source id="rw-stream-reactivity" channel="reactivity" permanent="true"></rw:stream-source>
 ```
+
+Use `replay="true"` when the source powers resumable UI state, such as a build or harvest progress surface. Leave it off for purely live feeds where old messages would be confusing.
 
 ### `requires-stream`
 

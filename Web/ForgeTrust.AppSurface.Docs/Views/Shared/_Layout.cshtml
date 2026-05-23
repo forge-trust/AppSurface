@@ -31,6 +31,7 @@
         ViewContext.RouteData.Values["action"]?.ToString(),
         "Search",
         StringComparison.OrdinalIgnoreCase);
+    var suppressSidebar = ViewData["SuppressSidebar"] is true;
 }
 <!DOCTYPE html>
 <html lang="en" class="h-full bg-[#050b17] border-[#1b2a43]" style="scrollbar-gutter: stable;">
@@ -131,7 +132,16 @@
             </a>
         </div>
         <nav class="flex-grow overflow-y-auto px-4 pb-4 space-y-1 min-h-0" aria-label="Documentation navigation">
-            @await Component.InvokeAsync("Sidebar")
+            @if (!suppressSidebar)
+            {
+                @await Component.InvokeAsync("Sidebar")
+            }
+            else
+            {
+                <p class="rounded-lg border border-[#1b2a43] bg-[#07101f] px-3 py-2 text-left text-xs text-slate-400">
+                    Navigation will appear when docs are ready.
+                </p>
+            }
         </nav>
         <div id="docs-sidebar-footer" class="p-4 border-t border-[#1b2a43] text-xs text-slate-500 text-center">
             @docsIdentity.DisplayName

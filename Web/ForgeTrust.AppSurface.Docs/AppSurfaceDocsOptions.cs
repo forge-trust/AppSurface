@@ -368,6 +368,12 @@ public sealed class AppSurfaceDocsSourceOptions
 public sealed class AppSurfaceDocsHarvestOptions
 {
     /// <summary>
+    /// Gets the default amount of time a first docs page request waits for the initial harvest before rendering the live
+    /// harvest observatory.
+    /// </summary>
+    public const int DefaultInitialRequestWaitBudgetMilliseconds = 350;
+
+    /// <summary>
     /// Gets or sets a value indicating whether host startup should fail when the aggregate harvest health is
     /// <see cref="ForgeTrust.AppSurface.Docs.Models.DocHarvestHealthStatus.Failed"/>.
     /// </summary>
@@ -376,6 +382,59 @@ public sealed class AppSurfaceDocsHarvestOptions
     /// non-fatal in this slice because they can represent intentional empty repositories or still-usable partial docs.
     /// </remarks>
     public bool FailOnFailure { get; set; }
+
+    /// <summary>
+    /// Gets or sets how AppSurface Docs starts the initial source harvest.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see cref="AppSurfaceDocsHarvestStartupMode.Background"/>, which starts the same memoized harvest
+    /// during host startup and lets first requests render live progress if the snapshot is not ready within
+    /// <see cref="InitialRequestWaitBudgetMilliseconds"/>. <see cref="FailOnFailure"/> still makes startup wait for the
+    /// snapshot and fail closed when the aggregate status is failed.
+    /// </remarks>
+    public AppSurfaceDocsHarvestStartupMode StartupMode { get; set; } = AppSurfaceDocsHarvestStartupMode.Background;
+
+    /// <summary>
+    /// Gets or sets the first-request wait budget, in milliseconds, before AppSurface Docs renders the harvest observatory.
+    /// </summary>
+    /// <remarks>
+    /// The budget applies only while the initial harvest is still running. Caller cancellation cancels the wait, not the
+    /// shared memoized harvest. Use zero to render the observatory immediately for cold requests.
+    /// </remarks>
+    public int InitialRequestWaitBudgetMilliseconds { get; set; } = DefaultInitialRequestWaitBudgetMilliseconds;
+
+    /// <summary>
+    /// Gets or sets an artificial delay before active harvesters start, in milliseconds, for local and automated
+    /// observatory testing.
+    /// </summary>
+    /// <remarks>
+    /// The delay is inserted after AppSurface Docs publishes the live harvest run and before it invokes any active
+    /// harvester. The default is zero. This option exists so development and test hosts can intentionally keep the
+    /// harvest observatory in its startup phase; do not enable it in production traffic.
+    /// </remarks>
+    public int TestingPreHarvestDelayMilliseconds { get; set; }
+
+    /// <summary>
+    /// Gets or sets an artificial delay per harvester, in milliseconds, for local and automated observatory testing.
+    /// </summary>
+    /// <remarks>
+    /// The delay is inserted after a harvester publishes its running state and before that harvester starts real work. The
+    /// default is zero. This option exists so development and test hosts can intentionally keep the harvest observatory
+    /// visible; do not enable it in production traffic.
+    /// </remarks>
+    public int TestingDelayPerHarvesterMilliseconds { get; set; }
+
+    /// <summary>
+    /// Gets or sets an artificial delay per harvested document, in milliseconds, for local and automated observatory
+    /// testing.
+    /// </summary>
+    /// <remarks>
+    /// The delay is inserted after a harvester returns documents and before AppSurface Docs marks that harvester complete.
+    /// When live progress is available, the harvester's document count is published one document at a time. The default is
+    /// zero. This option exists so development and test hosts can intentionally keep the harvest observatory visible; do
+    /// not enable it in production traffic.
+    /// </remarks>
+    public int TestingDelayPerDocumentMilliseconds { get; set; }
 
     /// <summary>
     /// Gets health-surface settings for the operator-facing AppSurface Docs harvest health routes and sidebar chrome.
@@ -406,6 +465,27 @@ public sealed class AppSurfaceDocsHarvestOptions
     /// Gets JavaScript public API path policy and parser settings.
     /// </summary>
     public AppSurfaceDocsJavaScriptHarvestOptions JavaScript { get; set; } = new();
+}
+
+/// <summary>
+/// Controls when AppSurface Docs starts its initial source-backed harvest.
+/// </summary>
+public enum AppSurfaceDocsHarvestStartupMode
+{
+    /// <summary>
+    /// Do not start the initial harvest during host startup; the first docs read starts it lazily.
+    /// </summary>
+    Disabled = 0,
+
+    /// <summary>
+    /// Start the initial harvest during host startup without blocking startup unless strict failure mode is enabled.
+    /// </summary>
+    Background = 1,
+
+    /// <summary>
+    /// Start the initial harvest during host startup and wait for completion before startup continues.
+    /// </summary>
+    Blocking = 2
 }
 
 /// <summary>
@@ -989,6 +1069,31 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         }
         else
         {
+            if (!Enum.IsDefined(harvest.StartupMode))
+            {
+                failures.Add($"Unsupported AppSurface Docs harvest startup mode '{harvest.StartupMode}'.");
+            }
+
+            if (harvest.InitialRequestWaitBudgetMilliseconds < 0)
+            {
+                failures.Add("AppSurfaceDocs:Harvest:InitialRequestWaitBudgetMilliseconds must be greater than or equal to zero.");
+            }
+
+            if (harvest.TestingPreHarvestDelayMilliseconds < 0)
+            {
+                failures.Add("AppSurfaceDocs:Harvest:TestingPreHarvestDelayMilliseconds must be greater than or equal to zero.");
+            }
+
+            if (harvest.TestingDelayPerHarvesterMilliseconds < 0)
+            {
+                failures.Add("AppSurfaceDocs:Harvest:TestingDelayPerHarvesterMilliseconds must be greater than or equal to zero.");
+            }
+
+            if (harvest.TestingDelayPerDocumentMilliseconds < 0)
+            {
+                failures.Add("AppSurfaceDocs:Harvest:TestingDelayPerDocumentMilliseconds must be greater than or equal to zero.");
+            }
+
             if (harvest.Health is null)
             {
                 failures.Add("AppSurfaceDocs:Harvest:Health must not be null.");

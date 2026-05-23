@@ -18,6 +18,11 @@ public class StreamSourceTagHelper : TagHelper
     /// </summary>
     public bool Permanent { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether retained channel messages should be delivered before live messages.
+    /// </summary>
+    public bool Replay { get; set; }
+
     private readonly RazorWireOptions _options;
 
     /// <summary>
@@ -46,7 +51,9 @@ public class StreamSourceTagHelper : TagHelper
                 $"The 'channel' attribute is required for the 'rw:stream-source' tag helper.");
         }
 
-        var src = $"{_options.Streams.BasePath}/{Channel}";
+        var src = Replay
+            ? $"{_options.Streams.BasePath}/{Channel}?replay=1"
+            : $"{_options.Streams.BasePath}/{Channel}";
         output.Attributes.SetAttribute("src", src);
 
         if (Permanent)

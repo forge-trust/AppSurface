@@ -90,15 +90,25 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
-    public async Task GetDocsAsync_ShouldExpireSnapshotUsingConfiguredCacheExpiration()
+    public async Task GetDocsAsync_ShouldServeStaleSnapshotWhileRevalidatingExpiredCache()
     {
         var harvester = A.Fake<IDocHarvester>();
         var harvestCount = 0;
+        var secondHarvestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondHarvestRelease = new TaskCompletionSource<IReadOnlyList<DocNode>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .ReturnsLazily(() =>
             {
                 var currentHarvest = Interlocked.Increment(ref harvestCount);
-                return new[] { new DocNode($"Harvest {currentHarvest}", "path", "<p>content</p>") };
+                if (currentHarvest == 1)
+                {
+                    return Task.FromResult<IReadOnlyList<DocNode>>(
+                        [new DocNode("Harvest 1", "path", "<p>content</p>")]);
+                }
+
+                secondHarvestStarted.TrySetResult();
+                return secondHarvestRelease.Task;
             });
 
         using var cache = new MemoryCache(new MemoryCacheOptions());
@@ -123,9 +133,24 @@ public class DocAggregatorTests : IDisposable
         var second = await aggregator.GetDocsAsync();
 
         Assert.Equal("Harvest 1", Assert.Single(first).Title);
-        Assert.Equal("Harvest 2", Assert.Single(second).Title);
+        Assert.Equal("Harvest 1", Assert.Single(second).Title);
+        await secondHarvestStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .MustHaveHappenedTwiceExactly();
+
+        secondHarvestRelease.SetResult([new DocNode("Harvest 2", "path", "<p>content</p>")]);
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            var refreshed = await aggregator.GetDocsAsync();
+            if (Assert.Single(refreshed).Title == "Harvest 2")
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        Assert.Equal("Harvest 2", Assert.Single(await aggregator.GetDocsAsync()).Title);
     }
 
     [Fact]

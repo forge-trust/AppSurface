@@ -51,4 +51,34 @@ public class InMemoryRazorWireStreamHubTests
         // Act + Assert
         await hub.PublishAsync("missing", "payload");
     }
+
+    [Fact]
+    public async Task Subscribe_WithReplay_DeliversRetainedMessagesBeforeLiveMessages()
+    {
+        var hub = new InMemoryRazorWireStreamHub();
+        await hub.PublishAsync("orders", "first", new RazorWireStreamPublishOptions { Replay = true });
+        await hub.PublishAsync("orders", "live-only");
+        await hub.PublishAsync("orders", "second", new RazorWireStreamPublishOptions { Replay = true });
+
+        var reader = hub.Subscribe("orders", new RazorWireStreamSubscribeOptions { Replay = true });
+        await hub.PublishAsync("orders", "third");
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        Assert.Equal("first", await reader.ReadAsync(cts.Token));
+        Assert.Equal("second", await reader.ReadAsync(cts.Token));
+        Assert.Equal("third", await reader.ReadAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task Subscribe_WithoutReplay_RemainsLiveOnly()
+    {
+        var hub = new InMemoryRazorWireStreamHub();
+        await hub.PublishAsync("orders", "retained", new RazorWireStreamPublishOptions { Replay = true });
+
+        var reader = hub.Subscribe("orders");
+        await hub.PublishAsync("orders", "live");
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        Assert.Equal("live", await reader.ReadAsync(cts.Token));
+    }
 }
