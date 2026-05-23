@@ -616,6 +616,17 @@ internal sealed class PackageIndexGenerator
             .Replace('\\', '/');
     }
 
+    /// <summary>
+    /// Checks whether a known repository-relative chooser support file exists under the repository root.
+    /// </summary>
+    /// <param name="repositoryRoot">Repository root used as the path-resolution base; relative roots are normalized with <see cref="Path.GetFullPath(string)" />.</param>
+    /// <param name="repositoryRelativePath">Repository-relative file path, conventionally using <c>/</c> separators.</param>
+    /// <returns><c>true</c> when the normalized file exists; otherwise, <c>false</c>.</returns>
+    /// <remarks>
+    /// Use this only for trusted, optional chooser links. It normalizes separators and resolves <c>..</c> segments before
+    /// checking existence, but missing files are not errors. Manifest-supplied or required documentation targets should
+    /// use <see cref="ResolveRepositoryFilePath" /> so rooted, escaping, or missing paths fail loudly.
+    /// </remarks>
     private static bool RepositoryFileExists(string repositoryRoot, string repositoryRelativePath)
     {
         var normalizedRoot = Path.GetFullPath(repositoryRoot);
@@ -623,6 +634,22 @@ internal sealed class PackageIndexGenerator
         return File.Exists(Path.GetFullPath(normalizedRelativePath, normalizedRoot));
     }
 
+    /// <summary>
+    /// Resolves a required repository-relative documentation target and validates that it exists under the repository root.
+    /// </summary>
+    /// <param name="repositoryRoot">Repository root used as the resolution boundary; relative roots are normalized with <see cref="Path.GetFullPath(string)" />.</param>
+    /// <param name="repositoryRelativePath">Repository-relative file path supplied by chooser metadata, conventionally using <c>/</c> separators.</param>
+    /// <param name="description">Human-readable label included in validation errors.</param>
+    /// <returns>The normalized absolute path to the validated file.</returns>
+    /// <exception cref="PackageIndexException">
+    /// Thrown when <paramref name="repositoryRelativePath" /> is blank, rooted, escapes the repository root after
+    /// normalization, or points at missing documentation.
+    /// </exception>
+    /// <remarks>
+    /// The resolver replaces <c>/</c> with <see cref="Path.DirectorySeparatorChar" /> and normalizes <c>..</c> segments.
+    /// Callers should keep inputs repository-relative and avoid leading separators, because absolute-looking paths are
+    /// rejected before they can bypass the repository boundary.
+    /// </remarks>
     internal static string ResolveRepositoryFilePath(string repositoryRoot, string repositoryRelativePath, string description)
     {
         if (string.IsNullOrWhiteSpace(repositoryRelativePath))
