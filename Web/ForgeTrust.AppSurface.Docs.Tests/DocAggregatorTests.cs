@@ -4590,10 +4590,11 @@ public class DocAggregatorTests : IDisposable
         var root = Directory.CreateTempSubdirectory("appsurface-docaggregator-vcs-").FullName;
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(root, ".gitignore"), "ignored/\n");
-            Directory.CreateDirectory(Path.Combine(root, "ignored"));
-            await File.WriteAllTextAsync(Path.Combine(root, "ignored", "Hidden.md"), "# Hidden");
-            await File.WriteAllTextAsync(Path.Combine(root, "Visible.md"), "# Visible");
+            var ignoredDirectory = Path.Join(root, "ignored");
+            await File.WriteAllTextAsync(Path.Join(root, ".gitignore"), "ignored/\n");
+            Directory.CreateDirectory(ignoredDirectory);
+            await File.WriteAllTextAsync(Path.Join(ignoredDirectory, "Hidden.md"), "# Hidden");
+            await File.WriteAllTextAsync(Path.Join(root, "Visible.md"), "# Visible");
 
             using var cache = new MemoryCache(new MemoryCacheOptions());
             var memo = new Memo(cache);
@@ -4629,7 +4630,7 @@ public class DocAggregatorTests : IDisposable
         var root = Directory.CreateTempSubdirectory("appsurface-docaggregator-custom-").FullName;
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(root, ".gitignore"), "ignored/\n");
+            await File.WriteAllTextAsync(Path.Join(root, ".gitignore"), "ignored/\n");
             var harvester = new StaticHarvester([new DocNode("Ignored", "ignored/Custom.md", "<p>custom</p>")]);
             using var cache = new MemoryCache(new MemoryCacheOptions());
             var memo = new Memo(cache);

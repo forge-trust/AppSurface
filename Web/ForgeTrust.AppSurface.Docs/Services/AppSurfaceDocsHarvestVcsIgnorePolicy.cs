@@ -231,16 +231,8 @@ internal sealed class AppSurfaceDocsHarvestVcsIgnorePolicy
 
     private bool CouldAnyNegationMatchDirectory(string relativeDirectory)
     {
-        var negatedRules = GetApplicableRules(relativeDirectory).Where(rule => rule.IsNegated);
-        foreach (var rule in negatedRules)
-        {
-            if (rule.Matches(relativeDirectory, isDirectory: true))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return GetApplicableRules(relativeDirectory)
+            .Any(rule => rule.IsNegated && rule.Matches(relativeDirectory, isDirectory: true));
     }
 
     private IgnoreRuleSet LoadRulesForDirectory(string relativeDirectory)
