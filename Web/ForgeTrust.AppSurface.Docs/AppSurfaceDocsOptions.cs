@@ -470,6 +470,10 @@ public sealed class AppSurfaceDocsHarvestOptions
 /// <summary>
 /// Controls when AppSurface Docs starts its initial source-backed harvest.
 /// </summary>
+/// <remarks>
+/// The numeric values are part of the options binding and serialization contract. Do not renumber or reorder existing
+/// members; append new modes with explicit numeric values so persisted configuration remains stable.
+/// </remarks>
 public enum AppSurfaceDocsHarvestStartupMode
 {
     /// <summary>
