@@ -405,7 +405,7 @@
       "forgetrust.appsurface.cli": {
         "type": "Project",
         "dependencies": {
-          "CliFx": "[3.0.0, )",
+          "CliFx": "[2.3.6, )",
           "CliWrap": "[3.10.1, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Docs.Standalone": "[0.1.0, )",
@@ -423,7 +423,7 @@
       "forgetrust.appsurface.console": {
         "type": "Project",
         "dependencies": {
-          "CliFx": "[3.0.0, )",
+          "CliFx": "[2.3.6, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
@@ -499,7 +499,7 @@
       "forgetrust.razorwire.cli": {
         "type": "Project",
         "dependencies": {
-          "CliFx": "[3.0.0, )",
+          "CliFx": "[2.3.6, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )"
@@ -513,9 +513,9 @@
       },
       "CliFx": {
         "type": "CentralTransitive",
-        "requested": "[3.0.0, )",
-        "resolved": "3.0.0",
-        "contentHash": "pdwqGjsOnD/aHgbFGJJOk1U5JOEsFwVhVMb2LqHUQmPEVSZf2YgyGeZvCtP2SHndBEHxgUVNlNXX37o9uz62bw=="
+        "requested": "[2.3.6, )",
+        "resolved": "2.3.6",
+        "contentHash": "7Q6rbhCxpEoAtPrcBm4sJ4QlDeY+0Dp4in0oXAxrJJ/4L1LV/YkDQSqfUMwK56GbnpUo4fIrpOxoxM+ta44B1g=="
       },
       "CliWrap": {
         "type": "CentralTransitive",

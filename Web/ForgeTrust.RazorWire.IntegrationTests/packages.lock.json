@@ -462,7 +462,7 @@
           "Microsoft.CodeAnalysis.CSharp": "[5.0.0, )",
           "TextMateSharp": "[2.0.3, )",
           "TextMateSharp.Grammars": "[2.0.3, )",
-          "YamlDotNet": "[17.0.1, )"
+          "YamlDotNet": "[18.0.0, )"
         }
       },
       "forgetrust.appsurface.docs.standalone": {
@@ -654,9 +654,9 @@
       },
       "YamlDotNet": {
         "type": "CentralTransitive",
-        "requested": "[17.0.1, )",
-        "resolved": "17.0.1",
-        "contentHash": "qVir5fehR/W5nTJyoJUibypETXaW4iRAF9cQa0FQIC9TJ3VC0qDOwm4o/RxANewj8KzPF8WMF2abBfUgi6LC4w=="
+        "requested": "[18.0.0, )",
+        "resolved": "18.0.0",
+        "contentHash": "ptHVgcYmLejGuWXV7RMFoEqFKYMXnieOlWLPzEslfDtzZ9ngMhjYwykfqjBN2+fMEAEyobozkj07lKEpR4dssA=="
       }
     }
   }

@@ -5,7 +5,7 @@ ForgeTrust.AppSurface.Docs includes the following third-party components in addi
 ## Acornima
 
 - Package: `Acornima`
-- Version: `1.6.1`
+- Version: `1.6.2`
 - License: BSD-3-Clause
 - Project: https://github.com/adams85/acornima
 

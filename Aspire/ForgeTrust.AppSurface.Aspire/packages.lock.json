@@ -483,7 +483,7 @@
       "forgetrust.appsurface.console": {
         "type": "Project",
         "dependencies": {
-          "CliFx": "[3.0.0, )",
+          "CliFx": "[2.3.6, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
       },
@@ -497,9 +497,9 @@
       },
       "CliFx": {
         "type": "CentralTransitive",
-        "requested": "[3.0.0, )",
-        "resolved": "3.0.0",
-        "contentHash": "pdwqGjsOnD/aHgbFGJJOk1U5JOEsFwVhVMb2LqHUQmPEVSZf2YgyGeZvCtP2SHndBEHxgUVNlNXX37o9uz62bw=="
+        "requested": "[2.3.6, )",
+        "resolved": "2.3.6",
+        "contentHash": "7Q6rbhCxpEoAtPrcBm4sJ4QlDeY+0Dp4in0oXAxrJJ/4L1LV/YkDQSqfUMwK56GbnpUo4fIrpOxoxM+ta44B1g=="
       },
       "CliWrap": {
         "type": "CentralTransitive",
@@ -572,9 +572,9 @@
       },
       "YamlDotNet": {
         "type": "CentralTransitive",
-        "requested": "[17.0.1, )",
-        "resolved": "17.0.1",
-        "contentHash": "qVir5fehR/W5nTJyoJUibypETXaW4iRAF9cQa0FQIC9TJ3VC0qDOwm4o/RxANewj8KzPF8WMF2abBfUgi6LC4w=="
+        "requested": "[18.0.0, )",
+        "resolved": "18.0.0",
+        "contentHash": "ptHVgcYmLejGuWXV7RMFoEqFKYMXnieOlWLPzEslfDtzZ9ngMhjYwykfqjBN2+fMEAEyobozkj07lKEpR4dssA=="
       }
     }
   }
