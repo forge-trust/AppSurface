@@ -2397,19 +2397,7 @@ public class DocAggregator
 
     private static string NormalizeRelativeDirectory(string relativeDirectory)
     {
-        var normalized = relativeDirectory.Trim();
-        while (Path.IsPathRooted(normalized))
-        {
-            var root = Path.GetPathRoot(normalized);
-            if (string.IsNullOrEmpty(root))
-            {
-                break;
-            }
-
-            normalized = normalized[root.Length..];
-        }
-
-        return normalized.TrimStart(
+        return relativeDirectory.Trim().TrimStart(
             Path.DirectorySeparatorChar,
             Path.AltDirectorySeparatorChar,
             '/',
