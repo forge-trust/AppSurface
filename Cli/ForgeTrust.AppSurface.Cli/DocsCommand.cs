@@ -1709,7 +1709,8 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
 }
 
 /// <summary>
-/// Default AppSurface Docs export configurator that publishes docs route aliases into RazorWire's export graph.
+/// Default AppSurface Docs export configurator that publishes docs route aliases into RazorWire's export graph and
+/// captures the frozen route manifest alongside the static output.
 /// </summary>
 internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsExportContextConfigurator
 {
@@ -1732,6 +1733,11 @@ internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsE
                 context.AddRedirectArtifact(alias.LiveUrl, entry.CanonicalLiveUrl);
             }
         }
+
+        await AppSurfaceDocsFrozenRouteManifest.WriteAsync(
+            context.OutputPath,
+            routeManifest,
+            cancellationToken);
     }
 }
 
