@@ -72,6 +72,44 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
     }
 
     [Fact]
+    public void RewriteHtml_ShouldPrefixPathBase_WhenRebasingSearchRecoveryAnchors()
+    {
+        const string html =
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body>
+              <section id="docs-search-page-starter">
+                <a href="/docs/search?q=API%20reference" data-rw-search-suggestion="API reference">API reference</a>
+              </section>
+              <section id="docs-search-page-recovery">
+                <a href="/docs/sections/start-here">Start Here</a>
+                <a href="/docs/sections/examples">Examples</a>
+                <a href="/docs/packages">Packages</a>
+                <a href="/docs/sections/troubleshooting">Troubleshooting</a>
+                <a href="/docs/sections/api-reference">API Reference</a>
+              </section>
+            </body>
+            </html>
+            """;
+
+        var rewritten = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(
+            html,
+            "/docs/v/1.2.3",
+            requestPathBase: "/some-base");
+
+        Assert.Contains("href=\"/some-base/docs/v/1.2.3/search?q=API%20reference\"", rewritten);
+        Assert.Contains("href=\"/some-base/docs/v/1.2.3/sections/start-here\"", rewritten);
+        Assert.Contains("href=\"/some-base/docs/v/1.2.3/sections/examples\"", rewritten);
+        Assert.Contains("href=\"/some-base/docs/v/1.2.3/packages\"", rewritten);
+        Assert.Contains("href=\"/some-base/docs/v/1.2.3/sections/troubleshooting\"", rewritten);
+        Assert.Contains("href=\"/some-base/docs/v/1.2.3/sections/api-reference\"", rewritten);
+    }
+
+    [Fact]
     public void RewriteHtml_ShouldRebaseMiniSearchUrlWithoutSuffix()
     {
         const string html =

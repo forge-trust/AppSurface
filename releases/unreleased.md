@@ -24,6 +24,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface now builds and uploads validated prerelease package artifacts on pull requests and manual workflow runs, using the package chooser manifest as the single source of truth for publish decisions, dependency expectations, tool packages, first-party DLL version identity, and Tailwind runtime payload presence before NuGet publishing is enabled.
 - AppSurface now has a protected, tag-only NuGet prerelease publish workflow that revalidates package artifact manifests, force-fetches the pushed annotated tag before validation, uses NuGet Trusted Publishing instead of a long-lived API key, requires a reviewed `nuget-prerelease` environment, writes a redacted publish ledger, and smoke-restores published packages from a clean NuGet configuration before a prerelease is considered ready.
 - The public docs Start Here path now leads with an AppSurface evaluator sequence for teams comparing module-based startup against plain ASP.NET Core `Program.cs` configuration.
+- Search fallback verification now proves the server-rendered search shell stays useful for no-JS readers, crawlers, failed `search-index.json` requests, and path-base or published-tree mounts before the browser search runtime takes over.
 - The root README now has a single hello-world quickstart that starts the smallest web example on an explicit port and proves the response with `curl`.
 
 ### Contribution contract
