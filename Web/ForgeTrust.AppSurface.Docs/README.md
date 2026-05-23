@@ -668,7 +668,8 @@ Pitfalls:
   - Remote URLs, relative paths, query strings, fragments, protocol-relative URLs, and unsafe schemes are rejected during startup validation.
 - `AppSurfaceDocs:Identity:Logo:Path`
   - Optional logo image path rendered beside the display name in the built-in docs chrome.
-  - Must be an app-root path such as `/brand/docs-logo.svg` or an application-relative path such as `~/brand/docs-logo.svg`.
+  - Must be an app-root path such as `/branding/docs-logo.svg` or an application-relative path such as `~/branding/docs-logo.svg`.
+  - This is a browser URL path, not a filesystem path.
   - Remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments are rejected.
 - `AppSurfaceDocs:Identity:Logo:AltText`
   - Optional accessible text for logo-only renderers that consume the resolved identity.
@@ -677,12 +678,48 @@ Pitfalls:
 - `AppSurfaceDocs:Identity:Favicon:SvgPath`
   - Optional SVG favicon path.
   - Uses the same app-root or `~/` path rules as the logo.
+  - This is a browser URL path, not a filesystem path.
 - `AppSurfaceDocs:Identity:Favicon:IcoPath`
   - Optional ICO favicon path.
   - Uses the same app-root or `~/` path rules as the logo.
+  - This is a browser URL path, not a filesystem path.
 - `AppSurfaceDocs:Identity:Favicon:PngPath`
   - Optional PNG favicon path.
   - Uses the same app-root or `~/` path rules as the logo.
+  - This is a browser URL path, not a filesystem path.
+- `AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath`
+  - Optional filesystem directory that AppSurface Docs serves for consumer-owned logos, favicons, and related brand assets.
+  - May be absolute, relative to `AppSurfaceDocs:Source:RepositoryRoot` when configured, or relative to the host content root otherwise.
+  - This is a server filesystem path, not a browser URL path.
+  - Serves only common web image and icon extensions: `.avif`, `.gif`, `.ico`, `.jpg`, `.jpeg`, `.png`, `.svg`, and `.webp`.
+  - Keep this as a dedicated public branding directory, not a broad repository or deployment root.
+  - Leave this blank when the owning application serves `Logo:Path` and `Favicon:*Path` itself.
+- `AppSurfaceDocs:Identity:BrandingAssets:RequestPath`
+  - Optional URL prefix for the configured branding asset directory.
+  - Defaults to `/branding`.
+  - Uses the same app-root or `~/` path rules as the logo and must not be the application root.
+  - Override this only when `/branding` conflicts with an owning application route.
+
+Use `Identity:BrandingAssets` when AppSurface Docs should serve brand files from a repository-owned or mounted directory.
+For example, with `DirectoryPath` set to `branding` and the default `RequestPath` of `/branding`, the file
+`branding/docs-logo.svg` is rendered with `Logo:Path` set to `/branding/docs-logo.svg`. AppSurface Docs does not join
+`Logo:Path` or `Favicon:*Path` with `DirectoryPath`; those path options are the browser URLs that users and crawlers
+request.
+
+Leave `Identity:BrandingAssets:DirectoryPath` blank when the owning application already serves the logo or favicon URL.
+For example, a host that serves `/assets/docs-logo.svg` itself can set `Logo:Path` to `/assets/docs-logo.svg` without
+mounting a branding directory through AppSurface Docs.
+
+When no favicon paths are configured, AppSurface Docs renders the packaged AppSurface Docs document-layers SVG mark as
+the default favicon. Standalone AppSurface Docs hosts also serve that same SVG mark at `/favicon.ico` so the browser's
+conventional root favicon probe succeeds before or alongside the rendered `<link rel="icon">` metadata. When
+`AppSurfaceDocs:Identity:Favicon:SvgPath` is configured in a standalone host, `/favicon.ico` redirects to that SVG path so
+the conventional browser probe matches the configured favicon. Embedded hosts do not claim `/favicon.ico`; the owning
+application keeps control of its app-wide favicon. If you configure any custom favicon path, the built-in layout renders
+only the configured entries, and the host is responsible for serving those files. Use `Identity:BrandingAssets` when those
+files should come from a repository-owned or deployment-mounted directory instead of the owning application's normal
+static web assets.
+
 - `AppSurfaceDocs:Harvest:FailOnFailure`
   - Defaults to `false`.
   - `AddAppSurfaceDocs()` always registers `AppSurfaceDocsHarvestFailurePreflightService`; this flag controls whether that preflight can fail startup.

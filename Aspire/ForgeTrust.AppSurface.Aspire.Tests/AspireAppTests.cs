@@ -49,8 +49,6 @@ public class AspireAppTests
     [Fact]
     public async Task RunAsync_WithoutModule_UsesCallingAssembly()
     {
-        var previousExitCode = Environment.ExitCode;
-
         try
         {
             Environment.ExitCode = 0;
@@ -62,7 +60,7 @@ public class AspireAppTests
         }
         finally
         {
-            Environment.ExitCode = previousExitCode;
+            Environment.ExitCode = 0;
         }
     }
 
@@ -73,8 +71,6 @@ public class AspireAppTests
     [InlineData("-f")]
     public async Task RunAsync_InvalidArgs_Throws(string arg)
     {
-        var previousExitCode = Environment.ExitCode;
-
         try
         {
             Environment.ExitCode = 0;
@@ -85,7 +81,7 @@ public class AspireAppTests
         }
         finally
         {
-            Environment.ExitCode = previousExitCode;
+            Environment.ExitCode = 0;
         }
     }
 
