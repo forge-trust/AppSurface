@@ -1023,19 +1023,19 @@ public class DocAggregator
         DocHarvestContext context,
         CancellationToken cancellationToken)
     {
-        if (harvester.GetType() == typeof(MarkdownHarvester))
+        if (harvester is MarkdownHarvester markdownHarvester)
         {
-            return ((MarkdownHarvester)harvester).HarvestAsync(context, cancellationToken);
+            return markdownHarvester.HarvestAsync(context, cancellationToken);
         }
 
-        if (harvester.GetType() == typeof(CSharpDocHarvester))
+        if (harvester is CSharpDocHarvester csharpDocHarvester)
         {
-            return ((CSharpDocHarvester)harvester).HarvestAsync(context, cancellationToken);
+            return csharpDocHarvester.HarvestAsync(context, cancellationToken);
         }
 
-        if (harvester.GetType() == typeof(JavaScriptDocHarvester))
+        if (harvester is JavaScriptDocHarvester javaScriptDocHarvester)
         {
-            return ((JavaScriptDocHarvester)harvester).HarvestAsync(context, cancellationToken);
+            return javaScriptDocHarvester.HarvestAsync(context, cancellationToken);
         }
 
         return harvester.HarvestAsync(context.RepositoryRoot, cancellationToken);

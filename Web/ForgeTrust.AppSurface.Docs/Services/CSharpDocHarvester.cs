@@ -74,6 +74,11 @@ public class CSharpDocHarvester : IDocHarvester
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        if (GetType() != typeof(CSharpDocHarvester))
+        {
+            return await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken);
+        }
+
         return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
     }
 

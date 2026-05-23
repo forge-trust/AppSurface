@@ -91,6 +91,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        if (GetType() != typeof(JavaScriptDocHarvester))
+        {
+            return await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken);
+        }
+
         return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
     }
 
