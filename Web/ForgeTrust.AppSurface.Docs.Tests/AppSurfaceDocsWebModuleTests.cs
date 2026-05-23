@@ -114,6 +114,7 @@ public class AppSurfaceDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetRequiredService<IMemo>());
         Assert.NotNull(serviceProvider.GetRequiredService<RazorWireOptions>());
         Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireStreamHub>());
+        Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestProgressReporter>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestCoordinator>());
@@ -162,6 +163,48 @@ public class AppSurfaceDocsWebModuleTests
             new DefaultHttpContext { RequestServices = serviceProvider },
             AppSurfaceDocsHarvestProgressReporter.ChannelName));
         Assert.True(await authorizer.CanSubscribeAsync(
+            new DefaultHttpContext { RequestServices = serviceProvider },
+            "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostChannelAuthorizerIsInstance_DelegatesHostChannels()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireChannelAuthorizer>(new DenyAllChannelAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+
+        Assert.False(await authorizer.CanSubscribeAsync(
+            new DefaultHttpContext { RequestServices = serviceProvider },
+            "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostChannelAuthorizerIsFactory_DelegatesHostChannels()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireChannelAuthorizer>(_ => new DenyAllChannelAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+
+        Assert.False(await authorizer.CanSubscribeAsync(
             new DefaultHttpContext { RequestServices = serviceProvider },
             "host-channel"));
     }
@@ -1096,6 +1139,14 @@ public class AppSurfaceDocsWebModuleTests
         public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
         {
             return new ValueTask<bool>(true);
+        }
+    }
+
+    private sealed class DenyAllChannelAuthorizer : IRazorWireChannelAuthorizer
+    {
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            return new ValueTask<bool>(false);
         }
     }
 

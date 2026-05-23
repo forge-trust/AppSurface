@@ -532,6 +532,7 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups:0"] = " testprojects ",
                         ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups:1"] = "TestProjects",
                         ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:AllowGlobs:HiddenDirectories:0"] = " .github\\workflows\\** ",
+                        ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:AllowGlobs: HiddenDirectories :0"] = "docs\\.github\\**",
                         ["AppSurfaceDocs:Harvest:Markdown:IncludeGlobs:0"] = "docs\\guides\\**",
                         ["AppSurfaceDocs:Harvest:Markdown:ExcludeGlobs:0"] = "docs\\drafts\\**",
                         ["AppSurfaceDocs:Harvest:Markdown:DefaultExclusions:AllowGlobs:BuildOutput:0"] = "docs\\bin\\README.md",
@@ -558,7 +559,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.False(options.Harvest.Paths.VcsIgnore.Enabled);
         Assert.Equal(["docs/generated-public/**"], options.Harvest.Paths.VcsIgnore.AllowGlobs);
         Assert.Equal(["TestProjects"], options.Harvest.Paths.DefaultExclusions.DisabledGroups);
-        Assert.Equal([".github/workflows/**"], options.Harvest.Paths.DefaultExclusions.AllowGlobs["HiddenDirectories"]);
+        Assert.Equal(
+            [".github/workflows/**", "docs/.github/**"],
+            options.Harvest.Paths.DefaultExclusions.AllowGlobs["HiddenDirectories"].Order(StringComparer.Ordinal));
         Assert.Equal(["docs/guides/**"], options.Harvest.Markdown.IncludeGlobs);
         Assert.Equal(["docs/drafts/**"], options.Harvest.Markdown.ExcludeGlobs);
         Assert.Equal(["docs/bin/README.md"], options.Harvest.Markdown.DefaultExclusions.AllowGlobs["BuildOutput"]);
