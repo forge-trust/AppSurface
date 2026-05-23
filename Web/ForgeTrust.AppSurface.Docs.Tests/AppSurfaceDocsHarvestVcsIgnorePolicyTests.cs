@@ -79,7 +79,7 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             new AppSurfaceDocsHarvestVcsIgnoreOptions(),
             NullLogger.Instance);
 
-        var rootedDirectory = Path.Combine(Path.GetPathRoot(_root)!, "outside-repository");
+        var rootedDirectory = Path.Join(Path.GetPathRoot(_root)!, "outside-repository");
 
         Assert.False(policy.ShouldPruneDirectory(rootedDirectory, AppSurfaceDocsHarvestSourceKind.Markdown));
     }
