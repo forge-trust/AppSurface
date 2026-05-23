@@ -1,0 +1,21 @@
+title: AppSurface v0.1.0 Release Preview
+summary: Consumer-facing preview for the first coordinated AppSurface release. Final version, date, shipped scope, and migration steps are completed when the tag is cut.
+page_type: release-note
+nav_group: Releases
+order: 20
+breadcrumbs:
+  - Releases
+  - v0.1.0 Preview
+trust:
+  status: Release preview
+  summary: This page previews the intended v0.1.0 release story. It is not a tagged release note until v0.1.0 is cut.
+  freshness: Provisional. Read the unreleased proof artifact for the current merged-work ledger.
+  change_scope: Repository-wide. AppSurface plans to release the monorepo in unison for v0.1.0.
+  migration:
+    label: Read the pre-1.0 upgrade policy
+    href: /docs/releases/upgrade-policy
+  archive: When v0.1.0 is tagged, this preview is finalized into the durable tagged release note and linked from CHANGELOG.md.
+  sources:
+    - releases/unreleased.md is the current merged-work proof artifact.
+    - CHANGELOG.md is the compact ledger.
+    - releases/templates/tagged-release-template.md defines the final tagged-note shape.

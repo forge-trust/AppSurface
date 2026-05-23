@@ -32,6 +32,7 @@ public sealed class DocsUrlBuilder
     private readonly string _currentDocsRootPath;
     private readonly string _routeRootPath;
     private readonly string _docsVersionPrefixPath;
+    private readonly string? _publicOrigin;
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocsUrlBuilder"/> from typed AppSurface Docs options.
@@ -47,6 +48,7 @@ public sealed class DocsUrlBuilder
             ? ResolveDefaultDocsRootPath(_routeRootPath, VersioningEnabled)
             : normalizedDocsRootPath;
         _docsVersionPrefixPath = JoinPath(_routeRootPath, "v");
+        _publicOrigin = NormalizePublicOriginOrNull(options.Routing?.PublicOrigin);
         Routes = new AppSurfaceDocsRouteReferences
         {
             Home = BuildHomeUrl(),
@@ -100,6 +102,16 @@ public sealed class DocsUrlBuilder
     /// Gets named AppSurface Docs routes that consumers should prefer over hardcoded route strings.
     /// </summary>
     public AppSurfaceDocsRouteReferences Routes { get; }
+
+    /// <summary>
+    /// Gets the configured public origin used for absolute canonical metadata, or <see langword="null"/> when unset.
+    /// </summary>
+    /// <remarks>
+    /// This value is an origin only, for example <c>https://docs.example.com</c>. It never includes the AppSurface Docs
+    /// route root because canonical route identity is still owned by <see cref="BuildDocUrl(string)"/>,
+    /// <see cref="BuildVersionDocUrl(string, string)"/>, and the route manifest.
+    /// </remarks>
+    public string? PublicOrigin => _publicOrigin;
 
     /// <summary>
     /// Builds the current live docs home URL.
@@ -209,6 +221,36 @@ public sealed class DocsUrlBuilder
     }
 
     /// <summary>
+    /// Builds the browser-facing canonical href for an app-relative canonical route.
+    /// </summary>
+    /// <param name="appRelativeCanonicalUrl">The app-relative canonical route, such as <c>/docs/start</c>.</param>
+    /// <returns>
+    /// The app-relative canonical route when no public origin is configured, or an absolute public canonical URL when
+    /// <see cref="PublicOrigin"/> is set.
+    /// </returns>
+    /// <remarks>
+    /// AppSurface Docs keeps route identity app-relative until the final render boundary. This method is that boundary
+    /// for canonical metadata: it joins the configured origin with the already-selected canonical path without changing
+    /// current, preview, archive, or exact-version route semantics.
+    /// </remarks>
+    public string BuildCanonicalHref(string appRelativeCanonicalUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appRelativeCanonicalUrl);
+
+        var normalizedCanonicalUrl = appRelativeCanonicalUrl.Trim();
+        if (!IsAppRelativeUrl(normalizedCanonicalUrl))
+        {
+            throw new ArgumentException(
+                "Canonical href input must be an app-relative URL such as '/docs/start'.",
+                nameof(appRelativeCanonicalUrl));
+        }
+
+        return _publicOrigin is null
+            ? normalizedCanonicalUrl
+            : _publicOrigin + normalizedCanonicalUrl;
+    }
+
+    /// <summary>
     /// Builds the public archive URL.
     /// </summary>
     /// <returns>The stable archive URL.</returns>
@@ -259,6 +301,62 @@ public sealed class DocsUrlBuilder
         }
 
         return url;
+    }
+
+    /// <summary>
+    /// Normalizes a configured public origin for absolute canonical metadata.
+    /// </summary>
+    /// <param name="publicOrigin">The configured origin, which may be null or already normalized.</param>
+    /// <returns>The normalized origin, or <see langword="null"/> when the value is blank.</returns>
+    /// <exception cref="ArgumentException">Thrown when the configured value is not an origin-only HTTP(S) URL.</exception>
+    internal static string? NormalizePublicOriginOrNull(string? publicOrigin)
+    {
+        if (TryNormalizePublicOrigin(publicOrigin, out var normalizedPublicOrigin))
+        {
+            return normalizedPublicOrigin;
+        }
+
+        throw new ArgumentException(
+            "Public origin must be an absolute http or https origin without a path, query string, fragment, or userinfo.",
+            nameof(publicOrigin));
+    }
+
+    /// <summary>
+    /// Attempts to normalize a configured public origin for absolute canonical metadata.
+    /// </summary>
+    /// <param name="publicOrigin">The configured origin, which may be null or already normalized.</param>
+    /// <param name="normalizedPublicOrigin">The normalized origin, or <see langword="null"/> when the value is blank.</param>
+    /// <returns><see langword="true"/> when the value is blank or a valid HTTP(S) origin; otherwise <see langword="false"/>.</returns>
+    internal static bool TryNormalizePublicOrigin(string? publicOrigin, out string? normalizedPublicOrigin)
+    {
+        normalizedPublicOrigin = null;
+        if (string.IsNullOrWhiteSpace(publicOrigin))
+        {
+            return true;
+        }
+
+        if (!Uri.TryCreate(publicOrigin.Trim(), UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(uri.Host)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || (!string.IsNullOrEmpty(uri.AbsolutePath) && !string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal))
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment))
+        {
+            return false;
+        }
+
+        normalizedPublicOrigin = uri.GetLeftPart(UriPartial.Authority);
+        return true;
     }
 
     /// <summary>
@@ -396,6 +494,13 @@ public sealed class DocsUrlBuilder
     internal static string ResolveDefaultDocsRootPath(string routeRootPath, bool versioningEnabled)
     {
         return versioningEnabled ? JoinPath(routeRootPath, "next") : routeRootPath;
+    }
+
+    private static bool IsAppRelativeUrl(string value)
+    {
+        return value.StartsWith("/", StringComparison.Ordinal)
+               && !value.StartsWith("//", StringComparison.Ordinal)
+               && !value.Contains("://", StringComparison.Ordinal);
     }
 }
 

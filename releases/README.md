@@ -11,7 +11,8 @@ It also acts as a concrete AppSurface Docs example for teams that want stronger 
 ## Start here
 
 - [Package chooser](../packages/README.md) is the fastest install map for deciding which AppSurface package to add first.
-- [Unreleased](./unreleased.md) is the living proof artifact for the next coordinated AppSurface version.
+- [v0.1.0 Release Preview](./v0.1-preview.md) is the consumer-facing story for the first coordinated AppSurface release. It is still provisional until the tag is cut.
+- [Unreleased](./unreleased.md) is the living proof artifact for the next coordinated AppSurface version: the current merged-work ledger, not the final tagged narrative.
 - [Changelog](../CHANGELOG.md) is the compact ledger that points to unreleased and tagged stories.
 - [Pre-1.0 upgrade policy](./upgrade-policy.md) explains the stability contract before `v1.0.0`.
 - [Release authoring checklist](./release-authoring-checklist.md) is the maintainer workflow for turning the unreleased page into a tagged release.

@@ -472,6 +472,26 @@ Default routing:
 
 AppSurface Docs registers only the configured docs routes. It does not add a generic `{controller}/{action}` fallback to the host application, so custom docs roots stay isolated from other modules and application routes.
 
+### Public canonical origin
+
+Set `AppSurfaceDocs:Routing:PublicOrigin` when a preview or export host listens on one origin but published metadata should name another origin:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Routing": {
+      "PublicOrigin": "https://docs.example.com"
+    }
+  }
+}
+```
+
+`PublicOrigin` affects canonical metadata only. AppSurface Docs still chooses the page route from `RouteRootPath`, `DocsRootPath`, versioning settings, and page metadata before joining that route to the configured origin. For example, `PublicOrigin=https://docs.example.com` and the default docs root render a detail page canonical href such as `https://docs.example.com/docs/guides/intro`.
+
+Use `PublicOrigin` for static export, reverse-proxied docs hosts, and CI hosts that crawl an internal loopback URL while publishing to a stable public domain. Leave it unset for local preview, ephemeral review apps, or deployments where AppSurface Docs should keep app-relative canonical links.
+
+Configure only the origin: scheme, host, and optional port. Values such as `https://docs.example.com/docs`, `https://docs.example.com?x=1`, `https://user:pass@docs.example.com`, or `ftp://docs.example.com` are invalid. Put route paths in `RouteRootPath` and `DocsRootPath`, not in `PublicOrigin`.
+
 ### Route references
 
 Consumers should resolve `DocsUrlBuilder` and use `DocsUrlBuilder.Routes` instead of hardcoding route strings:
@@ -648,7 +668,8 @@ Pitfalls:
   - Remote URLs, relative paths, query strings, fragments, protocol-relative URLs, and unsafe schemes are rejected during startup validation.
 - `AppSurfaceDocs:Identity:Logo:Path`
   - Optional logo image path rendered beside the display name in the built-in docs chrome.
-  - Must be an app-root path such as `/brand/docs-logo.svg` or an application-relative path such as `~/brand/docs-logo.svg`.
+  - Must be an app-root path such as `/branding/docs-logo.svg` or an application-relative path such as `~/branding/docs-logo.svg`.
+  - This is a browser URL path, not a filesystem path.
   - Remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments are rejected.
 - `AppSurfaceDocs:Identity:Logo:AltText`
   - Optional accessible text for logo-only renderers that consume the resolved identity.
@@ -657,12 +678,48 @@ Pitfalls:
 - `AppSurfaceDocs:Identity:Favicon:SvgPath`
   - Optional SVG favicon path.
   - Uses the same app-root or `~/` path rules as the logo.
+  - This is a browser URL path, not a filesystem path.
 - `AppSurfaceDocs:Identity:Favicon:IcoPath`
   - Optional ICO favicon path.
   - Uses the same app-root or `~/` path rules as the logo.
+  - This is a browser URL path, not a filesystem path.
 - `AppSurfaceDocs:Identity:Favicon:PngPath`
   - Optional PNG favicon path.
   - Uses the same app-root or `~/` path rules as the logo.
+  - This is a browser URL path, not a filesystem path.
+- `AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath`
+  - Optional filesystem directory that AppSurface Docs serves for consumer-owned logos, favicons, and related brand assets.
+  - May be absolute, relative to `AppSurfaceDocs:Source:RepositoryRoot` when configured, or relative to the host content root otherwise.
+  - This is a server filesystem path, not a browser URL path.
+  - Serves only common web image and icon extensions: `.avif`, `.gif`, `.ico`, `.jpg`, `.jpeg`, `.png`, `.svg`, and `.webp`.
+  - Keep this as a dedicated public branding directory, not a broad repository or deployment root.
+  - Leave this blank when the owning application serves `Logo:Path` and `Favicon:*Path` itself.
+- `AppSurfaceDocs:Identity:BrandingAssets:RequestPath`
+  - Optional URL prefix for the configured branding asset directory.
+  - Defaults to `/branding`.
+  - Uses the same app-root or `~/` path rules as the logo and must not be the application root.
+  - Override this only when `/branding` conflicts with an owning application route.
+
+Use `Identity:BrandingAssets` when AppSurface Docs should serve brand files from a repository-owned or mounted directory.
+For example, with `DirectoryPath` set to `branding` and the default `RequestPath` of `/branding`, the file
+`branding/docs-logo.svg` is rendered with `Logo:Path` set to `/branding/docs-logo.svg`. AppSurface Docs does not join
+`Logo:Path` or `Favicon:*Path` with `DirectoryPath`; those path options are the browser URLs that users and crawlers
+request.
+
+Leave `Identity:BrandingAssets:DirectoryPath` blank when the owning application already serves the logo or favicon URL.
+For example, a host that serves `/assets/docs-logo.svg` itself can set `Logo:Path` to `/assets/docs-logo.svg` without
+mounting a branding directory through AppSurface Docs.
+
+When no favicon paths are configured, AppSurface Docs renders the packaged AppSurface Docs document-layers SVG mark as
+the default favicon. Standalone AppSurface Docs hosts also serve that same SVG mark at `/favicon.ico` so the browser's
+conventional root favicon probe succeeds before or alongside the rendered `<link rel="icon">` metadata. When
+`AppSurfaceDocs:Identity:Favicon:SvgPath` is configured in a standalone host, `/favicon.ico` redirects to that SVG path so
+the conventional browser probe matches the configured favicon. Embedded hosts do not claim `/favicon.ico`; the owning
+application keeps control of its app-wide favicon. If you configure any custom favicon path, the built-in layout renders
+only the configured entries, and the host is responsible for serving those files. Use `Identity:BrandingAssets` when those
+files should come from a repository-owned or deployment-mounted directory instead of the owning application's normal
+static web assets.
+
 - `AppSurfaceDocs:Harvest:FailOnFailure`
   - Defaults to `false`.
   - `AddAppSurfaceDocs()` always registers `AppSurfaceDocsHarvestFailurePreflightService`; this flag controls whether that preflight can fail startup.
@@ -736,6 +793,12 @@ Pitfalls:
   - `/` is supported for single-purpose unversioned docs hosts.
   - The path must be app-relative, must not end with `/` except for `/`, and cannot contain query or fragment segments.
   - When versioning is on, it cannot equal the route root and cannot use the route root's reserved archive or exact-version children, such as `/foo/bar/versions`, `/foo/bar/v`, or `/foo/bar/v/1.2.3`.
+- `AppSurfaceDocs:Routing:PublicOrigin`
+  - Optional public origin used when rendering absolute canonical metadata.
+  - When omitted, details pages render app-relative canonical links.
+  - When set, it must be an absolute `http` or `https` origin such as `https://docs.example.com` or `https://docs.example.com:8443`.
+  - The value is normalized during `AddAppSurfaceDocs()` post-configuration and must not include a docs path, query string, fragment, userinfo, or non-HTTP(S) scheme.
+  - This setting does not move docs routes. Use `RouteRootPath` and `DocsRootPath` for path routing, then use `PublicOrigin` only for the host portion of canonical metadata.
 - `AppSurfaceDocs:Localization:Enabled`
   - Defaults to `false`.
   - When `false`, AppSurface Docs keeps existing routes, visible UI, and search payload behavior.
@@ -1250,6 +1313,7 @@ This means a link is rewritten only when the target exists in the harvested docs
 - If a doc link is not rewritten, first confirm the target file is included by the active harvester and not excluded by directory policy.
 - Public docs-surface links are safe for exported docs, but source-relative Markdown links are usually easier to keep portable in GitHub and editor previews.
 - Details pages emit a canonical link for the clean public route. In CDN export mode, RazorWire rewrites app-relative canonical links to the emitted static artifact URL, such as `/docs/guides/intro.html`, so exported pages and redirect alias artifacts agree on the same static canonical destination.
+- Set `AppSurfaceDocs:Routing:PublicOrigin` before export when the crawl happens on loopback but the artifact will publish under a public origin. Otherwise canonical links stay app-relative instead of naming the production host.
 
 ## Landing Curation
 

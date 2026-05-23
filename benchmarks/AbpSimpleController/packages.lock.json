@@ -61,8 +61,8 @@
       },
       "JetBrains.Annotations": {
         "type": "Transitive",
-        "resolved": "2024.3.0",
-        "contentHash": "ox5pkeLQXjvJdyAB4b2sBYAlqZGLh3PjSnP1bQNVx72ONuTJ9+34/+Rq91Fc0dG29XG9RgZur9+NcP4riihTug=="
+        "resolved": "2025.2.2",
+        "contentHash": "0X56ZRizuHdrnPpgXjWV7f2tQO1FlQg5O1967OGKnI/4ZRNOK642J8L7brM1nYvrxTTU5TP1yRyXLRLaXLPQ8A=="
       },
       "Microsoft.AspNetCore.Authentication.OpenIdConnect": {
         "type": "Transitive",
@@ -177,6 +177,11 @@
         "resolved": "1.21.15",
         "contentHash": "Vxwg0EjbM/gmILPtzfmzlf0MDu9a17OQb8b57oTgoHoRsZNHWIFQFa00Izcvuam3Hbw2eH272TfczDRHSXgSlA=="
       },
+      "System.CodeDom": {
+        "type": "Transitive",
+        "resolved": "10.0.7",
+        "contentHash": "bwKU+E9lAt6wRDtSdPnmcnKEev5hpUrQOPBIOVYXfN69GQPYJv9IxeifiBOm53QzYmARUjEKNwPlFALE9Ab53Q=="
+      },
       "System.IdentityModel.Tokens.Jwt": {
         "type": "Transitive",
         "resolved": "8.0.1",
@@ -188,8 +193,16 @@
       },
       "System.Linq.Dynamic.Core": {
         "type": "Transitive",
-        "resolved": "1.6.2",
-        "contentHash": "piIcdelf4dGotuIjFlyu7JLIZkYTmYM0ZTLGpCcxs9iCJFflhJht0nchkIV+GS5wfA3OtC3QNjIcUqyOdBdOsA=="
+        "resolved": "1.6.7",
+        "contentHash": "lH+YgtovXbxD6JImHl2VXUtXRUvN8BMEZB2ReZNvS+J5GnGGZV9ivxslQ2nJWmKlBjFTReAKsevnQKE4yLP2pA=="
+      },
+      "System.Management": {
+        "type": "Transitive",
+        "resolved": "10.0.7",
+        "contentHash": "urkYf/JYCGUSF7+95BF2yM5E+QwnpR1Sf23vBw/niZfNbIkxvwYgRV0eoOq5wmz44JLEZ2Jojxa6nvgkrPVGfg==",
+        "dependencies": {
+          "System.CodeDom": "10.0.7"
+        }
       },
       "TimeZoneConverter": {
         "type": "Transitive",
@@ -706,13 +719,14 @@
       },
       "Volo.Abp.Core": {
         "type": "CentralTransitive",
-        "requested": "[9.3.1, )",
-        "resolved": "9.3.1",
-        "contentHash": "t+ljhfqX1lCke4qwuvfSexXKC0IGAZOVmqicLSQg0gvzgZkrsIOl0VjAUAWywn+tLvDgEu5ehDLoCadFZdkgEQ==",
+        "requested": "[10.4.0, )",
+        "resolved": "10.4.0",
+        "contentHash": "hcix4C8e7o6BF30bD5eL+WA/2S51zYm+AV5oLx9liBLEnToAxGanv3XpUSKLUjybPuxHfow/T5wM8ORphKNmtQ==",
         "dependencies": {
-          "JetBrains.Annotations": "2024.3.0",
+          "JetBrains.Annotations": "2025.2.2",
           "Nito.AsyncEx.Context": "5.1.2",
-          "System.Linq.Dynamic.Core": "1.6.2"
+          "System.Linq.Dynamic.Core": "1.6.7",
+          "System.Management": "10.0.7"
         }
       }
     }

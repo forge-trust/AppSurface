@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="94 104 324 324" role="img" aria-labelledby="title desc">
+  <title id="title">AppSurface layered document mark</title>
+  <desc id="desc">Four rounded glass AppSurface layers stacked with even spacing in navy, blue, cyan, and violet.</desc>
+  <defs>
+    <linearGradient id="baseTop" x1="101" y1="337" x2="410" y2="194" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07142E"/>
+      <stop offset=".48" stop-color="#0B1E3F"/>
+      <stop offset="1" stop-color="#14325F"/>
+    </linearGradient>
+    <linearGradient id="baseEdgeShade" x1="128" y1="234" x2="340" y2="377" gradientUnits="userSpaceOnUse">
+      <stop offset=".4" stop-color="#020817" stop-opacity="0"/>
+      <stop offset=".78" stop-color="#020817" stop-opacity=".08"/>
+      <stop offset="1" stop-color="#020817" stop-opacity=".18"/>
+    </linearGradient>
+    <linearGradient id="baseRim" x1="89" y1="346" x2="423" y2="231" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#06142E"/>
+      <stop offset=".48" stop-color="#0A1D3E"/>
+      <stop offset="1" stop-color="#12315D"/>
+    </linearGradient>
+    <linearGradient id="blueTop" x1="133" y1="300" x2="380" y2="185" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0074FF"/>
+      <stop offset=".52" stop-color="#1478FF"/>
+      <stop offset="1" stop-color="#2D6BEB"/>
+    </linearGradient>
+    <linearGradient id="blueEdgeShade" x1="156" y1="205" x2="316" y2="314" gradientUnits="userSpaceOnUse">
+      <stop offset=".42" stop-color="#003B8F" stop-opacity="0"/>
+      <stop offset=".78" stop-color="#003B8F" stop-opacity=".1"/>
+      <stop offset="1" stop-color="#003B8F" stop-opacity=".22"/>
+    </linearGradient>
+    <linearGradient id="blueRim" x1="154" y1="287" x2="358" y2="199" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#075ED8"/>
+      <stop offset=".5" stop-color="#0B6EEC"/>
+      <stop offset="1" stop-color="#245FD0"/>
+    </linearGradient>
+    <linearGradient id="cyanTop" x1="165" y1="257" x2="347" y2="173" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#06A6D9"/>
+      <stop offset=".52" stop-color="#19C6CF"/>
+      <stop offset="1" stop-color="#24D8C5"/>
+    </linearGradient>
+    <linearGradient id="cyanEdgeShade" x1="184" y1="174" x2="302" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset=".42" stop-color="#047A84" stop-opacity="0"/>
+      <stop offset=".8" stop-color="#047A84" stop-opacity=".1"/>
+      <stop offset="1" stop-color="#047A84" stop-opacity=".22"/>
+    </linearGradient>
+    <linearGradient id="cyanRim" x1="181" y1="238" x2="331" y2="173" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0799AA"/>
+      <stop offset=".5" stop-color="#0DB5B8"/>
+      <stop offset="1" stop-color="#16C5BA"/>
+    </linearGradient>
+    <linearGradient id="violetTop" x1="193" y1="197" x2="320" y2="138" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C3AED"/>
+      <stop offset=".5" stop-color="#8B48F4"/>
+      <stop offset="1" stop-color="#A362FF"/>
+    </linearGradient>
+    <linearGradient id="violetEdgeShade" x1="207" y1="133" x2="292" y2="190" gradientUnits="userSpaceOnUse">
+      <stop offset=".42" stop-color="#4C1D95" stop-opacity="0"/>
+      <stop offset=".8" stop-color="#4C1D95" stop-opacity=".1"/>
+      <stop offset="1" stop-color="#4C1D95" stop-opacity=".24"/>
+    </linearGradient>
+    <linearGradient id="violetRim" x1="203" y1="176" x2="309" y2="130" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6730D8"/>
+      <stop offset=".5" stop-color="#793DE6"/>
+      <stop offset="1" stop-color="#8B50F2"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="164" y1="104" x2="333" y2="301" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity=".32"/>
+      <stop offset=".45" stop-color="#FFFFFF" stop-opacity=".1"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="contactShadow" x="28" y="120" width="456" height="300" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+    <filter id="paneLift" x="80" y="92" width="352" height="260" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#03122B" flood-opacity=".22"/>
+    </filter>
+  </defs>
+
+  <g>
+    <path d="M106 310 240 375Q256 382 272 375L406 310 406 324 272 389Q256 396 240 389L106 324Z" fill="url(#baseRim)"/>
+    <path d="M106 291 240 220Q256 213 272 220L406 291Q416 299 406 310L272 375Q256 382 240 375L106 310Q96 299 106 291Z" fill="url(#baseTop)"/>
+    <path d="M106 291 240 220Q256 213 272 220L406 291Q416 299 406 310L272 375Q256 382 240 375L106 310Q96 299 106 291Z" fill="url(#baseEdgeShade)"/>
+    <path d="M128 297 250 234Q256 231 262 234L384 297 262 357Q256 360 250 357Z" fill="url(#glass)" opacity=".3"/>
+
+    <path d="M138 268 243 219Q256 213 269 219L374 268Q388 274 374 281L269 330Q256 336 243 330L138 281Q124 274 138 268Z" fill="#03122B" filter="url(#contactShadow)" opacity=".28"/>
+    <path d="M138 263 243 312Q256 318 269 312L374 263 374 273 269 322Q256 328 243 322L138 273Z" fill="url(#blueRim)"/>
+    <path d="M138 250 243 201Q256 195 269 201L374 250Q388 256 374 263L269 312Q256 318 243 312L138 263Q124 256 138 250Z" fill="url(#blueTop)" filter="url(#paneLift)"/>
+    <path d="M138 250 243 201Q256 195 269 201L374 250Q388 256 374 263L269 312Q256 318 243 312L138 263Q124 256 138 250Z" fill="url(#blueEdgeShade)"/>
+    <path d="M158 253 251 210Q256 208 261 210L354 253 261 296Q256 298 251 296Z" fill="url(#glass)" opacity=".24"/>
+
+    <path d="M169 221 245 186Q256 181 267 186L343 221Q354 226 343 231L267 267Q256 272 245 267L169 231Q158 226 169 221Z" fill="#034E73" filter="url(#contactShadow)" opacity=".24"/>
+    <path d="M169 217 245 253Q256 258 267 253L343 217 343 224 267 260Q256 265 245 260L169 224Z" fill="url(#cyanRim)"/>
+    <path d="M169 207 245 172Q256 167 267 172L343 207Q354 212 343 217L267 253Q256 258 245 253L169 217Q158 212 169 207Z" fill="url(#cyanTop)" filter="url(#paneLift)"/>
+    <path d="M169 207 245 172Q256 167 267 172L343 207Q354 212 343 217L267 253Q256 258 245 253L169 217Q158 212 169 207Z" fill="url(#cyanEdgeShade)"/>
+    <path d="M185 209 252 178Q256 176 260 178L327 209 260 240Q256 242 252 240Z" fill="url(#glass)" opacity=".2"/>
+
+    <path d="M196 166 247 142Q256 138 265 142L316 166Q325 170 316 174L265 198Q256 202 247 198L196 174Q187 170 196 166Z" fill="#3B17A9" filter="url(#contactShadow)" opacity=".2"/>
+    <path d="M196 164 247 188Q256 192 265 188L316 164 316 169 265 193Q256 197 247 193L196 169Z" fill="url(#violetRim)"/>
+    <path d="M196 156 247 132Q256 128 265 132L316 156Q325 160 316 164L265 188Q256 192 247 188L196 164Q187 160 196 156Z" fill="url(#violetTop)" filter="url(#paneLift)"/>
+    <path d="M196 156 247 132Q256 128 265 132L316 156Q325 160 316 164L265 188Q256 192 247 188L196 164Q187 160 196 156Z" fill="url(#violetEdgeShade)"/>
+    <path d="M207 157 253 136Q256 135 259 136L305 157 259 178Q256 179 253 178Z" fill="url(#glass)" opacity=".22"/>
+  </g>
+</svg>

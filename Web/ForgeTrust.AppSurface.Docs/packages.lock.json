@@ -4,9 +4,9 @@
     "net10.0": {
       "Acornima": {
         "type": "Direct",
-        "requested": "[1.6.1, )",
-        "resolved": "1.6.1",
-        "contentHash": "EB2vFgpNar8DrC+KLJv8MG6YIU2xqNyrq8GpL69vectPCXoaq6XyZGb/VHbfPVYul7dscO1Mw30eblrxs05RHg=="
+        "requested": "[1.6.2, )",
+        "resolved": "1.6.2",
+        "contentHash": "laakpDHzMwHr5C8+q5RlRf0XJJshUvghNeo4xDerICrYR3iEuGvwfpauCmXuU3RE437XDaQO5ZxieWDpADuD+w=="
       },
       "HtmlSanitizer": {
         "type": "Direct",
@@ -20,9 +20,9 @@
       },
       "Markdig": {
         "type": "Direct",
-        "requested": "[0.44.0, )",
-        "resolved": "0.44.0",
-        "contentHash": "X+CYMjcUnh/yO24wOSQxVFLiGqWrrtXJ5M7toHiM1Zk4Fg9UMLN5fkaq6FSOWH+mIprsHHgDMlq3MJhmrXalhg=="
+        "requested": "[1.2.0, )",
+        "resolved": "1.2.0",
+        "contentHash": "LoBVOgeDWfHthWTPzQJkjDkxImqBXRA5XpuTyjdM4SAURyWQGG1CbEEbfPbmvAavggnAZPaTYpbhIPUurWvIXA=="
       },
       "Microsoft.CodeAnalysis.CSharp": {
         "type": "Direct",
@@ -54,9 +54,9 @@
       },
       "YamlDotNet": {
         "type": "Direct",
-        "requested": "[17.0.1, )",
-        "resolved": "17.0.1",
-        "contentHash": "qVir5fehR/W5nTJyoJUibypETXaW4iRAF9cQa0FQIC9TJ3VC0qDOwm4o/RxANewj8KzPF8WMF2abBfUgi6LC4w=="
+        "requested": "[18.0.0, )",
+        "resolved": "18.0.0",
+        "contentHash": "ptHVgcYmLejGuWXV7RMFoEqFKYMXnieOlWLPzEslfDtzZ9ngMhjYwykfqjBN2+fMEAEyobozkj07lKEpR4dssA=="
       },
       "AngleSharp": {
         "type": "Transitive",

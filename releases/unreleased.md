@@ -18,11 +18,13 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 
 - The `/docs` landing now promotes a Releases entry point alongside product proof paths.
 - AppSurface now ships a public release hub, a changelog, an unreleased page, and a tagged release template inside the repository.
+- AppSurface now has a consumer-facing [v0.1.0 release preview](./v0.1-preview.md) that package consumers can read before the tag exists. Package-facing docs route release-risk questions into that preview while this unreleased page remains the merged-work proof artifact.
 - Release-note pages can show status, freshness, scope, migration guidance, and provenance in a shared trust bar instead of bespoke page chrome.
 - AppSurface now ships a generated package chooser that tells first-time adopters which package to install first, which optional modules to add next, and which proof paths to follow for release risk and working examples.
 - AppSurface now builds and uploads validated prerelease package artifacts on pull requests and manual workflow runs, using the package chooser manifest as the single source of truth for publish decisions, dependency expectations, tool packages, first-party DLL version identity, and Tailwind runtime payload presence before NuGet publishing is enabled.
 - AppSurface now has a protected, tag-only NuGet prerelease publish workflow that revalidates package artifact manifests, force-fetches the pushed annotated tag before validation, uses NuGet Trusted Publishing instead of a long-lived API key, requires a reviewed `nuget-prerelease` environment, writes a redacted publish ledger, and smoke-restores published packages from a clean NuGet configuration before a prerelease is considered ready.
 - The public docs Start Here path now leads with an AppSurface evaluator sequence for teams comparing module-based startup against plain ASP.NET Core `Program.cs` configuration.
+- Search fallback verification now proves the server-rendered search shell stays useful for no-JS readers, crawlers, failed `search-index.json` requests, and path-base or published-tree mounts before the browser search runtime takes over.
 - The root README now has a single hello-world quickstart that starts the smallest web example on an explicit port and proves the response with `curl`.
 
 ### Contribution contract
@@ -61,6 +63,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 
 ### Dependency maintenance
 
+- The dotnet dependency group has been refreshed to the latest compatible package set, with affected NuGet lock files regenerated while CliFx remains pinned to the current runtime-command-registration-compatible version until a dedicated CliFx 3 migration can replace reflection-based command discovery.
 - The centrally managed `YamlDotNet` dependency now targets `17.0.1`, and the affected PackageIndex, AppSurface Docs, and Aspire lock files have been regenerated.
 - The Autofac dependency package now has dedicated test coverage for AppSurface module integration, host container setup, dependent module loading, and implementation scanning.
 
@@ -103,6 +106,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface's own release pages now double as a working AppSurface Docs example for consumers who want better release notes.
 - AppSurface Docs now supports a static-first versioned docs surface: `/docs` can point at the recommended released tree, `/docs/next` can stay on the live preview, `/docs/v/{version}` can serve exact historical releases, and `/docs/versions` can act as the public archive.
 - AppSurface Docs route families can now be mounted away from `/docs` with `AppSurfaceDocs:Routing:RouteRootPath`, so consumers can host docs under paths such as `/foo/bar` while archive, exact-version, search, metadata, and static export URLs stay aligned. AppSurface Docs now registers only its configured docs routes instead of an app-wide controller/action fallback, keeping docs routing isolated from other modules.
+- AppSurface Docs can now render absolute canonical metadata with `AppSurfaceDocs:Routing:PublicOrigin`, and `appsurface docs` plus `appsurface docs export` expose the same setting as `--public-origin` so loopback preview or export hosts can publish canonical links for their real public origin.
 - Published AppSurface Docs release trees are now catalog-driven and validated before they are mounted, so broken historical exports stay unavailable instead of half-rendering with cross-version search or asset leakage.
 - AppSurface Docs pages can now expose typed `On this page` outlines, explicit proof-path previous/next links, related-page cards, and sidebar anchor navigation from harvested metadata instead of scraping rendered HTML.
 - AppSurface Docs details pages now render those `On this page` outlines as a page-local navigation surface, using a sticky desktop rail, a compact narrow-viewport drawer, and active-section state that keeps the reader oriented without competing with the global sidebar.
@@ -155,6 +159,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs namespace pages now merge namespace-level `README.md` guidance back above generated API reference content, support authored `entry_points` sidecar metadata for common API starting points, redirect consumed README source-shaped routes to the generated namespace page, and project those entry-point terms into the search payload while the richer search engine follow-up remains separate.
 - AppSurface Docs now keeps built-in brand titles inside the sidebar/header bounds with ellipsis clipping for long names, defaults docs chrome to the shorter `Documentation` title, and lets the public AppSurface Pages export opt into the compact AppSurface wordmark plus blue `Surface` highlight through `AppSurfaceDocs:Identity` configuration.
 - AppSurface Docs public branding now distinguishes the spaced product name from the `AppSurfaceDocs` configuration root, renders the sidebar footer from the configured docs identity instead of static RazorWire copy, and guards those public surfaces with regression tests.
+- AppSurface Docs now supports repository-owned branding asset directories for consumer logos and favicons, while AppSurface's own Pages export opts into its custom stacked-pane icon and default standalone docs consumers keep the built-in document-layers favicon.
 - AppSurface Docs now treats `Releases` as a first-class public section and suppresses breadcrumb links to generated parent routes that do not correspond to published docs pages, keeping static export warnings focused on actionable broken links.
 - AppSurface Docs wayfinding coverage now waits for docs content replacement before asserting sequence-link destinations, keeping the details-page proof path deterministic in CI.
 - AppSurface Docs Playwright integration coverage now hosts the standalone docs app in-process through the standalone host builder, avoiding fixture-time `dotnet run` rebuilds and stale standalone `bin` output during focused test runs.

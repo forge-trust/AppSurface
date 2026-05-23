@@ -89,7 +89,7 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
     }
 
     [Fact]
-    public async Task Landing_NavigatesToReleaseHub_AndUnreleasedProofArtifact()
+    public async Task Landing_NavigatesToReleaseHub_PreviewAndUnreleasedProofArtifact()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
@@ -105,7 +105,26 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
 
         Assert.Equal("Releases", (await page.TextContentAsync("h1"))?.Trim());
         Assert.Contains("Release contract", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("v0.1.0 Release Preview", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Unreleased", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("living proof artifact", await page.InnerTextAsync(".docs-content"), StringComparison.OrdinalIgnoreCase);
 
+        await page.Locator(".docs-content a[href='/docs/releases/v0.1-preview']").First.ClickAsync();
+        await WaitForPathAsync(page, "/docs/releases/v0.1-preview");
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('h1')?.textContent?.trim() === 'AppSurface v0.1.0 Release Preview'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+        await page.WaitForSelectorAsync(".docs-trust-bar", new PageWaitForSelectorOptions
+        {
+            Timeout = 30_000,
+            State = WaitForSelectorState.Visible
+        });
+
+        Assert.Equal("AppSurface v0.1.0 Release Preview", (await page.TextContentAsync("h1"))?.Trim());
+        Assert.Contains("Release preview", await page.InnerTextAsync(".docs-trust-bar"), StringComparison.OrdinalIgnoreCase);
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/releases");
         await page.Locator(".docs-content a[href='/docs/releases/unreleased']").First.ClickAsync();
         await WaitForPathAsync(page, "/docs/releases/unreleased");
         await page.WaitForFunctionAsync(
