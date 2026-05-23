@@ -224,11 +224,27 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
         Assert.Contains("docs-search-result-meta-line", searchClient);
         Assert.Contains("docs-search-page-starter-docs", searchClient);
-        Assert.Contains("page.failure.hidden = false;", searchClient);
-        Assert.Contains("page.starter.hidden = false;", searchClient);
-        Assert.Contains("page.recovery.hidden = false;", searchClient);
-        Assert.Contains("page.results.replaceChildren();", searchClient);
-        Assert.Contains("setSearchPageBusy(page, false);", searchClient);
+        Assert.Matches(
+            """
+            if \(searchPageState\.loadState === 'error' && !searchData\.index\) \{\s*
+                  setStatus\(page\.status, 'Search index could not be loaded\.'\);\s*
+                  ensureSearchPageFailureContent\(page\);\s*
+                  page\.failure\.hidden = false;\s*
+                  page\.starter\.hidden = false;\s*
+                  if \(page\.recovery\) \{\s*
+                    page\.recovery\.hidden = false;\s*
+                  \}\s*
+                  page\.starterDocs\?\.replaceChildren\(\);\s*
+                  if \(page\.starterDocs\) \{\s*
+                    page\.starterDocs\.hidden = true;\s*
+                  \}\s*
+                  page\.resultsMeta\.hidden = true;\s*
+                  page\.results\.replaceChildren\(\);\s*
+                  setSearchPageBusy\(page, false\);\s*
+                  return;\s*
+                \}
+            """,
+            searchClient);
         Assert.Contains("setStatus(page.status, 'Search index could not be loaded.');", searchClient);
         Assert.Contains("event.preventDefault();", searchClient);
         Assert.DoesNotContain("title.append(link);", searchClient);
