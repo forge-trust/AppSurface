@@ -4,8 +4,8 @@
     "net10.0": {
       "Microsoft.OpenApi": {
         "type": "Transitive",
-        "resolved": "1.6.17",
-        "contentHash": "Le+kehlmrlQfuDFUt1zZ2dVwrhFQtKREdKBo+rexOwaCoYP0/qpgT9tLxCsZjsgR5Itk1UKPcbgO+FyaNid/bA=="
+        "resolved": "2.0.0",
+        "contentHash": "GGYLfzV/G/ct80OZ45JxnWP7NvMX1BCugn/lX7TH5o0lcVaviavsLMTxmFV2AybXWjbi3h6FF1vgZiTK6PXndw=="
       },
       "forgetrust.appsurface.core": {
         "type": "Project",
@@ -23,14 +23,14 @@
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
-          "Microsoft.AspNetCore.OpenApi": "[9.0.8, )"
+          "Microsoft.AspNetCore.OpenApi": "[10.0.8, )"
         }
       },
       "forgetrust.appsurface.web.scalar": {
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Web.OpenApi": "[0.1.0, )",
-          "Scalar.AspNetCore": "[2.6.8, )"
+          "Scalar.AspNetCore": "[2.14.14, )"
         }
       },
       "CliWrap": {
@@ -41,18 +41,18 @@
       },
       "Microsoft.AspNetCore.OpenApi": {
         "type": "CentralTransitive",
-        "requested": "[9.0.8, )",
-        "resolved": "9.0.8",
-        "contentHash": "BwF9sQCKmvu93C/pmKxJjPhF5fFB23MEcgTsGL+7W3wKLYawS4lyFSL5/qh00IJzuADLf+1SmvxMaphbyZYqQQ==",
+        "requested": "[10.0.8, )",
+        "resolved": "10.0.8",
+        "contentHash": "cw24xHE2QaWwyEG9GQwFbjboyabub6Vd80DIItUGENzcQOa/BEnTrXsg2GADqWTmY/3ycqk9ToLGjgvF/VRlGA==",
         "dependencies": {
-          "Microsoft.OpenApi": "1.6.17"
+          "Microsoft.OpenApi": "2.0.0"
         }
       },
       "Scalar.AspNetCore": {
         "type": "CentralTransitive",
-        "requested": "[2.6.8, )",
-        "resolved": "2.6.8",
-        "contentHash": "2wwNX51ofrsgLNxe6n2bIuLEFcbVqp/le13nRaAs1mAuracL2tbTdIcgT89o3NmtvVa0hfBdxH5vAi1hwATqTw=="
+        "requested": "[2.14.14, )",
+        "resolved": "2.14.14",
+        "contentHash": "xNa3MadDudKk7y+0gQPBQihVL+JxGP3KNZHB4Zl2W42ATFIffHHHBjsuyKJ4YPUnnA7NUiHR/diqV/FTZC9dkg=="
       }
     }
   }
