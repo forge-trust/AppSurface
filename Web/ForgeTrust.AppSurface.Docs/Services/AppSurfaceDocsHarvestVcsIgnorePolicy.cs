@@ -677,11 +677,6 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
             return false;
         }
 
-        if (cursor == contentStart)
-        {
-            return false;
-        }
-
         builder.Append('[');
         if (negated)
         {

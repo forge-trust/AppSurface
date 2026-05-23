@@ -71,6 +71,18 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task ShouldPruneDirectory_WhenDirectoryIsEmptyDoesNotPrune()
+    {
+        await WriteAsync(".gitignore", "*\n");
+        var policy = new AppSurfaceDocsHarvestVcsIgnorePolicy(
+            _root,
+            new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+            NullLogger.Instance);
+
+        Assert.False(policy.ShouldPruneDirectory(string.Empty, AppSurfaceDocsHarvestSourceKind.Markdown));
+    }
+
+    [Fact]
     public async Task ShouldPruneDirectory_WhenDirectoryIsRootedDoesNotProbeOutsideRepository()
     {
         await WriteAsync(".gitignore", "*\n");
