@@ -3806,16 +3806,11 @@ public class DocsControllerTests : IDisposable
 
         public async ValueTask DisposeAsync()
         {
+            using var cache = _cache;
+            using var memo = _memo;
+
             _release.TrySetResult([]);
-            try
-            {
-                await _initialHarvest.WaitAsync(TimeSpan.FromSeconds(3));
-            }
-            finally
-            {
-                _memo.Dispose();
-                _cache.Dispose();
-            }
+            await _initialHarvest.WaitAsync(TimeSpan.FromSeconds(3));
         }
     }
 }

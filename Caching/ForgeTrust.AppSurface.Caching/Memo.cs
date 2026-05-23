@@ -880,7 +880,7 @@ public sealed class Memo : IMemo, IDisposable
 
         if (shouldRefresh)
         {
-            _ = RefreshStaleEntryAsync(key, staleEntry, state, factory, policy);
+            ObserveBackgroundRefresh(RefreshStaleEntryAsync(key, staleEntry, state, factory, policy));
         }
 
         return !expired;
@@ -1017,7 +1017,11 @@ public sealed class Memo : IMemo, IDisposable
             StoreStaleEntry(key, result, policy, keyLock);
             refreshed = true;
         }
-        catch (Exception)
+        catch (ObjectDisposedException)
+        {
+            // Background revalidation keeps serving the stale value and lets a later access retry.
+        }
+        catch (OperationCanceledException)
         {
             // Background revalidation keeps serving the stale value and lets a later access retry.
         }
@@ -1042,6 +1046,15 @@ public sealed class Memo : IMemo, IDisposable
                 _locks.TryRemove(key, out _);
             }
         }
+    }
+
+    private static void ObserveBackgroundRefresh(Task refreshTask)
+    {
+        _ = refreshTask.ContinueWith(
+            static task => _ = task.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private void StoreStaleEntry<TResult>(
