@@ -59,12 +59,24 @@ public class AppSurfaceDocsHeadingSuppressorTests
     [InlineData("<h1 id=\"quickstart\"")]
     [InlineData("<h1>Quickstart")]
     [InlineData("<h1>Quickstart</h1")]
+    [InlineData("<h1>Quickstart</h10>\n<p>Body</p>")]
+    [InlineData("<h1>Quickstart</h1x>\n<p>Body</p>")]
     [InlineData("<h1/>")]
     public void SuppressLeadingMarkdownH1_ShouldKeepMalformedLeadingH1(string content)
     {
         var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
 
         Assert.Equal(content, suppressed);
+    }
+
+    [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldRemoveLeadingH1_WhenCloseTagHasWhitespace()
+    {
+        var content = "<h1>Quickstart</h1 >\n<p>Body</p>";
+
+        var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal("<p>Body</p>", suppressed);
     }
 
     [Fact]

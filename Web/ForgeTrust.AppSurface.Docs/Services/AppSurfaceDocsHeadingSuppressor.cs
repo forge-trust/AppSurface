@@ -40,14 +40,7 @@ internal static class AppSurfaceDocsHeadingSuppressor
             return content;
         }
 
-        var closeTagStart = content.IndexOf("</h1", openTagEnd + 1, StringComparison.OrdinalIgnoreCase);
-        if (closeTagStart < 0)
-        {
-            return content;
-        }
-
-        var closeTagEnd = content.IndexOf('>', closeTagStart + 4);
-        if (closeTagEnd < 0)
+        if (!TryFindH1CloseTag(content, openTagEnd + 1, out _, out var closeTagEnd))
         {
             return content;
         }
@@ -108,6 +101,52 @@ internal static class AppSurfaceDocsHeadingSuppressor
         return remaining.StartsWith("<h1", StringComparison.OrdinalIgnoreCase)
             && remaining.Length > 3
             && IsTagNameBoundary(remaining[3]);
+    }
+
+    private static bool TryFindH1CloseTag(string content, int startIndex, out int closeTagStart, out int closeTagEnd)
+    {
+        var searchIndex = startIndex;
+        while (searchIndex < content.Length)
+        {
+            var candidate = content.IndexOf("</h1", searchIndex, StringComparison.OrdinalIgnoreCase);
+            if (candidate < 0)
+            {
+                break;
+            }
+
+            var boundaryIndex = candidate + 4;
+            if (boundaryIndex < content.Length)
+            {
+                if (content[boundaryIndex] == '>')
+                {
+                    closeTagStart = candidate;
+                    closeTagEnd = boundaryIndex;
+                    return true;
+                }
+
+                if (char.IsWhiteSpace(content[boundaryIndex]))
+                {
+                    var tagEnd = boundaryIndex + 1;
+                    while (tagEnd < content.Length && char.IsWhiteSpace(content[tagEnd]))
+                    {
+                        tagEnd++;
+                    }
+
+                    if (tagEnd < content.Length && content[tagEnd] == '>')
+                    {
+                        closeTagStart = candidate;
+                        closeTagEnd = tagEnd;
+                        return true;
+                    }
+                }
+            }
+
+            searchIndex = candidate + 4;
+        }
+
+        closeTagStart = -1;
+        closeTagEnd = -1;
+        return false;
     }
 
     private static bool IsTagNameBoundary(char value)
