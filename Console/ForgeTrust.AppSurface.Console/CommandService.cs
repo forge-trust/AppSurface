@@ -149,27 +149,7 @@ internal class CommandService : CriticalService
         validOptions.Add("--help");
         validOptions.Add("--version");
 
-        CommandDescriptor? commandDescriptor = null;
-
-        // Basic routing: Check if first arg is a command
-        if (args.Length > 0)
-        {
-            var commandName = args[0];
-            if (!commandName.StartsWith("-"))
-            {
-                commandDescriptor = _commands
-                    .Select(c => CommandDescriptorResolver.TryGetDescriptor(c.GetType()))
-                    .FirstOrDefault(d => d?.Name?.Equals(commandName, StringComparison.OrdinalIgnoreCase) == true);
-            }
-        }
-
-        // Fallback to default/root command
-        if (commandDescriptor == null)
-        {
-            commandDescriptor = _commands
-                .Select(c => CommandDescriptorResolver.TryGetDescriptor(c.GetType()))
-                .FirstOrDefault(d => d is { Name: null });
-        }
+        var commandDescriptor = ResolveCommandDescriptor(args);
 
         if (commandDescriptor != null)
         {
@@ -241,5 +221,31 @@ internal class CommandService : CriticalService
                 }
             }
         }
+    }
+
+    private CommandDescriptor? ResolveCommandDescriptor(string[] args)
+    {
+        var descriptors = _commands
+            .Select(c => CommandDescriptorResolver.TryGetDescriptor(c.GetType()))
+            .OfType<CommandDescriptor>()
+            .ToArray();
+
+        var commandTokens = args
+            .TakeWhile(arg => arg != "--" && !arg.StartsWith("-"))
+            .ToArray();
+
+        for (var tokenCount = commandTokens.Length; tokenCount > 0; tokenCount--)
+        {
+            var candidateName = string.Join(' ', commandTokens.Take(tokenCount));
+            var commandDescriptor = descriptors.FirstOrDefault(
+                d => d.Name?.Equals(candidateName, StringComparison.OrdinalIgnoreCase) == true);
+
+            if (commandDescriptor != null)
+            {
+                return commandDescriptor;
+            }
+        }
+
+        return descriptors.FirstOrDefault(d => d is { Name: null });
     }
 }

@@ -29,6 +29,14 @@ public partial class CommandServiceTests
         public ValueTask ExecuteAsync(IConsole console) => throw new InvalidOperationException("Test");
     }
 
+    [Command("docs export")]
+    public partial class MultiWordCommand : ICommand
+    {
+        [CommandOption("format")] public string? Format { get; set; }
+
+        public ValueTask ExecuteAsync(IConsole console) => default;
+    }
+
     public class NoAttributeCommandProxy : System.Reflection.DispatchProxy
     {
         protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
@@ -118,6 +126,39 @@ public partial class CommandServiceTests
 
         var errorOutput = console.ReadErrorString();
         Assert.Contains("Did you mean '--output'", errorOutput);
+    }
+
+    [Fact]
+    public void CheckForUnknownOptions_WithMultiWordCommand_ShowsCommandSpecificSuggestion()
+    {
+        var console = new FakeInMemoryConsole();
+        var suggester = new LevenshteinOptionSuggester();
+
+        var commands = new ICommand[] { new RootTestCommand(), new MultiWordCommand() };
+        var context = new StartupContext(new[] { "docs", "export", "site", "--formta" }, new TestModule());
+
+        var commandService = new CommandService(commands, context, suggester);
+        commandService.CheckForUnknownOptions(console);
+
+        var errorOutput = console.ReadErrorString();
+        Assert.Contains("Did you mean '--format'", errorOutput);
+    }
+
+    [Fact]
+    public void CheckForUnknownOptions_WithPartialMultiWordCommandPrefix_ShowsMostSpecificSuggestion()
+    {
+        var console = new FakeInMemoryConsole();
+        var suggester = new LevenshteinOptionSuggester();
+
+        var commands = new ICommand[] { new RootTestCommand(), new TestCommand(), new MultiWordCommand() };
+        var context = new StartupContext(new[] { "docs", "export", "--formta" }, new TestModule());
+
+        var commandService = new CommandService(commands, context, suggester);
+        commandService.CheckForUnknownOptions(console);
+
+        var errorOutput = console.ReadErrorString();
+        Assert.Contains("Did you mean '--format'", errorOutput);
+        Assert.DoesNotContain("Did you mean '--force'", errorOutput);
     }
 
     [Fact]
