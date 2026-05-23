@@ -424,6 +424,8 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/sections/concepts", builder.BuildSectionUrl(DocPublicSection.Concepts));
         Assert.True(builder.IsCurrentDocsPath("/guides/start.md.html"));
         Assert.True(builder.IsCurrentDocsPath("/search"));
+        Assert.True(builder.IsCurrentDocsPath("/_routes"));
+        Assert.True(builder.IsCurrentDocsPath("/_routes.json"));
         Assert.True(builder.IsCurrentDocsPath("/outline-client.js"));
         Assert.True(builder.IsCurrentDocsPath("/Namespaces/ForgeTrust.AppSurface.Web.html"));
         Assert.False(builder.IsCurrentDocsPath("/privacy.html"));

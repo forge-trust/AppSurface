@@ -78,12 +78,20 @@ public sealed record AppSurfaceDocsRouteInspectorEntryResponse
     /// <summary>
     /// Gets implicit source-shaped aliases that recover copied Markdown paths.
     /// </summary>
+    /// <remarks>
+    /// Empty when no Markdown source-shaped recovery aliases exist for the canonical route. The JSON wire form is always
+    /// an array, never <see langword="null"/>.
+    /// </remarks>
     [JsonPropertyName("recoveryAliases")]
     public IReadOnlyList<AppSurfaceDocsRouteAliasResponse> RecoveryAliases { get; init; } = [];
 
     /// <summary>
     /// Gets author-declared redirect aliases from documentation metadata.
     /// </summary>
+    /// <remarks>
+    /// Empty when the document declares no redirect aliases. The JSON wire form is always an array, never
+    /// <see langword="null"/>.
+    /// </remarks>
     [JsonPropertyName("declaredAliases")]
     public IReadOnlyList<AppSurfaceDocsRouteAliasResponse> DeclaredAliases { get; init; } = [];
 
@@ -123,6 +131,10 @@ public sealed record AppSurfaceDocsRouteAliasResponse
     /// <summary>
     /// Gets the alias source category.
     /// </summary>
+    /// <remarks>
+    /// Values currently include <c>MarkdownSource</c> for implicit source-shaped recovery aliases and
+    /// <c>DeclaredRedirect</c> for aliases declared by documentation metadata.
+    /// </remarks>
     [JsonPropertyName("kind")]
     public string Kind { get; init; } = string.Empty;
 
@@ -153,30 +165,51 @@ public sealed record AppSurfaceDocsRouteProbeResponse
     /// <summary>
     /// Gets the docs-root-relative path used for route lookup, when the input was valid.
     /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> for invalid input. The docs home route is represented as <see cref="string.Empty"/> rather
+    /// than <c>/</c> because lookup paths are relative to the active docs root.
+    /// </remarks>
     [JsonPropertyName("normalizedPath")]
     public string? NormalizedPath { get; init; }
 
     /// <summary>
     /// Gets the route resolution kind.
     /// </summary>
+    /// <remarks>
+    /// Values currently include <c>Canonical</c>, <c>AliasRedirect</c>, <c>InternalSourceMatch</c>,
+    /// <c>CollisionLoser</c>, <c>ReservedRoute</c>, <c>NotFound</c>, and <c>InvalidInput</c>. Consumers should treat
+    /// unknown values as non-successful diagnostics so newer servers can add route states without breaking older tools.
+    /// </remarks>
     [JsonPropertyName("kind")]
     public string Kind { get; init; } = string.Empty;
 
     /// <summary>
     /// Gets the repository-relative source path associated with the route, when one exists.
     /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> for invalid input, reserved routes, and missing routes. Alias, canonical, internal source,
+    /// and collision-loser probes include the source path that owns or attempted to own the route.
+    /// </remarks>
     [JsonPropertyName("sourcePath")]
     public string? SourcePath { get; init; }
 
     /// <summary>
     /// Gets the docs-root-relative canonical route path associated with the route, when one exists.
     /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> when the result has no canonical target, such as invalid input, reserved routes, or
+    /// missing routes. The docs home route is represented as <see cref="string.Empty"/>.
+    /// </remarks>
     [JsonPropertyName("canonicalRoutePath")]
     public string? CanonicalRoutePath { get; init; }
 
     /// <summary>
     /// Gets the app-relative live URL for the canonical route, when one exists.
     /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> when <see cref="CanonicalRoutePath"/> is <see langword="null"/>. For the docs home route,
+    /// this is the configured docs root URL, for example <c>/docs</c>.
+    /// </remarks>
     [JsonPropertyName("canonicalLiveUrl")]
     public string? CanonicalLiveUrl { get; init; }
 

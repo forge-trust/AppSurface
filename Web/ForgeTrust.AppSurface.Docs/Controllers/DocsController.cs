@@ -509,13 +509,24 @@ public class DocsController : Controller
     }
 
     /// <summary>
-    /// Displays the redacted maintainer-facing route inspector for the current live docs surface.
+    /// Displays the human-facing route inspector for the current live docs surface.
     /// </summary>
-    /// <param name="path">Optional route path to probe against the current docs route identity catalog.</param>
+    /// <param name="path">
+    /// Optional path to probe. Values are trimmed, may be docs-root-relative or app-relative, may include the active
+    /// <see cref="HttpRequest.PathBase"/>, and have any query string or fragment stripped before route lookup. Absolute
+    /// URLs, protocol-relative URLs, paths outside the active docs root, empty post-strip values, and <c>.</c> or
+    /// <c>..</c> path segments produce an invalid-input probe instead of route lookup.
+    /// </param>
     /// <returns>
-    /// A route inspector page when the inspector is exposed for the current environment; otherwise
-    /// <see cref="NotFoundResult"/>.
+    /// A no-store route inspector page when diagnostics are exposed for the current environment; otherwise
+    /// <see cref="NotFoundResult"/>. The page uses <see cref="BuildRouteInspectorResponseAsync(string?)"/> for the same
+    /// manifest and optional probe shape as the JSON endpoint.
     /// </returns>
+    /// <remarks>
+    /// Use this endpoint for interactive maintainer inspection. It is intentionally separate from reader navigation and
+    /// is hidden by <see cref="AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(AppSurfaceDocsOptions, IHostEnvironment)"/>
+    /// when the current environment or explicit diagnostics settings do not expose route diagnostics.
+    /// </remarks>
     [HttpGet]
     public async Task<IActionResult> RouteInspector([FromQuery(Name = "path")] string? path = null)
     {
@@ -532,13 +543,24 @@ public class DocsController : Controller
     }
 
     /// <summary>
-    /// Returns redacted machine-readable route identity for the current live docs surface.
+    /// Returns machine-readable route identity for the current live docs surface.
     /// </summary>
-    /// <param name="path">Optional route path to probe against the current docs route identity catalog.</param>
+    /// <param name="path">
+    /// Optional path to probe. Values are trimmed, may be docs-root-relative or app-relative, may include the active
+    /// <see cref="HttpRequest.PathBase"/>, and have any query string or fragment stripped before route lookup. Absolute
+    /// URLs, protocol-relative URLs, paths outside the active docs root, empty post-strip values, and <c>.</c> or
+    /// <c>..</c> path segments produce an invalid-input probe in the JSON response.
+    /// </param>
     /// <returns>
-    /// A JSON route inspector response when the inspector is exposed for the current environment; otherwise
+    /// A no-store JSON route inspector response when diagnostics are exposed for the current environment; otherwise
     /// <see cref="NotFoundResult"/>.
     /// </returns>
+    /// <remarks>
+    /// Use this endpoint for scripts, tests, and maintainer tools that need the
+    /// <see cref="AppSurfaceDocsRouteInspectorResponse"/> wire contract produced by
+    /// <see cref="BuildRouteInspectorResponseAsync(string?)"/>. Use <see cref="RouteInspector(string?)"/> instead when a
+    /// human needs the compact HTML probing surface.
+    /// </remarks>
     [HttpGet]
     public async Task<IActionResult> RouteInspectorJson([FromQuery(Name = "path")] string? path = null)
     {
