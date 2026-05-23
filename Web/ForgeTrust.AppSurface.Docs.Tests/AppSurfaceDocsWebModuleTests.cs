@@ -207,6 +207,8 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("docs/search-index.json", routePatterns);
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_routes", routePatterns);
+        Assert.Contains("docs/_routes.json", routePatterns);
         Assert.Contains("docs/{*path}", routePatterns);
         Assert.DoesNotContain("{controller=Docs}/{action=Index}/{path?}", routePatterns);
 
@@ -222,14 +224,20 @@ public class AppSurfaceDocsWebModuleTests
         var searchIndex = prioritizedPatterns.IndexOf("docs/search");
         var healthIndex = prioritizedPatterns.IndexOf("docs/_health");
         var healthJsonIndex = prioritizedPatterns.IndexOf("docs/_health.json");
+        var routeInspectorIndex = prioritizedPatterns.IndexOf("docs/_routes");
+        var routeInspectorJsonIndex = prioritizedPatterns.IndexOf("docs/_routes.json");
         var catchAllIndex = prioritizedPatterns.IndexOf("docs/{*path}");
         Assert.True(searchIndex >= 0, "Expected docs/search route declaration.");
         Assert.True(healthIndex >= 0, "Expected docs/_health route declaration.");
         Assert.True(healthJsonIndex >= 0, "Expected docs/_health.json route declaration.");
+        Assert.True(routeInspectorIndex >= 0, "Expected docs/_routes route declaration.");
+        Assert.True(routeInspectorJsonIndex >= 0, "Expected docs/_routes.json route declaration.");
         Assert.True(catchAllIndex >= 0, "Expected docs/{*path} route declaration.");
         Assert.True(searchIndex < catchAllIndex, "docs/search must be prioritized before docs/{*path}.");
         Assert.True(healthIndex < catchAllIndex, "docs/_health must be prioritized before docs/{*path}.");
         Assert.True(healthJsonIndex < catchAllIndex, "docs/_health.json must be prioritized before docs/{*path}.");
+        Assert.True(routeInspectorIndex < catchAllIndex, "docs/_routes must be prioritized before docs/{*path}.");
+        Assert.True(routeInspectorJsonIndex < catchAllIndex, "docs/_routes.json must be prioritized before docs/{*path}.");
     }
 
     [Fact]
@@ -387,6 +395,8 @@ public class AppSurfaceDocsWebModuleTests
 
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_routes", routePatterns);
+        Assert.Contains("docs/_routes.json", routePatterns);
     }
 
     [Fact]
@@ -414,6 +424,8 @@ public class AppSurfaceDocsWebModuleTests
 
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_routes", routePatterns);
+        Assert.Contains("docs/_routes.json", routePatterns);
     }
 
     [Fact]
@@ -454,6 +466,8 @@ public class AppSurfaceDocsWebModuleTests
 
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_routes", routePatterns);
+        Assert.Contains("docs/_routes.json", routePatterns);
     }
 
     [Fact]
@@ -494,6 +508,8 @@ public class AppSurfaceDocsWebModuleTests
 
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_routes", routePatterns);
+        Assert.Contains("docs/_routes.json", routePatterns);
     }
 
     [Fact]

@@ -83,6 +83,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Source ??= new AppSurfaceDocsSourceOptions();
                     options.Harvest ??= new AppSurfaceDocsHarvestOptions();
                     options.Harvest.Health ??= new AppSurfaceDocsHarvestHealthOptions();
+                    options.Diagnostics ??= new AppSurfaceDocsDiagnosticsOptions();
                     options.Harvest.Paths ??= new AppSurfaceDocsHarvestPathOptions();
                     options.Harvest.Paths.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
                     options.Harvest.Markdown ??= new AppSurfaceDocsMarkdownHarvestOptions();

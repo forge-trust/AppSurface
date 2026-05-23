@@ -2905,6 +2905,176 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task RouteInspectorJson_ShouldReturnManifestAndProbeAlias()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns(
+                [
+                    new DocNode("Package", "packages/README.md", "<p>Package</p>"),
+                    new DocNode(
+                        "Intro",
+                        "docs/intro.md",
+                        "<p>Intro</p>",
+                        Metadata: new DocMetadata
+                        {
+                            CanonicalSlug = "start-here/intro",
+                            RedirectAliases = ["legacy/intro"]
+                        })
+                ]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("packages/README.md"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+            var serialized = JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            using var document = JsonDocument.Parse(serialized);
+
+            Assert.Equal("no-store, no-cache", controller.Response.Headers.CacheControl.ToString());
+            Assert.NotNull(response.Probe);
+            Assert.Equal("AliasRedirect", response.Probe.Kind);
+            Assert.Equal("packages/README.md", response.Probe.NormalizedPath);
+            Assert.Equal("packages", response.Probe.CanonicalRoutePath);
+            Assert.Equal("/docs/packages", response.Probe.CanonicalLiveUrl);
+            Assert.Contains(response.Entries, entry => entry.SourcePath == "packages/README.md" && entry.CanonicalRoutePath == "packages");
+            var intro = Assert.Single(response.Entries, entry => entry.SourcePath == "docs/intro.md");
+            Assert.Contains(intro.DeclaredAliases, alias => alias.RoutePath == "legacy/intro" && alias.Kind == "DeclaredRedirect");
+            Assert.True(document.RootElement.TryGetProperty("probe", out var probe));
+            Assert.Equal("AliasRedirect", probe.GetProperty("kind").GetString());
+            Assert.False(document.RootElement.TryGetProperty("Probe", out _));
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldProbeAppRelativePath_WithPathBase()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        controller.Request.PathBase = "/preview";
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/preview/docs/packages"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("Canonical", response.Probe.Kind);
+            Assert.Equal("packages", response.Probe.NormalizedPath);
+            Assert.Equal("/docs/packages", response.Probe.CanonicalLiveUrl);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldReturnInvalidProbe_ForOutsideAppRelativePath()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/other/packages"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("InvalidInput", response.Probe.Kind);
+            Assert.Null(response.Probe.NormalizedPath);
+            Assert.Contains("active docs root", response.Probe.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspector_ShouldRenderViewWithManifest()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start.md", "<p>First steps.</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<ViewResult>(await controller.RouteInspector("guides/start.md"));
+            var model = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Model);
+
+            Assert.Equal("RouteInspector", result.ViewName);
+            Assert.Equal("AliasRedirect", model.Probe?.Kind);
+            Assert.Single(model.Entries);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorActions_ShouldReturnNotFound_InProductionByDefault()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start.md", "<p>First steps.</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester, Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var htmlResult = await controller.RouteInspector();
+            var jsonResult = await controller.RouteInspectorJson();
+
+            Assert.IsType<NotFoundResult>(htmlResult);
+            Assert.IsType<NotFoundResult>(jsonResult);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorActions_ShouldReturnNotFound_InDevelopmentWhenExplicitlyDisabled()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start.md", "<p>First steps.</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Never
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester, Environments.Development);
+        using (memo)
+        using (cache)
+        {
+            var htmlResult = await controller.RouteInspector();
+            var jsonResult = await controller.RouteInspectorJson();
+
+            Assert.IsType<NotFoundResult>(htmlResult);
+            Assert.IsType<NotFoundResult>(jsonResult);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorActions_ShouldAllowRoutes_InProductionWhenExplicitlyEnabled()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start.md", "<p>First steps.</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester, Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var htmlResult = await controller.RouteInspector();
+            var jsonResult = await controller.RouteInspectorJson();
+
+            Assert.IsType<ViewResult>(htmlResult);
+            Assert.IsType<JsonResult>(jsonResult);
+        }
+    }
+
+    [Fact]
     public async Task SearchIndex_ShouldRefreshCache_WhenAuthenticatedRefreshRequested()
     {
         var docs = new List<DocNode>

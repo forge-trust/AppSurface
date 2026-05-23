@@ -71,7 +71,9 @@ internal sealed class DocRouteIdentityCatalog
         "search-client.js",
         "outline-client.js",
         "minisearch.min.js",
-        "versions"
+        "versions",
+        "_routes",
+        "_routes.json"
     ];
 
     private readonly Dictionary<string, DocRouteIdentity> _identityBySourcePath;
@@ -1005,6 +1007,8 @@ internal sealed class DocRouteIdentityCatalog
         AddRouteReference(reserved, docsUrlBuilder.Routes.SearchIndex, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.Health, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.HealthJson, docsUrlBuilder.CurrentDocsRootPath);
+        AddRouteReference(reserved, docsUrlBuilder.Routes.Routes, docsUrlBuilder.CurrentDocsRootPath);
+        AddRouteReference(reserved, docsUrlBuilder.Routes.RoutesJson, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.Versions, docsUrlBuilder.RouteRootPath);
         return reserved;
     }
