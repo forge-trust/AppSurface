@@ -56,6 +56,7 @@ public class AppSurfaceDocsHeadingSuppressorTests
 
     [Theory]
     [InlineData("<h1")]
+    [InlineData("<h1 id=\"quickstart\"")]
     [InlineData("<h1>Quickstart")]
     [InlineData("<h1>Quickstart</h1")]
     [InlineData("<h1/>")]
