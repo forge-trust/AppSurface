@@ -149,7 +149,9 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Identity:Logo:AltText"] = "  Acme mark  ",
                         ["AppSurfaceDocs:Identity:Favicon:SvgPath"] = "  /brand/favicon.svg  ",
                         ["AppSurfaceDocs:Identity:Favicon:IcoPath"] = "  ~/favicon.ico  ",
-                        ["AppSurfaceDocs:Identity:Favicon:PngPath"] = "  /brand/favicon.png  "
+                        ["AppSurfaceDocs:Identity:Favicon:PngPath"] = "  /brand/favicon.png  ",
+                        ["AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath"] = "  branding  ",
+                        ["AppSurfaceDocs:Identity:BrandingAssets:RequestPath"] = "  ~/brand  "
                     })
                 .Build());
 
@@ -167,6 +169,53 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("/brand/favicon.svg", options.Identity.Favicon.SvgPath);
         Assert.Equal("~/favicon.ico", options.Identity.Favicon.IcoPath);
         Assert.Equal("/brand/favicon.png", options.Identity.Favicon.PngPath);
+        Assert.Equal("branding", options.Identity.BrandingAssets.DirectoryPath);
+        Assert.Equal("~/brand", options.Identity.BrandingAssets.RequestPath);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldDefaultBrandingAssetsRequestPath()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath"] = "branding"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal("branding", options.Identity.BrandingAssets.DirectoryPath);
+        Assert.Equal(AppSurfaceDocsBrandingAssetsOptions.DefaultRequestPath, options.Identity.BrandingAssets.RequestPath);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldDefaultBrandingAssetsRequestPath_WhenConfiguredRequestPathIsBlank()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath"] = "branding",
+                        ["AppSurfaceDocs:Identity:BrandingAssets:RequestPath"] = "   "
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal("branding", options.Identity.BrandingAssets.DirectoryPath);
+        Assert.Equal(AppSurfaceDocsBrandingAssetsOptions.DefaultRequestPath, options.Identity.BrandingAssets.RequestPath);
     }
 
     [Theory]
@@ -262,6 +311,9 @@ public sealed class AppSurfaceDocsOptionsTests
     [InlineData("AppSurfaceDocs:Identity:Logo:Path", "/assets\\logo.svg")]
     [InlineData("AppSurfaceDocs:Identity:Logo:Path", "/../logo.svg")]
     [InlineData("AppSurfaceDocs:Identity:Favicon:SvgPath", "favicon.svg")]
+    [InlineData("AppSurfaceDocs:Identity:BrandingAssets:RequestPath", "branding")]
+    [InlineData("AppSurfaceDocs:Identity:BrandingAssets:RequestPath", "/branding?tenant=acme")]
+    [InlineData("AppSurfaceDocs:Identity:BrandingAssets:RequestPath", "/")]
     [InlineData("AppSurfaceDocs:Identity:HomeHref", "docs")]
     [InlineData("AppSurfaceDocs:Identity:HomeHref", "https://example.com/docs")]
     [InlineData("AppSurfaceDocs:Identity:HomeHref", "/docs?tenant=acme")]
@@ -1168,7 +1220,8 @@ public sealed class AppSurfaceDocsOptionsTests
                 {
                     Logo = null!,
                     Wordmark = null!,
-                    Favicon = null!
+                    Favicon = null!,
+                    BrandingAssets = null!
                 };
                 options.Source = null!;
                 options.Harvest = null!;
@@ -1185,6 +1238,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Identity.Logo);
         Assert.NotNull(options.Identity.Wordmark);
         Assert.NotNull(options.Identity.Favicon);
+        Assert.NotNull(options.Identity.BrandingAssets);
         Assert.NotNull(options.Source);
         Assert.NotNull(options.Harvest);
         Assert.NotNull(options.Harvest.Health);
@@ -1289,6 +1343,55 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Sidebar);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldNormalizeRoutingPublicOrigin()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Routing:PublicOrigin"] = " https://forge-trust.com/ "
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.NotNull(options.Routing);
+        Assert.Equal("https://forge-trust.com", options.Routing.PublicOrigin);
+    }
+
+    [Theory]
+    [InlineData("https://forge-trust.com/docs")]
+    [InlineData("https://forge-trust.com?x=1")]
+    [InlineData("https://forge-trust.com#docs")]
+    [InlineData("https://user@forge-trust.com")]
+    [InlineData("ftp://forge-trust.com")]
+    [InlineData("forge-trust.com")]
+    public void Validator_ShouldRejectInvalidRoutingPublicOrigin(string publicOrigin)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Routing = new AppSurfaceDocsRoutingOptions
+            {
+                PublicOrigin = publicOrigin
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("AppSurfaceDocs:Routing:PublicOrigin", StringComparison.OrdinalIgnoreCase)
+                       && failure.Contains("origin", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1758,7 +1861,8 @@ public sealed class AppSurfaceDocsOptionsTests
             {
                 Logo = null!,
                 Wordmark = null!,
-                Favicon = null!
+                Favicon = null!,
+                BrandingAssets = null!
             },
             Source = null!,
             Bundle = null!,
@@ -1775,6 +1879,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:Logo must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:Wordmark must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:Favicon must not be null.", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:BrandingAssets must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Source must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Bundle must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Sidebar must not be null.", StringComparison.OrdinalIgnoreCase));

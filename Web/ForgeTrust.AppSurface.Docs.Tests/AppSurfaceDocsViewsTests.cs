@@ -108,6 +108,29 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task Layout_ShouldRenderAbsoluteCanonicalLink_WhenPublicOriginIsConfigured()
+    {
+        using var services = CreateServiceProvider(
+            CreateDocsWithOverrides(
+            [
+                new("Intro", "guides/intro.md", "<p>Start here.</p>")
+            ]),
+            new Dictionary<string, string?>
+            {
+                ["AppSurfaceDocs:Routing:PublicOrigin"] = "https://forge-trust.com"
+            });
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Details",
+            controller => controller.Details("guides/intro"),
+            pathBase: "/some-base");
+
+        Assert.Contains("<link rel=\"canonical\" href=\"https://forge-trust.com/docs/guides/intro\" />", html);
+        Assert.DoesNotContain("/some-base/https://forge-trust.com", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Layout_ShouldRenderDefaultNeutralDocsIdentity()
     {
         using var services = CreateServiceProvider(CreateDocs());

@@ -10,6 +10,9 @@ namespace ForgeTrust.AppSurface.Docs;
 /// historical root stylesheet URL at <c>~/css/site.gen.css</c>. Published and exported hosts may only materialize
 /// the packaged Razor Class Library asset path, so <see cref="AppSurfaceDocsWebModule"/> also preserves the root URL via
 /// a compatibility redirect to <c>~/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css</c>.
+/// Root-module hosts also serve <c>/favicon.ico</c> from the packaged AppSurface Docs document-layers SVG mark unless a
+/// host configures an explicit SVG favicon, so browsers that request the conventional favicon URL do not produce a 404
+/// before the linked SVG favicon is discovered.
 /// When AppSurface Docs is consumed from another host assembly, layouts link directly to that packaged asset path.
 /// </remarks>
 internal sealed class AppSurfaceDocsAssetPathResolver
@@ -31,7 +34,7 @@ internal sealed class AppSurfaceDocsAssetPathResolver
     public string StylesheetPath { get; }
 
     /// <summary>
-    /// Gets the application-relative path for the AppSurface brand mark static asset.
+    /// Gets the application-relative path for the default AppSurface Docs document-layers mark static asset.
     /// </summary>
     /// <remarks>
     /// The value resolves to <see cref="PackagedBrandIconPath"/>, the bundled static-web-assets location

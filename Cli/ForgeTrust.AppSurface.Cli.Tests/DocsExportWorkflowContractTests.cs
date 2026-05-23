@@ -38,6 +38,14 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Contains("AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate", ScalarKeys(exportEnv));
         Assert.Contains("AppSurfaceDocs__Contributor__EditUrlTemplate", ScalarKeys(exportEnv));
         Assert.Contains("AppSurfaceDocs__Contributor__LastUpdatedMode", ScalarKeys(exportEnv));
+        Assert.Equal("branding", GetScalar(exportEnv, "AppSurfaceDocs__Identity__BrandingAssets__DirectoryPath"));
+        Assert.DoesNotContain("AppSurfaceDocs__Identity__BrandingAssets__RequestPath", ScalarKeys(exportEnv));
+        Assert.Equal(
+            "/branding/appsurface-site-icon.svg",
+            GetScalar(exportEnv, "AppSurfaceDocs__Identity__Logo__Path"));
+        Assert.Equal(
+            "/branding/appsurface-site-icon.svg",
+            GetScalar(exportEnv, "AppSurfaceDocs__Identity__Favicon__SvgPath"));
 
         var exportRun = GetScalar(exportStep, "run");
         Assert.Contains("printf '%s\\n' '/' '/docs' > \"$RUNNER_TEMP/appsurface-docs-seeds.txt\"", exportRun, StringComparison.Ordinal);
@@ -48,6 +56,7 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Contains("--strict", exportRun, StringComparison.Ordinal);
         Assert.Contains("--seeds \"$RUNNER_TEMP/appsurface-docs-seeds.txt\"", exportRun, StringComparison.Ordinal);
         Assert.Contains("--output \"$RUNNER_TEMP/appsurface-docs-pages\"", exportRun, StringComparison.Ordinal);
+        Assert.Contains("--public-origin https://forge-trust.com", exportRun, StringComparison.Ordinal);
 
         var uploadStep = FindStep(steps, "Upload Pages artifact");
         Assert.Equal("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", GetScalar(uploadStep, "if"));

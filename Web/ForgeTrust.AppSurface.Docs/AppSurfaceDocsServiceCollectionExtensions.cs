@@ -79,6 +79,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Identity.Logo ??= new AppSurfaceDocsLogoOptions();
                     options.Identity.Wordmark ??= new AppSurfaceDocsWordmarkOptions();
                     options.Identity.Favicon ??= new AppSurfaceDocsFaviconOptions();
+                    options.Identity.BrandingAssets ??= new AppSurfaceDocsBrandingAssetsOptions();
                     options.Source ??= new AppSurfaceDocsSourceOptions();
                     options.Harvest ??= new AppSurfaceDocsHarvestOptions();
                     options.Harvest.Health ??= new AppSurfaceDocsHarvestHealthOptions();
@@ -109,6 +110,10 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Identity.Favicon.SvgPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.SvgPath);
                     options.Identity.Favicon.IcoPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.IcoPath);
                     options.Identity.Favicon.PngPath = AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.Favicon.PngPath);
+                    options.Identity.BrandingAssets.DirectoryPath = NormalizeOrNull(options.Identity.BrandingAssets.DirectoryPath);
+                    options.Identity.BrandingAssets.RequestPath =
+                        AppSurfaceDocsIdentityPath.NormalizeBrowserPathOrNull(options.Identity.BrandingAssets.RequestPath)
+                        ?? AppSurfaceDocsBrandingAssetsOptions.DefaultRequestPath;
                     options.Harvest.Paths.IncludeGlobs = NormalizeGlobArray(options.Harvest.Paths.IncludeGlobs);
                     options.Harvest.Paths.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Paths.ExcludeGlobs);
                     options.Harvest.Paths.DefaultExclusions =
@@ -142,6 +147,11 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Routing.DocsRootPath = string.IsNullOrWhiteSpace(configuredDocsRootPath)
                         ? DocsUrlBuilder.ResolveDefaultDocsRootPath(options.Routing.RouteRootPath, options.Versioning.Enabled)
                         : normalizedDocsRootPath;
+                    options.Routing.PublicOrigin =
+                        DocsUrlBuilder.TryNormalizePublicOrigin(options.Routing.PublicOrigin, out var normalizedPublicOrigin)
+                            ? normalizedPublicOrigin
+                            : NormalizeOrNull(options.Routing.PublicOrigin);
+
                     options.Versioning.CatalogPath = NormalizeOrNull(options.Versioning.CatalogPath);
                     options.Contributor.SymbolSourceUrlTemplate = NormalizeOrNull(options.Contributor.SymbolSourceUrlTemplate);
                     options.Contributor.SourceRef = NormalizeOrNull(options.Contributor.SourceRef);
