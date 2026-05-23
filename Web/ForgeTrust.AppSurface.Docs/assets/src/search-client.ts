@@ -33,6 +33,7 @@ declare global {
   const facetDefinitions = [
     { key: 'pageType', label: 'Page Type', kind: 'chips' },
     { key: 'component', label: 'Component', kind: 'select' },
+    { key: 'language', label: 'Language', kind: 'chips' },
     { key: 'audience', label: 'Audience', kind: 'chips' },
     { key: 'status', label: 'Status', kind: 'chips' }
   ];
@@ -82,6 +83,7 @@ declare global {
     q: '',
     pageType: '',
     component: '',
+    language: '',
     audience: '',
     status: '',
     filtersExpanded: false,
@@ -92,6 +94,7 @@ declare global {
     return {
       pageType: [],
       component: [],
+      language: [],
       audience: [],
       status: []
     };
@@ -568,6 +571,14 @@ declare global {
     }
 
     const pageTypeAlias = normalizePageTypeAlias(normalized);
+    if (normalized === 'csharp' || normalized === 'c-sharp' || normalized === 'cs') {
+      return 'C#';
+    }
+
+    if (normalized === 'javascript' || normalized === 'java-script' || normalized === 'js') {
+      return 'JavaScript';
+    }
+
     if (pageTypeAlias === 'api' || pageTypeAlias === 'api-reference') {
       return 'API Reference';
     }
@@ -650,6 +661,7 @@ declare global {
     return {
       pageType: normalizePageTypeAlias(state.pageType),
       component: normalizeFacetValue(state.component),
+      language: normalizeFacetValue(state.language),
       audience: normalizeFacetValue(state.audience),
       status: normalizeFacetValue(state.status)
     };
@@ -730,6 +742,7 @@ declare global {
       q: normalizeQuery(params.get('q')),
       pageType: normalizeFacetValue(params.get('pageType')),
       component: normalizeFacetValue(params.get('component')),
+      language: normalizeFacetValue(params.get('language')),
       audience: normalizeFacetValue(params.get('audience')),
       status: normalizeFacetValue(params.get('status'))
     };
@@ -1024,6 +1037,10 @@ declare global {
     const pageTypeBadge = createSearchResultPageTypeBadge(doc);
     if (pageTypeBadge) {
       badgeRow.append(pageTypeBadge);
+    }
+
+    if (doc.languageLabel || doc.language) {
+      badgeRow.append(createSearchResultBadge(`Language: ${doc.languageLabel || formatFacetValue(doc.language)}`));
     }
 
     if (doc.component) {
@@ -2065,7 +2082,7 @@ declare global {
         return;
       }
 
-      setSearchPageState({ pageType: '', component: '', audience: '', status: '' }, 'push');
+      setSearchPageState({ pageType: '', component: '', language: '', audience: '', status: '' }, 'push');
     });
 
     failure.addEventListener('click', (event) => {

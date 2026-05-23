@@ -44,6 +44,16 @@ public sealed record DocMetadata
     public string? Component { get; init; }
 
     /// <summary>
+    /// Gets the programming or source language for generated code documentation.
+    /// </summary>
+    /// <remarks>
+    /// This value describes extracted API documentation such as C# namespace pages or JavaScript runtime doclets. It is
+    /// intentionally separate from <see cref="Localization"/> and from Markdown code-fence language tokens, because those
+    /// describe reader locale and inline example highlighting rather than the source language of the documented API.
+    /// </remarks>
+    public string? CodeLanguage { get; init; }
+
+    /// <summary>
     /// Gets the generated namespace page that namespace-intro source content should merge into.
     /// </summary>
     /// <remarks>
@@ -226,6 +236,11 @@ public sealed record DocMetadata
             primary.ComponentIsDerived,
             fallback.Component,
             fallback.ComponentIsDerived);
+        var (codeLanguage, _) = MergeTextWithFlag(
+            primary.CodeLanguage,
+            null,
+            fallback.CodeLanguage,
+            null);
         var (navGroup, navGroupIsDerived) = MergeTextWithFlag(
             primary.NavGroup,
             primary.NavGroupIsDerived,
@@ -255,6 +270,7 @@ public sealed record DocMetadata
             AudienceIsDerived = audienceIsDerived,
             Component = component,
             ComponentIsDerived = componentIsDerived,
+            CodeLanguage = codeLanguage,
             Namespace = DocTrustMergeHelpers.PreferNonBlank(primary.Namespace, fallback.Namespace),
             Aliases = MergeLists(primary.Aliases, fallback.Aliases),
             RedirectAliases = MergeLists(primary.RedirectAliases, fallback.RedirectAliases),
@@ -1735,6 +1751,16 @@ public sealed record DocDetailsViewModel
     /// Gets the explicit audience metadata shown with the page when available.
     /// </summary>
     public string? Audience { get; init; }
+
+    /// <summary>
+    /// Gets the normalized programming language value shown and filtered by generated API documentation surfaces.
+    /// </summary>
+    public string? CodeLanguage { get; init; }
+
+    /// <summary>
+    /// Gets the reader-facing programming language label shown for generated API documentation.
+    /// </summary>
+    public string? CodeLanguageLabel { get; init; }
 
     /// <summary>
     /// Gets the breadcrumb trail used by the page.

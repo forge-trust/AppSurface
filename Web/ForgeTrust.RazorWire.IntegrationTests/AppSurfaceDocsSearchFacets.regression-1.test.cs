@@ -36,6 +36,8 @@ public sealed class AppSurfaceDocsSearchFacetsRegression1Tests
                 pageType = "guide",
                 audience = string.Empty,
                 component = "CLI",
+                language = "csharp",
+                languageLabel = "C#",
                 aliases = Array.Empty<string>(),
                 keywords = Array.Empty<string>(),
                 status = string.Empty,
@@ -56,6 +58,8 @@ public sealed class AppSurfaceDocsSearchFacetsRegression1Tests
                 pageType = "example",
                 audience = string.Empty,
                 component = "SDK",
+                language = "javascript",
+                languageLabel = "JavaScript",
                 aliases = Array.Empty<string>(),
                 keywords = Array.Empty<string>(),
                 status = string.Empty,
@@ -87,6 +91,22 @@ public sealed class AppSurfaceDocsSearchFacetsRegression1Tests
         var componentLabelId = await componentSelect.First.GetAttributeAsync("aria-labelledby");
         Assert.False(string.IsNullOrWhiteSpace(componentLabelId));
         Assert.Equal("Component", await page.Locator($"#{componentLabelId}").TextContentAsync());
+        Assert.Equal(1, await page.GetByRole(AriaRole.Heading, new() { Name = "Language" }).CountAsync());
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search?language=javascript");
+        await WaitForSearchPageSettledAsync(page);
+
+        var selectedLanguageFacet = page.Locator("[data-rw-facet-key='language'][data-rw-facet-value='javascript']");
+        Assert.Equal(1, await selectedLanguageFacet.CountAsync());
+        Assert.Equal("true", await selectedLanguageFacet.First.GetAttributeAsync("aria-pressed"));
+        Assert.Contains(
+            "Quick Start",
+            await page.Locator("#docs-search-page-results").TextContentAsync() ?? string.Empty,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Getting Started",
+            await page.Locator("#docs-search-page-results").TextContentAsync() ?? string.Empty,
+            StringComparison.Ordinal);
 
         await page.GotoAsync($"{_fixture.DocsUrl}/search?status=beta");
         await WaitForSearchPageSettledAsync(page);

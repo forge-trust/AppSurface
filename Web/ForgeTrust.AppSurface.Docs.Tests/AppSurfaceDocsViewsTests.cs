@@ -2552,7 +2552,8 @@ public class AppSurfaceDocsViewsTests
             {
                 PageType = "api-reference",
                 Component = "AppSurfaceDocs",
-                Audience = "Evaluators"
+                Audience = "Evaluators",
+                CodeLanguage = "csharp"
             });
 
         var html = await RenderDetailsViewAsync(doc);
@@ -2564,6 +2565,7 @@ public class AppSurfaceDocsViewsTests
             document.QuerySelector(".docs-page-meta .docs-page-badge")?.ClassName ?? string.Empty);
         Assert.Contains("Component: AppSurfaceDocs", html);
         Assert.Contains("Audience: Evaluators", html);
+        Assert.Contains("Language: C#", html);
     }
 
     [Fact]

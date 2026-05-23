@@ -67,12 +67,36 @@ test('normalizePageTypeAlias keeps client filters aligned with indexed docs', as
   }
 });
 
+test('normalizeSearchDocument preserves and labels generated code language', async () => {
+  const { createMiniSearchDocument, normalizeSearchDocument } = await loadSearchCore();
+
+  const csharpDoc = normalizeSearchDocument({
+    id: 'calculator',
+    path: '/docs/Namespaces/Test#calculator',
+    title: 'Calculator',
+    language: 'csharp'
+  });
+  const jsDoc = normalizeSearchDocument({
+    id: 'runtime',
+    path: '/docs/api/javascript/razorwire',
+    title: 'RazorWire JavaScript API',
+    language: 'javascript'
+  });
+
+  assert.equal(csharpDoc.language, 'csharp');
+  assert.equal(csharpDoc.languageLabel, 'C#');
+  assert.equal(jsDoc.language, 'javascript');
+  assert.equal(jsDoc.languageLabel, 'JavaScript');
+  assert.equal(createMiniSearchDocument(csharpDoc).languageSearchText, 'csharp C# CSharp C-Sharp');
+  assert.equal(createMiniSearchDocument(jsDoc).languageSearchText, 'javascript JavaScript js');
+});
+
 test('createMiniSearchConfiguration includes all searchable and stored fields', async () => {
   const { createMiniSearchConfiguration } = await loadSearchCore();
 
   const config = createMiniSearchConfiguration();
 
-  assert.deepEqual(config.fields, ['title', 'aliases', 'keywords', 'summary', 'headings', 'bodyText', 'entryPoints']);
+  assert.deepEqual(config.fields, ['title', 'aliases', 'keywords', 'summary', 'headings', 'bodyText', 'entryPoints', 'languageSearchText']);
   assert.deepEqual(config.searchOptions.boost, {
     title: 6,
     aliases: 4,
@@ -80,10 +104,13 @@ test('createMiniSearchConfiguration includes all searchable and stored fields', 
     keywords: 2,
     summary: 2,
     entryPoints: 2,
+    languageSearchText: 2,
     bodyText: 1
   });
   assert.equal(config.searchOptions.prefix, true);
   assert.equal(config.searchOptions.fuzzy, 0.1);
   assert.ok(config.storeFields.includes('breadcrumbs'));
   assert.ok(config.storeFields.includes('status'));
+  assert.ok(config.storeFields.includes('language'));
+  assert.ok(config.storeFields.includes('languageLabel'));
 });
