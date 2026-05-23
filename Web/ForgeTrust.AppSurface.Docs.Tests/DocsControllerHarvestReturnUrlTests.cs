@@ -14,13 +14,14 @@ public sealed class DocsControllerHarvestReturnUrlTests
     }
 
     [Theory]
+    [InlineData(null)]
     [InlineData("")]
     [InlineData("docs")]
     [InlineData("https://example.com/docs")]
     [InlineData("//example.com/docs")]
     [InlineData("/\\evil")]
     [InlineData("/docs\r\nLocation:%20https://example.com")]
-    public void IsSafeAppRelativeUrl_WhenUrlCouldLeaveTheApp_ReturnsFalse(string url)
+    public void IsSafeAppRelativeUrl_WhenUrlCouldLeaveTheApp_ReturnsFalse(string? url)
     {
         Assert.False(DocsController.IsSafeAppRelativeUrl(url));
     }

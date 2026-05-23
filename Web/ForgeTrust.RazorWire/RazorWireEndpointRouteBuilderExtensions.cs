@@ -18,6 +18,11 @@ public static class RazorWireEndpointRouteBuilderExtensions
     /// <param name="endpoints">The endpoint route builder to configure.</param>
     /// <remarks>
     /// The endpoint enforces channel subscription authorization, streams hub messages as SSE (each line emitted as a `data:` event), sends a 20-second heartbeat comment when idle, and unsubscribes on client disconnect.
+    /// A <c>replay</c> query value of <c>1</c> or <c>true</c> maps to
+    /// <see cref="RazorWireStreamSubscribeOptions.Replay"/> and asks the hub to deliver retained messages before live
+    /// messages. Replay is disabled when the query is absent or has any other value. The helper that parses this input is
+    /// intentionally narrow so live delivery remains the default and replay stays a one-time historical catch-up before
+    /// ongoing stream delivery.
     /// </remarks>
     /// <returns>The original <see cref="IEndpointRouteBuilder"/> instance.</returns>
     public static IEndpointRouteBuilder MapRazorWire(this IEndpointRouteBuilder endpoints)

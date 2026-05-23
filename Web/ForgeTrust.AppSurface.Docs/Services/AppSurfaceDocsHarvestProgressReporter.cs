@@ -32,6 +32,13 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Gets the latest redacted harvest progress snapshot.
+    /// </summary>
+    /// <remarks>
+    /// Access is synchronized through the reporter gate so callers receive a consistent snapshot instance. The returned
+    /// record is immutable by convention through init-only properties.
+    /// </remarks>
     internal AppSurfaceDocsHarvestProgressSnapshot CurrentSnapshot
     {
         get
@@ -43,8 +50,20 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         }
     }
 
+    /// <summary>
+    /// Gets the client-side completion navigation delay in milliseconds.
+    /// </summary>
     internal int CompletionDelay => CompletionDelayMilliseconds;
 
+    /// <summary>
+    /// Begins a new harvest run and publishes the initial waiting snapshot.
+    /// </summary>
+    /// <param name="harvesterTypes">The redacted harvester type names expected in the run.</param>
+    /// <returns>The generated run identifier used to correlate later progress callbacks.</returns>
+    /// <remarks>
+    /// The snapshot update is protected by the reporter gate and <c>PublishAsync</c> is invoked after the lock is
+    /// released. Passing <see langword="null"/> throws <see cref="ArgumentNullException"/>.
+    /// </remarks>
     internal async ValueTask<string> BeginRunAsync(IReadOnlyList<string> harvesterTypes)
     {
         ArgumentNullException.ThrowIfNull(harvesterTypes);
@@ -73,11 +92,25 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         return runId;
     }
 
+    /// <summary>
+    /// Marks a harvester as running for the correlated harvest run.
+    /// </summary>
+    /// <param name="runId">The run identifier returned from <see cref="BeginRunAsync"/>.</param>
+    /// <param name="harvesterType">The harvester type to update.</param>
+    /// <returns>A task that completes after any snapshot publication attempt.</returns>
     internal ValueTask HarvesterStartedAsync(string runId, string harvesterType)
     {
         return UpdateHarvesterAsync(runId, harvesterType, "Running", 0, $"{FriendlyHarvesterName(harvesterType)} started.");
     }
 
+    /// <summary>
+    /// Marks a harvester as terminal and records its document count.
+    /// </summary>
+    /// <param name="runId">The run identifier returned from <see cref="BeginRunAsync"/>.</param>
+    /// <param name="harvesterType">The harvester type to update.</param>
+    /// <param name="status">The terminal health status reported by the harvester.</param>
+    /// <param name="docCount">The non-negative document count reported by the harvester.</param>
+    /// <returns>A task that completes after any snapshot publication attempt.</returns>
     internal ValueTask HarvesterCompletedAsync(string runId, string harvesterType, DocHarvesterHealthStatus status, int docCount)
     {
         return UpdateHarvesterAsync(
@@ -88,6 +121,13 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
             $"{FriendlyHarvesterName(harvesterType)} finished with {docCount.ToString(CultureInfo.InvariantCulture)} docs.");
     }
 
+    /// <summary>
+    /// Updates the in-progress document count for a harvester.
+    /// </summary>
+    /// <param name="runId">The run identifier returned from <see cref="BeginRunAsync"/>.</param>
+    /// <param name="harvesterType">The harvester type to update.</param>
+    /// <param name="docCount">The current non-negative document count.</param>
+    /// <returns>A task that completes after any snapshot publication attempt.</returns>
     internal ValueTask HarvesterDocumentCountUpdatedAsync(string runId, string harvesterType, int docCount)
     {
         return UpdateHarvesterAsync(
@@ -98,6 +138,16 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
             $"{FriendlyHarvesterName(harvesterType)} processed {docCount.ToString(CultureInfo.InvariantCulture)} docs.");
     }
 
+    /// <summary>
+    /// Adds a bounded activity message to the current run.
+    /// </summary>
+    /// <param name="runId">The run identifier returned from <see cref="BeginRunAsync"/>.</param>
+    /// <param name="message">The redacted activity message to prepend.</param>
+    /// <returns>A task that completes after any snapshot publication attempt.</returns>
+    /// <remarks>
+    /// Messages are kept newest-first and capped to the renderer's activity budget. A stale <paramref name="runId"/> is
+    /// ignored, and blank messages throw <see cref="ArgumentException"/>.
+    /// </remarks>
     internal async ValueTask ActivityAsync(string runId, string message)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
@@ -120,6 +170,16 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         await PublishAsync(snapshot);
     }
 
+    /// <summary>
+    /// Completes the correlated run from the final harvest-health snapshot.
+    /// </summary>
+    /// <param name="runId">The run identifier returned from <see cref="BeginRunAsync"/>.</param>
+    /// <param name="health">The final redacted health snapshot used to populate terminal state, counts, and diagnostics.</param>
+    /// <returns>A task that completes after any snapshot publication attempt.</returns>
+    /// <remarks>
+    /// A failed aggregate health status maps to <see cref="AppSurfaceDocsHarvestRunState.Failed"/>; all other terminal
+    /// statuses map to <see cref="AppSurfaceDocsHarvestRunState.Completed"/>. A stale <paramref name="runId"/> is ignored.
+    /// </remarks>
     internal async ValueTask CompleteRunAsync(string runId, DocHarvestHealthSnapshot health)
     {
         ArgumentNullException.ThrowIfNull(health);

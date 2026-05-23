@@ -582,6 +582,22 @@ public class DocsController : Controller
         return PathBaseAware(_docsUrlBuilder.BuildHomeUrl());
     }
 
+    /// <summary>
+    /// Determines whether a return URL is safe to use as an app-relative navigation target.
+    /// </summary>
+    /// <param name="url">The candidate URL to validate.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="url"/> is a non-empty app-relative path that starts with
+    /// <c>/</c>, is not protocol-relative, is not slash-backslash rooted, and contains no backslashes or control
+    /// characters; otherwise <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// Use <see cref="IsSafeAppRelativeUrl(string?)"/> before echoing request-derived return URLs into redirects,
+    /// links, or local path decisions. The helper intentionally rejects <see langword="null"/>, empty or whitespace
+    /// input, paths that do not start with <c>/</c>, <c>//</c>, <c>/\</c>, any <c>\</c> character, and any control
+    /// character such as CR or LF. Checks are ordinal and culture-invariant; the method does not URL-decode or
+    /// normalize Unicode, so callers should decode first when validating encoded input.
+    /// </remarks>
     internal static bool IsSafeAppRelativeUrl(string? url)
     {
         if (string.IsNullOrWhiteSpace(url)

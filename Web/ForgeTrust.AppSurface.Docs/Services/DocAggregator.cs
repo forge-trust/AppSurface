@@ -348,7 +348,10 @@ public class DocAggregator
     /// <param name="utcNow">
     /// Optional clock seam used by tests that need deterministic contributor-freshness budgeting.
     /// </param>
-    /// <param name="harvestProgress">Optional progress reporter used by live docs hosts to publish redacted harvest state.</param>
+    /// <param name="harvestProgress">
+    /// Optional progress reporter used by live docs hosts to publish redacted harvest state. <see langword="null"/>
+    /// disables callbacks, which is appropriate for tests or hosts that do not expose the observatory.
+    /// </param>
     internal DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
         AppSurfaceDocsOptions options,
@@ -387,7 +390,10 @@ public class DocAggregator
     /// <param name="sanitizer">The HTML sanitizer applied to rendered docs content.</param>
     /// <param name="docsUrlBuilder">Shared URL builder for the live source-backed docs surface.</param>
     /// <param name="logger">The logger used for harvest and contributor-freshness diagnostics.</param>
-    /// <param name="harvestProgress">Optional progress reporter used by live docs hosts to publish redacted harvest state.</param>
+    /// <param name="harvestProgress">
+    /// Optional progress reporter used by live docs hosts to publish redacted harvest state. <see langword="null"/>
+    /// disables callbacks, which is appropriate for tests or hosts that do not expose the observatory.
+    /// </param>
     [ActivatorUtilitiesConstructor]
     public DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
@@ -439,13 +445,21 @@ public class DocAggregator
     /// Optional clock seam used by tests that need deterministic contributor-freshness budgeting. When
     /// <see langword="null" />, the aggregator uses <see cref="DateTimeOffset.UtcNow"/>.
     /// </param>
-    /// <param name="harvestProgress">Optional progress reporter used by live docs hosts to publish redacted harvest state.</param>
+    /// <param name="harvestProgress">
+    /// Optional progress reporter used by live docs hosts to publish redacted harvest state. <see langword="null"/>
+    /// disables callbacks, so cache hits and misses produce no live updates.
+    /// </param>
     /// <remarks>
     /// Contributor freshness is resolved during snapshot generation, not during Razor view rendering. Callers that inject
     /// <paramref name="resolveGitLastUpdatedUtcAsync"/> should respect the supplied <see cref="CancellationToken"/>, because
     /// timeout cancellation is treated as "omit Last updated" rather than as a fatal snapshot failure. The timeout budget
     /// is shared across one snapshot generation so slow or wedged git lookups degrade to missing freshness evidence instead
     /// of multiplying the stall across the whole docs corpus.
+    /// When <paramref name="harvestProgress"/> is supplied, callbacks are emitted only while a new snapshot is being built:
+    /// the reporter is notified when the run starts, when each harvester starts, when document counts are known, and once
+    /// with a terminal success or failure snapshot. Memoized cache hits reuse the existing snapshot and do not emit progress.
+    /// Reporter callbacks may run on the caller's async flow or on the coordinator's background warmup task; callers should
+    /// not assume a UI thread or request scope. No further callbacks are expected after the terminal notification for a run.
     /// </remarks>
     internal DocAggregator(
         IEnumerable<IDocHarvester> harvesters,

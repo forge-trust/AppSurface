@@ -25,10 +25,27 @@ public sealed class AppSurfaceDocsHarvestCoordinator
         _progress = progress ?? throw new ArgumentNullException(nameof(progress));
     }
 
+    /// <summary>
+    /// Gets the latest redacted harvest progress snapshot published by the reporter.
+    /// </summary>
     internal AppSurfaceDocsHarvestProgressSnapshot CurrentProgress => _progress.CurrentSnapshot;
 
+    /// <summary>
+    /// Gets the completion-navigation delay, in milliseconds, used by the progress reporter.
+    /// </summary>
     internal int CompletionDelay => _progress.CompletionDelay;
 
+    /// <summary>
+    /// Starts or reuses the shared initial harvest task.
+    /// </summary>
+    /// <returns>
+    /// The memoized harvest-health task for the current run. A new task is created when no task exists or when the
+    /// prior task was canceled or faulted.
+    /// </returns>
+    /// <remarks>
+    /// Callers share one background harvest through this coordinator. The task itself runs with
+    /// <see cref="CancellationToken.None"/> so one impatient request cannot cancel warmup for later requests.
+    /// </remarks>
     internal Task<DocHarvestHealthSnapshot> EnsureStarted()
     {
         lock (_gate)
@@ -44,6 +61,16 @@ public sealed class AppSurfaceDocsHarvestCoordinator
         }
     }
 
+    /// <summary>
+    /// Waits for the shared initial harvest to complete within the provided wait budget.
+    /// </summary>
+    /// <param name="waitBudget">The maximum time to wait. Non-positive values return <see langword="false"/> immediately.</param>
+    /// <param name="cancellationToken">A token used to cancel the caller's wait operation.</param>
+    /// <returns><see langword="true"/> when the harvest task completes within budget; otherwise <see langword="false"/>.</returns>
+    /// <remarks>
+    /// The caller's token cancels only the wait, not the shared harvest task. Exceptions from the harvest task are
+    /// observed when the task completes before the timeout.
+    /// </remarks>
     internal async Task<bool> WaitForCompletionAsync(TimeSpan waitBudget, CancellationToken cancellationToken)
     {
         var task = EnsureStarted();

@@ -32,8 +32,7 @@ public sealed class AppSurfaceDocsSourceRouteRedirectTests
                 BaseAddress = new Uri(host.BaseUrl)
             };
 
-            using var healthResponse = await client.GetAsync("/docs/_health.json");
-            healthResponse.EnsureSuccessStatusCode();
+            await WaitUntilHealthyAsync(client);
 
             using var response = await client.GetAsync(requestPath);
 
@@ -43,6 +42,30 @@ public sealed class AppSurfaceDocsSourceRouteRedirectTests
         finally
         {
             await host.DisposeAsync();
+        }
+    }
+
+    private static async Task WaitUntilHealthyAsync(HttpClient client)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        HttpResponseMessage? lastResponse = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            lastResponse?.Dispose();
+            lastResponse = await client.GetAsync("/docs/_health.json");
+            if (lastResponse.IsSuccessStatusCode)
+            {
+                lastResponse.Dispose();
+                return;
+            }
+
+            await Task.Delay(100);
+        }
+
+        using (lastResponse)
+        {
+            lastResponse?.EnsureSuccessStatusCode();
         }
     }
 }

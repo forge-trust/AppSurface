@@ -20,8 +20,16 @@ public interface IRazorWireStreamHub
     /// </summary>
     /// <param name="channel">The name of the channel to publish the message to.</param>
     /// <param name="message">The message payload to publish.</param>
-    /// <param name="options">Optional publish behavior. When omitted, publishing remains live-only.</param>
+    /// <param name="options">
+    /// Optional publish behavior. The default interface implementation is a compatibility fallback and ignores this value
+    /// by delegating to <see cref="PublishAsync(string, string)"/>. Implementations that support replay retention or other
+    /// optioned semantics must override this overload.
+    /// </param>
     /// <returns>A <see cref="ValueTask"/> that completes when the publish operation has finished.</returns>
+    /// <remarks>
+    /// Pitfall: callers should not expect <see cref="RazorWireStreamPublishOptions"/> to be honored unless the concrete
+    /// <see cref="IRazorWireStreamHub"/> implementation overrides this member.
+    /// </remarks>
     ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
     {
         return PublishAsync(channel, message);
@@ -38,8 +46,18 @@ public interface IRazorWireStreamHub
     /// Subscribes to a named message channel with explicit subscription options.
     /// </summary>
     /// <param name="channel">The name of the channel to subscribe to.</param>
-    /// <param name="options">Optional subscription behavior. When omitted, the subscription receives only live messages.</param>
-    /// <returns>A <see cref="ChannelReader{String}"/> that yields replayed and live messages for the specified channel.</returns>
+    /// <param name="options">
+    /// Optional subscription behavior. The default interface implementation is a compatibility fallback and ignores this
+    /// value by delegating to <see cref="Subscribe(string)"/>.
+    /// </param>
+    /// <returns>
+    /// A <see cref="ChannelReader{String}"/> for the specified channel. Replay semantics are available only when the
+    /// concrete implementation overrides this overload.
+    /// </returns>
+    /// <remarks>
+    /// Pitfall: <see cref="RazorWireStreamSubscribeOptions.Replay"/> is an opt-in contract between caller and hub
+    /// implementation; the interface fallback remains live-only for backward compatibility.
+    /// </remarks>
     ChannelReader<string> Subscribe(string channel, RazorWireStreamSubscribeOptions? options)
     {
         return Subscribe(channel);

@@ -5,10 +5,32 @@ using ForgeTrust.AppSurface.Docs.Models;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
+/// <summary>
+/// Renders encoded harvest progress HTML fragments for the AppSurface Docs observatory.
+/// </summary>
+/// <remarks>
+/// The renderer accepts already-redacted progress snapshots and emits bounded markup for full pages and Turbo stream
+/// updates. It HTML-encodes text and attribute values, truncates activity to eight entries and diagnostics to four, and
+/// treats <see cref="AppSurfaceDocsHarvestRunState.Completed"/> and <see cref="AppSurfaceDocsHarvestRunState.Failed"/> as
+/// terminal states. Callers should pass only app-relative return URLs that have already been validated.
+/// </remarks>
 internal static class AppSurfaceDocsHarvestProgressRenderer
 {
     private static readonly HtmlEncoder Encoder = HtmlEncoder.Default;
 
+    /// <summary>
+    /// Renders the observatory fragment for a harvest progress snapshot.
+    /// </summary>
+    /// <param name="snapshot">The redacted snapshot to render.</param>
+    /// <param name="returnUrl">The app-relative URL used by the completion link and navigation data attributes.</param>
+    /// <param name="completionDelayMilliseconds">The completion navigation delay in milliseconds.</param>
+    /// <param name="includeReturnNavigation">Whether to emit the completion return link and return-url data attribute.</param>
+    /// <returns>An encoded HTML fragment for the observatory surface.</returns>
+    /// <remarks>
+    /// When <paramref name="includeReturnNavigation"/> is <see langword="true"/> and the snapshot is completed, the
+    /// fragment includes data attributes used by the client script to navigate after the configured delay. Failed runs
+    /// render diagnostics but do not auto-navigate. A blank <paramref name="returnUrl"/> falls back to <c>/</c>.
+    /// </remarks>
     internal static string Render(
         AppSurfaceDocsHarvestProgressSnapshot snapshot,
         string returnUrl,
@@ -124,6 +146,16 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Renders a Turbo stream update for the harvest observatory target.
+    /// </summary>
+    /// <param name="snapshot">The redacted snapshot to render.</param>
+    /// <param name="completionDelayMilliseconds">The completion navigation delay in milliseconds.</param>
+    /// <returns>A Turbo stream update that replaces the observatory content.</returns>
+    /// <remarks>
+    /// This wrapper renders with <c>returnUrl: "/"</c> and disables return navigation because the outer page owns
+    /// navigation timing; the emitted fragment still carries completion state for client-side refresh scheduling.
+    /// </remarks>
     internal static string RenderTurboStream(
         AppSurfaceDocsHarvestProgressSnapshot snapshot,
         int completionDelayMilliseconds)

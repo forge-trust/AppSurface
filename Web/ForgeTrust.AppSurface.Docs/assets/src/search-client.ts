@@ -2232,12 +2232,20 @@ declare global {
     }
 
     harvestCompletionNavigationScheduled = true;
+    const scheduledHref = window.location.href;
     const configuredDelay = page.getAttribute('data-appsurface-docs-harvest-delay')
       || completion.getAttribute('data-appsurface-docs-harvest-delay');
     const delay = Number.parseInt(configuredDelay || '900', 10);
     harvestObserver?.disconnect();
     harvestObserver = null;
     window.setTimeout(() => {
+      const currentPage = document.getElementById('docs-harvest-page');
+      const isComplete = currentPage?.querySelector('[data-appsurface-docs-harvest-complete="true"]');
+      if (window.location.href !== scheduledHref || !currentPage || !isComplete) {
+        harvestCompletionNavigationScheduled = false;
+        return;
+      }
+
       window.location.reload();
     }, Number.isFinite(delay) && delay >= 0 ? delay : 900);
   }

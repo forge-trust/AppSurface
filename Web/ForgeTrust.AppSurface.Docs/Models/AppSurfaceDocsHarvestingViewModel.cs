@@ -34,7 +34,8 @@ public sealed record AppSurfaceDocsHarvestProgressSnapshot
     public static AppSurfaceDocsHarvestProgressSnapshot Idle => new()
     {
         State = AppSurfaceDocsHarvestRunState.Idle,
-        StartedUtc = DateTimeOffset.UtcNow
+        StartedUtc = DateTimeOffset.UtcNow,
+        Status = "Idle"
     };
 
     /// <summary>
@@ -133,14 +134,60 @@ public enum AppSurfaceDocsHarvestRunState
 /// <summary>
 /// Redacted progress for one AppSurface Docs harvester.
 /// </summary>
-public sealed record AppSurfaceDocsHarvesterProgress(
-    string HarvesterType,
-    string Status,
-    int DocCount);
+public sealed record AppSurfaceDocsHarvesterProgress
+{
+    /// <summary>
+    /// Initializes a new redacted harvester progress entry.
+    /// </summary>
+    /// <param name="harvesterType">The non-secret harvester type name used as the stable row identity.</param>
+    /// <param name="status">The display status for the harvester, such as <c>Waiting</c>, <c>Running</c>, or a terminal health status.</param>
+    /// <param name="docCount">The number of documents reported by this harvester. Values are expected to be zero or greater.</param>
+    public AppSurfaceDocsHarvesterProgress(string harvesterType, string status, int docCount)
+    {
+        HarvesterType = harvesterType;
+        Status = status;
+        DocCount = docCount;
+    }
+
+    /// <summary>
+    /// Gets the non-secret harvester type name used as the stable row identity.
+    /// </summary>
+    public string HarvesterType { get; init; }
+
+    /// <summary>
+    /// Gets the display status for this harvester.
+    /// </summary>
+    public string Status { get; init; }
+
+    /// <summary>
+    /// Gets the number of documents reported by this harvester.
+    /// </summary>
+    public int DocCount { get; init; }
+}
 
 /// <summary>
 /// One bounded activity entry in the live harvest observatory.
 /// </summary>
-public sealed record AppSurfaceDocsHarvestActivity(
-    DateTimeOffset TimestampUtc,
-    string Message);
+public sealed record AppSurfaceDocsHarvestActivity
+{
+    /// <summary>
+    /// Initializes a new bounded harvest activity entry.
+    /// </summary>
+    /// <param name="timestampUtc">The UTC timestamp used for sorting and machine-readable rendering.</param>
+    /// <param name="message">The redacted human-readable activity message.</param>
+    public AppSurfaceDocsHarvestActivity(DateTimeOffset timestampUtc, string message)
+    {
+        TimestampUtc = timestampUtc;
+        Message = message;
+    }
+
+    /// <summary>
+    /// Gets the UTC timestamp used for sorting and machine-readable rendering.
+    /// </summary>
+    public DateTimeOffset TimestampUtc { get; init; }
+
+    /// <summary>
+    /// Gets the redacted human-readable activity message.
+    /// </summary>
+    public string Message { get; init; }
+}

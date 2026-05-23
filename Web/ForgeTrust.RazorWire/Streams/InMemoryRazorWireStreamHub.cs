@@ -119,7 +119,7 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
                 subscribers.TryRemove(writer, out _);
                 if (subscribers.IsEmpty)
                 {
-                    _channels.TryRemove(channel, out _);
+                    _channels.TryRemove(new KeyValuePair<string, ConcurrentDictionary<ChannelWriter<string>, byte>>(channel, subscribers));
                     if (!_replayMessages.ContainsKey(channel))
                     {
                         _replayLocks.TryRemove(channel, out _);
@@ -155,11 +155,10 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
             }
         }
 
-        // Prune empty channels to prevent unbounded memory growth.
-        // We accept the minor race with Subscribe as Subscribe uses GetOrAdd.
+        // Prune only when the channel still maps to this subscriber dictionary.
         if (subscribersDict.IsEmpty)
         {
-            _channels.TryRemove(channel, out _);
+            _channels.TryRemove(new KeyValuePair<string, ConcurrentDictionary<ChannelWriter<string>, byte>>(channel, subscribersDict));
         }
     }
 
