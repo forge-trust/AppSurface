@@ -54,6 +54,18 @@ public class AppSurfaceDocsHeadingSuppressorTests
         Assert.Equal(content, suppressed);
     }
 
+    [Theory]
+    [InlineData("<h1")]
+    [InlineData("<h1>Quickstart")]
+    [InlineData("<h1>Quickstart</h1")]
+    [InlineData("<h1/>")]
+    public void SuppressLeadingMarkdownH1_ShouldKeepMalformedLeadingH1(string content)
+    {
+        var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
+
+        Assert.Equal(content, suppressed);
+    }
+
     [Fact]
     public void SuppressLeadingMarkdownH1_ShouldRemoveLargeLeadingH1_WithoutRegexTimeout()
     {
