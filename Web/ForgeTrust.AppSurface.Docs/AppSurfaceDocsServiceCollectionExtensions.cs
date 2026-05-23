@@ -85,6 +85,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Harvest.Health ??= new AppSurfaceDocsHarvestHealthOptions();
                     options.Harvest.Paths ??= new AppSurfaceDocsHarvestPathOptions();
                     options.Harvest.Paths.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
+                    options.Harvest.Paths.VcsIgnore ??= new AppSurfaceDocsHarvestVcsIgnoreOptions();
                     options.Harvest.Markdown ??= new AppSurfaceDocsMarkdownHarvestOptions();
                     options.Harvest.Markdown.DefaultExclusions ??= new AppSurfaceDocsHarvestDefaultExclusionOptions();
                     options.Harvest.CSharp ??= new AppSurfaceDocsCSharpHarvestOptions();
@@ -118,6 +119,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Harvest.Paths.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Paths.ExcludeGlobs);
                     options.Harvest.Paths.DefaultExclusions =
                         NormalizeDefaultExclusions(options.Harvest.Paths.DefaultExclusions);
+                    options.Harvest.Paths.VcsIgnore.AllowGlobs = NormalizeGlobArray(options.Harvest.Paths.VcsIgnore.AllowGlobs);
                     options.Harvest.Markdown.IncludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.IncludeGlobs);
                     options.Harvest.Markdown.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.ExcludeGlobs);
                     options.Harvest.Markdown.DefaultExclusions =
