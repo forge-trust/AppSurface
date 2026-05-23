@@ -80,26 +80,17 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
 
         if (options?.Replay == true)
         {
-            if (_replayLocks.TryGetValue(channel, out var gate))
-            {
-                lock (gate)
-                {
-                    var subscribers = _channels.GetOrAdd(
-                        channel,
-                        _ => new ConcurrentDictionary<ChannelWriter<string>, byte>());
-                    foreach (var message in GetReplayMessagesLocked(channel))
-                    {
-                        subscriber.Writer.TryWrite(message);
-                    }
-
-                    subscribers.TryAdd(subscriber.Writer, 0);
-                }
-            }
-            else
+            var gate = _replayLocks.GetOrAdd(channel, _ => new object());
+            lock (gate)
             {
                 var subscribers = _channels.GetOrAdd(
                     channel,
                     _ => new ConcurrentDictionary<ChannelWriter<string>, byte>());
+                foreach (var message in GetReplayMessagesLocked(channel))
+                {
+                    subscriber.Writer.TryWrite(message);
+                }
+
                 subscribers.TryAdd(subscriber.Writer, 0);
             }
 
@@ -128,6 +119,11 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
                 if (subscribers.IsEmpty)
                 {
                     _channels.TryRemove(channel, out _);
+                    if (!_replayMessages.ContainsKey(channel))
+                    {
+                        _replayLocks.TryRemove(channel, out _);
+                        _replayTouchedUtc.TryRemove(channel, out _);
+                    }
                 }
             }
         }

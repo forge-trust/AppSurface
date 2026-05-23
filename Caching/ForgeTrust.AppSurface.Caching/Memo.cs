@@ -16,6 +16,11 @@ public sealed class Memo : IMemo, IDisposable
     private readonly TimeSpan _failureCacheDuration;
     private int _disposed;
 
+    /// <summary>
+    /// Gets the number of per-key semaphores currently retained for in-flight or failure-cached work.
+    /// </summary>
+    internal int ActiveLockCount => _locks.Count;
+
     private void ThrowIfDisposed()
     {
         if (Volatile.Read(ref _disposed) != 0)
@@ -930,6 +935,11 @@ public sealed class Memo : IMemo, IDisposable
         }
         catch (OperationCanceledException)
         {
+            if (keyLock.CurrentCount > 0)
+            {
+                _locks.TryRemove(new KeyValuePair<object, SemaphoreSlim>(key, keyLock));
+            }
+
             throw;
         }
 

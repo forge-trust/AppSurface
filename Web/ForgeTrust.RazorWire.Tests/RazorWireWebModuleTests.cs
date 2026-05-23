@@ -146,6 +146,8 @@ public class RazorWireWebModuleTests
     [InlineData("?replay=1", true)]
     [InlineData("?replay=true", true)]
     [InlineData("?replay=TRUE", true)]
+    [InlineData("?replay=0&replay=true", true)]
+    [InlineData("?replay=1&replay=false", true)]
     [InlineData("?replay=false", false)]
     public async Task ConfigureEndpoints_PassesReplayQueryToStreamHub(string queryString, bool expectedReplay)
     {

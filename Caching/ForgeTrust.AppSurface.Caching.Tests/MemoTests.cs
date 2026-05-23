@@ -765,6 +765,81 @@ public class MemoTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_WhenExpiredWaiterIsCanceled_RetainsHeldLockUntilRefreshCompletes()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+        var refreshStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var refreshRelease = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> Factory()
+        {
+            var call = Interlocked.Increment(ref callCount);
+            if (call == 1)
+            {
+                return Task.FromResult(1);
+            }
+
+            refreshStarted.TrySetResult();
+            return refreshRelease.Task;
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(20),
+            TimeSpan.FromMilliseconds(20));
+        async Task<int> GetValue(CancellationToken cancellationToken = default) =>
+            await memo.GetAsync(Factory, policy, cancellationToken);
+
+        Assert.Equal(1, await GetValue());
+        await Task.Delay(80);
+
+        var refresh = GetValue();
+        await refreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(1, memo.ActiveLockCount);
+
+        using var canceled = new CancellationTokenSource();
+        var waiter = GetValue(canceled.Token);
+        await canceled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiter);
+        Assert.Equal(1, memo.ActiveLockCount);
+
+        refreshRelease.SetResult(2);
+        Assert.Equal(2, await refresh.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.Equal(0, memo.ActiveLockCount);
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_WhenAlreadyCanceled_RemovesUncontendedLock()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+
+        Task<int> Factory()
+        {
+            return Task.FromResult(Interlocked.Increment(ref callCount));
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(20),
+            TimeSpan.FromMilliseconds(20));
+        async Task<int> GetValue(CancellationToken cancellationToken = default) =>
+            await memo.GetAsync(Factory, policy, cancellationToken);
+
+        Assert.Equal(1, await GetValue());
+        await Task.Delay(80);
+
+        using var canceled = new CancellationTokenSource();
+        await canceled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GetValue(canceled.Token));
+        Assert.Equal(0, memo.ActiveLockCount);
+        Assert.Equal(1, Volatile.Read(ref callCount));
+    }
+
+    [Fact]
     public async Task GetAsync_StaleWhileRevalidate_WhenBackgroundRefreshFails_KeepsStaleValue()
     {
         var memo = CreateMemoWithOptions(

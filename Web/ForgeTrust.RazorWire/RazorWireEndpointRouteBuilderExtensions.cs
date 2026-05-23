@@ -117,8 +117,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
             return false;
         }
 
-        var replay = values.ToString();
-        return replay == "1"
-               || string.Equals(replay, "true", StringComparison.OrdinalIgnoreCase);
+        return values.Any(value => value == "1"
+                                   || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase));
     }
 }

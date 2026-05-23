@@ -49,6 +49,7 @@ for i in "${!test_projects[@]}"; do
     project_path="$SOLUTION_DIR/$project_rel"
   fi
   echo "[$((i + 1))/${#test_projects[@]}] dotnet test $project_rel"
+  junit_file="$OUTPUT_DIR/junit-$((i + 1))-$(basename "$project_path" .csproj).xml"
 
   args=(
     dotnet test "$project_path"
@@ -56,7 +57,7 @@ for i in "${!test_projects[@]}"; do
     --no-build
     -v minimal
     "--logger:GitHubActions;report-warnings=false"
-    "--logger:junit;LogFilePath=junit.xml"
+    "--logger:junit;LogFilePath=$junit_file"
     /p:CollectCoverage=true
     "/p:CoverletOutput=$OUTPUT_DIR/coverage"
     "/p:CoverletOutputFormat=json%2ccobertura"

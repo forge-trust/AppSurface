@@ -286,13 +286,6 @@ public class DocsController : Controller
             return harvestingResult;
         }
 
-        if (!servesPartial
-            && IsSourceShapedMarkdownRoute(resolvedPath)
-            && await TryRedirectSourceShapedRouteAsync(resolvedPath) is { } redirectResult)
-        {
-            return redirectResult;
-        }
-
         var routeResolution = await _aggregator.ResolvePublicRouteAsync(resolvedPath, HttpContext.RequestAborted);
         if (servesPartial)
         {
@@ -339,26 +332,6 @@ public class DocsController : Controller
         }
 
         return View(viewModel);
-    }
-
-    private async Task<IActionResult?> TryRedirectSourceShapedRouteAsync(string resolvedPath)
-    {
-        var routeResolution = await _aggregator.ResolvePublicRouteAsync(resolvedPath, HttpContext.RequestAborted);
-        if (routeResolution.Kind != DocRouteResolutionKind.AliasRedirect)
-        {
-            return null;
-        }
-
-        var redirectPath = _docsUrlBuilder.BuildDocUrl(routeResolution.PublicRoutePath ?? string.Empty);
-        return LocalRedirectPermanent(AppendQueryStringBeforeFragment(
-            PathBaseAware(redirectPath),
-            HttpContext.Request.QueryString));
-    }
-
-    private static bool IsSourceShapedMarkdownRoute(string path)
-    {
-        return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
-               || path.EndsWith(".md.html", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<DocRouteResolution> ResolvePartialRouteAsync(
