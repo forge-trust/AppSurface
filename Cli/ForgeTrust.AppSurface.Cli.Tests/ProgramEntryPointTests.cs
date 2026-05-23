@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Console;

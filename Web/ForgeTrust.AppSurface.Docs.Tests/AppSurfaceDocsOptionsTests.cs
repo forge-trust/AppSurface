@@ -173,6 +173,28 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("~/brand", options.Identity.BrandingAssets.RequestPath);
     }
 
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldDefaultBrandingAssetsRequestPath()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath"] = "branding"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal("branding", options.Identity.BrandingAssets.DirectoryPath);
+        Assert.Equal(AppSurfaceDocsBrandingAssetsOptions.DefaultRequestPath, options.Identity.BrandingAssets.RequestPath);
+    }
+
     [Theory]
     [InlineData("AppSurfaceDocs:Identity:Wordmark:HighlightColor", "blue", "CSS hex color")]
     [InlineData("AppSurfaceDocs:Identity:Wordmark:HighlightColor", "var(--brand)", "CSS hex color")]

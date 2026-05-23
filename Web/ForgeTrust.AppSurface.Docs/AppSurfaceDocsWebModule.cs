@@ -636,8 +636,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             return;
         }
 
-        var provider = new PhysicalFileProvider(directoryPath);
-        RegisterMountedProviderDisposal(endpoints.ServiceProvider, [provider]);
+        var provider = CreateLifetimeOwnedBrandingAssetProvider(endpoints.ServiceProvider, directoryPath);
 
         endpoints.MapMethods(
             $"{requestPath}/{{*assetPath}}",
@@ -672,6 +671,27 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
 
                 await context.Response.SendFileAsync(fileInfo, context.RequestAborted);
             });
+    }
+
+    [ExcludeFromCodeCoverage(
+        Justification = "Private provider ownership transfer; route integration covers success and failure cleanup is defensive.")]
+    [SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "The provider is captured by the endpoint route and disposed through IHostApplicationLifetime when the host stops.")]
+    private static PhysicalFileProvider CreateLifetimeOwnedBrandingAssetProvider(IServiceProvider services, string directoryPath)
+    {
+        var provider = new PhysicalFileProvider(directoryPath);
+        try
+        {
+            RegisterMountedProviderDisposal(services, [provider]);
+            return provider;
+        }
+        catch
+        {
+            provider.Dispose();
+            throw;
+        }
     }
 
     private static string? ResolveBrandingAssetsDirectoryPath(IServiceProvider services, AppSurfaceDocsOptions options)

@@ -1223,25 +1223,224 @@ public class AppSurfaceDocsWebModuleRegressionTests
     }
 
     [Fact]
+    public async Task ConfigureEndpoints_ShouldServePackagedRootFavicon_WhenConfiguredSvgPointsToRootFavicon()
+    {
+        var module = new AppSurfaceDocsWebModule();
+        var context = new StartupContext([], module);
+        var builder = WebApplication.CreateBuilder();
+
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    Favicon = new AppSurfaceDocsFaviconOptions
+                    {
+                        SvgPath = RootFaviconPath
+                    }
+                }
+            });
+
+        using var app = builder.Build();
+        module.ConfigureEndpoints(context, app);
+
+        await app.StartAsync();
+
+        try
+        {
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            using var response = await client.GetAsync(RootFaviconPath);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureEndpoints_ShouldServeConfiguredBrandingAssetsFromContentRootDefaultPath()
+    {
+        var module = new AppSurfaceDocsWebModule();
+        var context = new StartupContext([], module);
+        var tempDirectoryName = $"{nameof(ConfigureEndpoints_ShouldServeConfiguredBrandingAssetsFromContentRootDefaultPath)}-{Guid.NewGuid():N}";
+        var tempDirectory = Path.Join(Path.GetTempPath(), Path.GetFileName(tempDirectoryName));
+        var brandingDirectory = Path.Join(tempDirectory, "branding");
+        Directory.CreateDirectory(brandingDirectory);
+        File.WriteAllText(
+            Path.Join(brandingDirectory, "favicon.svg"),
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+              <title>Default branding path favicon</title>
+              <rect width="16" height="16" fill="#123456" />
+            </svg>
+            """);
+
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = tempDirectory });
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions
+                    {
+                        DirectoryPath = "branding"
+                    }
+                }
+            });
+
+        using var app = builder.Build();
+
+        try
+        {
+            module.ConfigureEndpoints(context, app);
+            await app.StartAsync();
+
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            using var response = await client.GetAsync("/branding/favicon.svg");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
+            Assert.Contains("Default branding path favicon", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await app.StopAsync();
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldRejectMissingBrandingAssetsDirectory()
+    {
+        var module = new AppSurfaceDocsWebModule();
+        var context = new StartupContext([], module);
+        var missingDirectory = Path.Join(
+            Path.GetTempPath(),
+            Path.GetFileName($"{nameof(ConfigureEndpoints_ShouldRejectMissingBrandingAssetsDirectory)}-{Guid.NewGuid():N}"));
+        var builder = WebApplication.CreateBuilder();
+
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions
+                    {
+                        DirectoryPath = missingDirectory
+                    }
+                }
+            });
+
+        using var app = builder.Build();
+
+        var ex = Assert.Throws<DirectoryNotFoundException>(() => module.ConfigureEndpoints(context, app));
+        Assert.Contains("AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("branding")]
+    [InlineData("/")]
+    public async Task ConfigureEndpoints_ShouldSkipBrandingAssets_WhenRequestPathIsNotDedicatedBrowserRoot(string requestPath)
+    {
+        var module = new AppSurfaceDocsWebModule();
+        var context = new StartupContext([], module);
+        var tempDirectoryName = $"{nameof(ConfigureEndpoints_ShouldSkipBrandingAssets_WhenRequestPathIsNotDedicatedBrowserRoot)}-{Guid.NewGuid():N}";
+        var tempDirectory = Path.Join(Path.GetTempPath(), Path.GetFileName(tempDirectoryName));
+        var brandingDirectory = Path.Join(tempDirectory, "branding");
+        Directory.CreateDirectory(brandingDirectory);
+        File.WriteAllText(
+            Path.Join(brandingDirectory, "favicon.svg"),
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+              <title>Skipped branding path favicon</title>
+              <rect width="16" height="16" fill="#123456" />
+            </svg>
+            """);
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions
+                    {
+                        DirectoryPath = brandingDirectory,
+                        RequestPath = requestPath
+                    }
+                }
+            });
+
+        using var app = builder.Build();
+
+        try
+        {
+            module.ConfigureEndpoints(context, app);
+            await app.StartAsync();
+
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            using var response = await client.GetAsync("/branding/favicon.svg");
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync();
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConfigureEndpoints_ShouldServeConfiguredBrandingAssetsFromRepositoryRootDirectory()
     {
         var module = new AppSurfaceDocsWebModule();
         var context = new StartupContext([], module);
-        var tempDirectory = Path.Combine(
-            Path.GetTempPath(),
-            $"{nameof(ConfigureEndpoints_ShouldServeConfiguredBrandingAssetsFromRepositoryRootDirectory)}-{Guid.NewGuid():N}");
-        var brandingDirectory = Path.Combine(tempDirectory, "branding");
+        var tempDirectoryName = $"{nameof(ConfigureEndpoints_ShouldServeConfiguredBrandingAssetsFromRepositoryRootDirectory)}-{Guid.NewGuid():N}";
+        var tempDirectory = Path.Join(Path.GetTempPath(), Path.GetFileName(tempDirectoryName));
+        var brandingDirectory = Path.Join(tempDirectory, "branding");
         Directory.CreateDirectory(brandingDirectory);
         File.WriteAllText(
-            Path.Combine(brandingDirectory, "favicon.svg"),
+            Path.Join(brandingDirectory, "favicon.svg"),
             """
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
               <title>Consumer favicon</title>
               <rect width="16" height="16" fill="#123456" />
             </svg>
             """);
-        File.WriteAllText(Path.Combine(brandingDirectory, "notes.txt"), "not a public brand asset");
-        File.WriteAllText(Path.Combine(tempDirectory, "secret.svg"), "<svg><title>Secret</title></svg>");
+        File.WriteAllText(Path.Join(brandingDirectory, "notes.txt"), "not a public brand asset");
+        File.WriteAllText(Path.Join(tempDirectory, "secret.svg"), "<svg><title>Secret</title></svg>");
 
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -1299,6 +1498,15 @@ public class AppSurfaceDocsWebModuleRegressionTests
 
             using var unsupportedFileResponse = await client.GetAsync("/brand/notes.txt");
             Assert.Equal(HttpStatusCode.NotFound, unsupportedFileResponse.StatusCode);
+
+            using var emptyAssetResponse = await client.GetAsync("/brand/");
+            Assert.Equal(HttpStatusCode.NotFound, emptyAssetResponse.StatusCode);
+
+            using var backslashAssetResponse = await client.GetAsync("/brand/%5Csecret.svg");
+            Assert.Equal(HttpStatusCode.NotFound, backslashAssetResponse.StatusCode);
+
+            using var controlCharacterAssetResponse = await client.GetAsync("/brand/%01secret.svg");
+            Assert.Equal(HttpStatusCode.NotFound, controlCharacterAssetResponse.StatusCode);
         }
         finally
         {

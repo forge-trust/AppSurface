@@ -814,18 +814,18 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Export_Favicon_Link_Assets()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new FaviconLinkHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new FaviconLinkHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var faviconPath = Path.Combine(tempDir, "branding", "appsurface-site-icon.svg");
+            var faviconPath = Path.Join(tempDir, "branding", "appsurface-site-icon.svg");
             Assert.True(File.Exists(faviconPath), "Expected favicon link asset to be exported.");
             Assert.Contains("Exported AppSurface icon", await File.ReadAllTextAsync(faviconPath), StringComparison.Ordinal);
             Assert.True(context.RouteOutcomes.TryGetValue("/branding/appsurface-site-icon.svg", out var faviconOutcome));
@@ -1809,7 +1809,7 @@ public class ExportEngineTests
                 return Bytes("image/png");
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return NotFound();
         }
     }
 
@@ -1843,7 +1843,7 @@ public class ExportEngineTests
                     "image/svg+xml");
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return NotFound();
         }
     }
 
@@ -2056,6 +2056,11 @@ public class ExportEngineTests
         {
             Content = new StringContent(content, Encoding.UTF8, mediaType)
         });
+    }
+
+    private static Task<HttpResponseMessage> NotFound()
+    {
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
     }
 
     private static Task<HttpResponseMessage> Bytes(string mediaType)
