@@ -38,6 +38,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 ### Changed
 
 - AppSurface now treats the whole monorepo as one coordinated release surface. Packages, CLI tools, examples, and docs-facing behavior all roll into the same upcoming version.
+- AppSurface NuGet packages now point their project website metadata at `https://appsurface.dev` while keeping repository metadata linked to GitHub.
 - Pull requests are expected to use Conventional Commits titles and to update `releases/unreleased.md` unless maintainers explicitly opt out.
 - Markdown-only changes on `main` now trigger the build-and-export workflow so release-note and policy updates publish with the docs surface.
 - AppSurface Docs search result rows now expose the whole visible result as one semantic link, making mobile taps easier while preserving keyboard focus, copied links, and open-in-new-tab browser behavior.
