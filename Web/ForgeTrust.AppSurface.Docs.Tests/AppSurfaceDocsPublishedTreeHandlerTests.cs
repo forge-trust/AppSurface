@@ -254,7 +254,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldIgnoreAmbiguousFrozenManifestAliases_AndContinueServingFiles()
     {
         var tree = CreatePublishedTree("ambiguous-frozen-manifest");
-        File.WriteAllText(Path.Combine(tree, "legacy.html"), "<!DOCTYPE html><html><body>legacy page</body></html>");
+        File.WriteAllText(Path.Join(tree, "legacy.html"), "<!DOCTYPE html><html><body>legacy page</body></html>");
         WriteFrozenManifest(
             tree,
             """
@@ -288,8 +288,8 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldDisableFrozenAliasRecovery_WhenManifestIsMalformed()
     {
         var tree = CreatePublishedTree("malformed-frozen-manifest");
-        Directory.CreateDirectory(Path.Combine(tree, "packages"));
-        File.WriteAllText(Path.Combine(tree, "packages", "README.md.html"), "<!DOCTYPE html><html><body>legacy artifact</body></html>");
+        Directory.CreateDirectory(Path.Join(tree, "packages"));
+        File.WriteAllText(Path.Join(tree, "packages", "README.md.html"), "<!DOCTYPE html><html><body>legacy artifact</body></html>");
         WriteFrozenManifest(tree, "{");
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var aliasRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md");
@@ -743,7 +743,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
     private static void WriteFrozenManifest(string treePath, string json)
     {
-        File.WriteAllText(Path.Combine(treePath, ".appsurface-docs-route-manifest.json"), json);
+        File.WriteAllText(Path.Join(treePath, ".appsurface-docs-route-manifest.json"), json);
     }
 
     private static DefaultHttpContext CreateContext(string method, string requestPath, string? pathBase = null)

@@ -2017,7 +2017,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
         File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
         File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
         File.WriteAllText(
-            Path.Combine(root, ".appsurface-docs-route-manifest.json"),
+            Path.Join(root, ".appsurface-docs-route-manifest.json"),
             """
             {
               "schema": "appsurface-docs-route-manifest-v1",

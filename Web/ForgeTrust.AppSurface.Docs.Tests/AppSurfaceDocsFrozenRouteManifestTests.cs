@@ -37,6 +37,26 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
     }
 
     [Fact]
+    public async Task WriteAsync_ShouldAllowDocsRootCanonicalRoutes()
+    {
+        var manifest = new AppSurfaceDocsRouteManifest(
+            [
+                Entry(
+                    sourcePath: "README.md",
+                    canonicalRoutePath: string.Empty,
+                    aliases: ["README.md", "README.md.html"])
+            ],
+            []);
+
+        await AppSurfaceDocsFrozenRouteManifest.WriteAsync(_tempDirectory, manifest, CancellationToken.None);
+
+        var frozenManifest = await File.ReadAllTextAsync(Path.Join(_tempDirectory, ".appsurface-docs-route-manifest.json"));
+        Assert.Contains("\"canonicalRoutePath\": \"\"", frozenManifest);
+        Assert.Contains("\"README.md\"", frozenManifest);
+        Assert.Contains("\"README.md.html\"", frozenManifest);
+    }
+
+    [Fact]
     public async Task WriteAsync_ShouldRejectAliasesThatPointAtMultipleCanonicalRoutes()
     {
         var manifest = new AppSurfaceDocsRouteManifest(

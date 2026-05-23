@@ -56,7 +56,12 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         ValidateDocument(document, strict: true, out _);
 
         Directory.CreateDirectory(outputPath);
-        var manifestPath = Path.Combine(outputPath, FileName);
+        if (Path.IsPathRooted(FileName))
+        {
+            throw new InvalidOperationException("Frozen AppSurface Docs route manifest filename must be relative.");
+        }
+
+        var manifestPath = Path.Join(outputPath, FileName);
         await File.WriteAllTextAsync(
             manifestPath,
             JsonSerializer.Serialize(document, SerializerOptions) + Environment.NewLine,
@@ -173,17 +178,12 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         var canonicalRoutes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in document.Entries ?? [])
         {
-            var canonicalRoutePath = NormalizeRoutePath(entry.CanonicalRoutePath);
-            if (string.IsNullOrWhiteSpace(canonicalRoutePath))
+            if (entry.CanonicalRoutePath is null)
             {
-                if (strict)
-                {
-                    throw new InvalidOperationException("Frozen AppSurface Docs route manifest entries require non-empty canonicalRoutePath values.");
-                }
-
-                continue;
+                throw new InvalidOperationException("Frozen AppSurface Docs route manifest entries require canonicalRoutePath values.");
             }
 
+            var canonicalRoutePath = NormalizeRoutePath(entry.CanonicalRoutePath);
             if (!canonicalRoutes.Add(canonicalRoutePath) && strict)
             {
                 throw new InvalidOperationException($"Frozen AppSurface Docs route manifest contains duplicate canonical route '{canonicalRoutePath}'.");
@@ -194,15 +194,16 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         var ambiguousAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in document.Entries ?? [])
         {
-            var canonicalRoutePath = NormalizeRoutePath(entry.CanonicalRoutePath);
-            if (string.IsNullOrWhiteSpace(canonicalRoutePath))
+            if (entry.CanonicalRoutePath is null)
             {
                 continue;
             }
 
-            foreach (var alias in (entry.RecoveryAliases ?? []).Concat(entry.DeclaredAliases ?? []))
+            var canonicalRoutePath = NormalizeRoutePath(entry.CanonicalRoutePath);
+            foreach (var aliasRoutePath in (entry.RecoveryAliases ?? [])
+                         .Concat(entry.DeclaredAliases ?? [])
+                         .Select(NormalizeRoutePath))
             {
-                var aliasRoutePath = NormalizeRoutePath(alias);
                 if (string.IsNullOrWhiteSpace(aliasRoutePath))
                 {
                     continue;

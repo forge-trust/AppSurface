@@ -709,7 +709,7 @@ public sealed class ProgramEntryPointTests
             context.RedirectArtifacts,
             artifact => artifact.AliasRoute == "/docs/legacy/intro"
                         && artifact.CanonicalRoute == "/docs/start-here/intro");
-        var frozenManifest = await File.ReadAllTextAsync(Path.Combine(output.Path, ".appsurface-docs-route-manifest.json"));
+        var frozenManifest = await File.ReadAllTextAsync(Path.Join(output.Path, ".appsurface-docs-route-manifest.json"));
         Assert.Contains("\"schema\": \"appsurface-docs-route-manifest-v1\"", frozenManifest);
         Assert.Contains("\"canonicalRoutePath\": \"packages\"", frozenManifest);
         Assert.Contains("\"packages/README.md\"", frozenManifest);
