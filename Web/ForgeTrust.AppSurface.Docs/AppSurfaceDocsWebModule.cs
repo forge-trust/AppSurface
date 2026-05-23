@@ -36,9 +36,23 @@ namespace ForgeTrust.AppSurface.Docs;
 public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
 {
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
+    private static readonly HashSet<string> AllowedBrandingAssetExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".avif",
+        ".gif",
+        ".ico",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".svg",
+        ".webp"
+    };
+
     private static readonly Assembly AppSurfaceDocsAssembly = typeof(AppSurfaceDocsWebModule).Assembly;
     private const string AppSurfaceDocsStaticAssetBasePath = "/_content/ForgeTrust.AppSurface.Docs/docs";
     private const string AppSurfaceDocsPackagedStylesheetPath = "/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css";
+    private const string AppSurfaceDocsPackagedBrandIconPath = "docs/appsurface-docs-icon.svg";
+    private const string AppSurfaceDocsRootFaviconPath = "/favicon.ico";
     private const string AppSurfaceDocsRootStylesheetPath = "/css/site.gen.css";
     private const string EmbeddedAssetResourcePrefix = "AppSurfaceDocsEmbeddedAssets/";
 
@@ -250,8 +264,9 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// Asset routes are built with <see cref="DocsUrlBuilder.BuildAssetUrl(string)"/> for <c>search.css</c>,
     /// <c>minisearch.min.js</c>, <c>search-client.js</c>, and the page-local <c>outline-client.js</c>. The packaged
     /// AppSurface brand icon is also served from an embedded fallback so static exports that disable static-web-assets
-    /// can still validate the layout image. Preview hosts can
-    /// serve those files directly from the web root; otherwise the current-surface URLs redirect through
+    /// can still validate the layout image. Consumer-owned branding assets can be served from a configured filesystem
+    /// directory, including directories outside AppSurface Docs packaged static web assets, under a dedicated request
+    /// prefix. Preview hosts can serve those files directly from the web root; otherwise the current-surface URLs redirect through
     /// <see cref="ResolveLegacySearchAssetBasePath"/> to the packaged AppSurface Docs assets. Legacy asset redirects preserve
     /// only the request query string, while the redirect path itself is constrained to an app-relative URL so
     /// cache-busting parameters cannot turn the redirect into an external hop.
@@ -260,9 +275,12 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// root-mounted or overlaps published exact-version aliases.
     /// </para>
     /// <para>
-    /// When AppSurface Docs is the root module, the bare application root redirects to the configured docs home. This keeps
-    /// standalone docs hosts and static exports useful after route isolation removed the old app-wide controller
-    /// fallback. Embedded hosts do not get this redirect; their owning app should decide what <c>/</c> means.
+    /// When AppSurface Docs is the root module, the bare application root redirects to the configured docs home and
+    /// <c>/favicon.ico</c> serves the packaged AppSurface Docs document-layers SVG mark unless the host configures
+    /// <see cref="AppSurfaceDocsFaviconOptions.SvgPath" />. In that case <c>/favicon.ico</c> redirects to the configured
+    /// SVG path so standalone docs hosts can keep the conventional browser favicon probe aligned with rendered
+    /// <c>&lt;link rel="icon"&gt;</c> metadata. Embedded hosts do not get these root routes; their owning app should
+    /// decide what <c>/</c> and <c>/favicon.ico</c> mean.
     /// </para>
     /// <para>
     /// The operator-facing harvest health route patterns are always registered before the catch-all docs route so
@@ -288,17 +306,31 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         MapEmbeddedAssetFallback(
             endpoints,
             $"{AppSurfaceDocsStaticAssetBasePath}/appsurface-docs-icon.svg",
-            "docs/appsurface-docs-icon.svg");
+            AppSurfaceDocsPackagedBrandIconPath);
         MapEmbeddedAssetFallback(endpoints, $"{AppSurfaceDocsStaticAssetBasePath}/search.css", "docs/search.css");
         MapEmbeddedAssetFallback(endpoints, $"{AppSurfaceDocsStaticAssetBasePath}/minisearch.min.js", "docs/minisearch.min.js");
         MapEmbeddedAssetFallback(endpoints, $"{AppSurfaceDocsStaticAssetBasePath}/search-client.js", "docs/search-client.js");
         MapEmbeddedAssetFallback(endpoints, $"{AppSurfaceDocsStaticAssetBasePath}/outline-client.js", "docs/outline-client.js");
+        MapBrandingAssetDirectory(endpoints, docsOptions);
 
         if (ShouldPreserveRootStylesheetPath(context))
         {
             // Published/exported standalone hosts can resolve the packaged stylesheet only under /_content.
             // Preserve the historical root stylesheet URL so docs HTML and static exports stay portable.
             MapLegacyAssetRedirect(endpoints, AppSurfaceDocsRootStylesheetPath, AppSurfaceDocsPackagedStylesheetPath);
+
+            var configuredSvgFaviconPath = ResolveConfiguredRootFaviconRedirectPath(docsOptions);
+            if (configuredSvgFaviconPath is not null)
+            {
+                // Browsers request /favicon.ico implicitly. Keep that conventional probe aligned
+                // with a standalone host's configured SVG favicon while embedded hosts keep ownership.
+                MapLegacyAssetRedirect(endpoints, AppSurfaceDocsRootFaviconPath, configuredSvgFaviconPath);
+            }
+            else
+            {
+                // Serve the packaged document-layers mark for standalone docs hosts without taking over embedded app roots.
+                MapEmbeddedAssetFallback(endpoints, AppSurfaceDocsRootFaviconPath, AppSurfaceDocsPackagedBrandIconPath);
+            }
         }
 
         if (ShouldServePreviewAssetsDirectlyFromWebRoot(context, docsOptions, docsUrlBuilder))
@@ -583,6 +615,149 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     }
 
     [ExcludeFromCodeCoverage(
+        Justification = "Private endpoint closure for configured branding assets; integration coverage verifies successful and rejected asset requests.")]
+    private static void MapBrandingAssetDirectory(IEndpointRouteBuilder endpoints, AppSurfaceDocsOptions options)
+    {
+        var directoryPath = ResolveBrandingAssetsDirectoryPath(endpoints.ServiceProvider, options);
+        if (directoryPath is null)
+        {
+            return;
+        }
+
+        if (!Directory.Exists(directoryPath))
+        {
+            throw new DirectoryNotFoundException(
+                $"Configured AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath does not exist: '{directoryPath}'.");
+        }
+
+        var requestPath = ResolveBrandingAssetsRequestPath(options);
+        if (requestPath is null)
+        {
+            return;
+        }
+
+        var provider = new PhysicalFileProvider(directoryPath);
+        RegisterMountedProviderDisposal(endpoints.ServiceProvider, [provider]);
+
+        endpoints.MapMethods(
+            $"{requestPath}/{{*assetPath}}",
+            [HttpMethods.Get, HttpMethods.Head],
+            async context =>
+            {
+                if (!TryResolveSafeBrandingAssetPath(
+                        context.Request.RouteValues["assetPath"],
+                        out var assetPath))
+                {
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    return;
+                }
+
+                var fileInfo = provider.GetFileInfo(assetPath);
+                if (!fileInfo.Exists || fileInfo.IsDirectory)
+                {
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    return;
+                }
+
+                context.Response.StatusCode = StatusCodes.Status200OK;
+                context.Response.ContentType = ResolveContentType(assetPath);
+                context.Response.ContentLength = fileInfo.Length;
+                context.Response.Headers.LastModified = fileInfo.LastModified
+                    .ToUniversalTime()
+                    .ToString("R", CultureInfo.InvariantCulture);
+                if (HttpMethods.IsHead(context.Request.Method))
+                {
+                    return;
+                }
+
+                await context.Response.SendFileAsync(fileInfo, context.RequestAborted);
+            });
+    }
+
+    private static string? ResolveBrandingAssetsDirectoryPath(IServiceProvider services, AppSurfaceDocsOptions options)
+    {
+        var configuredPath = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(options.Identity?.BrandingAssets?.DirectoryPath);
+        if (configuredPath is null)
+        {
+            return null;
+        }
+
+        var fullPath = Path.IsPathRooted(configuredPath)
+            ? Path.GetFullPath(configuredPath)
+            : Path.GetFullPath(configuredPath, ResolveBrandingAssetsBaseDirectory(services, options));
+        return Path.TrimEndingDirectorySeparator(fullPath);
+    }
+
+    private static string ResolveBrandingAssetsBaseDirectory(IServiceProvider services, AppSurfaceDocsOptions options)
+    {
+        var environment = services.GetService(typeof(IWebHostEnvironment)) as IWebHostEnvironment;
+        var contentRootPath = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(environment?.ContentRootPath)
+                              ?? Directory.GetCurrentDirectory();
+        var fullContentRootPath = Path.GetFullPath(contentRootPath);
+        var repositoryRoot = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(options.Source?.RepositoryRoot);
+
+        return repositoryRoot is null
+            ? fullContentRootPath
+            : Path.IsPathRooted(repositoryRoot)
+                ? Path.GetFullPath(repositoryRoot)
+                : Path.GetFullPath(repositoryRoot, fullContentRootPath);
+    }
+
+    private static string? ResolveBrandingAssetsRequestPath(AppSurfaceDocsOptions options)
+    {
+        var requestPath = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(options.Identity?.BrandingAssets?.RequestPath)
+                          ?? AppSurfaceDocsBrandingAssetsOptions.DefaultRequestPath;
+        if (!AppSurfaceDocsIdentityPath.TryNormalizeBrowserPath(requestPath, out var normalizedPath, out _))
+        {
+            return null;
+        }
+
+        var rootPath = normalizedPath?.StartsWith("~/", StringComparison.Ordinal) == true
+            ? "/" + normalizedPath[2..]
+            : normalizedPath;
+        if (string.IsNullOrWhiteSpace(rootPath) || string.Equals(rootPath, "/", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return rootPath.TrimEnd('/');
+    }
+
+    private static bool TryResolveSafeBrandingAssetPath(object? routeValue, out string assetPath)
+    {
+        assetPath = string.Empty;
+        var rawPath = Convert.ToString(routeValue, CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(rawPath))
+        {
+            return false;
+        }
+
+        var decodedPath = Uri.UnescapeDataString(rawPath);
+        if (decodedPath.StartsWith("/", StringComparison.Ordinal)
+            || decodedPath.Contains('\\', StringComparison.Ordinal)
+            || decodedPath.Any(char.IsControl))
+        {
+            return false;
+        }
+
+        var segments = decodedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Any(segment =>
+                string.Equals(segment, ".", StringComparison.Ordinal)
+                || string.Equals(segment, "..", StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        if (!AllowedBrandingAssetExtensions.Contains(Path.GetExtension(decodedPath)))
+        {
+            return false;
+        }
+
+        assetPath = decodedPath;
+        return true;
+    }
+
+    [ExcludeFromCodeCoverage(
         Justification = "Private assembly-resource adapter with a defensive missing-resource branch; public route tests cover packaged asset availability.")]
     private static async Task<bool> TryWriteEmbeddedAssetAsync(HttpContext context, string webRootSubPath)
     {
@@ -632,6 +807,25 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     private static string ResolveLegacySearchAssetBasePath(StartupContext context)
     {
         return AppSurfaceDocsStaticAssetBasePath;
+    }
+
+    private static string? ResolveConfiguredRootFaviconRedirectPath(AppSurfaceDocsOptions options)
+    {
+        if (!AppSurfaceDocsIdentityPath.TryNormalizeBrowserPath(
+                options.Identity?.Favicon?.SvgPath,
+                out var configuredPath,
+                out _)
+            || string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return null;
+        }
+
+        var rootPath = configuredPath.StartsWith("~/", StringComparison.Ordinal)
+            ? "/" + configuredPath[2..]
+            : configuredPath;
+        return string.Equals(rootPath, AppSurfaceDocsRootFaviconPath, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : rootPath;
     }
 
     private static string BuildPathBaseAwareRedirectUrl(HttpContext context, string appRelativeUrl)

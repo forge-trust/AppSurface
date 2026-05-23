@@ -38,6 +38,14 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Contains("AppSurfaceDocs__Contributor__SymbolSourceUrlTemplate", ScalarKeys(exportEnv));
         Assert.Contains("AppSurfaceDocs__Contributor__EditUrlTemplate", ScalarKeys(exportEnv));
         Assert.Contains("AppSurfaceDocs__Contributor__LastUpdatedMode", ScalarKeys(exportEnv));
+        Assert.Equal("branding", GetScalar(exportEnv, "AppSurfaceDocs__Identity__BrandingAssets__DirectoryPath"));
+        Assert.DoesNotContain("AppSurfaceDocs__Identity__BrandingAssets__RequestPath", ScalarKeys(exportEnv));
+        Assert.Equal(
+            "/branding/appsurface-site-icon.svg",
+            GetScalar(exportEnv, "AppSurfaceDocs__Identity__Logo__Path"));
+        Assert.Equal(
+            "/branding/appsurface-site-icon.svg",
+            GetScalar(exportEnv, "AppSurfaceDocs__Identity__Favicon__SvgPath"));
 
         var exportRun = GetScalar(exportStep, "run");
         Assert.Contains("printf '%s\\n' '/' '/docs' > \"$RUNNER_TEMP/appsurface-docs-seeds.txt\"", exportRun, StringComparison.Ordinal);

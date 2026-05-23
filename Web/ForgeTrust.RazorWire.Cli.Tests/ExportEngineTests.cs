@@ -812,6 +812,35 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_CdnMode_Should_Export_Favicon_Link_Assets()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new FaviconLinkHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var faviconPath = Path.Combine(tempDir, "branding", "appsurface-site-icon.svg");
+            Assert.True(File.Exists(faviconPath), "Expected favicon link asset to be exported.");
+            Assert.Contains("Exported AppSurface icon", await File.ReadAllTextAsync(faviconPath), StringComparison.Ordinal);
+            Assert.True(context.RouteOutcomes.TryGetValue("/branding/appsurface-site-icon.svg", out var faviconOutcome));
+            Assert.True(faviconOutcome.Succeeded);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_CdnMode_Should_Append_Html_For_Dotted_Extensionless_Page_Routes()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -1778,6 +1807,40 @@ public class ExportEngineTests
             if (path.StartsWith("/img/", StringComparison.Ordinal))
             {
                 return Bytes("image/png");
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class FaviconLinkHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+
+            if (path == "/")
+            {
+                return Html("""
+                    <html>
+                      <head>
+                        <link rel="icon" type="image/svg+xml" href="/branding/appsurface-site-icon.svg">
+                      </head>
+                      <body><h1>Docs</h1></body>
+                    </html>
+                    """);
+            }
+
+            if (path == "/branding/appsurface-site-icon.svg")
+            {
+                return Text(
+                    """
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+                      <title>Exported AppSurface icon</title>
+                      <rect width="16" height="16" fill="#123456" />
+                    </svg>
+                    """,
+                    "image/svg+xml");
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));

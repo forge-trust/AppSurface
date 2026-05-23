@@ -149,7 +149,9 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Identity:Logo:AltText"] = "  Acme mark  ",
                         ["AppSurfaceDocs:Identity:Favicon:SvgPath"] = "  /brand/favicon.svg  ",
                         ["AppSurfaceDocs:Identity:Favicon:IcoPath"] = "  ~/favicon.ico  ",
-                        ["AppSurfaceDocs:Identity:Favicon:PngPath"] = "  /brand/favicon.png  "
+                        ["AppSurfaceDocs:Identity:Favicon:PngPath"] = "  /brand/favicon.png  ",
+                        ["AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath"] = "  branding  ",
+                        ["AppSurfaceDocs:Identity:BrandingAssets:RequestPath"] = "  ~/brand  "
                     })
                 .Build());
 
@@ -167,6 +169,8 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("/brand/favicon.svg", options.Identity.Favicon.SvgPath);
         Assert.Equal("~/favicon.ico", options.Identity.Favicon.IcoPath);
         Assert.Equal("/brand/favicon.png", options.Identity.Favicon.PngPath);
+        Assert.Equal("branding", options.Identity.BrandingAssets.DirectoryPath);
+        Assert.Equal("~/brand", options.Identity.BrandingAssets.RequestPath);
     }
 
     [Theory]
@@ -262,6 +266,9 @@ public sealed class AppSurfaceDocsOptionsTests
     [InlineData("AppSurfaceDocs:Identity:Logo:Path", "/assets\\logo.svg")]
     [InlineData("AppSurfaceDocs:Identity:Logo:Path", "/../logo.svg")]
     [InlineData("AppSurfaceDocs:Identity:Favicon:SvgPath", "favicon.svg")]
+    [InlineData("AppSurfaceDocs:Identity:BrandingAssets:RequestPath", "branding")]
+    [InlineData("AppSurfaceDocs:Identity:BrandingAssets:RequestPath", "/branding?tenant=acme")]
+    [InlineData("AppSurfaceDocs:Identity:BrandingAssets:RequestPath", "/")]
     [InlineData("AppSurfaceDocs:Identity:HomeHref", "docs")]
     [InlineData("AppSurfaceDocs:Identity:HomeHref", "https://example.com/docs")]
     [InlineData("AppSurfaceDocs:Identity:HomeHref", "/docs?tenant=acme")]
@@ -1168,7 +1175,8 @@ public sealed class AppSurfaceDocsOptionsTests
                 {
                     Logo = null!,
                     Wordmark = null!,
-                    Favicon = null!
+                    Favicon = null!,
+                    BrandingAssets = null!
                 };
                 options.Source = null!;
                 options.Harvest = null!;
@@ -1185,6 +1193,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Identity.Logo);
         Assert.NotNull(options.Identity.Wordmark);
         Assert.NotNull(options.Identity.Favicon);
+        Assert.NotNull(options.Identity.BrandingAssets);
         Assert.NotNull(options.Source);
         Assert.NotNull(options.Harvest);
         Assert.NotNull(options.Harvest.Health);
@@ -1758,7 +1767,8 @@ public sealed class AppSurfaceDocsOptionsTests
             {
                 Logo = null!,
                 Wordmark = null!,
-                Favicon = null!
+                Favicon = null!,
+                BrandingAssets = null!
             },
             Source = null!,
             Bundle = null!,
@@ -1775,6 +1785,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:Logo must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:Wordmark must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:Favicon must not be null.", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Identity:BrandingAssets must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Source must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Bundle must not be null.", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Sidebar must not be null.", StringComparison.OrdinalIgnoreCase));

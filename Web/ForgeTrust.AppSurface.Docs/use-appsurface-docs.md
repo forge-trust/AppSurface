@@ -74,19 +74,35 @@ Add identity settings when the consuming repository should own the visible docs 
         "HighlightColor": "#38bdf8"
       },
       "Logo": {
-        "Path": "/brand/docs-logo.svg",
+        "Path": "/branding/docs-logo.svg",
         "AltText": "Acme"
       },
       "Favicon": {
-        "SvgPath": "/brand/favicon.svg",
-        "IcoPath": "/favicon.ico"
+        "SvgPath": "/branding/favicon.svg",
+        "IcoPath": "/branding/favicon.ico"
+      },
+      "BrandingAssets": {
+        "DirectoryPath": "branding"
       }
     }
   }
 }
 ```
 
-Identity paths must be app-root paths such as `/brand/docs-logo.svg` or application-relative paths such as `~/brand/docs-logo.svg`. AppSurface Docs rejects remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments during startup validation so the docs chrome cannot accidentally point at unsafe or environment-specific locations.
+Identity paths must be app-root paths such as `/branding/docs-logo.svg` or application-relative paths such as `~/branding/docs-logo.svg`. AppSurface Docs rejects remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments during startup validation so the docs chrome cannot accidentally point at unsafe or environment-specific locations.
+
+There are two branding asset use cases:
+
+1. AppSurface Docs serves the files. Set `Identity:BrandingAssets:DirectoryPath` to a filesystem directory, usually `branding`, and point `Logo:Path` plus `Favicon:*Path` at browser URLs under `/branding`. With the default request prefix, `branding/docs-logo.svg` is referenced as `/branding/docs-logo.svg`.
+2. The owning application already serves the files. Leave `Identity:BrandingAssets:DirectoryPath` blank and point `Logo:Path` plus `Favicon:*Path` at the host-owned browser URLs, such as `/assets/docs-logo.svg`.
+
+`Identity:BrandingAssets:DirectoryPath` is a filesystem path, not a browser path. Relative values resolve against `AppSurfaceDocs:Source:RepositoryRoot` when that root is configured, then fall back to the host content root. `Logo:Path` and `Favicon:*Path` are browser URL paths, not filenames relative to `DirectoryPath`; AppSurface Docs does not join those values with the directory. Keep `DirectoryPath` pointed at a dedicated public branding directory; AppSurface Docs serves only `.avif`, `.gif`, `.ico`, `.jpg`, `.jpeg`, `.png`, `.svg`, and `.webp` files from that directory. Override `Identity:BrandingAssets:RequestPath` only when the default `/branding` URL prefix conflicts with an owning application route.
+
+When `Identity:Favicon` is empty, the built-in layout links the packaged AppSurface Docs document-layers SVG mark.
+Standalone AppSurface Docs hosts also serve that mark at `/favicon.ico` for the browser's conventional favicon probe.
+When `Identity:Favicon:SvgPath` is configured in a standalone host, `/favicon.ico` redirects to that SVG path so the
+conventional probe matches the rendered favicon metadata. Embedded hosts leave `/favicon.ico` to the owning application,
+and any configured favicon path must be served by the host just like a logo asset.
 
 Leave `Identity:Wordmark` unset for a plain-text docs title. The built-in sidebar and mobile header clip long display names with an ellipsis so they do not push the chrome outside its bounds. Configure `DisplayName`, `HighlightText`, and `HighlightColor` when the publishing repository wants a shorter product wordmark treatment. The highlight text must be a substring of `DisplayName`, and the color must be a CSS hex color so the docs layout cannot receive arbitrary style declarations from configuration.
 

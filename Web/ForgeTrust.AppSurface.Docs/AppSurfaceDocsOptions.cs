@@ -113,9 +113,9 @@ public sealed class AppSurfaceDocsOptions
 /// </summary>
 /// <remarks>
 /// Identity settings intentionally cover the low-level brand assets every consuming repository expects to own:
-/// display name, logo, favicon variants, and the brand home link. Theme, layout, color, typography, and template
-/// customization are separate future work so identity remains safe to configure from appsettings, config_*.json,
-/// command-line arguments, and environment variables.
+/// display name, logo, favicon variants, optional branding-asset directory serving, and the brand home link. Theme,
+/// layout, color, typography, and template customization are separate future work so identity remains safe to configure
+/// from appsettings, config_*.json, command-line arguments, and environment variables.
 /// </remarks>
 public sealed class AppSurfaceDocsIdentityOptions
 {
@@ -157,6 +157,64 @@ public sealed class AppSurfaceDocsIdentityOptions
     /// Gets favicon settings emitted into the document head.
     /// </summary>
     public AppSurfaceDocsFaviconOptions Favicon { get; set; } = new();
+
+    /// <summary>
+    /// Gets optional static-file serving settings for consumer-owned branding assets.
+    /// </summary>
+    public AppSurfaceDocsBrandingAssetsOptions BrandingAssets { get; set; } = new();
+}
+
+/// <summary>
+/// Static-file serving settings for consumer-owned AppSurface Docs branding assets.
+/// </summary>
+/// <remarks>
+/// <para>
+/// These settings bridge the difference between filesystem asset ownership and browser paths. <see cref="DirectoryPath" />
+/// points at a directory on disk that can live outside AppSurface Docs packaged static web assets, while
+/// <see cref="RequestPath" /> defines the app-root browser prefix used by <see cref="AppSurfaceDocsLogoOptions.Path" />
+/// and <see cref="AppSurfaceDocsFaviconOptions" /> paths.
+/// </para>
+/// <para>
+/// Logo and favicon paths are browser URL paths, not filesystem paths, and are not joined with
+/// <see cref="DirectoryPath" />. When <see cref="DirectoryPath" /> is <c>branding</c> and
+/// <see cref="RequestPath" /> uses its default <c>/branding</c>, a file at <c>branding/logo.svg</c> is referenced as
+/// <c>/branding/logo.svg</c>.
+/// </para>
+/// <para>
+/// Relative directory paths resolve against <see cref="AppSurfaceDocsSourceOptions.RepositoryRoot" /> when configured;
+/// otherwise they resolve against the host content root. Absolute directory paths are served as-is. The endpoint only
+/// serves common web image and icon file extensions; keep this directory dedicated to public brand assets. Leave
+/// <see cref="DirectoryPath" /> blank when the owning application serves branding assets itself.
+/// </para>
+/// </remarks>
+public sealed class AppSurfaceDocsBrandingAssetsOptions
+{
+    /// <summary>
+    /// Gets the default request prefix for docs-served branding assets.
+    /// </summary>
+    public const string DefaultRequestPath = "/branding";
+
+    /// <summary>
+    /// Gets or sets the filesystem directory containing consumer-owned branding assets.
+    /// </summary>
+    /// <remarks>
+    /// Values may be absolute paths, repository-relative paths when
+    /// <see cref="AppSurfaceDocsSourceOptions.RepositoryRoot" /> is configured, or content-root-relative paths otherwise.
+    /// The directory is not enabled until this value is non-blank. This is a server-side filesystem path; logo and
+    /// favicon options still use browser paths under <see cref="RequestPath" />. The serving endpoint intentionally
+    /// ignores files outside the supported image and icon extension set.
+    /// </remarks>
+    public string? DirectoryPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the app-root or application-relative URL prefix used to serve <see cref="DirectoryPath" />.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <c>/branding</c>. Values must follow the same browser-path rules as logo and favicon paths and must not
+    /// be the application root because branding asset serving is intentionally scoped to a dedicated path prefix. Override
+    /// this only when <c>/branding</c> conflicts with an owning application route.
+    /// </remarks>
+    public string? RequestPath { get; set; } = DefaultRequestPath;
 }
 
 /// <summary>
@@ -200,8 +258,11 @@ public sealed class AppSurfaceDocsLogoOptions
     /// Gets or sets the app-root or application-relative logo path.
     /// </summary>
     /// <remarks>
-    /// Valid values look like <c>/brand/docs-logo.svg</c> or <c>~/brand/docs-logo.svg</c>. Remote URLs, relative paths,
-    /// query strings, fragments, backslashes, and traversal segments are rejected.
+    /// Valid values look like <c>/branding/docs-logo.svg</c> or <c>~/branding/docs-logo.svg</c>. This is always a
+    /// browser URL path. When <see cref="AppSurfaceDocsBrandingAssetsOptions.DirectoryPath" /> is configured, reference
+    /// files through the branding request prefix, for example <c>/branding/docs-logo.svg</c> for
+    /// <c>branding/docs-logo.svg</c>. Remote URLs, relative paths, query strings, fragments, backslashes, and traversal
+    /// segments are rejected.
     /// </remarks>
     public string? Path { get; set; }
 
@@ -218,6 +279,13 @@ public sealed class AppSurfaceDocsLogoOptions
 /// <summary>
 /// Favicon settings for AppSurface Docs.
 /// </summary>
+/// <remarks>
+/// When no custom favicon path is configured, the built-in layout links the packaged AppSurface Docs document-layers SVG
+/// mark. Standalone AppSurface Docs hosts also serve that same SVG mark at <c>/favicon.ico</c> for browsers that request
+/// the conventional root favicon URL before reading page metadata. When <see cref="SvgPath" /> is configured, standalone
+/// hosts redirect <c>/favicon.ico</c> to that SVG path so the conventional probe matches the rendered metadata. Embedded
+/// hosts do not claim <c>/favicon.ico</c>; their owning app should serve any app-wide favicon itself.
+/// </remarks>
 public sealed class AppSurfaceDocsFaviconOptions
 {
     /// <summary>
@@ -869,6 +937,28 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                     allowDocsHomeDefault: false);
             }
 
+            if (identity.BrandingAssets is null)
+            {
+                failures.Add("AppSurfaceDocs:Identity:BrandingAssets must not be null.");
+            }
+            else
+            {
+                AddIdentityBrowserPathFailure(
+                    failures,
+                    "AppSurfaceDocs:Identity:BrandingAssets:RequestPath",
+                    identity.BrandingAssets.RequestPath,
+                    allowDocsHomeDefault: false);
+
+                if (AppSurfaceDocsIdentityPath.TryNormalizeBrowserPath(
+                        identity.BrandingAssets.RequestPath,
+                        out var brandingRequestPath,
+                        out _)
+                    && string.Equals(NormalizeApplicationRelativePath(brandingRequestPath), "/", StringComparison.Ordinal))
+                {
+                    failures.Add("AppSurfaceDocs:Identity:BrandingAssets:RequestPath must not be the application root.");
+                }
+            }
+
             AddIdentityBrowserPathFailure(
                 failures,
                 "AppSurfaceDocs:Identity:HomeHref",
@@ -1154,6 +1244,13 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         {
             failures.Add($"{key} {error}");
         }
+    }
+
+    private static string? NormalizeApplicationRelativePath(string? path)
+    {
+        return path?.StartsWith("~/", StringComparison.Ordinal) == true
+            ? "/" + path[2..]
+            : path;
     }
 
     private static bool IsValidAppRelativeRootPath(string path)

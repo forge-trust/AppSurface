@@ -27,6 +27,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
 {
     private const string PackagedAssetBasePath = "/_content/ForgeTrust.AppSurface.Docs/docs";
     private const string PackagedStylesheetPath = "/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css";
+    private const string RootFaviconPath = "/favicon.ico";
     private const string RootStylesheetPath = "/css/site.gen.css";
     private const string ReferencedRazorWireScriptPath = "/_content/ForgeTrust.RazorWire/razorwire/razorwire.js";
 
@@ -1125,6 +1126,188 @@ public class AppSurfaceDocsWebModuleRegressionTests
     }
 
     [Fact]
+    public async Task ConfigureEndpoints_ShouldServeRootFaviconAsPackagedDocumentLayersSvg_WhenAppSurfaceDocsIsRootModule()
+    {
+        var module = new AppSurfaceDocsWebModule();
+        var context = new StartupContext([], module);
+        var builder = WebApplication.CreateBuilder();
+
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+
+        using var app = builder.Build();
+        module.ConfigureEndpoints(context, app);
+
+        await app.StartAsync();
+
+        try
+        {
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            using var response = await client.GetAsync(RootFaviconPath);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
+            var favicon = await response.Content.ReadAsStringAsync();
+            Assert.Contains(
+                "AppSurface layered document mark",
+                favicon,
+                StringComparison.Ordinal);
+            Assert.Contains(
+                "Four rounded isometric document layers in navy, blue, teal, and violet with document lines and a folded corner",
+                favicon,
+                StringComparison.Ordinal);
+
+            using var headRequest = new HttpRequestMessage(HttpMethod.Head, RootFaviconPath);
+            using var headResponse = await client.SendAsync(headRequest);
+            Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
+            Assert.Equal("image/svg+xml", headResponse.Content.Headers.ContentType?.MediaType);
+            Assert.True(headResponse.Content.Headers.ContentLength > 0);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureEndpoints_ShouldRedirectRootFaviconToConfiguredSvg_WhenRootModuleOverridesFavicon()
+    {
+        var module = new AppSurfaceDocsWebModule();
+        var context = new StartupContext([], module);
+        var builder = WebApplication.CreateBuilder();
+
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    Favicon = new AppSurfaceDocsFaviconOptions
+                    {
+                        SvgPath = "/branding/appsurface-site-icon.svg"
+                    }
+                }
+            });
+
+        using var app = builder.Build();
+        module.ConfigureEndpoints(context, app);
+
+        await app.StartAsync();
+
+        try
+        {
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            await AssertRedirectAsync(client, RootFaviconPath, "/branding/appsurface-site-icon.svg");
+            await AssertRedirectAsync(client, HttpMethod.Head, RootFaviconPath, "/branding/appsurface-site-icon.svg");
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureEndpoints_ShouldServeConfiguredBrandingAssetsFromRepositoryRootDirectory()
+    {
+        var module = new AppSurfaceDocsWebModule();
+        var context = new StartupContext([], module);
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"{nameof(ConfigureEndpoints_ShouldServeConfiguredBrandingAssetsFromRepositoryRootDirectory)}-{Guid.NewGuid():N}");
+        var brandingDirectory = Path.Combine(tempDirectory, "branding");
+        Directory.CreateDirectory(brandingDirectory);
+        File.WriteAllText(
+            Path.Combine(brandingDirectory, "favicon.svg"),
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+              <title>Consumer favicon</title>
+              <rect width="16" height="16" fill="#123456" />
+            </svg>
+            """);
+        File.WriteAllText(Path.Combine(brandingDirectory, "notes.txt"), "not a public brand asset");
+        File.WriteAllText(Path.Combine(tempDirectory, "secret.svg"), "<svg><title>Secret</title></svg>");
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions
+                {
+                    RepositoryRoot = tempDirectory
+                },
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions
+                    {
+                        DirectoryPath = "branding",
+                        RequestPath = "/brand"
+                    },
+                    Favicon = new AppSurfaceDocsFaviconOptions
+                    {
+                        SvgPath = "/brand/favicon.svg"
+                    }
+                }
+            });
+
+        using var app = builder.Build();
+
+        try
+        {
+            module.ConfigureEndpoints(context, app);
+            await app.StartAsync();
+
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            using var response = await client.GetAsync("/brand/favicon.svg");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
+            Assert.Contains("Consumer favicon", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+            using var headRequest = new HttpRequestMessage(HttpMethod.Head, "/brand/favicon.svg");
+            using var headResponse = await client.SendAsync(headRequest);
+            Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
+            Assert.Equal("image/svg+xml", headResponse.Content.Headers.ContentType?.MediaType);
+            Assert.True(headResponse.Content.Headers.ContentLength > 0);
+
+            using var traversalResponse = await client.GetAsync("/brand/%2e%2e/secret.svg");
+            Assert.Equal(HttpStatusCode.NotFound, traversalResponse.StatusCode);
+
+            using var unsupportedFileResponse = await client.GetAsync("/brand/notes.txt");
+            Assert.Equal(HttpStatusCode.NotFound, unsupportedFileResponse.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync();
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConfigureEndpoints_Issue001_DoesNotRedirectRootStylesheet_WhenAppSurfaceDocsIsEmbedded()
     {
         var module = new AppSurfaceDocsWebModule();
@@ -1152,6 +1335,42 @@ public class AppSurfaceDocsWebModuleRegressionTests
 
             await AssertDoesNotRedirectAsync(client, RootStylesheetPath);
             await AssertDoesNotRedirectAsync(client, HttpMethod.Head, $"{RootStylesheetPath}?v=42");
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureEndpoints_ShouldLeaveRootFaviconToOwningApplication_WhenAppSurfaceDocsIsEmbedded()
+    {
+        var module = new AppSurfaceDocsWebModule();
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+
+        using var app = builder.Build();
+        module.ConfigureEndpoints(context, app);
+
+        await app.StartAsync();
+
+        try
+        {
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            using var response = await client.GetAsync(RootFaviconPath);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Null(response.Headers.Location);
         }
         finally
         {
