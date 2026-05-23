@@ -165,7 +165,7 @@ public sealed class JavaScriptParserDecisionTests
             ?? throw new InvalidOperationException("Acornima nuspec metadata was not found.");
         var license = metadata.Element(NuGetNuspecNamespace + "license");
 
-        Assert.Equal("1.6.1", packageVersion);
+        Assert.Equal("1.6.2", packageVersion);
         Assert.Equal("expression", license?.Attribute("type")?.Value);
         Assert.Equal("BSD-3-Clause", license?.Value);
 

@@ -16,19 +16,19 @@ The original spike kept the dependency in `ForgeTrust.AppSurface.Docs.Tests` onl
 - Parser errors are catchable through `ParseErrorException` with line and zero-based column data.
 - The package targets `net8.0`, `netstandard2.0`, `netstandard2.1`, and `net462`, so it fits the package and CLI distribution story.
 - The package is BSD-3-Clause licensed, which is acceptable for AppSurface package and CLI distribution with normal third-party notice handling.
-- The installed `1.6.1` package is 632,439 bytes as a `.nupkg`, and the `net8.0` assembly is 363,520 bytes.
+- The installed `1.6.2` package is 632,632 bytes as a `.nupkg`, and the `net8.0` assembly is 363,520 bytes.
 
 ## Candidate Result
 
 | Question | Result |
 | --- | --- |
-| Parser package | `Acornima` `1.6.1` |
+| Parser package | `Acornima` `1.6.2` |
 | Supported ECMAScript version | `ParserOptions.EcmaVersion` supports through `ES17` / `ES2026`, with `Latest` as the default. |
 | Block comment spans | Available through `ParserOptions.OnComment`; `Comment.Range` gives zero-based start/end and `Comment.ContentRange` gives the comment body. |
 | AST node spans | Available on every `Node` through `Start`, `End`, `Range`, and `Location`. |
 | Source line/column behavior | Lines are one-based. Columns are zero-based. This matches parser error columns and node/comment locations. |
 | Parser failure behavior | Malformed JavaScript throws a catchable `ParseErrorException` subclass. The probe catches `ParseErrorException` for `malformed.js`, with line and column populated. |
-| Package size | `.nupkg`: 632,439 bytes. `lib/net8.0/Acornima.dll`: 363,520 bytes. |
+| Package size | `.nupkg`: 632,632 bytes. `lib/net8.0/Acornima.dll`: 363,520 bytes. |
 | License compatibility | BSD-3-Clause. Acceptable for AppSurface package and CLI distribution. |
 | Maintenance status | Current NuGet package, current README, and current ECMAScript coverage claim. This is healthier than depending on an abandoned grammar fork. |
 | Comment attachment algorithm | Attach a block comment only when it immediately precedes a supported declaration with whitespace only between `comment.End` and `node.Start`. Standalone `@event` and `@typedef` doclets are collected from unattached block comments. |

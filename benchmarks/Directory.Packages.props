@@ -1,11 +1,11 @@
 <Project>
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Packages.props', '$(MSBuildThisFileDirectory)../'))" />
   <ItemGroup>
-    <PackageVersion Include="BenchmarkDotNet" Version="0.15.2" />
-    <PackageVersion Include="Carter" Version="9.0.0" />
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageVersion Include="Carter" Version="10.0.0" />
     <PackageVersion Include="Spectre.Console.Cli" Version="0.47.0" />
     <PackageVersion Include="Volo.Abp.AspNetCore" Version="9.3.1" />
     <PackageVersion Include="Volo.Abp.AspNetCore.Mvc" Version="9.3.1" />
-    <PackageVersion Include="Volo.Abp.Core" Version="9.3.1" />
+    <PackageVersion Include="Volo.Abp.Core" Version="10.4.0" />
   </ItemGroup>
 </Project>

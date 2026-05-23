@@ -42,7 +42,9 @@ public class AppSurfaceWebOpenApiModule : IAppSurfaceWebModule
                 d.Info.Title = $"{context.ApplicationName} | v1";
                 if (d.Tags is not null)
                 {
-                    d.Tags = d.Tags.Where(x => x.Name != "ForgeTrust.AppSurface.Web").ToList();
+                    d.Tags = d.Tags
+                        .Where(x => x.Name != "ForgeTrust.AppSurface.Web")
+                        .ToHashSet();
                 }
 
                 return Task.CompletedTask;
@@ -54,7 +56,7 @@ public class AppSurfaceWebOpenApiModule : IAppSurfaceWebModule
                 {
                     op.Tags = op.Tags
                         .Where(x => x.Name != "ForgeTrust.AppSurface.Web")
-                        .ToList();
+                        .ToHashSet();
                 }
 
                 return Task.CompletedTask;
