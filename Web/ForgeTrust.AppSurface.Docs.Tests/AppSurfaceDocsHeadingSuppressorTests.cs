@@ -59,6 +59,8 @@ public class AppSurfaceDocsHeadingSuppressorTests
     [InlineData("<h1 id=\"quickstart\"")]
     [InlineData("<h1>Quickstart")]
     [InlineData("<h1>Quickstart</h1")]
+    [InlineData("<h1>Quickstart</h1 ")]
+    [InlineData("<h1>Quickstart</h1 x>\n<p>Body</p>")]
     [InlineData("<h1>Quickstart</h10>\n<p>Body</p>")]
     [InlineData("<h1>Quickstart</h1x>\n<p>Body</p>")]
     [InlineData("<h1/>")]
@@ -72,11 +74,21 @@ public class AppSurfaceDocsHeadingSuppressorTests
     [Fact]
     public void SuppressLeadingMarkdownH1_ShouldRemoveLeadingH1_WhenCloseTagHasWhitespace()
     {
-        var content = "<h1>Quickstart</h1 >\n<p>Body</p>";
+        var content = "<h1>Quickstart</h1 \t >\n<p>Body</p>";
 
         var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(content, shellOwnsH1: true);
 
         Assert.Equal("<p>Body</p>", suppressed);
+    }
+
+    [Fact]
+    public void SuppressLeadingMarkdownH1_ShouldReturnEmptyContent_WhenOnlyLeadingH1Exists()
+    {
+        var suppressed = AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(
+            "<h1>Quickstart</h1>",
+            shellOwnsH1: true);
+
+        Assert.Equal(string.Empty, suppressed);
     }
 
     [Fact]
