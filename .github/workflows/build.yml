@@ -18,6 +18,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
     steps:
       - name: Checkout code
@@ -70,14 +72,15 @@ jobs:
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+        if: ${{ env.CODECOV_TOKEN != '' }}
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ env.CODECOV_TOKEN }}
 
       - name: Upload test results to Codecov
         uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1.2.1
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.CODECOV_TOKEN != '' }}
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ env.CODECOV_TOKEN }}
 
   export-appsurface-docs:
     needs: build
