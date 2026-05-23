@@ -17,6 +17,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 
 ### Added
 
+- AppSurface Docs search fallback behavior now has regression proof for server-rendered starter queries, no-JS/crawler browse links, failed search-index recovery, and published-tree path-base rebasing.
 - AppSurface now has a planned `appsurface` .NET tool surface. Its first verb is `appsurface docs`, which runs AppSurface Docs preview workflows through the existing standalone docs host instead of minting a separate `appsurfacedocs` CLI.
 - AppSurface Web now has a startup watchdog that fails fast when a web host stalls before Kestrel starts listening; `appsurface docs` exposes the same guard through `--startup-timeout-seconds`.
 - AppSurface Docs and RazorWire runtime assets are now embedded into their assemblies and served through endpoint fallbacks, so packaged CLI hosts can serve docs UI assets without relying on static web asset manifests.
