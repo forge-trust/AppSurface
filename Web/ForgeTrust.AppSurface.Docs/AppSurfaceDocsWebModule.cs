@@ -183,6 +183,13 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// Public exact-version mounts always preserve the authored catalog order. When the recommended release points at a
     /// public exact tree, this helper adds the configured route-family root alias as an extra mount root that reuses the
     /// same <see cref="PhysicalFileProvider" /> instance instead of duplicating file watchers for the same export path.
+    /// Frozen route manifest caches follow the same reuse rule: exact tree paths are resolved to full paths, trimmed of
+    /// trailing directory separators, and compared with <see cref="StringComparer.OrdinalIgnoreCase" /> so canonical and
+    /// recommended mounts that point at the same tree share one <see cref="AppSurfaceDocsFrozenRouteManifestCache" />.
+    /// Consumers should treat the cache as an immutable mount dependency. The cache lazy-loads the hidden manifest in a
+    /// thread-safe manner on first use, and its lifetime is tied to the returned mount/provider collection; do not mutate
+    /// or replace it per mount because recommended aliases and public version mounts intentionally observe the same
+    /// frozen archive read model.
     /// </remarks>
     /// <param name="catalog">The resolved version catalog that describes available published trees.</param>
     /// <param name="docsUrlBuilder">The configured URL builder that supplies the route-family alias root.</param>

@@ -135,6 +135,11 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             return false;
         }
 
+        if (!AppSurfaceDocsFrozenRouteManifest.IsSafeRoutePath(canonicalRoutePath))
+        {
+            return false;
+        }
+
         redirectUrl = BuildRedirectUrl(
             httpContext.Request.PathBase.Value,
             mount.MountRootPath,

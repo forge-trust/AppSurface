@@ -118,6 +118,35 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
         Assert.False(manifest.TryResolveAlias("README.md", out _));
     }
 
+    [Fact]
+    public void Load_ShouldIgnoreUnsafeCanonicalRoutes_AndContinueUsingValidEntries()
+    {
+        var manifest = LoadFrozenManifest(
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "unsafe.md",
+                  "canonicalRoutePath": "../admin",
+                  "recoveryAliases": [ "unsafe.md" ],
+                  "declaredAliases": []
+                },
+                {
+                  "sourcePath": "guide.md",
+                  "canonicalRoutePath": "guide",
+                  "recoveryAliases": [ "guide.md" ],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+
+        Assert.False(manifest.TryResolveAlias("unsafe.md", out _));
+        Assert.True(manifest.TryResolveAlias("guide.md", out var canonicalRoutePath));
+        Assert.Equal("guide", canonicalRoutePath);
+    }
+
     [Theory]
     [InlineData("null")]
     [InlineData("""{ "schema": "unknown", "entries": [] }""")]
@@ -271,6 +300,29 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
             () => AppSurfaceDocsFrozenRouteManifest.WriteAsync(_tempDirectory, manifest, CancellationToken.None));
 
         Assert.Contains("duplicate canonical route", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("../admin")]
+    [InlineData("guide/../admin")]
+    [InlineData(".hidden/guide")]
+    [InlineData(@"guide\admin")]
+    [InlineData("guide?next=admin")]
+    public async Task WriteAsync_ShouldRejectUnsafeCanonicalRoutes(string canonicalRoutePath)
+    {
+        var manifest = new AppSurfaceDocsRouteManifest(
+            [
+                Entry(
+                    sourcePath: "guide.md",
+                    canonicalRoutePath: canonicalRoutePath,
+                    aliases: ["guide.md"])
+            ],
+            []);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => AppSurfaceDocsFrozenRouteManifest.WriteAsync(_tempDirectory, manifest, CancellationToken.None));
+
+        Assert.Contains("unsafe canonical route", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -116,14 +116,14 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
                 return Empty;
             }
 
-            var aliasMap = ValidateDocument(document, strict: false, out var ignoredAliasCount);
-            if (ignoredAliasCount > 0)
+            var aliasMap = ValidateDocument(document, strict: false, out var ignoredRouteCount);
+            if (ignoredRouteCount > 0)
             {
                 logger.LogWarning(
-                    "AppSurface Docs frozen route manifest {ManifestFile} for {SourceDescription} ignored {IgnoredAliasCount} ambiguous alias route(s).",
+                    "AppSurface Docs frozen route manifest {ManifestFile} for {SourceDescription} ignored {IgnoredRouteCount} unsafe or ambiguous route(s).",
                     FileName,
                     sourceDescription,
-                    ignoredAliasCount);
+                    ignoredRouteCount);
             }
 
             return aliasMap.Count == 0 ? Empty : new AppSurfaceDocsFrozenRouteManifest(aliasMap);
@@ -169,6 +169,38 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         return routePath.Trim().TrimStart('/');
     }
 
+    /// <summary>
+    /// Checks whether a docs-root-relative route path is safe to use as a frozen redirect target.
+    /// </summary>
+    /// <param name="routePath">The docs-root-relative route path, optionally including a canonical fragment.</param>
+    /// <returns>
+    /// <c>true</c> when the route stays inside the docs archive namespace; otherwise <c>false</c>.
+    /// </returns>
+    internal static bool IsSafeRoutePath(string? routePath)
+    {
+        var normalizedRoutePath = NormalizeRoutePath(routePath);
+        var fragmentIndex = normalizedRoutePath.IndexOf('#', StringComparison.Ordinal);
+        var pathPart = fragmentIndex < 0
+            ? normalizedRoutePath
+            : normalizedRoutePath[..fragmentIndex];
+
+        if (pathPart.Length == 0)
+        {
+            return true;
+        }
+
+        if (pathPart.Contains('\\', StringComparison.Ordinal)
+            || pathPart.Contains('?', StringComparison.Ordinal)
+            || pathPart.Contains("//", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return pathPart.Split('/')
+            .All(segment => !string.IsNullOrWhiteSpace(segment)
+                            && !segment.StartsWith(".", StringComparison.Ordinal));
+    }
+
     private static FrozenRouteManifestDocument CreateDocument(AppSurfaceDocsRouteManifest routeManifest)
     {
         var entries = routeManifest.Entries
@@ -186,10 +218,11 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
     private static IReadOnlyDictionary<string, string> ValidateDocument(
         FrozenRouteManifestDocument document,
         bool strict,
-        out int ignoredAliasCount)
+        out int ignoredRouteCount)
     {
-        ignoredAliasCount = 0;
+        ignoredRouteCount = 0;
         var canonicalRoutes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unsafeCanonicalRoutes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in document.Entries ?? [])
         {
             if (entry.CanonicalRoutePath is null)
@@ -198,6 +231,18 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
             }
 
             var canonicalRoutePath = NormalizeRoutePath(entry.CanonicalRoutePath);
+            if (!IsSafeRoutePath(canonicalRoutePath))
+            {
+                if (strict)
+                {
+                    throw new InvalidOperationException($"Frozen AppSurface Docs route manifest contains unsafe canonical route '{canonicalRoutePath}'.");
+                }
+
+                ignoredRouteCount++;
+                unsafeCanonicalRoutes.Add(canonicalRoutePath);
+                continue;
+            }
+
             if (!canonicalRoutes.Add(canonicalRoutePath) && strict)
             {
                 throw new InvalidOperationException($"Frozen AppSurface Docs route manifest contains duplicate canonical route '{canonicalRoutePath}'.");
@@ -214,6 +259,11 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
             }
 
             var canonicalRoutePath = NormalizeRoutePath(entry.CanonicalRoutePath);
+            if (unsafeCanonicalRoutes.Contains(canonicalRoutePath))
+            {
+                continue;
+            }
+
             foreach (var aliasRoutePath in (entry.RecoveryAliases ?? [])
                          .Concat(entry.DeclaredAliases ?? [])
                          .Select(NormalizeRoutePath))
@@ -231,6 +281,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
                     }
 
                     ambiguousAliases.Add(aliasRoutePath);
+                    ignoredRouteCount++;
                     continue;
                 }
 
@@ -242,6 +293,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
                     }
 
                     ambiguousAliases.Add(aliasRoutePath);
+                    ignoredRouteCount++;
                     continue;
                 }
 
@@ -258,6 +310,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
                     && !string.Equals(existingCanonicalRoute, canonicalRoutePath, StringComparison.OrdinalIgnoreCase))
                 {
                     ambiguousAliases.Add(aliasRoutePath);
+                    ignoredRouteCount++;
                     continue;
                 }
 
@@ -270,7 +323,6 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
             canonicalRouteByAlias.Remove(ambiguousAlias);
         }
 
-        ignoredAliasCount = ambiguousAliases.Count;
         return canonicalRouteByAlias;
     }
 

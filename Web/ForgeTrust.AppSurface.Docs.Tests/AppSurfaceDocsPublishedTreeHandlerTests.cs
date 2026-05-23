@@ -251,6 +251,34 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldNotRedirectUnsafeFrozenCanonicalRoutes()
+    {
+        var tree = CreatePublishedTree("unsafe-frozen-canonical-route");
+        File.WriteAllText(Path.Join(tree, "legacy.html"), "<!DOCTYPE html><html><body>legacy page</body></html>");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "legacy.md",
+                  "canonicalRoutePath": "../admin",
+                  "recoveryAliases": ["legacy"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/legacy");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
+        Assert.Contains("legacy page", ReadBody(request));
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldIgnoreAmbiguousFrozenManifestAliases_AndContinueServingFiles()
     {
         var tree = CreatePublishedTree("ambiguous-frozen-manifest");
