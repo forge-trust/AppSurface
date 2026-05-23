@@ -41,6 +41,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Pull requests are expected to use Conventional Commits titles and to update `releases/unreleased.md` unless maintainers explicitly opt out.
 - Markdown-only changes on `main` now trigger the build-and-export workflow so release-note and policy updates publish with the docs surface.
 - AppSurface Docs search result rows now expose the whole visible result as one semantic link, making mobile taps easier while preserving keyboard focus, copied links, and open-in-new-tab browser behavior.
+- AppSurface Docs homepage navigation rows now use title-led scan paths with quiet decorative chevron affordances instead of repeated "Open..." labels.
 - RazorWire CLI validation errors now include a concrete next command and `razorwire export --help` hint so failed exports are easier to recover from.
 - RazorWire CLI export now defaults to CDN-safe output: managed internal links, frames, scripts, stylesheets, images, `<img>` and `<source>` `srcset`, conventional `404.html`, and CSS `url(...)` references rewrite to emitted static artifacts, with `--mode hybrid` available for extensionless server-routed deployments.
 - Tailwind development watch mode now logs a warning, not a startup error, when the standalone CLI is unavailable and the app can continue serving existing CSS.
