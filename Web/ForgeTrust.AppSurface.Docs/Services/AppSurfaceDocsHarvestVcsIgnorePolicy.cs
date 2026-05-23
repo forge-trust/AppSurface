@@ -185,13 +185,8 @@ internal sealed class AppSurfaceDocsHarvestVcsIgnorePolicy
     {
         var normalizedDirectory = relativeDirectory.Trim('/');
         var result = default(AppSurfaceDocsHarvestVcsIgnoreMatch);
-        foreach (var rule in GetApplicableRules(normalizedDirectory))
+        foreach (var rule in GetApplicableRules(normalizedDirectory).Where(rule => rule.MatchesDirectorySubtree(normalizedDirectory)))
         {
-            if (!rule.MatchesDirectorySubtree(normalizedDirectory))
-            {
-                continue;
-            }
-
             result = new AppSurfaceDocsHarvestVcsIgnoreMatch(
                 Ignored: !rule.IsNegated,
                 rule.SourcePath,
@@ -221,31 +216,23 @@ internal sealed class AppSurfaceDocsHarvestVcsIgnorePolicy
 
     private bool CouldAnyNegationReachDirectoryOrDescendant(string relativeDirectory)
     {
-        foreach (var rule in LoadRulesForDirectory(string.Empty).Rules.Where(rule => rule.IsNegated))
+        if (LoadRulesForDirectory(string.Empty).Rules.Any(
+                rule => rule.IsNegated && rule.CouldMatchDirectoryOrDescendant(relativeDirectory)))
         {
-            if (rule.CouldMatchDirectoryOrDescendant(relativeDirectory))
-            {
-                return true;
-            }
+            return true;
         }
 
-        foreach (var directory in GetAncestorDirectories(relativeDirectory).Append(relativeDirectory))
-        {
-            foreach (var rule in LoadRulesForDirectory(directory).Rules.Where(rule => rule.IsNegated))
-            {
-                if (rule.CouldMatchDirectoryOrDescendant(relativeDirectory))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        return GetAncestorDirectories(relativeDirectory)
+            .Append(relativeDirectory)
+            .Any(
+                directory => LoadRulesForDirectory(directory).Rules.Any(
+                    rule => rule.IsNegated && rule.CouldMatchDirectoryOrDescendant(relativeDirectory)));
     }
 
     private bool CouldAnyNegationMatchDirectory(string relativeDirectory)
     {
-        foreach (var rule in GetApplicableRules(relativeDirectory).Where(rule => rule.IsNegated))
+        var negatedRules = GetApplicableRules(relativeDirectory).Where(rule => rule.IsNegated);
+        foreach (var rule in negatedRules)
         {
             if (rule.Matches(relativeDirectory, isDirectory: true))
             {
@@ -272,16 +259,12 @@ internal sealed class AppSurfaceDocsHarvestVcsIgnorePolicy
             return new IgnoreRuleSet([]);
         }
 
-        var directorySegment = GetLocalRelativeDirectorySegment(relativeDirectory);
-        if (directorySegment is null)
+        if (!TryGetRepositoryDirectoryPath(relativeDirectory, out var fullDirectory))
         {
             return new IgnoreRuleSet([]);
         }
 
-        var fullDirectory = directorySegment.Length == 0
-            ? _repositoryRoot
-            : Path.Combine(_repositoryRoot, directorySegment);
-        var ignorePath = Path.Combine(fullDirectory, ".gitignore");
+        var ignorePath = Path.Join(fullDirectory, ".gitignore");
         if (!File.Exists(ignorePath))
         {
             return new IgnoreRuleSet([]);
@@ -327,20 +310,38 @@ internal sealed class AppSurfaceDocsHarvestVcsIgnorePolicy
             return false;
         }
 
-        var directorySegment = GetLocalRelativeDirectorySegment(relativeDirectory);
-        if (directorySegment is null)
+        if (!TryGetRepositoryDirectoryPath(relativeDirectory, out var fullDirectory))
         {
             return false;
         }
 
-        var fullDirectory = Path.Combine(_repositoryRoot, directorySegment);
-        return Directory.Exists(Path.Combine(fullDirectory, ".git")) || File.Exists(Path.Combine(fullDirectory, ".git"));
+        var gitPath = Path.Join(fullDirectory, ".git");
+        return Directory.Exists(gitPath) || File.Exists(gitPath);
     }
 
-    private static string? GetLocalRelativeDirectorySegment(string relativeDirectory)
+    private bool TryGetRepositoryDirectoryPath(string relativeDirectory, out string fullDirectory)
     {
+        var repositoryRoot = Path.GetFullPath(_repositoryRoot);
         var directorySegment = relativeDirectory.Replace('/', Path.DirectorySeparatorChar);
-        return Path.IsPathRooted(directorySegment) ? null : directorySegment;
+        if (Path.IsPathRooted(directorySegment))
+        {
+            fullDirectory = repositoryRoot;
+            return false;
+        }
+
+        var candidateDirectory = directorySegment.Length == 0
+            ? repositoryRoot
+            : Path.GetFullPath(Path.Join(repositoryRoot, directorySegment));
+        var repositoryRootPrefix = Path.TrimEndingDirectorySeparator(repositoryRoot) + Path.DirectorySeparatorChar;
+        if (!candidateDirectory.Equals(repositoryRoot, StringComparison.Ordinal)
+            && !candidateDirectory.StartsWith(repositoryRootPrefix, StringComparison.Ordinal))
+        {
+            fullDirectory = repositoryRoot;
+            return false;
+        }
+
+        fullDirectory = candidateDirectory;
+        return true;
     }
 
     private static IEnumerable<string> GetAncestorDirectories(string relativePath)

@@ -192,15 +192,111 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluate_WhenSlashfulDirectoryOnlyPatternMatchesAncestorExcludesDescendant()
+    {
+        await WriteAsync(".gitignore", "src/generated/\n");
+        var snapshot = CreateSnapshot();
+
+        var decision = snapshot.Evaluate("src/generated/nested/guide.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.False(decision.Included);
+        Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore, decision.Code);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenPatternsUseEscapesAndCharacterGlobsMatchesGitStyleRules()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+
+            # comment
+            \#literal.md
+            \!literal.md
+            file?.md
+            data[0-9].md
+            broken[.md
+            trail\
+            """);
+        var snapshot = CreateSnapshot();
+
+        Assert.False(snapshot.Evaluate("#literal.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.False(snapshot.Evaluate("!literal.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.False(snapshot.Evaluate("file1.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.False(snapshot.Evaluate("data7.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.False(snapshot.Evaluate("broken[.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.True(snapshot.Evaluate("comment.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenEscapedTrailingSpacePatternMatchesLiteralSpace()
+    {
+        await WriteAsync(".gitignore", "space\\ .md\ntrimmed.md   \n");
+        var snapshot = CreateSnapshot();
+
+        Assert.False(snapshot.Evaluate("space .md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+        Assert.False(snapshot.Evaluate("trimmed.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+    }
+
+    [Fact]
     public async Task Evaluate_WhenNestedRepositoryBoundaryExistsDoesNotReadNestedIgnoreFile()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "nested", ".git"));
+        Directory.CreateDirectory(Path.Join(_root, "nested", ".git"));
         await WriteAsync("nested/.gitignore", "Hidden.md\n");
         var snapshot = CreateSnapshot();
 
         var decision = snapshot.Evaluate("nested/Hidden.md", AppSurfaceDocsHarvestSourceKind.Markdown);
 
         Assert.True(decision.Included);
+    }
+
+    [Fact]
+    public async Task EvaluateFile_WhenRelativePathEscapesRepositoryIgnoresEscapingIgnoreDirectory()
+    {
+        await WriteAsync(".gitignore", "*.md\n");
+        var policy = new AppSurfaceDocsHarvestVcsIgnorePolicy(
+            _root,
+            new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+            NullLogger.Instance);
+
+        var match = policy.EvaluateFile("../outside/file.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.NotNull(match);
+        Assert.True(match.Ignored);
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_WhenMoreThanMaxSamplesRecordsCountsAndCapsSamples()
+    {
+        await WriteAsync(".gitignore", "generated/\n");
+        var policy = new AppSurfaceDocsHarvestVcsIgnorePolicy(
+            _root,
+            new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+            NullLogger.Instance);
+
+        for (var index = 0; index < 25; index++)
+        {
+            _ = policy.EvaluateFile($"generated/{index}.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+        }
+
+        var diagnostics = policy.GetDiagnostics();
+
+        Assert.Equal(25, diagnostics.ExclusionCountsBySourceKind[AppSurfaceDocsHarvestSourceKind.Markdown]);
+        Assert.Equal(20, diagnostics.ExclusionSamples.Count);
+    }
+
+    [Fact]
+    public void VcsIgnoreDiagnosticsCollector_WhenMoreThanMaxWarningsCapsWarnings()
+    {
+        var collector = new VcsIgnoreDiagnosticsCollector(maxSamples: 2);
+
+        collector.RecordWarning(".gitignore", "one", "cause", "fix");
+        collector.RecordWarning("nested/.gitignore", "two", "cause", "fix");
+        collector.RecordWarning("other/.gitignore", "three", "cause", "fix");
+
+        var diagnostics = collector.CreateSnapshot(enabled: true);
+
+        Assert.Equal(2, diagnostics.Warnings.Count);
     }
 
     [Fact]
@@ -255,7 +351,19 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
 
     private async Task WriteAsync(string relativePath, string content)
     {
-        var fullPath = Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        var localRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(localRelativePath))
+        {
+            throw new ArgumentException("Fixture paths must be relative.", nameof(relativePath));
+        }
+
+        var fullPath = Path.GetFullPath(Path.Join(_root, localRelativePath));
+        var rootPrefix = Path.TrimEndingDirectorySeparator(_root) + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Fixture paths must stay under the test root.", nameof(relativePath));
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllTextAsync(fullPath, content);
     }
