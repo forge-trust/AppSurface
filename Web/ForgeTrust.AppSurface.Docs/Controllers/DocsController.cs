@@ -619,12 +619,9 @@ public class DocsController : Controller
             return false;
         }
 
-        foreach (var character in url)
+        if (url.Any(char.IsControl))
         {
-            if (char.IsControl(character))
-            {
-                return false;
-            }
+            return false;
         }
 
         return true;

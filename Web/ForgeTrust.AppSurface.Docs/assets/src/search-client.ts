@@ -2187,7 +2187,7 @@ declare global {
   }
 
   let harvestObserver: MutationObserver | null = null;
-  let scheduledHarvestReturnUrl: string | null = null;
+  let harvestCompletionNavigationScheduled = false;
 
   function bindHarvestObservatory() {
     scheduleHarvestCompletionNavigation();
@@ -2205,38 +2205,18 @@ declare global {
       return;
     }
 
-    const page = document.getElementById('docs-harvest-page');
-    const pageReturnUrl = page?.getAttribute('data-appsurface-docs-harvest-return-url');
-    const returnUrl = pageReturnUrl || completion.getAttribute('data-appsurface-docs-harvest-return-url');
-    if (!isSafeAppRelativeUrl(returnUrl) || scheduledHarvestReturnUrl === returnUrl) {
+    if (harvestCompletionNavigationScheduled) {
       return;
     }
 
-    const returnLink = completion.querySelector('.docs-harvest-return-link a');
-    if (returnLink instanceof HTMLAnchorElement && isSafeAppRelativeUrl(pageReturnUrl)) {
-      returnLink.href = pageReturnUrl;
-    }
-
-    scheduledHarvestReturnUrl = returnUrl;
+    const page = document.getElementById('docs-harvest-page');
+    harvestCompletionNavigationScheduled = true;
     const configuredDelay = page?.getAttribute('data-appsurface-docs-harvest-delay')
       || completion.getAttribute('data-appsurface-docs-harvest-delay');
     const delay = Number.parseInt(configuredDelay || '900', 10);
     window.setTimeout(() => {
-      if (window.Turbo && typeof window.Turbo.visit === 'function') {
-        window.Turbo.visit(returnUrl, { action: 'replace' });
-        return;
-      }
-
-      window.location.assign(returnUrl);
+      window.location.reload();
     }, Number.isFinite(delay) && delay >= 0 ? delay : 900);
-  }
-
-  function isSafeAppRelativeUrl(value: string | null): value is string {
-    return typeof value === 'string'
-      && value.startsWith('/')
-      && !value.startsWith('//')
-      && !value.includes('\\')
-      && !/[\u0000-\u001f\u007f]/u.test(value);
   }
 
   installDocsPartialHook();

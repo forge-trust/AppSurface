@@ -2,6 +2,7 @@ using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -192,6 +193,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.TryAddSingleton<AppSurfaceDocsVersionCatalogService>();
         services.AddMemoryCache();
         services.TryAddSingleton<IMemo, Memo>();
+        services.AddRazorWire();
         services.TryAddSingleton<IAppSurfaceDocsHtmlSanitizer, AppSurfaceDocsHtmlSanitizer>();
         services.TryAddSingleton<AppSurfaceDocsHarvestPathPolicy>();
         TryAddMarkdownHarvester(services);

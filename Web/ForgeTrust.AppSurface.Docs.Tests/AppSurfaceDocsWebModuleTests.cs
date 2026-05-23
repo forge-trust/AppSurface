@@ -112,6 +112,8 @@ public class AppSurfaceDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetService<AppSurfaceDocsOptions>());
         Assert.NotNull(serviceProvider.GetRequiredService<IMemoryCache>());
         Assert.NotNull(serviceProvider.GetRequiredService<IMemo>());
+        Assert.NotNull(serviceProvider.GetRequiredService<RazorWireOptions>());
+        Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireStreamHub>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestProgressReporter>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestCoordinator>());
