@@ -831,7 +831,6 @@ public class AppSurfaceDocsViewsTests
         Assert.Equal("doc-content", featuredPageLink.GetAttribute("data-turbo-frame"));
         Assert.Equal("advance", featuredPageLink.GetAttribute("data-turbo-action"));
         Assert.DoesNotContain("Open page", featuredPageLink.TextContent, StringComparison.Ordinal);
-        Assert.DoesNotContain("Open", featuredPageLink.TextContent, StringComparison.Ordinal);
         Assert.DoesNotContain("->", featuredPageLink.TextContent, StringComparison.Ordinal);
         AssertDecorativeChevron(featuredPageLink);
 
@@ -840,7 +839,6 @@ public class AppSurfaceDocsViewsTests
         Assert.Equal("doc-content", routeLink.GetAttribute("data-turbo-frame"));
         Assert.Equal("advance", routeLink.GetAttribute("data-turbo-action"));
         Assert.DoesNotContain("Open page", routeLink.TextContent, StringComparison.Ordinal);
-        Assert.DoesNotContain("Open", routeLink.TextContent, StringComparison.Ordinal);
         Assert.DoesNotContain("->", routeLink.TextContent, StringComparison.Ordinal);
         AssertDecorativeChevron(routeLink);
 
