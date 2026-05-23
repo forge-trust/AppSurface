@@ -132,6 +132,14 @@ The suppression is intentionally narrow:
 
 Pitfall: do not work around duplicate headings by removing the source `# Title` from README-style pages. That makes the file worse outside AppSurface Docs. Let the AppSurface Docs shell suppress the rendered duplicate instead.
 
+## Generated API language tags
+
+Generated code documentation carries programming-language metadata through `DocMetadata.CodeLanguage`. The built-in C# API harvester marks generated namespace pages and symbol stubs as `csharp`; the optional JavaScript public API harvester marks generated group pages and doclet stubs as `javascript`.
+
+AppSurface Docs normalizes these values for reader chrome and search. `csharp`, `c-sharp`, and `cs` display as `C#`; `javascript`, `java-script`, and `js` display as `JavaScript`; unknown nonblank values fall back to safe title-cased labels. Details pages render the language as a metadata chip, and the built-in search workspace exposes it as a `Language` facet using `?language=` query state. The search index also includes language search terms so queries such as `javascript`, `js`, `csharp`, `CSharp`, `C-Sharp`, and `C#` can find generated API docs.
+
+This language tag describes the source language of extracted API documentation. It is not a locale signal and it is not the same as the `data-doc-code-language` badge used by Markdown code fences.
+
 ## Syntax-highlighted code blocks
 
 AppSurface Docs renders fenced Markdown code blocks during Markdown harvest. Supported languages are highlighted server-side, so normal docs pages and exported docs do not need client-side Prism, highlight.js, or Shiki initialization after navigation.
@@ -746,7 +754,7 @@ Pitfalls:
   - Must be an app-root path such as `/docs` or an application-relative path such as `~/docs`.
   - Remote URLs, relative paths, query strings, fragments, protocol-relative URLs, and unsafe schemes are rejected during startup validation.
 - `AppSurfaceDocs:Identity:Logo:Path`
-  - Optional logo image path rendered beside the display name in the built-in docs chrome.
+  - Optional logo image path rendered beside the display name in the built-in docs chrome and as the root landing page hero mark.
   - Must be an app-root path such as `/branding/docs-logo.svg` or an application-relative path such as `~/branding/docs-logo.svg`.
   - This is a browser URL path, not a filesystem path.
   - Remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments are rejected.
@@ -1592,9 +1600,10 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `publicSectionLabel` for the reader-facing section label
 - `isSectionLanding` for authored section landing entry points
 - `entryPoints` for namespace-intro entry-point labels, summaries, targets, hrefs, and keywords when an intro source is consumed into a generated namespace page
+- `language` and `languageLabel` for generated API documentation language facets and result chrome
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
-Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, and namespace `entryPoints` as first-class MiniSearch fields with field-specific boosts. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
+Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, namespace `entryPoints`, and generated API `languageSearchText` as first-class MiniSearch fields with field-specific boosts. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
 
 When authored metadata uses `release-note` or `release-notes`, AppSurface Docs keeps the raw `pageType` metadata value in the payload but emits `pageTypeLabel = "Release"` and `pageTypeVariant = "release"` so built-in and custom clients can present release pages consistently.
 

@@ -12,6 +12,7 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 /// </summary>
 internal sealed class PackageArtifactValidator
 {
+    private const string RequiredPackageProjectUrl = "https://appsurface.dev";
     private const string TailwindRuntimePackagePrefix = "ForgeTrust.AppSurface.Web.Tailwind.Runtime.";
 
     private static readonly IReadOnlyDictionary<string, string> TailwindRuntimeBinaryNames =
@@ -122,6 +123,13 @@ internal sealed class PackageArtifactValidator
         }
 
         RequireMetadata(expected.PackageId, "license", inspected.License);
+        RequireMetadata(expected.PackageId, "project url", inspected.ProjectUrl);
+        if (!IsRequiredPackageProjectUrl(inspected.ProjectUrl!))
+        {
+            throw new PackageIndexException(
+                $"Package '{expected.PackageId}' project url must be '{RequiredPackageProjectUrl}', found '{inspected.ProjectUrl}'.");
+        }
+
         RequireMetadata(expected.PackageId, "repository url", inspected.RepositoryUrl);
         RequireMetadata(expected.PackageId, "tags", inspected.Tags);
         RequireMetadata(expected.PackageId, "readme", inspected.Readme);
@@ -312,6 +320,7 @@ internal sealed class PackageArtifactValidator
             GetElementValue(metadata, ns, "authors"),
             GetElementValue(metadata, ns, "description"),
             GetElementValue(metadata, ns, "license"),
+            GetElementValue(metadata, ns, "projectUrl"),
             repository?.Attribute("url")?.Value,
             GetElementValue(metadata, ns, "tags"),
             GetElementValue(metadata, ns, "readme"),
@@ -381,6 +390,14 @@ internal sealed class PackageArtifactValidator
         {
             throw new PackageIndexException($"Package '{packageId}' must define nuspec metadata '{name}'.");
         }
+    }
+
+    private static bool IsRequiredPackageProjectUrl(string projectUrl)
+    {
+        return string.Equals(
+            projectUrl.TrimEnd('/'),
+            RequiredPackageProjectUrl,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool DependencyVersionMatches(string dependencyVersion, string packageVersion)
@@ -622,6 +639,7 @@ internal sealed record PackageArtifactValidationReportEntry(
 /// <param name="Authors">Nuspec authors metadata, or <c>null</c> when absent.</param>
 /// <param name="Description">Nuspec description metadata, or <c>null</c> when absent.</param>
 /// <param name="License">Nuspec license expression or value, or <c>null</c> when absent.</param>
+/// <param name="ProjectUrl">Nuspec project URL, or <c>null</c> when absent.</param>
 /// <param name="RepositoryUrl">Nuspec repository URL, or <c>null</c> when absent.</param>
 /// <param name="Tags">Nuspec package tags, or <c>null</c> when absent.</param>
 /// <param name="Readme">Nuspec README path, or <c>null</c> when absent.</param>
@@ -638,6 +656,7 @@ internal sealed record InspectedPackage(
     string? Authors,
     string? Description,
     string? License,
+    string? ProjectUrl,
     string? RepositoryUrl,
     string? Tags,
     string? Readme,

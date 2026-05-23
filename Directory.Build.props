@@ -13,7 +13,7 @@
     <Company Condition="'$(Company)' == ''">Forge Trust</Company>
     <PackageDescription Condition="'$(PackageDescription)' == '' and '$(Description)' == ''">$(MSBuildProjectName) package for AppSurface application composition.</PackageDescription>
     <PackageLicenseFile Condition="'$(PackageLicenseFile)' == ''">LICENSE</PackageLicenseFile>
-    <PackageProjectUrl Condition="'$(PackageProjectUrl)' == ''">https://github.com/forge-trust/AppSurface</PackageProjectUrl>
+    <PackageProjectUrl Condition="'$(PackageProjectUrl)' == ''">https://appsurface.dev</PackageProjectUrl>
     <PackageTags Condition="'$(PackageTags)' == ''">appsurface;dotnet;modular;startup</PackageTags>
     <RepositoryType Condition="'$(RepositoryType)' == ''">git</RepositoryType>
     <RepositoryUrl Condition="'$(RepositoryUrl)' == ''">https://github.com/forge-trust/AppSurface</RepositoryUrl>

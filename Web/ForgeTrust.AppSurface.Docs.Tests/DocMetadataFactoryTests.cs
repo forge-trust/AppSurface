@@ -324,6 +324,14 @@ public sealed class DocMetadataFactoryTests
     }
 
     [Fact]
+    public void CreateApiReferenceMetadata_ShouldMarkGeneratedApiDocsAsCSharp()
+    {
+        var metadata = DocMetadataFactory.CreateApiReferenceMetadata("Web", "ForgeTrust.AppSurface.Web");
+
+        Assert.Equal("csharp", metadata.CodeLanguage);
+    }
+
+    [Fact]
     public void CreateMarkdownMetadata_ShouldClassifyRootReadmeAsStartHere()
     {
         var metadata = DocMetadataFactory.CreateMarkdownMetadata("README.md", "Home", null, null);

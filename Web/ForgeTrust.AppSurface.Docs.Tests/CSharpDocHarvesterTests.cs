@@ -41,9 +41,12 @@ public class CSharpDocHarvesterTests : IDisposable
         var results = (await _harvester.HarvestAsync(_testRoot)).ToList();
 
         // Assert
-        _ = results.Single(n => n.Path == "Namespaces" && n.Title == "Namespaces");
-        _ = results.Single(n => n.Path == "Namespaces/Global" && n.Title == "Global");
-        Assert.Contains(results, n => n.Title == "Included" && n.ParentPath == "Namespaces/Global");
+        var rootPage = results.Single(n => n.Path == "Namespaces" && n.Title == "Namespaces");
+        var globalPage = results.Single(n => n.Path == "Namespaces/Global" && n.Title == "Global");
+        var includedStub = results.Single(n => n.Title == "Included" && n.ParentPath == "Namespaces/Global");
+        Assert.Equal("csharp", rootPage.Metadata?.CodeLanguage);
+        Assert.Equal("csharp", globalPage.Metadata?.CodeLanguage);
+        Assert.Equal("csharp", includedStub.Metadata?.CodeLanguage);
         Assert.DoesNotContain(results, n => n.Title == "Ignored");
     }
 

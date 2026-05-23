@@ -6,6 +6,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 public sealed class PackageArtifactValidationTests : IDisposable
 {
     private const string PackageVersion = "0.0.0-ci.42";
+    private const string RequiredPackageProjectUrl = "https://appsurface.dev";
 
     private readonly string _repositoryRoot;
 
@@ -830,6 +831,89 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 PackageVersion));
 
         Assert.Contains("default NuGet package description", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenProjectUrlIsMissing()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Core",
+            PackageVersion,
+            EmptyDependencies,
+            projectUrl: string.Empty);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+                        "ForgeTrust.AppSurface.Core",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains("project url", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_ThrowsWhenProjectUrlDoesNotPointToAppSurfaceWebsite()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Core",
+            PackageVersion,
+            EmptyDependencies,
+            projectUrl: "https://github.com/forge-trust/AppSurface");
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => new PackageArtifactValidator().Validate(
+                new PackagePublishPlan([
+                    new PackagePublishPlanEntry(
+                        "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+                        "ForgeTrust.AppSurface.Core",
+                        PackagePublishDecision.Publish,
+                        [],
+                        IsTool: false)
+                ]),
+                artifactDirectory,
+                PackageVersion));
+
+        Assert.Contains(RequiredPackageProjectUrl, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackageArtifactValidator_AcceptsProjectUrlWithTrailingSlash()
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        WritePackage(
+            artifactDirectory,
+            "ForgeTrust.AppSurface.Core",
+            PackageVersion,
+            EmptyDependencies,
+            projectUrl: $"{RequiredPackageProjectUrl}/");
+
+        var report = new PackageArtifactValidator().Validate(
+            new PackagePublishPlan([
+                new PackagePublishPlanEntry(
+                    "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj",
+                    "ForgeTrust.AppSurface.Core",
+                    PackagePublishDecision.Publish,
+                    [],
+                    IsTool: false)
+            ]),
+            artifactDirectory,
+            PackageVersion);
+
+        Assert.Single(report.Entries);
     }
 
     [Fact]
@@ -2589,7 +2673,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         IReadOnlyList<string>? packageTypes = null,
         IReadOnlyDictionary<string, byte[]>? rawEntries = null,
         string? dependencyXml = null,
-        IReadOnlyList<string>? toolCommandNames = null)
+        IReadOnlyList<string>? toolCommandNames = null,
+        string? projectUrl = RequiredPackageProjectUrl)
     {
         var packagePath = Path.Combine(artifactDirectory, $"{packageId}.{packageVersion}.nupkg");
         using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
@@ -2607,7 +2692,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 includeId,
                 includeVersion,
                 packageTypes,
-                dependencyXml));
+                dependencyXml,
+                projectUrl));
         }
 
         if (includeReadme && includeReadmeEntry)
@@ -2657,7 +2743,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
         bool includeId,
         bool includeVersion,
         IReadOnlyList<string>? packageTypes,
-        string? dependencyXmlOverride)
+        string? dependencyXmlOverride,
+        string? projectUrl)
     {
         var dependencyXml = string.Join(
             Environment.NewLine,
@@ -2670,6 +2757,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 </dependencies>
             """;
         var readmeXml = includeReadme ? "    <readme>README.md</readme>" : string.Empty;
+        var projectUrlXml = string.IsNullOrEmpty(projectUrl) ? string.Empty : $"    <projectUrl>{projectUrl}</projectUrl>";
         var idXml = includeId ? $"    <id>{packageId}</id>" : string.Empty;
         var versionXml = includeVersion ? $"    <version>{packageVersion}</version>" : string.Empty;
         var packageTypesXml = packageTypes is null
@@ -2689,6 +2777,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 <authors>Forge Trust</authors>
                 <description>{{description ?? $"{packageId} package for AppSurface application composition."}}</description>
                 <license type="expression">MIT</license>
+            {{projectUrlXml}}
                 <repository type="git" url="https://github.com/forge-trust/AppSurface" />
                 <tags>appsurface dotnet</tags>
             {{readmeXml}}

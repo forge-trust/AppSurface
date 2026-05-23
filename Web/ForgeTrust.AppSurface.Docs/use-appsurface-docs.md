@@ -90,6 +90,7 @@ Add identity settings when the consuming repository should own the visible docs 
 ```
 
 Identity paths must be app-root paths such as `/branding/docs-logo.svg` or application-relative paths such as `~/branding/docs-logo.svg`. AppSurface Docs rejects remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments during startup validation so the docs chrome cannot accidentally point at unsafe or environment-specific locations.
+The configured `Identity:Logo:Path` is used by both the built-in docs chrome and the large root landing page mark, so custom-branded hosts should set it whenever that first-screen icon should differ from the packaged AppSurface Docs mark.
 
 There are two branding asset use cases:
 
