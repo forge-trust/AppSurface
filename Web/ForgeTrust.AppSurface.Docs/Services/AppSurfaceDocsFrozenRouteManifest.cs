@@ -56,16 +56,30 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         ValidateDocument(document, strict: true, out _);
 
         Directory.CreateDirectory(outputPath);
-        if (Path.IsPathRooted(FileName))
-        {
-            throw new InvalidOperationException("Frozen AppSurface Docs route manifest filename must be relative.");
-        }
-
-        var manifestPath = Path.Join(outputPath, FileName);
+        var manifestPath = BuildManifestPath(outputPath, FileName);
         await File.WriteAllTextAsync(
             manifestPath,
             JsonSerializer.Serialize(document, SerializerOptions) + Environment.NewLine,
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds the on-disk path for a frozen route manifest filename beneath an exact-version export root.
+    /// </summary>
+    /// <param name="outputPath">Export output root that represents one exact-version tree.</param>
+    /// <param name="fileName">Manifest filename to place beneath <paramref name="outputPath" />.</param>
+    /// <returns>The manifest path under the export output root.</returns>
+    internal static string BuildManifestPath(string outputPath, string fileName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+
+        if (Path.IsPathRooted(fileName))
+        {
+            throw new InvalidOperationException("Frozen AppSurface Docs route manifest filename must be relative.");
+        }
+
+        return Path.Join(outputPath, fileName);
     }
 
     /// <summary>

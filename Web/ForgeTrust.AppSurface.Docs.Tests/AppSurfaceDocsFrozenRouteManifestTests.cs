@@ -1,5 +1,8 @@
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.FileProviders.Physical;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -54,6 +57,71 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
         Assert.Contains("\"canonicalRoutePath\": \"\"", frozenManifest);
         Assert.Contains("\"README.md\"", frozenManifest);
         Assert.Contains("\"README.md.html\"", frozenManifest);
+    }
+
+    [Fact]
+    public void BuildManifestPath_ShouldRejectRootedManifestFileNames()
+    {
+        var rootedFileName = Path.GetFullPath("rooted-manifest.json");
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => AppSurfaceDocsFrozenRouteManifest.BuildManifestPath(_tempDirectory, rootedFileName));
+
+        Assert.Contains("filename must be relative", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Load_ShouldResolveDocsRootCanonicalAliases()
+    {
+        WriteFrozenManifest(
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "README.md",
+                  "canonicalRoutePath": "",
+                  "recoveryAliases": [ "README.md", "README.md.html" ],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        using var provider = new PhysicalFileProvider(_tempDirectory, ExclusionFilters.None);
+
+        var manifest = AppSurfaceDocsFrozenRouteManifest.Load(
+            provider,
+            NullLogger<AppSurfaceDocsFrozenRouteManifestTests>.Instance,
+            _tempDirectory);
+
+        Assert.True(manifest.TryResolveAlias("README.md", out var canonicalRoutePath));
+        Assert.Equal(string.Empty, canonicalRoutePath);
+    }
+
+    [Fact]
+    public void Load_ShouldDisableAliasRecovery_WhenCanonicalRoutePathIsMissing()
+    {
+        WriteFrozenManifest(
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "README.md",
+                  "recoveryAliases": [ "README.md" ],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        using var provider = new PhysicalFileProvider(_tempDirectory, ExclusionFilters.None);
+
+        var manifest = AppSurfaceDocsFrozenRouteManifest.Load(
+            provider,
+            NullLogger<AppSurfaceDocsFrozenRouteManifestTests>.Instance,
+            _tempDirectory);
+
+        Assert.False(manifest.TryResolveAlias("README.md", out _));
     }
 
     [Fact]
@@ -136,5 +204,10 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
                 .ToArray(),
             [],
             SourcePathIsMarkdown: true);
+    }
+
+    private void WriteFrozenManifest(string json)
+    {
+        File.WriteAllText(Path.Join(_tempDirectory, AppSurfaceDocsFrozenRouteManifest.FileName), json);
     }
 }
