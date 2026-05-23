@@ -27,6 +27,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs now supports metadata-driven page wayfinding: harvested outlines, explicit proof-path previous/next links, related pages, and sidebar anchor navigation.
 - AppSurface Docs detail pages now expose copy-link actions for outline rows and section headers so readers can share deep links without navigating away from their current position.
 - AppSurface Docs now exposes `DocAggregator.GetHarvestHealthAsync(...)` plus structured harvest health models so hosts can distinguish healthy, empty, degraded, and all-failed source harvest snapshots without parsing logs.
+- AppSurface Docs hosts, preview runs, and static exports can now set a public canonical origin so metadata names the published domain even when the host is crawled through loopback.
 - RazorWire forms now have convention-based failed-submission UX with default form-local fallbacks, server helpers for handled validation errors, development anti-forgery diagnostics, runtime events, and sample coverage.
 - The root README now includes a single hello-world web quickstart with an explicit local port and a concrete expected response.
 - AppSurface now ships GitHub issue templates for bug reports and documentation feedback.
