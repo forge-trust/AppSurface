@@ -155,6 +155,7 @@ jobs:
             --seeds "$RUNNER_TEMP/appsurface-docs-seeds.txt" \
             --output "$RUNNER_TEMP/appsurface-docs-pages" \
             --public-origin https://forge-trust.com \
+            --startup-timeout-seconds 30 \
             --strict
 
       - name: Upload Pages artifact
