@@ -3964,7 +3964,8 @@ public class AppSurfaceDocsViewsTests
 
         var configValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
-            ["AppSurfaceDocs:Source:RepositoryRoot"] = repoRoot
+            ["AppSurfaceDocs:Source:RepositoryRoot"] = repoRoot,
+            ["AppSurfaceDocs:Harvest:StartupMode"] = nameof(AppSurfaceDocsHarvestStartupMode.Disabled)
         };
 
         if (overrides != null)
