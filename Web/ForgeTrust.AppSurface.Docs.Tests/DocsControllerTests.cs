@@ -3094,7 +3094,7 @@ public class DocsControllerTests : IDisposable
             Assert.NotNull(response.Probe);
             Assert.Equal("Canonical", response.Probe.Kind);
             Assert.Equal(string.Empty, response.Probe.NormalizedPath);
-            Assert.Null(response.Probe.CanonicalLiveUrl);
+            Assert.Equal("/docs", response.Probe.CanonicalLiveUrl);
         }
     }
 

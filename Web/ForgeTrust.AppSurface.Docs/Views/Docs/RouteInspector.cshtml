@@ -89,7 +89,7 @@
                             <td class="min-w-56 px-4 py-3 align-top">
                                 <a class="font-semibold text-slate-100 underline decoration-slate-600 underline-offset-4 hover:decoration-[#14b8a6]"
                                    href="@Url.PathBaseAware(entry.CanonicalLiveUrl)">
-                                    @entry.CanonicalRoutePath
+                                    @(string.IsNullOrWhiteSpace(entry.CanonicalRoutePath) ? "/" : entry.CanonicalRoutePath)
                                 </a>
                             </td>
                             <td class="min-w-56 px-4 py-3 align-top text-slate-300">

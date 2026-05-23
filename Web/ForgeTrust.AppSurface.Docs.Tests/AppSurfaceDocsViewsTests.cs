@@ -1423,6 +1423,38 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task RouteInspectorView_ShouldRenderHomeRouteLabel()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new AppSurfaceDocsRouteInspectorResponse
+        {
+            Entries =
+            [
+                new AppSurfaceDocsRouteInspectorEntryResponse
+                {
+                    SourcePath = "README.md",
+                    CanonicalRoutePath = string.Empty,
+                    CanonicalLiveUrl = "/docs",
+                    SourcePathIsMarkdown = true,
+                    RecoveryAliases = [],
+                    DeclaredAliases = []
+                }
+            ],
+            Diagnostics = []
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/RouteInspector.cshtml",
+            model,
+            pathBase: "/preview");
+
+        Assert.Contains("href=\"/preview/docs\"", html);
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        Assert.Equal("/", document.QuerySelector("table a[href='/preview/docs']")?.TextContent.Trim());
+    }
+
+    [Fact]
     public async Task RouteInspectorView_ShouldRenderEmptyAliasesAndHideDiagnostics_WhenAbsent()
     {
         using var services = CreateServiceProvider(CreateDocs());

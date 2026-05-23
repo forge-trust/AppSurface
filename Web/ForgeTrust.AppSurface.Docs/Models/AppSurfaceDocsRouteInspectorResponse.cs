@@ -205,16 +205,16 @@ public sealed record AppSurfaceDocsRouteProbeResponse
         ArgumentNullException.ThrowIfNull(resolution);
         ArgumentNullException.ThrowIfNull(docsUrlBuilder);
 
+        var publicRoutePath = resolution.PublicRoutePath ?? string.Empty;
+
         return new AppSurfaceDocsRouteProbeResponse
         {
             InputPath = inputPath,
             NormalizedPath = normalizedPath,
             Kind = resolution.Kind.ToString(),
             SourcePath = resolution.SourcePath,
-            CanonicalRoutePath = resolution.PublicRoutePath,
-            CanonicalLiveUrl = string.IsNullOrWhiteSpace(resolution.PublicRoutePath)
-                ? null
-                : docsUrlBuilder.BuildDocUrl(resolution.PublicRoutePath),
+            CanonicalRoutePath = publicRoutePath,
+            CanonicalLiveUrl = docsUrlBuilder.BuildDocUrl(publicRoutePath),
             Message = GetMessage(resolution.Kind)
         };
     }
