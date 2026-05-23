@@ -29,6 +29,28 @@ test('normalizeSearchDocument handles missing and unsupported entryPoints', asyn
   assert.equal(normalizeSearchDocument({ id: 'c', path: '/c', title: 'C', entryPoints: null }).entryPoints, '');
 });
 
+test('normalizeSearchDocument deduplicates entryPoints without locale-dependent casing', async () => {
+  const { normalizeSearchDocument } = await loadSearchCore();
+  const originalToLocaleLowerCase = String.prototype.toLocaleLowerCase;
+
+  try {
+    String.prototype.toLocaleLowerCase = function toLocaleLowerCaseShouldNotBeUsed() {
+      throw new Error('entry point normalization must not depend on locale-sensitive casing');
+    };
+
+    const doc = normalizeSearchDocument({
+      id: 'entry-points',
+      path: '/docs/entry-points',
+      title: 'Entry points',
+      entryPoints: ['Install', 'install', 'Configure']
+    });
+
+    assert.equal(doc.entryPoints, 'Install Configure');
+  } finally {
+    String.prototype.toLocaleLowerCase = originalToLocaleLowerCase;
+  }
+});
+
 test('normalizePageTypeAlias keeps client filters aligned with indexed docs', async () => {
   const { normalizePageTypeAlias, normalizeSearchDocument } = await loadSearchCore();
 

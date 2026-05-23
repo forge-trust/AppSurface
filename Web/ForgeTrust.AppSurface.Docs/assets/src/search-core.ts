@@ -95,7 +95,7 @@ export function flattenEntryPoints(value: any) {
       continue;
     }
 
-    const key = normalized.toLocaleLowerCase();
+    const key = normalized.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
       unique.push(normalized);
