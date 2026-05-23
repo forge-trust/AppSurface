@@ -281,16 +281,16 @@ public class DocsController : Controller
             return NotFound();
         }
 
+        if (await TryRenderHarvestingIfInitialHarvestPendingAsync() is { } harvestingResult)
+        {
+            return harvestingResult;
+        }
+
         if (!servesPartial
             && IsSourceShapedMarkdownRoute(resolvedPath)
             && await TryRedirectSourceShapedRouteAsync(resolvedPath) is { } redirectResult)
         {
             return redirectResult;
-        }
-
-        if (await TryRenderHarvestingIfInitialHarvestPendingAsync() is { } harvestingResult)
-        {
-            return harvestingResult;
         }
 
         var routeResolution = await _aggregator.ResolvePublicRouteAsync(resolvedPath, HttpContext.RequestAborted);

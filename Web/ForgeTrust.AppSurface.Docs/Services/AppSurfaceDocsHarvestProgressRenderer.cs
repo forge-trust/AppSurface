@@ -9,7 +9,11 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
 {
     private static readonly HtmlEncoder Encoder = HtmlEncoder.Default;
 
-    internal static string Render(AppSurfaceDocsHarvestProgressSnapshot snapshot, string returnUrl, int completionDelayMilliseconds)
+    internal static string Render(
+        AppSurfaceDocsHarvestProgressSnapshot snapshot,
+        string returnUrl,
+        int completionDelayMilliseconds,
+        bool includeReturnNavigation = true)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -31,8 +35,11 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
         if (isComplete && snapshot.State == AppSurfaceDocsHarvestRunState.Completed)
         {
             sb.Append(" data-appsurface-docs-harvest-complete=\"true\"");
-            sb.Append(" data-appsurface-docs-harvest-return-url=\"").Append(EncodeAttribute(safeReturnUrl)).Append('"');
             sb.Append(" data-appsurface-docs-harvest-delay=\"").Append(completionDelayMilliseconds).Append('"');
+            if (includeReturnNavigation)
+            {
+                sb.Append(" data-appsurface-docs-harvest-return-url=\"").Append(EncodeAttribute(safeReturnUrl)).Append('"');
+            }
         }
 
         sb.Append('>');
@@ -55,7 +62,7 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
 
         sb.Append("<ol class=\"docs-harvest-phase-rail\" aria-label=\"Harvest phases\">");
         AppendPhase(sb, "Wake", "Done", true);
-        AppendPhase(sb, "Scan", snapshot.CompletedHarvesters > 0 ? "Now" : "Now", snapshot.State == AppSurfaceDocsHarvestRunState.Running);
+        AppendPhase(sb, "Scan", isComplete ? "Done" : "Now", snapshot.State == AppSurfaceDocsHarvestRunState.Running);
         AppendPhase(sb, "Index", isComplete ? "Done" : "Waiting", false);
         AppendPhase(sb, "Ready", isComplete ? "Done" : "Waiting", false);
         sb.Append("</ol>");
@@ -106,7 +113,7 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
             sb.Append("</section>");
         }
 
-        if (isComplete)
+        if (isComplete && includeReturnNavigation)
         {
             sb.Append("<p class=\"docs-harvest-return-link\"><a href=\"")
                 .Append(EncodeAttribute(safeReturnUrl))
@@ -117,10 +124,12 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
         return sb.ToString();
     }
 
-    internal static string RenderTurboStream(AppSurfaceDocsHarvestProgressSnapshot snapshot, string returnUrl, int completionDelayMilliseconds)
+    internal static string RenderTurboStream(
+        AppSurfaceDocsHarvestProgressSnapshot snapshot,
+        int completionDelayMilliseconds)
     {
         return "<turbo-stream action=\"update\" target=\"docs-harvest-observatory\"><template>"
-               + Render(snapshot, returnUrl, completionDelayMilliseconds)
+               + Render(snapshot, returnUrl: "/", completionDelayMilliseconds, includeReturnNavigation: false)
                + "</template></turbo-stream>";
     }
 

@@ -2185,6 +2185,16 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task Details_ShouldRenderHarvestingForMarkdownRoute_WhenInitialHarvestIsStillPending()
+    {
+        await using var pending = CreatePendingHarvestController("/docs/guides/composition.md");
+
+        var result = await pending.Controller.Details("guides/composition.md");
+
+        AssertHarvestingView(result, "/docs/guides/composition.md");
+    }
+
+    [Fact]
     public async Task Search_ShouldSkipHiddenNamespacesFallback_WhenBuildingRecoveryLinks()
     {
         var docs = new List<DocNode>

@@ -81,4 +81,25 @@ public class InMemoryRazorWireStreamHubTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         Assert.Equal("live", await reader.ReadAsync(cts.Token));
     }
+
+    [Fact]
+    public async Task PublishAsync_WithReplay_PrunesOldInactiveReplayChannels()
+    {
+        var hub = new InMemoryRazorWireStreamHub();
+        for (var index = 0; index < 260; index++)
+        {
+            await hub.PublishAsync(
+                $"orders-{index}",
+                $"retained-{index}",
+                new RazorWireStreamPublishOptions { Replay = true });
+        }
+
+        var prunedReader = hub.Subscribe("orders-0", new RazorWireStreamSubscribeOptions { Replay = true });
+        await hub.PublishAsync("orders-0", "live");
+        var retainedReader = hub.Subscribe("orders-259", new RazorWireStreamSubscribeOptions { Replay = true });
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        Assert.Equal("live", await prunedReader.ReadAsync(cts.Token));
+        Assert.Equal("retained-259", await retainedReader.ReadAsync(cts.Token));
+    }
 }

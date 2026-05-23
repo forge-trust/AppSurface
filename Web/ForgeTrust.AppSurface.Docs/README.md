@@ -295,7 +295,7 @@ AppSurface Docs starts the initial harvest in the background by default. If a us
 
 The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The defaults are `0`. Set `TestingPreHarvestDelayMilliseconds` to pause after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` to pause each active harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` to publish each harvester's document count one document at a time. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the observatory visibly unfold. Do not enable these for production traffic.
 
-When the harvest completes successfully, AppSurface Docs navigates back to the original app-relative URL with `Turbo.visit(..., { action: "replace" })` when Turbo is present, or a normal browser navigation fallback otherwise. The completion view also renders a plain return link so no-JavaScript users can continue manually.
+When the harvest completes successfully, AppSurface Docs reloads the current app-relative URL after the configured completion delay. The reload lets the server render the originally requested docs page, including any permanent redirect for source-shaped Markdown routes. The completion view also renders a plain return link so no-JavaScript users can continue manually.
 
 The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints. In development it is exposed by default; non-development hosts must opt in with `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` if users should see the live progress stream.
 

@@ -2191,12 +2191,29 @@ declare global {
 
   function bindHarvestObservatory() {
     scheduleHarvestCompletionNavigation();
-    if (harvestObserver || !document.body || typeof MutationObserver === 'undefined') {
+    const page = document.getElementById('docs-harvest-page');
+    if (!page) {
+      harvestObserver?.disconnect();
+      harvestObserver = null;
+      harvestCompletionNavigationScheduled = false;
       return;
     }
 
-    harvestObserver = new MutationObserver(() => scheduleHarvestCompletionNavigation());
-    harvestObserver.observe(document.body, { childList: true, subtree: true, attributes: true });
+    if (harvestObserver || typeof MutationObserver === 'undefined') {
+      return;
+    }
+
+    harvestObserver = new MutationObserver(() => {
+      if (!document.body.contains(page)) {
+        harvestObserver?.disconnect();
+        harvestObserver = null;
+        harvestCompletionNavigationScheduled = false;
+        return;
+      }
+
+      scheduleHarvestCompletionNavigation();
+    });
+    harvestObserver.observe(page, { childList: true, subtree: true, attributes: true });
   }
 
   function scheduleHarvestCompletionNavigation() {
@@ -2214,6 +2231,8 @@ declare global {
     const configuredDelay = page?.getAttribute('data-appsurface-docs-harvest-delay')
       || completion.getAttribute('data-appsurface-docs-harvest-delay');
     const delay = Number.parseInt(configuredDelay || '900', 10);
+    harvestObserver?.disconnect();
+    harvestObserver = null;
     window.setTimeout(() => {
       window.location.reload();
     }, Number.isFinite(delay) && delay >= 0 ? delay : 900);

@@ -202,7 +202,6 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         {
             var message = AppSurfaceDocsHarvestProgressRenderer.RenderTurboStream(
                 snapshot,
-                returnUrl: "/",
                 CompletionDelayMilliseconds);
             await hub.PublishAsync(
                 ChannelName,

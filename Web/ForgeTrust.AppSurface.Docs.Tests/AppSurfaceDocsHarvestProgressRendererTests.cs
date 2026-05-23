@@ -150,14 +150,15 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
         var html = AppSurfaceDocsHarvestProgressRenderer.RenderTurboStream(
             new AppSurfaceDocsHarvestProgressSnapshot
             {
-                State = AppSurfaceDocsHarvestRunState.Running,
+                State = AppSurfaceDocsHarvestRunState.Completed,
                 TotalHarvesters = 1,
                 Status = "Harvesting"
             },
-            "/docs",
             0);
 
         Assert.Contains("<turbo-stream action=\"update\" target=\"docs-harvest-observatory\">", html, StringComparison.Ordinal);
         Assert.Contains("<template>", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurface-docs-harvest-return-url", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs-harvest-return-link", html, StringComparison.Ordinal);
     }
 }
