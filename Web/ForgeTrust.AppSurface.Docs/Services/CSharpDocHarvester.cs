@@ -57,6 +57,17 @@ public class CSharpDocHarvester : IDocHarvester
         return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
     }
 
+    /// <summary>
+    /// Collects XML documentation with the repository-scoped path policy captured for the current aggregation pass.
+    /// </summary>
+    /// <param name="context">The harvest context containing the repository root and active path policy snapshot.</param>
+    /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
+    /// <returns>A collection of generated C# API documentation nodes.</returns>
+    /// <remarks>
+    /// This overload is used by the aggregator so VCS ignore exclusions are applied consistently across traversal and
+    /// file inclusion checks. Custom harvesters continue to use the public <see cref="HarvestAsync(string, CancellationToken)"/>
+    /// contract.
+    /// </remarks>
     internal async Task<IReadOnlyList<DocNode>> HarvestAsync(
         DocHarvestContext context,
         CancellationToken cancellationToken = default)
@@ -80,7 +91,7 @@ public class CSharpDocHarvester : IDocHarvester
 
             var relativePath = Path.GetRelativePath(rootPath, file)
                 .Replace('\\', '/'); // Normalize to forward slashes for URLs
-            if (!_pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.CSharp))
+            if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.CSharp))
             {
                 continue;
             }

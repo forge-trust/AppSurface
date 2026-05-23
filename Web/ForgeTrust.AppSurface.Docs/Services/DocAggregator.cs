@@ -1023,13 +1023,22 @@ public class DocAggregator
         DocHarvestContext context,
         CancellationToken cancellationToken)
     {
-        return harvester switch
+        if (harvester.GetType() == typeof(MarkdownHarvester))
         {
-            MarkdownHarvester markdownHarvester => markdownHarvester.HarvestAsync(context, cancellationToken),
-            CSharpDocHarvester csharpDocHarvester => csharpDocHarvester.HarvestAsync(context, cancellationToken),
-            JavaScriptDocHarvester javaScriptDocHarvester => javaScriptDocHarvester.HarvestAsync(context, cancellationToken),
-            _ => harvester.HarvestAsync(context.RepositoryRoot, cancellationToken)
-        };
+            return ((MarkdownHarvester)harvester).HarvestAsync(context, cancellationToken);
+        }
+
+        if (harvester.GetType() == typeof(CSharpDocHarvester))
+        {
+            return ((CSharpDocHarvester)harvester).HarvestAsync(context, cancellationToken);
+        }
+
+        if (harvester.GetType() == typeof(JavaScriptDocHarvester))
+        {
+            return ((JavaScriptDocHarvester)harvester).HarvestAsync(context, cancellationToken);
+        }
+
+        return harvester.HarvestAsync(context.RepositoryRoot, cancellationToken);
     }
 
     private static IReadOnlyList<DocHarvestDiagnostic> CollectHarvestDiagnostics(
@@ -1110,7 +1119,12 @@ public class DocAggregator
         foreach (var diagnostic in pathPolicyDiagnostics)
         {
             logger.Log(
-                diagnostic.Severity >= DocHarvestDiagnosticSeverity.Error ? LogLevel.Error : LogLevel.Information,
+                diagnostic.Severity switch
+                {
+                    DocHarvestDiagnosticSeverity.Critical or DocHarvestDiagnosticSeverity.Error => LogLevel.Error,
+                    DocHarvestDiagnosticSeverity.Warning => LogLevel.Warning,
+                    _ => LogLevel.Information
+                },
                 "AppSurface Docs harvest path diagnostic {DiagnosticCode}: {Problem}",
                 diagnostic.Code,
                 diagnostic.Problem);

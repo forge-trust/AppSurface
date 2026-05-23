@@ -86,6 +86,36 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_WithContextShouldUseContextPathPolicyForFileInclusion()
+    {
+        var harvester = new CSharpDocHarvester(A.Fake<ILogger<CSharpDocHarvester>>());
+        var internalDir = CombineUnder(_testRoot, "src", "internal");
+        Directory.CreateDirectory(internalDir);
+        await File.WriteAllTextAsync(
+            CombineUnder(internalDir, "InternalService.cs"),
+            """
+            namespace Product.Internal;
+
+            /// <summary>Internal service docs.</summary>
+            public class InternalService {}
+            """);
+        var configuredPolicy = CreatePathPolicy(
+            options => options.Harvest.Paths.ExcludeGlobs = ["src/internal/InternalService.cs"]);
+        var vcsIgnorePolicy = new AppSurfaceDocsHarvestVcsIgnorePolicy(
+            _testRoot,
+            new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+            NullLogger.Instance);
+        var context = new DocHarvestContext(
+            _testRoot,
+            new AppSurfaceDocsHarvestPathPolicySnapshot(configuredPolicy, vcsIgnorePolicy));
+
+        var results = (await harvester.HarvestAsync(context)).ToList();
+
+        Assert.DoesNotContain(results, n => n.Title == "InternalService");
+        Assert.DoesNotContain(results, n => n.Path == "Namespaces/Product.Internal");
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldIgnoreExampleApplicationSource()
     {
         var exampleDir = CombineUnder(_testRoot, "examples", "web-app");

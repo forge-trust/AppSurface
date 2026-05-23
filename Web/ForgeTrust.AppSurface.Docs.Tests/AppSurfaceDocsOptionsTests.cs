@@ -1471,6 +1471,36 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(result.Failures, failure => failure.Contains("invalid repository-relative glob pattern", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Theory]
+    [InlineData("/docs/**")]
+    [InlineData("docs/**?raw=1")]
+    [InlineData("")]
+    public void Validator_ShouldRejectInvalidVcsIgnoreAllowGlobsWithFocusedPath(string invalidPattern)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Paths = new AppSurfaceDocsHarvestPathOptions
+                {
+                    VcsIgnore = new AppSurfaceDocsHarvestVcsIgnoreOptions
+                    {
+                        AllowGlobs = [invalidPattern]
+                    }
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("AppSurfaceDocs:Harvest:Paths:VcsIgnore:AllowGlobs", StringComparison.Ordinal)
+                       && failure.Contains("invalid repository-relative glob pattern", StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public void Validator_ShouldRejectUnknownDefaultExclusionGroups()
     {

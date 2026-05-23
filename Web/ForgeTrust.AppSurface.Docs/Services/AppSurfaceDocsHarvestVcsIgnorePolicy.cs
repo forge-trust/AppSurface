@@ -478,11 +478,16 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
     bool RootRelative,
     string NormalizedPattern)
 {
-    private readonly Regex _regex = CreateRegex(NormalizedPattern);
+    private readonly Regex? _regex = TryCreateRegex(NormalizedPattern);
     private readonly bool _hasSlash = NormalizedPattern.Contains('/', StringComparison.Ordinal);
 
     public bool Matches(string repositoryRelativePath, bool isDirectory)
     {
+        if (_regex is null)
+        {
+            return false;
+        }
+
         if (!TryGetPathRelativeToBase(repositoryRelativePath, out var relativePath))
         {
             return false;
@@ -528,6 +533,11 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
 
     private bool MatchesDirectoryPattern(string relativePath)
     {
+        if (_regex is null)
+        {
+            return false;
+        }
+
         if (_regex.IsMatch(relativePath))
         {
             return true;
@@ -568,6 +578,18 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
 
         relativePath = string.Empty;
         return false;
+    }
+
+    private static Regex? TryCreateRegex(string pattern)
+    {
+        try
+        {
+            return CreateRegex(pattern);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     private static Regex CreateRegex(string pattern)

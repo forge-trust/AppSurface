@@ -256,6 +256,36 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluate_WhenIgnorePatternContainsMalformedCharacterClassSkipsRule()
+    {
+        await WriteAsync(".gitignore", "[z-a]\nvalid.md\n");
+        var snapshot = CreateSnapshot();
+
+        var validDecision = snapshot.Evaluate("valid.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+        var malformedDecision = snapshot.Evaluate("README.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.False(validDecision.Included);
+        Assert.True(malformedDecision.Included);
+    }
+
+    [Fact]
+    public void VcsIgnoreRule_WhenRegexPatternIsMalformedDoesNotThrowOrMatch()
+    {
+        var rule = new AppSurfaceDocsHarvestVcsIgnoreRule(
+            ".gitignore",
+            1,
+            "[z-a]",
+            BaseDirectory: string.Empty,
+            IsNegated: false,
+            DirectoryOnly: false,
+            RootRelative: false,
+            "[z-a]");
+
+        Assert.False(rule.Matches("z", isDirectory: false));
+        Assert.False(rule.MatchesDirectorySubtree("z"));
+    }
+
+    [Fact]
     public async Task Evaluate_WhenEscapedTrailingSpacePatternMatchesLiteralSpace()
     {
         await WriteAsync(".gitignore", "space\\ .md\nliteral\\ \ntrimmed.md   \n");

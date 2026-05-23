@@ -74,6 +74,17 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
     }
 
+    /// <summary>
+    /// Scans JavaScript sources with the repository-scoped path policy captured for the current aggregation pass.
+    /// </summary>
+    /// <param name="context">The harvest context containing the repository root and active path policy snapshot.</param>
+    /// <param name="cancellationToken">An optional token to observe while reading and parsing files.</param>
+    /// <returns>Generated JavaScript API group pages and fragment-addressable API nodes.</returns>
+    /// <remarks>
+    /// This overload is used by the aggregator so VCS ignore exclusions are applied consistently across traversal and
+    /// file inclusion checks. Custom harvesters continue to use the public <see cref="HarvestAsync(string, CancellationToken)"/>
+    /// contract.
+    /// </remarks>
     internal async Task<IReadOnlyList<DocNode>> HarvestAsync(
         DocHarvestContext context,
         CancellationToken cancellationToken = default)

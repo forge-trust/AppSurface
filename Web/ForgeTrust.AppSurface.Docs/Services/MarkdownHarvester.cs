@@ -155,6 +155,17 @@ public class MarkdownHarvester : IDocHarvester
         return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
     }
 
+    /// <summary>
+    /// Harvests Markdown files with the repository-scoped path policy captured for the current aggregation pass.
+    /// </summary>
+    /// <param name="context">The harvest context containing the repository root and active path policy snapshot.</param>
+    /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
+    /// <returns>Markdown documentation nodes generated from eligible repository files.</returns>
+    /// <remarks>
+    /// This overload is used by the aggregator so VCS ignore exclusions are applied consistently across traversal and
+    /// file inclusion checks. Custom harvesters continue to use the public <see cref="HarvestAsync(string, CancellationToken)"/>
+    /// contract.
+    /// </remarks>
     internal async Task<IReadOnlyList<DocNode>> HarvestAsync(DocHarvestContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
