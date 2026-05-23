@@ -66,6 +66,11 @@ internal sealed class AppSurfaceDocsHarvestVcsIgnorePolicy
             return false;
         }
 
+        if (Path.IsPathRooted(relativeDirectory.Replace('/', Path.DirectorySeparatorChar)))
+        {
+            return false;
+        }
+
         var normalizedDirectory = relativeDirectory.TrimEnd('/');
         if (string.IsNullOrEmpty(normalizedDirectory))
         {
@@ -533,12 +538,8 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
 
     private bool MatchesDirectoryPattern(string relativePath)
     {
-        if (_regex is null)
-        {
-            return false;
-        }
-
-        if (_regex.IsMatch(relativePath))
+        var regex = _regex!;
+        if (regex.IsMatch(relativePath))
         {
             return true;
         }
@@ -547,7 +548,7 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
         for (var count = 1; count < segments.Length; count++)
         {
             var parent = string.Join('/', segments.Take(count));
-            if (_regex.IsMatch(parent))
+            if (regex.IsMatch(parent))
             {
                 return true;
             }

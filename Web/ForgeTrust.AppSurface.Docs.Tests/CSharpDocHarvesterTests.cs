@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using FakeItEasy;
+using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Extensions.Logging;
@@ -113,6 +114,18 @@ public class CSharpDocHarvesterTests : IDisposable
 
         Assert.DoesNotContain(results, n => n.Title == "InternalService");
         Assert.DoesNotContain(results, n => n.Path == "Namespaces/Product.Internal");
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WithContextOnDerivedHarvesterUsesPublicHarvesterContract()
+    {
+        var harvester = new DerivedCSharpDocHarvester(A.Fake<ILogger<CSharpDocHarvester>>());
+        var context = CreateContextWithDefaultPolicy();
+
+        var results = await harvester.HarvestAsync(context);
+
+        Assert.True(harvester.PublicHarvestCalled);
+        Assert.Same(DerivedCSharpDocHarvester.Result, results);
     }
 
     [Fact]
@@ -1029,6 +1042,18 @@ public class GlobalType {}
             NullLogger<AppSurfaceDocsHarvestPathPolicy>.Instance);
     }
 
+    private DocHarvestContext CreateContextWithDefaultPolicy()
+    {
+        var configuredPolicy = AppSurfaceDocsHarvestPathPolicy.CreateDefault();
+        var vcsIgnorePolicy = new AppSurfaceDocsHarvestVcsIgnorePolicy(
+            _testRoot,
+            new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+            NullLogger.Instance);
+        return new DocHarvestContext(
+            _testRoot,
+            new AppSurfaceDocsHarvestPathPolicySnapshot(configuredPolicy, vcsIgnorePolicy));
+    }
+
     private static string CombineUnder(
         string root,
         params string[] segments)
@@ -1036,6 +1061,22 @@ public class GlobalType {}
         Assert.All(segments, segment => Assert.False(Path.IsPathRooted(segment)));
 
         return segments.Aggregate(root, Path.Combine);
+    }
+
+    private sealed class DerivedCSharpDocHarvester(ILogger<CSharpDocHarvester> logger)
+        : CSharpDocHarvester(logger), IDocHarvester
+    {
+        public static readonly IReadOnlyList<DocNode> Result = [];
+
+        public bool PublicHarvestCalled { get; private set; }
+
+        Task<IReadOnlyList<DocNode>> IDocHarvester.HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken)
+        {
+            PublicHarvestCalled = true;
+            return Task.FromResult(Result);
+        }
     }
 
     public void Dispose()
