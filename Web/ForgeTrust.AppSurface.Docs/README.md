@@ -705,7 +705,7 @@ Pitfalls:
   - Must be an app-root path such as `/docs` or an application-relative path such as `~/docs`.
   - Remote URLs, relative paths, query strings, fragments, protocol-relative URLs, and unsafe schemes are rejected during startup validation.
 - `AppSurfaceDocs:Identity:Logo:Path`
-  - Optional logo image path rendered beside the display name in the built-in docs chrome.
+  - Optional logo image path rendered beside the display name in the built-in docs chrome and as the root landing page hero mark.
   - Must be an app-root path such as `/branding/docs-logo.svg` or an application-relative path such as `~/branding/docs-logo.svg`.
   - This is a browser URL path, not a filesystem path.
   - Remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments are rejected.
