@@ -15,7 +15,7 @@ public sealed class AppSurfaceDocsSourceRouteRedirectTests
     [InlineData(
         "/docs/guides/from-program-cs-to-module.md.html?view=compact",
         "/docs/guides/from-program-cs-to-module?view=compact")]
-    public async Task SourceShapedMarkdownRoutes_ShouldRedirectToCanonicalDocsRoute(
+    public async Task SourceShapedMarkdownRoutes_ShouldRedirectToCanonicalDocsRoute_AfterInitialHarvestCompletes(
         string requestPath,
         string expectedLocation)
     {
@@ -31,6 +31,9 @@ public sealed class AppSurfaceDocsSourceRouteRedirectTests
             {
                 BaseAddress = new Uri(host.BaseUrl)
             };
+
+            using var healthResponse = await client.GetAsync("/docs/_health.json");
+            healthResponse.EnsureSuccessStatusCode();
 
             using var response = await client.GetAsync(requestPath);
 
