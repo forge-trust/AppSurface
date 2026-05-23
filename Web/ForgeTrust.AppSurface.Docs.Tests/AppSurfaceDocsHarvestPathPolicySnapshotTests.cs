@@ -168,7 +168,22 @@ public sealed class AppSurfaceDocsHarvestPathPolicySnapshotTests : IDisposable
         var externalFile = Path.Join(_externalRoot, "External.md");
         await File.WriteAllTextAsync(externalFile, "# external");
         var linkPath = Path.Join(_root, "Linked.md");
-        File.CreateSymbolicLink(linkPath, externalFile);
+        try
+        {
+            File.CreateSymbolicLink(linkPath, externalFile);
+        }
+        catch (IOException)
+        {
+            return;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
 
         var snapshot = CreateSnapshot();
 
