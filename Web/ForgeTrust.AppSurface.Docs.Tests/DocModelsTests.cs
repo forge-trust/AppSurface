@@ -110,6 +110,7 @@ public class DocModelsTests
             Aliases = ["alpha"],
             RedirectAliases = ["legacy/primary"],
             SequenceKey = "proof-path",
+            CodeLanguage = "javascript",
             HideFromSearch = true
         };
         var fallback = new DocMetadata
@@ -151,6 +152,7 @@ public class DocModelsTests
         Assert.Equal(["alpha"], merged.Aliases);
         Assert.Equal(["legacy/primary"], merged.RedirectAliases);
         Assert.Equal("proof-path", merged.SequenceKey);
+        Assert.Equal("javascript", merged.CodeLanguage);
         Assert.Equal(["keyword"], merged.Keywords);
         Assert.True(merged.HideFromSearch);
         Assert.True(merged.HideFromPublicNav);

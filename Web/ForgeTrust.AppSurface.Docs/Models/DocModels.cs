@@ -44,6 +44,16 @@ public sealed record DocMetadata
     public string? Component { get; init; }
 
     /// <summary>
+    /// Gets the programming or source language for generated code documentation.
+    /// </summary>
+    /// <remarks>
+    /// This value describes extracted API documentation such as C# namespace pages or JavaScript runtime doclets. It is
+    /// intentionally separate from <see cref="Localization"/> and from Markdown code-fence language tokens, because those
+    /// describe reader locale and inline example highlighting rather than the source language of the documented API.
+    /// </remarks>
+    public string? CodeLanguage { get; init; }
+
+    /// <summary>
     /// Gets the generated namespace page that namespace-intro source content should merge into.
     /// </summary>
     /// <remarks>
@@ -226,6 +236,11 @@ public sealed record DocMetadata
             primary.ComponentIsDerived,
             fallback.Component,
             fallback.ComponentIsDerived);
+        var (codeLanguage, _) = MergeTextWithFlag(
+            primary.CodeLanguage,
+            null,
+            fallback.CodeLanguage,
+            null);
         var (navGroup, navGroupIsDerived) = MergeTextWithFlag(
             primary.NavGroup,
             primary.NavGroupIsDerived,
@@ -255,6 +270,7 @@ public sealed record DocMetadata
             AudienceIsDerived = audienceIsDerived,
             Component = component,
             ComponentIsDerived = componentIsDerived,
+            CodeLanguage = codeLanguage,
             Namespace = DocTrustMergeHelpers.PreferNonBlank(primary.Namespace, fallback.Namespace),
             Aliases = MergeLists(primary.Aliases, fallback.Aliases),
             RedirectAliases = MergeLists(primary.RedirectAliases, fallback.RedirectAliases),
@@ -943,6 +959,16 @@ public static class DocHarvestDiagnosticCodes
     /// Every active harvester failed, timed out, or canceled for the snapshot.
     /// </summary>
     public const string AllFailed = "appsurfacedocs.harvest.all_failed";
+
+    /// <summary>
+    /// Repository-owned Git ignore rules excluded one or more harvest candidates.
+    /// </summary>
+    public const string VcsIgnoreSummary = "appsurfacedocs.harvest.vcs_ignore_summary";
+
+    /// <summary>
+    /// AppSurface Docs could not read or normalize part of the repository-owned Git ignore policy.
+    /// </summary>
+    public const string VcsIgnoreWarning = "appsurfacedocs.harvest.vcs_ignore_warning";
 
     /// <summary>
     /// A JavaScript source file matched the configured include set but exceeded the configured parse size limit.
@@ -1725,6 +1751,29 @@ public sealed record DocDetailsViewModel
     /// Gets the explicit audience metadata shown with the page when available.
     /// </summary>
     public string? Audience { get; init; }
+
+    /// <summary>
+    /// Gets the normalized programming language value shown and filtered by generated API documentation surfaces.
+    /// </summary>
+    /// <remarks>
+    /// Values are stable programmatic identifiers such as <c>csharp</c> or <c>javascript</c>. A null value means the
+    /// source language is unknown or not applicable, and callers should treat blank values the same way. Use this
+    /// property for matching, indexing, URL filters, and other machine-readable behavior; use
+    /// <see cref="CodeLanguageLabel" /> for reader-facing UI. Do not match on the label, because labels may contain
+    /// punctuation, casing, or future localization choices that are not part of the canonical metadata contract.
+    /// </remarks>
+    public string? CodeLanguage { get; init; }
+
+    /// <summary>
+    /// Gets the reader-facing programming language label shown for generated API documentation.
+    /// </summary>
+    /// <remarks>
+    /// Labels are display text derived from <see cref="CodeLanguage" />, such as <c>C#</c> for <c>csharp</c> or
+    /// <c>JavaScript</c> for <c>javascript</c>. A null value means there is no language chip to render. Callers should
+    /// use this only for presentation chrome; programmatic comparisons, search filters, and persisted lookup keys should
+    /// use <see cref="CodeLanguage" /> instead so aliases and display spelling do not fragment behavior.
+    /// </remarks>
+    public string? CodeLanguageLabel { get; init; }
 
     /// <summary>
     /// Gets the breadcrumb trail used by the page.

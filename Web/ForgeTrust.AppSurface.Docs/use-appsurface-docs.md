@@ -90,6 +90,7 @@ Add identity settings when the consuming repository should own the visible docs 
 ```
 
 Identity paths must be app-root paths such as `/branding/docs-logo.svg` or application-relative paths such as `~/branding/docs-logo.svg`. AppSurface Docs rejects remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments during startup validation so the docs chrome cannot accidentally point at unsafe or environment-specific locations.
+The configured `Identity:Logo:Path` is used by both the built-in docs chrome and the large root landing page mark, so custom-branded hosts should set it whenever that first-screen icon should differ from the packaged AppSurface Docs mark.
 
 There are two branding asset use cases:
 
@@ -146,6 +147,52 @@ Before pointing AppSurface Docs at a large repository, decide which paths are me
 Use repository-relative globs with `/` separators. AppSurface Docs rejects rooted paths, URI-shaped patterns, query strings, fragments, and `..` segments during startup validation. Empty includes mean the built-in harvester defaults are used; nonempty global includes become the outer boundary for both Markdown and C#.
 
 The package also keeps protective defaults for build output, hidden directories, test projects, and C# source under `examples`. These defaults prevent common accidental publication without requiring every host to write the same excludes. If a default is too broad, use `DefaultExclusions:AllowGlobs` for narrow exceptions or `DefaultExclusions:DisabledGroups` when the entire group is intentionally public. Use the named group IDs, not numeric enum values; ordinals fail startup validation. Allows are group-aware, so a path inside `.github/bin` needs an allow for both `HiddenDirectories` and `BuildOutput` unless one group is disabled.
+
+AppSurface Docs also honors repository-owned Git `.gitignore` files by default. That is meant to make older repositories safer to adopt: generated bundles, `bower_components/`, `dist/`, `build/`, and other ignored trees stay out of the docs harvest without every host writing duplicate AppSurface excludes. This is snapshot-scoped and reproducible; AppSurface reads `.gitignore` files under the configured source root, not `.git/info/exclude` or global developer ignore files.
+
+Use `VcsIgnore:AllowGlobs` only for intentionally public docs under ignored paths:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Paths": {
+        "VcsIgnore": {
+          "AllowGlobs": [
+            "docs/generated-public/**"
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+Those allow globs use AppSurface glob syntax, not Git-ignore syntax. They restore only VCS-ignore exclusions; AppSurface default exclusions and configured `ExcludeGlobs` still win. If a host needs the pre-existing behavior, set `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled=false`.
+
+## Understand first harvest behavior
+
+AppSurface Docs starts the first source-backed harvest during application startup by default. If the docs cache is still warming when a user opens `/docs`, the request waits for `AppSurfaceDocs:Harvest:InitialRequestWaitBudgetMilliseconds` and then shows a live RazorWire harvest observatory. The default wait budget is `350` milliseconds.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "StartupMode": "Background",
+      "InitialRequestWaitBudgetMilliseconds": 350,
+      "TestingPreHarvestDelayMilliseconds": 0,
+      "TestingDelayPerHarvesterMilliseconds": 0,
+      "TestingDelayPerDocumentMilliseconds": 0
+    }
+  }
+}
+```
+
+Use `StartupMode=Background` for normal hosts, `Blocking` for hosts that must finish docs warmup before accepting traffic, and `Disabled` only when you intentionally want the old first-request lazy harvest. Strict startup failure still comes from `Harvest:FailOnFailure=true`; when strict mode is enabled, startup waits for harvest health and fails only when every active harvester fails.
+
+For manual UI testing, set the `Testing*Delay*Milliseconds` knobs to positive values. `TestingPreHarvestDelayMilliseconds` pauses after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` pauses each harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` publishes each harvester's document count one document at a time. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the live observatory easy to inspect locally. Keep them at `0` for production traffic.
+
+The live observatory uses the same redacted diagnostics as harvest health. Do not put secrets, absolute repository paths, or raw exception messages into diagnostic fields that can reach client-visible UI.
 
 ## Author the first useful page set
 

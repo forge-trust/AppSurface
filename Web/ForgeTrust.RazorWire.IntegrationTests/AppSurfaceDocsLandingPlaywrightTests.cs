@@ -203,7 +203,11 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
         Assert.Contains(question, cardText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(title, cardText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(badge, cardText, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Open page", cardText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Open page", cardText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("->", cardText, StringComparison.Ordinal);
+
+        var decorativeChevronCount = await card.Locator("svg[aria-hidden='true'][focusable='false']").CountAsync();
+        Assert.True(decorativeChevronCount > 0);
     }
 
     private static async Task WaitForPathAsync(IPage page, string expectedPath)

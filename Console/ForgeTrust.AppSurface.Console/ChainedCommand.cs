@@ -1,7 +1,7 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using CliFx;
-using CliFx.Attributes;
-using CliFx.Exceptions;
+using CliFx.Binding;
 using CliFx.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -54,7 +54,8 @@ public abstract class ChainedCommand : ICommand
                 var option = prop.GetCustomAttribute<CommandOptionAttribute>();
                 var parameter = prop.GetCustomAttribute<CommandParameterAttribute>();
 
-                var isRequired = option?.IsRequired ?? parameter?.IsRequired ?? false;
+                var isRequired = prop.GetCustomAttribute<RequiredMemberAttribute>() != null &&
+                                 (option != null || parameter != null);
                 if (!isRequired)
                 {
                     continue;

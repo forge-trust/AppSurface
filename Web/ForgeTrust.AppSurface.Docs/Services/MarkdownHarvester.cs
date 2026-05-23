@@ -152,14 +152,45 @@ public class MarkdownHarvester : IDocHarvester
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
     {
+        return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
+    }
+
+    /// <summary>
+    /// Harvests Markdown files with the repository-scoped path policy captured for the current aggregation pass.
+    /// </summary>
+    /// <param name="context">The harvest context containing the repository root and active path policy snapshot.</param>
+    /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
+    /// <returns>Markdown documentation nodes generated from eligible repository files.</returns>
+    /// <remarks>
+    /// This overload is used by the aggregator so VCS ignore exclusions are applied consistently across traversal and
+    /// file inclusion checks. Custom harvesters continue to use the public <see cref="HarvestAsync(string, CancellationToken)"/>
+    /// contract.
+    /// </remarks>
+    internal async Task<IReadOnlyList<DocNode>> HarvestAsync(DocHarvestContext context, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (GetType() != typeof(MarkdownHarvester))
+        {
+            return await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken);
+        }
+
+        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<DocNode>> HarvestAsync(
+        string rootPath,
+        IHarvestPathPolicy pathPolicy,
+        CancellationToken cancellationToken)
+    {
         var nodes = new List<DocNode>();
-        foreach (var file in EnumerateMarkdownSourceFiles(rootPath, cancellationToken))
+        foreach (var file in EnumerateMarkdownSourceFiles(rootPath, pathPolicy, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var relativePath = Path.GetRelativePath(rootPath, file).Replace('\\', '/');
-                if (!_pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.Markdown))
+                if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.Markdown))
                 {
                     continue;
                 }
@@ -207,9 +238,10 @@ public class MarkdownHarvester : IDocHarvester
 
     private IEnumerable<string> EnumerateMarkdownSourceFiles(
         string rootPath,
+        IHarvestPathPolicy pathPolicy,
         CancellationToken cancellationToken)
     {
-        foreach (var file in _pathPolicy.EnumerateCandidateFiles(
+        foreach (var file in pathPolicy.EnumerateCandidateFiles(
                      rootPath,
                      AppSurfaceDocsHarvestSourceKind.Markdown,
                      "*.md",

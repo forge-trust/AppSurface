@@ -7,6 +7,7 @@ using ForgeTrust.AppSurface.Docs.Controllers;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.RazorWire.Bridge;
+using ForgeTrust.RazorWire.Streams;
 using Ganss.Xss;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -2144,6 +2145,56 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_ShouldRenderHarvesting_WhenInitialHarvestIsStillPending()
+    {
+        await using var pending = CreatePendingHarvestController("/docs/search");
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs/search");
+    }
+
+    [Fact]
+    public async Task Search_ShouldUseDocsHomeReturnUrl_WhenCurrentRequestIsNotSafeAppRelative()
+    {
+        await using var pending = CreatePendingHarvestController("//evil.example/docs/search");
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs");
+    }
+
+    [Fact]
+    public async Task Section_ShouldRenderHarvesting_WhenInitialHarvestIsStillPending()
+    {
+        await using var pending = CreatePendingHarvestController("/docs/section/guides");
+
+        var result = await pending.Controller.Section("guides");
+
+        AssertHarvestingView(result, "/docs/section/guides");
+    }
+
+    [Fact]
+    public async Task Details_ShouldRenderHarvesting_WhenInitialHarvestIsStillPending()
+    {
+        await using var pending = CreatePendingHarvestController("/docs/guides/composition");
+
+        var result = await pending.Controller.Details("guides/composition");
+
+        AssertHarvestingView(result, "/docs/guides/composition");
+    }
+
+    [Fact]
+    public async Task Details_ShouldRenderHarvestingForMarkdownRoute_WhenInitialHarvestIsStillPending()
+    {
+        await using var pending = CreatePendingHarvestController("/docs/guides/composition.md");
+
+        var result = await pending.Controller.Details("guides/composition.md");
+
+        AssertHarvestingView(result, "/docs/guides/composition.md");
+    }
+
+    [Fact]
     public async Task Search_ShouldSkipHiddenNamespacesFallback_WhenBuildingRecoveryLinks()
     {
         var docs = new List<DocNode>
@@ -3960,6 +4011,70 @@ public class DocsControllerTests : IDisposable
         return (controller, cache, memo);
     }
 
+    private PendingHarvestController CreatePendingHarvestController(string requestPath)
+    {
+        var release = new TaskCompletionSource<IReadOnlyList<DocNode>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns(release.Task);
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                InitialRequestWaitBudgetMilliseconds = 0
+            }
+        };
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var memo = new Memo(cache);
+        var environment = A.Fake<IWebHostEnvironment>();
+        var sanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
+        var aggregatorLogger = A.Fake<ILogger<DocAggregator>>();
+        var controllerLogger = A.Fake<ILogger<DocsController>>();
+        var services = A.Fake<IServiceProvider>();
+        A.CallTo(() => environment.ContentRootPath).Returns(Path.GetTempPath());
+        A.CallTo(() => sanitizer.Sanitize(A<string>._)).ReturnsLazily((string input) => input);
+        A.CallTo(() => services.GetService(typeof(IRazorWireStreamHub))).Returns(null);
+
+        var aggregator = new DocAggregator(
+            [harvester],
+            options,
+            environment,
+            memo,
+            sanitizer,
+            aggregatorLogger);
+        var progress = new AppSurfaceDocsHarvestProgressReporter(
+            services,
+            A.Fake<ILogger<AppSurfaceDocsHarvestProgressReporter>>());
+        var coordinator = new AppSurfaceDocsHarvestCoordinator(aggregator, progress);
+        var initialHarvest = coordinator.EnsureStarted();
+        var docsUrlBuilder = new DocsUrlBuilder(options);
+        var controller = new DocsController(
+            aggregator,
+            docsUrlBuilder,
+            CreateDefaultVersionCatalogService(options),
+            new DocFeaturedPageResolver(_featuredPageResolverLoggerFake, docsUrlBuilder),
+            options,
+            environment,
+            controllerLogger,
+            coordinator)
+        {
+            ControllerContext = CreateControllerContext(new DefaultHttpContext())
+        };
+        controller.ControllerContext.HttpContext.Request.Path = requestPath;
+        controller.Url = new UrlHelper(controller.ControllerContext);
+
+        return new PendingHarvestController(controller, release, initialHarvest, cache, memo);
+    }
+
+    private static void AssertHarvestingView(IActionResult result, string expectedReturnUrl)
+    {
+        var viewResult = Assert.IsType<ViewResult>(result);
+        Assert.Equal("Harvesting", viewResult.ViewName);
+        var model = Assert.IsType<AppSurfaceDocsHarvestingViewModel>(viewResult.Model);
+        Assert.Equal(expectedReturnUrl, model.ReturnUrl);
+    }
+
     private static DocFeaturedPageGroupDefinition FeaturedGroup(params DocFeaturedPageDefinition[] pages)
     {
         return new DocFeaturedPageGroupDefinition
@@ -4045,6 +4160,39 @@ public class DocsControllerTests : IDisposable
         public override string ConvertName(string name)
         {
             return $"x_{name}";
+        }
+    }
+
+    private sealed class PendingHarvestController : IAsyncDisposable
+    {
+        private readonly TaskCompletionSource<IReadOnlyList<DocNode>> _release;
+        private readonly Task<DocHarvestHealthSnapshot> _initialHarvest;
+        private readonly IMemoryCache _cache;
+        private readonly Memo _memo;
+
+        public PendingHarvestController(
+            DocsController controller,
+            TaskCompletionSource<IReadOnlyList<DocNode>> release,
+            Task<DocHarvestHealthSnapshot> initialHarvest,
+            IMemoryCache cache,
+            Memo memo)
+        {
+            Controller = controller;
+            _release = release;
+            _initialHarvest = initialHarvest;
+            _cache = cache;
+            _memo = memo;
+        }
+
+        public DocsController Controller { get; }
+
+        public async ValueTask DisposeAsync()
+        {
+            using var cache = _cache;
+            using var memo = _memo;
+
+            _release.TrySetResult([]);
+            await _initialHarvest.WaitAsync(TimeSpan.FromSeconds(3));
         }
     }
 }

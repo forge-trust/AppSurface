@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.FileProviders.Physical;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
@@ -161,7 +162,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var publishedTreeHandler = new AppSurfaceDocsPublishedTreeHandler(
             mounts,
             docsUrlBuilder.CurrentDocsRootPath,
-            docsUrlBuilder.RouteRootPath);
+            docsUrlBuilder.RouteRootPath,
+            app.ApplicationServices.GetService<ILogger<AppSurfaceDocsPublishedTreeHandler>>());
         app.Use(
             async (httpContext, next) =>
             {
@@ -181,6 +183,13 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// Public exact-version mounts always preserve the authored catalog order. When the recommended release points at a
     /// public exact tree, this helper adds the configured route-family root alias as an extra mount root that reuses the
     /// same <see cref="PhysicalFileProvider" /> instance instead of duplicating file watchers for the same export path.
+    /// Frozen route manifest caches follow the same reuse rule: exact tree paths are resolved to full paths, trimmed of
+    /// trailing directory separators, and compared with <see cref="StringComparer.OrdinalIgnoreCase" /> so canonical and
+    /// recommended mounts that point at the same tree share one <see cref="AppSurfaceDocsFrozenRouteManifestCache" />.
+    /// Consumers should treat the cache as an immutable mount dependency. The cache lazy-loads the hidden manifest in a
+    /// thread-safe manner on first use, and its lifetime is tied to the returned mount/provider collection; do not mutate
+    /// or replace it per mount because recommended aliases and public version mounts intentionally observe the same
+    /// frozen archive read model.
     /// </remarks>
     /// <param name="catalog">The resolved version catalog that describes available published trees.</param>
     /// <param name="docsUrlBuilder">The configured URL builder that supplies the route-family alias root.</param>
@@ -195,18 +204,27 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         ArgumentNullException.ThrowIfNull(docsUrlBuilder);
 
         var providersByPath = new Dictionary<string, PhysicalFileProvider>(StringComparer.OrdinalIgnoreCase);
+        var manifestCachesByPath = new Dictionary<string, AppSurfaceDocsFrozenRouteManifestCache>(StringComparer.OrdinalIgnoreCase);
         var mounts = new List<AppSurfaceDocsPublishedTreeMount>();
 
         foreach (var version in catalog.PublicVersions.Where(version => version.IsAvailable && version.ExactTreePath is not null))
         {
             var provider = GetOrCreateProvider(version.ExactTreePath!, providersByPath);
-            mounts.Add(new AppSurfaceDocsPublishedTreeMount(version.ExactRootUrl, provider));
+            var manifestCache = GetOrCreateFrozenRouteManifestCache(
+                version.ExactTreePath!,
+                provider,
+                manifestCachesByPath);
+            mounts.Add(new AppSurfaceDocsPublishedTreeMount(version.ExactRootUrl, provider, manifestCache));
         }
 
         if (catalog.RecommendedVersion is { IsAvailable: true, ExactTreePath: not null } recommendedVersion)
         {
             var provider = GetOrCreateProvider(recommendedVersion.ExactTreePath, providersByPath);
-            mounts.Add(new AppSurfaceDocsPublishedTreeMount(docsUrlBuilder.DocsEntryRootPath, provider));
+            var manifestCache = GetOrCreateFrozenRouteManifestCache(
+                recommendedVersion.ExactTreePath,
+                provider,
+                manifestCachesByPath);
+            mounts.Add(new AppSurfaceDocsPublishedTreeMount(docsUrlBuilder.DocsEntryRootPath, provider, manifestCache));
         }
 
         return (mounts, providersByPath.Values.ToList());
@@ -222,9 +240,25 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             return provider;
         }
 
-        provider = new PhysicalFileProvider(normalizedPath);
+        provider = new PhysicalFileProvider(normalizedPath, ExclusionFilters.None);
         providersByPath[normalizedPath] = provider;
         return provider;
+    }
+
+    private static AppSurfaceDocsFrozenRouteManifestCache GetOrCreateFrozenRouteManifestCache(
+        string exactTreePath,
+        PhysicalFileProvider provider,
+        IDictionary<string, AppSurfaceDocsFrozenRouteManifestCache> manifestCachesByPath)
+    {
+        var normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(exactTreePath));
+        if (manifestCachesByPath.TryGetValue(normalizedPath, out var cache))
+        {
+            return cache;
+        }
+
+        cache = new AppSurfaceDocsFrozenRouteManifestCache(provider, normalizedPath);
+        manifestCachesByPath[normalizedPath] = cache;
+        return cache;
     }
 
     private static void RegisterMountedProviderDisposal(IServiceProvider services, IReadOnlyList<PhysicalFileProvider> providers)

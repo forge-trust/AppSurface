@@ -16,6 +16,11 @@ public sealed class Memo : IMemo, IDisposable
     private readonly TimeSpan _failureCacheDuration;
     private int _disposed;
 
+    /// <summary>
+    /// Gets the number of per-key semaphores currently retained for in-flight or failure-cached work.
+    /// </summary>
+    internal int ActiveLockCount => _locks.Count;
+
     private void ThrowIfDisposed()
     {
         if (Volatile.Read(ref _disposed) != 0)
@@ -42,6 +47,29 @@ public sealed class Memo : IMemo, IDisposable
         {
             Exception = exception;
         }
+    }
+
+    /// <summary>
+    /// Mutable wrapper used for entries that can serve stale values while a background refresh runs.
+    /// </summary>
+    private sealed class StaleCacheEntry
+    {
+        public StaleCacheEntry(object? value, DateTimeOffset freshUntilUtc, DateTimeOffset staleUntilUtc)
+        {
+            Value = value;
+            FreshUntilUtc = freshUntilUtc;
+            StaleUntilUtc = staleUntilUtc;
+        }
+
+        public object? Value { get; set; }
+
+        public DateTimeOffset FreshUntilUtc { get; set; }
+
+        public DateTimeOffset StaleUntilUtc { get; set; }
+
+        public bool RefreshInProgress { get; set; }
+
+        public object Gate { get; } = new();
     }
 
     /// <summary>
@@ -115,8 +143,8 @@ public sealed class Memo : IMemo, IDisposable
 
         return GetOrCreateCoreAsync(
             key,
-            (factory, cancellationToken), // cancellationToken is duplicated in state to allow static lambda access
-            static (state, _) => state.factory(state.cancellationToken),
+            factory,
+            static (currentFactory, token) => currentFactory(token),
             policy,
             cancellationToken);
     }
@@ -163,8 +191,8 @@ public sealed class Memo : IMemo, IDisposable
 
         return GetOrCreateCoreAsync(
             key,
-            (factory, arg, cancellationToken), // cancellationToken is duplicated in state to allow static lambda access
-            static (state, _) => state.factory(state.arg, state.cancellationToken),
+            (factory, arg),
+            static (state, token) => state.factory(state.arg, token),
             policy,
             cancellationToken);
     }
@@ -213,9 +241,8 @@ public sealed class Memo : IMemo, IDisposable
 
         return GetOrCreateCoreAsync(
             key,
-            (factory, arg1, arg2,
-                cancellationToken), // cancellationToken is duplicated in state to allow static lambda access
-            static (state, _) => state.factory(state.arg1, state.arg2, state.cancellationToken),
+            (factory, arg1, arg2),
+            static (state, token) => state.factory(state.arg1, state.arg2, token),
             policy,
             cancellationToken);
     }
@@ -266,9 +293,8 @@ public sealed class Memo : IMemo, IDisposable
 
         return GetOrCreateCoreAsync(
             key,
-            (factory, arg1, arg2, arg3,
-                cancellationToken), // cancellationToken is duplicated in state to allow static lambda access
-            static (state, _) => state.factory(state.arg1, state.arg2, state.arg3, state.cancellationToken),
+            (factory, arg1, arg2, arg3),
+            static (state, token) => state.factory(state.arg1, state.arg2, state.arg3, token),
             policy,
             cancellationToken);
     }
@@ -333,9 +359,8 @@ public sealed class Memo : IMemo, IDisposable
 
         return GetOrCreateCoreAsync(
             key,
-            (factory, arg1, arg2, arg3, arg4,
-                cancellationToken), // cancellationToken is duplicated in state to allow static lambda access
-            static (state, _) => state.factory(state.arg1, state.arg2, state.arg3, state.arg4, state.cancellationToken),
+            (factory, arg1, arg2, arg3, arg4),
+            static (state, token) => state.factory(state.arg1, state.arg2, state.arg3, state.arg4, token),
             policy,
             cancellationToken);
     }
@@ -404,15 +429,14 @@ public sealed class Memo : IMemo, IDisposable
 
         return GetOrCreateCoreAsync(
             key,
-            (factory, arg1, arg2, arg3, arg4, arg5,
-                cancellationToken), // cancellationToken is duplicated in state to allow static lambda access
-            static (state, _) => state.factory(
+            (factory, arg1, arg2, arg3, arg4, arg5),
+            static (state, token) => state.factory(
                 state.arg1,
                 state.arg2,
                 state.arg3,
                 state.arg4,
                 state.arg5,
-                state.cancellationToken),
+                token),
             policy,
             cancellationToken);
     }
@@ -485,16 +509,15 @@ public sealed class Memo : IMemo, IDisposable
 
         return GetOrCreateCoreAsync(
             key,
-            (factory, arg1, arg2, arg3, arg4, arg5, arg6,
-                cancellationToken), // cancellationToken is duplicated in state to allow static lambda access
-            static (state, _) => state.factory(
+            (factory, arg1, arg2, arg3, arg4, arg5, arg6),
+            static (state, token) => state.factory(
                 state.arg1,
                 state.arg2,
                 state.arg3,
                 state.arg4,
                 state.arg5,
                 state.arg6,
-                state.cancellationToken),
+                token),
             policy,
             cancellationToken);
     }
@@ -578,9 +601,8 @@ public sealed class Memo : IMemo, IDisposable
 
         return GetOrCreateCoreAsync(
             key,
-            (factory, arg1, arg2, arg3, arg4, arg5, arg6, arg7,
-                cancellationToken), // cancellationToken is duplicated in state to allow static lambda access
-            static (state, _) => state.factory(
+            (factory, arg1, arg2, arg3, arg4, arg5, arg6, arg7),
+            static (state, token) => state.factory(
                 state.arg1,
                 state.arg2,
                 state.arg3,
@@ -588,7 +610,7 @@ public sealed class Memo : IMemo, IDisposable
                 state.arg5,
                 state.arg6,
                 state.arg7,
-                state.cancellationToken),
+                token),
             policy,
             cancellationToken);
     }
@@ -677,9 +699,8 @@ public sealed class Memo : IMemo, IDisposable
 
         return GetOrCreateCoreAsync(
             key,
-            (factory, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,
-                cancellationToken), // cancellationToken is duplicated in state to allow static lambda access
-            static (state, _) => state.factory(
+            (factory, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8),
+            static (state, token) => state.factory(
                 state.arg1,
                 state.arg2,
                 state.arg3,
@@ -688,7 +709,7 @@ public sealed class Memo : IMemo, IDisposable
                 state.arg6,
                 state.arg7,
                 state.arg8,
-                state.cancellationToken),
+                token),
             policy,
             cancellationToken);
     }
@@ -712,6 +733,10 @@ public sealed class Memo : IMemo, IDisposable
         CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
+        if (policy.StaleWhileRevalidate.HasValue)
+        {
+            return await GetOrCreateStaleCoreAsync(key, state, factory, policy, cancellationToken);
+        }
 
         // Fast path: check cache without acquiring the lock.
         // The cache may contain either a TResult value or a CachedFailure sentinel.
@@ -805,6 +830,244 @@ public sealed class Memo : IMemo, IDisposable
                 // Ignore: the Memo instance or the lock was disposed concurrently.
             }
         }
+    }
+
+    private async Task<TResult> GetOrCreateStaleCoreAsync<TState, TResult>(
+        object key,
+        TState state,
+        Func<TState, CancellationToken, Task<TResult>> factory,
+        CachePolicy policy,
+        CancellationToken cancellationToken)
+    {
+        if (!policy.AbsoluteExpiration.HasValue)
+        {
+            throw new InvalidOperationException(
+                "Stale-while-revalidate requires an absolute-expiration cache policy.");
+        }
+
+        if (_cache.TryGetValue(key, out object? cached)
+            && TryReturnCachedOrStale(key, cached, state, factory, policy, out TResult cachedValue))
+        {
+            return cachedValue;
+        }
+
+        return await RefreshStaleEntryForCallerAsync(key, state, factory, policy, cancellationToken);
+    }
+
+    private bool TryReturnCachedOrStale<TState, TResult>(
+        object key,
+        object? cached,
+        TState state,
+        Func<TState, CancellationToken, Task<TResult>> factory,
+        CachePolicy policy,
+        out TResult value)
+    {
+        if (cached is CachedFailure failure)
+        {
+            ExceptionDispatchInfo.Capture(failure.Exception).Throw();
+        }
+
+        if (cached is not StaleCacheEntry staleEntry)
+        {
+            value = (TResult)cached!;
+            return true;
+        }
+
+        if (!TryReadStaleEntry(staleEntry, out value, out var shouldRefresh, out var expired))
+        {
+            return false;
+        }
+
+        if (shouldRefresh)
+        {
+            ObserveBackgroundRefresh(RefreshStaleEntryAsync(key, staleEntry, state, factory, policy));
+        }
+
+        return !expired;
+    }
+
+    private static bool TryReadStaleEntry<TResult>(
+        StaleCacheEntry entry,
+        out TResult value,
+        out bool shouldRefresh,
+        out bool expired)
+    {
+        lock (entry.Gate)
+        {
+            value = (TResult)entry.Value!;
+            shouldRefresh = false;
+            expired = false;
+
+            var now = DateTimeOffset.UtcNow;
+            if (now < entry.FreshUntilUtc)
+            {
+                return true;
+            }
+
+            if (now < entry.StaleUntilUtc)
+            {
+                if (!entry.RefreshInProgress)
+                {
+                    entry.RefreshInProgress = true;
+                    shouldRefresh = true;
+                }
+
+                return true;
+            }
+
+            expired = true;
+            return true;
+        }
+    }
+
+    private async Task<TResult> RefreshStaleEntryForCallerAsync<TState, TResult>(
+        object key,
+        TState state,
+        Func<TState, CancellationToken, Task<TResult>> factory,
+        CachePolicy policy,
+        CancellationToken cancellationToken)
+    {
+        var keyLock = _locks.GetOrAdd(key, static _ => new SemaphoreSlim(1, 1));
+
+        try
+        {
+            await keyLock.WaitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            if (keyLock.CurrentCount > 0)
+            {
+                _locks.TryRemove(new KeyValuePair<object, SemaphoreSlim>(key, keyLock));
+            }
+
+            throw;
+        }
+
+        ThrowIfDisposed();
+        try
+        {
+            if (_cache.TryGetValue(key, out object? cached)
+                && TryReturnCachedOrStale(key, cached, state, factory, policy, out TResult cachedValue))
+            {
+                return cachedValue;
+            }
+
+            TResult result;
+            try
+            {
+                result = await factory(state, cancellationToken);
+                ThrowIfDisposed();
+            }
+            catch (Exception ex) when (ex is not ObjectDisposedException)
+            {
+                var failureOptions = CreateEntryOptions(keyLock);
+                failureOptions.AbsoluteExpirationRelativeToNow = _failureCacheDuration;
+                _cache.Set(key, new CachedFailure(ex), failureOptions);
+
+                throw;
+            }
+
+            StoreStaleEntry(key, result, policy, keyLock);
+            _locks.TryRemove(key, out _);
+            return result;
+        }
+        finally
+        {
+            try
+            {
+                keyLock.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ignore: the Memo instance or the lock was disposed concurrently.
+            }
+        }
+    }
+
+    private async Task RefreshStaleEntryAsync<TState, TResult>(
+        object key,
+        StaleCacheEntry staleEntry,
+        TState state,
+        Func<TState, CancellationToken, Task<TResult>> factory,
+        CachePolicy policy)
+    {
+        var keyLock = _locks.GetOrAdd(key, static _ => new SemaphoreSlim(1, 1));
+
+        try
+        {
+            await keyLock.WaitAsync(CancellationToken.None);
+            ThrowIfDisposed();
+
+            if (_cache.TryGetValue(key, out object? cached)
+                && cached is StaleCacheEntry currentEntry
+                && !ReferenceEquals(currentEntry, staleEntry))
+            {
+                lock (currentEntry.Gate)
+                {
+                    if (DateTimeOffset.UtcNow < currentEntry.FreshUntilUtc)
+                    {
+                        return;
+                    }
+                }
+            }
+
+            var result = await factory(state, CancellationToken.None);
+            ThrowIfDisposed();
+            StoreStaleEntry(key, result, policy, keyLock);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Background revalidation keeps serving the stale value and lets a later access retry.
+        }
+        catch (OperationCanceledException)
+        {
+            // Background revalidation keeps serving the stale value and lets a later access retry.
+        }
+        finally
+        {
+            lock (staleEntry.Gate)
+            {
+                staleEntry.RefreshInProgress = false;
+            }
+
+            try
+            {
+                keyLock.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Ignore: the Memo instance or the lock was disposed concurrently.
+            }
+
+            if (keyLock.CurrentCount > 0)
+            {
+                _locks.TryRemove(new KeyValuePair<object, SemaphoreSlim>(key, keyLock));
+            }
+        }
+    }
+
+    private static void ObserveBackgroundRefresh(Task refreshTask)
+    {
+        _ = refreshTask.ContinueWith(
+            static task => _ = task.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private void StoreStaleEntry<TResult>(
+        object key,
+        TResult result,
+        CachePolicy policy,
+        SemaphoreSlim keyLock)
+    {
+        var freshDuration = policy.AbsoluteExpiration!.Value;
+        var staleDuration = policy.StaleWhileRevalidate!.Value;
+        var now = DateTimeOffset.UtcNow;
+        var entry = new StaleCacheEntry(result, now.Add(freshDuration), now.Add(freshDuration).Add(staleDuration));
+        var options = CreateEntryOptions(keyLock);
+        options.AbsoluteExpirationRelativeToNow = freshDuration.Add(staleDuration);
+        _cache.Set(key, entry, options);
     }
 
     /// <summary>

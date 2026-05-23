@@ -402,6 +402,18 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     Assert.Contains("data-tree=\"release-search\"", exactSearchHtml);
                     Assert.Contains("href=\"/docs/v/1.2.3/guide.html\"", exactSearchHtml);
 
+                    using var redirectClient = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+                    {
+                        BaseAddress = new Uri(baseAddress)
+                    };
+                    using var exactAliasResponse = await redirectClient.GetAsync("/docs/v/1.2.3/guide.md?view=compact");
+                    Assert.Equal(HttpStatusCode.MovedPermanently, exactAliasResponse.StatusCode);
+                    Assert.Equal("/docs/v/1.2.3/guide?view=compact", exactAliasResponse.Headers.Location?.ToString());
+
+                    using var recommendedAliasResponse = await redirectClient.GetAsync("/docs/guide.md");
+                    Assert.Equal(HttpStatusCode.MovedPermanently, recommendedAliasResponse.StatusCode);
+                    Assert.Equal("/docs/guide", recommendedAliasResponse.Headers.Location?.ToString());
+
                     using var searchIndexResponse = await client.GetAsync("/docs/v/1.2.3/search-index.json");
                     var searchIndexJson = await searchIndexResponse.Content.ReadAsStringAsync();
                     Assert.Equal(HttpStatusCode.OK, searchIndexResponse.StatusCode);
@@ -2004,6 +2016,21 @@ public class AppSurfaceDocsWebModuleRegressionTests
         File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
         File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
         File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
+        File.WriteAllText(
+            Path.Join(root, ".appsurface-docs-route-manifest.json"),
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "guide.md",
+                  "canonicalRoutePath": "guide",
+                  "recoveryAliases": ["guide.md", "guide.md.html"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
         return root;
     }
 

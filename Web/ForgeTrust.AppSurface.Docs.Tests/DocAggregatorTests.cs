@@ -5,10 +5,12 @@ using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.RazorWire.Streams;
 using Ganss.Xss;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -89,15 +91,25 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
-    public async Task GetDocsAsync_ShouldExpireSnapshotUsingConfiguredCacheExpiration()
+    public async Task GetDocsAsync_ShouldServeStaleSnapshotWhileRevalidatingExpiredCache()
     {
         var harvester = A.Fake<IDocHarvester>();
         var harvestCount = 0;
+        var secondHarvestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondHarvestRelease = new TaskCompletionSource<IReadOnlyList<DocNode>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .ReturnsLazily(() =>
             {
                 var currentHarvest = Interlocked.Increment(ref harvestCount);
-                return new[] { new DocNode($"Harvest {currentHarvest}", "path", "<p>content</p>") };
+                if (currentHarvest == 1)
+                {
+                    return Task.FromResult<IReadOnlyList<DocNode>>(
+                        [new DocNode("Harvest 1", "path", "<p>content</p>")]);
+                }
+
+                secondHarvestStarted.TrySetResult();
+                return secondHarvestRelease.Task;
             });
 
         using var cache = new MemoryCache(new MemoryCacheOptions());
@@ -122,9 +134,24 @@ public class DocAggregatorTests : IDisposable
         var second = await aggregator.GetDocsAsync();
 
         Assert.Equal("Harvest 1", Assert.Single(first).Title);
-        Assert.Equal("Harvest 2", Assert.Single(second).Title);
+        Assert.Equal("Harvest 1", Assert.Single(second).Title);
+        await secondHarvestStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
         A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
             .MustHaveHappenedTwiceExactly();
+
+        secondHarvestRelease.SetResult([new DocNode("Harvest 2", "path", "<p>content</p>")]);
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            var refreshed = await aggregator.GetDocsAsync();
+            if (Assert.Single(refreshed).Title == "Harvest 2")
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        Assert.Equal("Harvest 2", Assert.Single(await aggregator.GetDocsAsync()).Title);
     }
 
     [Fact]
@@ -2745,6 +2772,26 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldProjectGeneratedCodeLanguage()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Calculator",
+                "Namespaces/ForgeTrust.Web",
+                "<section class='doc-type'>Calculator behavior.</section>",
+                Metadata: DocMetadataFactory.CreateApiReferenceMetadata("Calculator", "ForgeTrust.Web"))
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+
+        var indexedDocument = Assert.Single(payload.Documents);
+        Assert.Equal("csharp", indexedDocument.Language);
+        Assert.Equal("C#", indexedDocument.LanguageLabel);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldOmitGeneratedSymbolSourceLinkText()
     {
         var harvester = A.Fake<IDocHarvester>();
@@ -3230,6 +3277,38 @@ public class DocAggregatorTests : IDisposable
         var harvesterHealth = Assert.Single(health.Harvesters);
         Assert.Equal(DocHarvesterHealthStatus.Canceled, harvesterHealth.Status);
         Assert.Equal(DocHarvestDiagnosticCodes.HarvesterCanceled, harvesterHealth.Diagnostic?.Code);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldPublishTerminalProgress_ForTimedOutAndCanceledHarvesters()
+    {
+        var timeoutHarvester = new DelayingHarvester();
+        var canceledHarvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => canceledHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new OperationCanceledException());
+        var services = A.Fake<IServiceProvider>();
+        A.CallTo(() => services.GetService(typeof(IRazorWireStreamHub))).Returns(null);
+        var progress = new AppSurfaceDocsHarvestProgressReporter(
+            services,
+            A.Fake<ILogger<AppSurfaceDocsHarvestProgressReporter>>());
+        var aggregator = CreateHarvestHealthAggregator(
+            [timeoutHarvester, canceledHarvester],
+            harvesterTimeout: TimeSpan.FromMilliseconds(10),
+            harvestProgress: progress);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+        var progressSnapshot = progress.CurrentSnapshot;
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Failed, progressSnapshot.State);
+        Assert.Equal(2, progressSnapshot.CompletedHarvesters);
+        Assert.Contains(
+            progressSnapshot.Harvesters,
+            item => item.HarvesterType == nameof(DelayingHarvester)
+                    && item.Status == DocHarvesterHealthStatus.TimedOut.ToString());
+        Assert.Contains(
+            progressSnapshot.Harvesters,
+            item => item.Status == DocHarvesterHealthStatus.Canceled.ToString());
     }
 
     [Fact]
@@ -4874,7 +4953,8 @@ public class DocAggregatorTests : IDisposable
         IEnumerable<IDocHarvester> harvesters,
         ILogger<DocAggregator>? logger = null,
         TimeSpan? harvesterTimeout = null,
-        Func<DateTimeOffset>? utcNow = null)
+        Func<DateTimeOffset>? utcNow = null,
+        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null)
     {
         return new DocAggregator(
             harvesters,
@@ -4892,7 +4972,8 @@ public class DocAggregatorTests : IDisposable
             resolveGitLastUpdatedUtcAsync: null,
             harvesterTimeout: harvesterTimeout,
             contributorFreshnessTimeout: null,
-            utcNow: utcNow);
+            utcNow: utcNow,
+            harvestProgress: harvestProgress);
     }
 
     private DocAggregator CreateAggregatorWithRepositoryRoot(IDocHarvester harvester, string repositoryRoot)
@@ -5078,9 +5159,92 @@ public class DocAggregatorTests : IDisposable
             chooser.Content);
     }
 
+    [Fact]
+    public async Task GetDocsAsync_WithBuiltInMarkdownHarvesterAppliesVcsIgnoreSnapshotAndHealthDiagnostic()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-docaggregator-vcs-").FullName;
+        try
+        {
+            var ignoredDirectory = Path.Join(root, "ignored");
+            await File.WriteAllTextAsync(Path.Join(root, ".gitignore"), "ignored/\n");
+            Directory.CreateDirectory(ignoredDirectory);
+            await File.WriteAllTextAsync(Path.Join(ignoredDirectory, "Hidden.md"), "# Hidden");
+            await File.WriteAllTextAsync(Path.Join(root, "Visible.md"), "# Visible");
+
+            using var cache = new MemoryCache(new MemoryCacheOptions());
+            var memo = new Memo(cache);
+            var env = A.Fake<IWebHostEnvironment>();
+            A.CallTo(() => env.ContentRootPath).Returns(root);
+            var aggregator = new DocAggregator(
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, NullLoggerFactory.Instance)],
+                new AppSurfaceDocsOptions
+                {
+                    Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = root }
+                },
+                env,
+                memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var docs = await aggregator.GetDocsAsync();
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            Assert.Contains(docs, doc => doc.Path == "Visible.md");
+            Assert.DoesNotContain(docs, doc => doc.Path == "ignored/Hidden.md");
+            Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.VcsIgnoreSummary);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetDocsAsync_WithLegacyCustomHarvesterKeepsPublicHarvestContract()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-docaggregator-custom-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(root, ".gitignore"), "ignored/\n");
+            var harvester = new StaticHarvester([new DocNode("Ignored", "ignored/Custom.md", "<p>custom</p>")]);
+            using var cache = new MemoryCache(new MemoryCacheOptions());
+            var memo = new Memo(cache);
+            var env = A.Fake<IWebHostEnvironment>();
+            A.CallTo(() => env.ContentRootPath).Returns(root);
+            var aggregator = new DocAggregator(
+                [harvester],
+                new AppSurfaceDocsOptions
+                {
+                    Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = root }
+                },
+                env,
+                memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var docs = await aggregator.GetDocsAsync();
+
+            Assert.Contains(docs, doc => doc.Path == "ignored/Custom.md");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     public void Dispose()
     {
         (_memo as IDisposable)?.Dispose();
         _cache.Dispose();
+    }
+
+    private sealed class StaticHarvester(IReadOnlyList<DocNode> docs) : IDocHarvester
+    {
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(docs);
+        }
     }
 }

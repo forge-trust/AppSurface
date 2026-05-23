@@ -4,7 +4,9 @@
 @{
     ViewData["Title"] = "Documentation Index";
     var docsIdentity = IdentityResolver.Identity;
-    var docsBrandIconUrl = Url.Content(AssetPathResolver.BrandIconPath);
+    var docsBrandIconUrl = docsIdentity.Logo is null
+        ? Url.Content(AssetPathResolver.BrandIconPath)
+        : Url.PathBaseAware(docsIdentity.Logo.Path);
 }
 
 <div class="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
@@ -41,9 +43,13 @@
             @if (!string.IsNullOrWhiteSpace(Model.StartHereHref))
             {
                 <a href="@Url.PathBaseAware(Model.StartHereHref)"
-                   class="inline-flex items-center gap-2 self-start rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-4 py-2 text-sm font-semibold text-[#bfdbfe] transition-colors hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
-                    Open Start Here
-                    <span aria-hidden="true">-&gt;</span>
+                   aria-label="Browse Start Here"
+                   class="inline-flex min-h-11 items-center gap-2 self-start rounded-full border border-[#2563eb]/45 bg-[#2563eb]/10 px-4 py-2 text-sm font-semibold text-[#bfdbfe] transition-colors hover:border-[#14b8a6] hover:bg-[#14b8a6]/10">
+                    Start Here
+                    <svg class="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                        <circle cx="10" cy="10" r="7"></circle>
+                        <path d="M8.5 6.75L11.75 10 8.5 13.25"></path>
+                    </svg>
                 </a>
             }
         </div>
@@ -86,9 +92,11 @@
                                                     <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-300">@featuredPage.SupportingText</p>
                                                 }
                                             </div>
-                                            <span class="inline-flex items-center gap-2 text-sm font-semibold text-[#bfdbfe] transition-colors group-hover:text-[#ccfbf1]">
-                                                Open page
-                                                <span class="transition-transform group-hover:translate-x-1" aria-hidden="true">-&gt;</span>
+                                            <span class="inline-flex items-center text-sm font-semibold text-[#bfdbfe] transition-colors group-hover:text-[#ccfbf1]">
+                                                <svg class="h-4 w-4 transition-transform group-hover:translate-x-1" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                                    <circle cx="10" cy="10" r="7"></circle>
+                                                    <path d="M8.5 6.75L11.75 10 8.5 13.25"></path>
+                                                </svg>
                                             </span>
                                         </div>
                                     </a>
@@ -146,9 +154,11 @@
                                                 <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-400">@route.Summary</p>
                                             }
                                         </div>
-                                        <span class="inline-flex items-center gap-2 text-sm font-semibold text-[#bfdbfe] transition-colors group-hover:text-[#ccfbf1]">
-                                            Open
-                                            <span class="transition-transform group-hover:translate-x-1" aria-hidden="true">-&gt;</span>
+                                        <span class="inline-flex items-center text-sm font-semibold text-[#bfdbfe] transition-colors group-hover:text-[#ccfbf1]">
+                                            <svg class="h-4 w-4 transition-transform group-hover:translate-x-1" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                                <circle cx="10" cy="10" r="7"></circle>
+                                                <path d="M8.5 6.75L11.75 10 8.5 13.25"></path>
+                                            </svg>
                                         </span>
                                     </a>
                                 </li>

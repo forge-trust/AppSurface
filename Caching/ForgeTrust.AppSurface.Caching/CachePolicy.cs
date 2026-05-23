@@ -28,6 +28,12 @@ public sealed record CachePolicy
     public TimeSpan? SlidingExpiration { get; internal init; }
 
     /// <summary>
+    /// Gets the bounded stale window used after <see cref="AbsoluteExpiration"/> elapses.
+    /// During this window <see cref="IMemo"/> returns the stale value immediately and refreshes it in the background.
+    /// </summary>
+    public TimeSpan? StaleWhileRevalidate { get; internal init; }
+
+    /// <summary>
     /// Creates a policy that evicts the entry after a fixed duration from creation.
     /// </summary>
     /// <param name="duration">The time after which the entry expires.</param>
@@ -41,6 +47,69 @@ public sealed record CachePolicy
         }
 
         return new CachePolicy { AbsoluteExpiration = duration };
+    }
+
+    /// <summary>
+    /// Creates an absolute-expiration policy that can serve stale values while one background refresh runs.
+    /// </summary>
+    /// <remarks>
+    /// Use this factory when a caller wants a single declaration for <paramref name="freshDuration"/> absolute
+    /// freshness followed by a bounded <paramref name="staleDuration"/> revalidation window; use
+    /// <see cref="Absolute(TimeSpan)"/> followed by <see cref="WithStaleWhileRevalidate(TimeSpan)"/> when composing
+    /// or modifying an existing absolute policy. During the stale window, callers can receive out-of-date data while
+    /// one background refresh per key runs; refresh failures keep the stale entry available until a later access
+    /// retries. The stale-while-revalidate pattern is incompatible with sliding expiration policies.
+    /// </remarks>
+    /// <param name="freshDuration">The duration for which the cached value is considered fresh.</param>
+    /// <param name="staleDuration">The additional duration for which the stale value can be served while revalidating.</param>
+    /// <returns>A <see cref="CachePolicy"/> with absolute freshness and stale-while-revalidate behavior.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="freshDuration"/> or <paramref name="staleDuration"/> is not positive.
+    /// </exception>
+    public static CachePolicy AbsoluteWithStaleWhileRevalidate(TimeSpan freshDuration, TimeSpan staleDuration)
+    {
+        if (freshDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(freshDuration), "Fresh duration must be positive.");
+        }
+
+        if (staleDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(staleDuration), "Stale duration must be positive.");
+        }
+
+        return new CachePolicy
+        {
+            AbsoluteExpiration = freshDuration,
+            StaleWhileRevalidate = staleDuration
+        };
+    }
+
+    /// <summary>
+    /// Adds a bounded stale-while-revalidate window to an absolute-expiration policy.
+    /// </summary>
+    /// <remarks>
+    /// Stale-while-revalidate is supported only for absolute-expiration policies because sliding freshness changes on
+    /// access and cannot define a stable revalidation moment.
+    /// </remarks>
+    /// <param name="duration">The additional duration for which the stale value can be served while revalidating.</param>
+    /// <returns>A new policy with the same absolute freshness and the requested stale window.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="duration"/> is not positive.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the current policy is not absolute-only.</exception>
+    public CachePolicy WithStaleWhileRevalidate(TimeSpan duration)
+    {
+        if (duration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(duration), "Stale duration must be positive.");
+        }
+
+        if (AbsoluteExpiration is null || SlidingExpiration is not null)
+        {
+            throw new InvalidOperationException(
+                "Stale-while-revalidate can only be added to an absolute-expiration cache policy.");
+        }
+
+        return this with { StaleWhileRevalidate = duration };
     }
 
     /// <summary>

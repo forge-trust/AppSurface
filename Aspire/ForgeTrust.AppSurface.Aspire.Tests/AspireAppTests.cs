@@ -1,13 +1,13 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
-using CliFx.Attributes;
+using CliFx.Binding;
 using ForgeTrust.AppSurface.Aspire;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-public class AspireAppTests
+public partial class AspireAppTests
 {
     static AspireAppTests()
     {
@@ -93,7 +93,7 @@ public class AspireAppTests
         bool NonComponentRegistered);
 
     [Command("validate")]
-    public sealed class ValidateComponentCommand : AspireProfile
+    public sealed partial class ValidateComponentCommand : AspireProfile
     {
         private readonly IHostApplicationLifetime _lifetime;
 

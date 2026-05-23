@@ -31,6 +31,7 @@ Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `
 - `AppSurfaceDocsWebModule` for wiring the docs UI into an AppSurface web host
 - `AddAppSurfaceDocs()` for typed options binding and core service registration
 - `DocAggregator` plus the built-in Markdown, C# API, and opt-in JavaScript public API harvesters, including structured harvest health diagnostics
+- A live harvest observatory that starts the first source-backed harvest during startup, streams real-time RazorWire progress, and keeps first navigation informative instead of appearing hung
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by AppSurface Docs consumers
 - `DocsUrlBuilder` plus the MVC surface used by AppSurface Docs consumers so the live docs root, search shell, and archive routes stay in one shared contract
 - `AppSurfaceDocsVersionCatalog` plus `AppSurfaceDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
@@ -130,6 +131,14 @@ The suppression is intentionally narrow:
 - A leading Markdown H1 still participates in title resolution when explicit metadata `title` is absent, so README-style pages keep their authored title in the shell after the body H1 is suppressed.
 
 Pitfall: do not work around duplicate headings by removing the source `# Title` from README-style pages. That makes the file worse outside AppSurface Docs. Let the AppSurface Docs shell suppress the rendered duplicate instead.
+
+## Generated API language tags
+
+Generated code documentation carries programming-language metadata through `DocMetadata.CodeLanguage`. The built-in C# API harvester marks generated namespace pages and symbol stubs as `csharp`; the optional JavaScript public API harvester marks generated group pages and doclet stubs as `javascript`.
+
+AppSurface Docs normalizes these values for reader chrome and search. `csharp`, `c-sharp`, and `cs` display as `C#`; `javascript`, `java-script`, and `js` display as `JavaScript`; unknown nonblank values fall back to safe title-cased labels. Details pages render the language as a metadata chip, and the built-in search workspace exposes it as a `Language` facet using `?language=` query state. The search index also includes language search terms so queries such as `javascript`, `js`, `csharp`, `CSharp`, `C-Sharp`, and `C#` can find generated API docs.
+
+This language tag describes the source language of extracted API documentation. It is not a locale signal and it is not the same as the `data-doc-code-language` badge used by Markdown code fences.
 
 ## Syntax-highlighted code blocks
 
@@ -263,6 +272,46 @@ An all-failed snapshot logs one critical message when that snapshot is generated
 `GetHarvestHealthAsync(cancellationToken)` observes caller cancellation only while the caller waits for the memoized snapshot. Canceling that wait does not cancel, poison, or evict the shared snapshot computation. A later caller can still receive the completed snapshot.
 
 Health and docs are computed from the same cached snapshot. This is deliberate: a host that reads `GetDocsAsync()` and then `GetHarvestHealthAsync()` sees health for the docs it is serving, not a second harvest with different timing or failures. Use `InvalidateCache()` when an operator explicitly asks AppSurface Docs to refresh source-backed docs.
+
+AppSurface Docs uses an absolute freshness window followed by a bounded stale-while-revalidate window of the same length. After `CacheExpirationMinutes` elapses, requests continue to receive the last good snapshot while one background harvest refreshes the cache. If that refresh succeeds, later reads use the new snapshot; if it fails, the stale snapshot remains available until the stale window ends. A cold start with no previous snapshot still waits for the initial harvest or renders the live harvest observatory.
+
+### Live Harvest Observatory
+
+AppSurface Docs starts the initial harvest in the background by default. If a user reaches a docs page before the first cached snapshot is ready, the request waits briefly and then renders a live harvest observatory instead of holding a blank or apparently hung page. The observatory uses RazorWire Server-Sent Events with replay enabled, so late subscribers receive the latest retained harvest state and continue with live updates.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "StartupMode": "Background",
+      "InitialRequestWaitBudgetMilliseconds": 350,
+      "TestingPreHarvestDelayMilliseconds": 0,
+      "TestingDelayPerHarvesterMilliseconds": 0,
+      "TestingDelayPerDocumentMilliseconds": 0
+    }
+  }
+}
+```
+
+`AppSurfaceDocs:Harvest:StartupMode` accepts:
+
+- `Background`: default. Startup schedules the memoized initial harvest and returns immediately unless strict failure mode is enabled.
+- `Blocking`: startup waits for the initial harvest to complete.
+- `Disabled`: startup does not pre-warm the docs cache; the first docs request starts harvest work.
+
+`InitialRequestWaitBudgetMilliseconds` controls how long a docs request waits for the initial harvest before showing the observatory. The default is `350`. Set it to `0` when you want the observatory immediately for any pending first harvest. Set it higher when a host usually harvests quickly and you prefer to avoid showing the progress page for sub-second starts.
+
+The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The defaults are `0`. Set `TestingPreHarvestDelayMilliseconds` to pause after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` to pause each active harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` to publish each harvester's document count one document at a time. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the observatory visibly unfold. Do not enable these for production traffic.
+
+When the harvest completes successfully, AppSurface Docs reloads the current app-relative URL after the configured completion delay. The reload lets the server render the originally requested docs page, including any permanent redirect for source-shaped Markdown routes. The completion view also renders a plain return link so no-JavaScript users can continue manually.
+
+The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints. In development it is exposed by default; non-development hosts must opt in with `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` if users should see the live progress stream.
+
+Pitfalls:
+
+- Do not put secrets, absolute filesystem paths, or raw exception details in harvester diagnostics. The observatory uses the same redacted diagnostic shape as harvest health.
+- Do not rely on file-level progress counts in v1. The current stream reports harvester-level progress and aggregate document counts.
+- Do not use `StartupMode=Disabled` for hosts where first navigation latency matters; that preserves the old lazy-harvest behavior.
 
 ### Operator Diagnostics Routes
 
@@ -435,6 +484,44 @@ AppSurface Docs keeps four package-defined default exclusion groups active when 
 | `CSharpExampleSource` | Excludes C# source under `examples` so sample applications do not become API reference by accident. Markdown in `examples` remains eligible. |
 
 Use `DefaultExclusions:DisabledGroups` when an entire default group should stop applying for a scope. Use `DefaultExclusions:AllowGlobs` when only selected files inside a default group should come back. Group IDs are the names above, not enum ordinals; numeric values such as `0` fail validation instead of mapping to a group. Allows are group-aware: if a path matches both `HiddenDirectories` and `BuildOutput`, it needs an allow for both groups, or one of the groups must be disabled. Configured excludes still win after an allow.
+
+AppSurface Docs also reads repository-owned Git `.gitignore` files by default. This keeps legacy package-manager and generated trees such as `bower_components/`, `dist/`, and `build/` from becoming public docs just because they contain Markdown, C#, or JavaScript files. The ignore policy is loaded lazily for each docs snapshot, follows nested `.gitignore` files only when traversal reaches that directory, and prunes obvious ignored subtrees without enumerating all their files.
+
+VCS ignore rules sit after AppSurface include boundaries and default exclusion groups, but before configured AppSurface excludes. Git negation can only neutralize a previous Git ignore rule. `VcsIgnore:AllowGlobs` can also restore selected VCS-ignored candidates, but those allow globs use AppSurface's normal repository-relative glob syntax, not Git-ignore syntax, and cannot override AppSurface default exclusions or configured excludes.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Paths": {
+        "VcsIgnore": {
+          "AllowGlobs": [
+            "docs/generated-public/**"
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+Disable VCS ignore integration only when the host intentionally wants pre-existing AppSurface behavior:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Paths": {
+        "VcsIgnore": {
+          "Enabled": false
+        }
+      }
+    }
+  }
+}
+```
+
+AppSurface Docs reads only repository-owned `.gitignore` files under the resolved source root. It does not read `.git/info/exclude`, global Git excludes, or machine-local ignore state, so source-backed docs are reproducible in CI, static export, and packaged hosts. Tracked files that match `.gitignore` are still ignored by AppSurface Docs; use `VcsIgnore:AllowGlobs` for intentional public docs under ignored paths.
 
 Traversal uses the same policy for Markdown and C#. AppSurface Docs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file. The root `LICENSE` file is a Markdown candidate, but when global includes are configured it still needs to match an include such as `LICENSE`.
 
@@ -694,7 +781,7 @@ Pitfalls:
   - Must be an app-root path such as `/docs` or an application-relative path such as `~/docs`.
   - Remote URLs, relative paths, query strings, fragments, protocol-relative URLs, and unsafe schemes are rejected during startup validation.
 - `AppSurfaceDocs:Identity:Logo:Path`
-  - Optional logo image path rendered beside the display name in the built-in docs chrome.
+  - Optional logo image path rendered beside the display name in the built-in docs chrome and as the root landing page hero mark.
   - Must be an app-root path such as `/branding/docs-logo.svg` or an application-relative path such as `~/branding/docs-logo.svg`.
   - This is a browser URL path, not a filesystem path.
   - Remote URLs, relative paths, query strings, fragments, backslashes, and traversal segments are rejected.
@@ -786,6 +873,14 @@ static web assets.
   - Defaults to an empty dictionary.
   - Maps a default group ID to repository-relative globs that opt matching files back into that group.
   - Allows are group-aware. A path matching multiple enabled groups needs an allow for every matched group, and configured excludes still win afterward.
+- `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled`
+  - Defaults to `true`.
+  - Reads repository-owned Git `.gitignore` files under the resolved source root during each cached docs snapshot.
+  - Does not read `.git/info/exclude`, global Git excludes, or machine-local ignore state.
+- `AppSurfaceDocs:Harvest:Paths:VcsIgnore:AllowGlobs`
+  - Defaults to an empty array.
+  - Uses AppSurface repository-relative glob syntax, not Git-ignore syntax.
+  - Restores selected candidates excluded only by VCS ignore rules; AppSurface default exclusions and configured excludes still win.
 - `AppSurfaceDocs:Harvest:Markdown:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Defaults mirror the global path option shape, but apply only to Markdown candidates and the root `LICENSE` candidate.
   - Source-specific includes are evaluated after global includes, so they narrow Markdown rather than widening it.
@@ -978,6 +1073,10 @@ The version catalog is the release-level source of truth for version routing and
 
 Each `exactTreePath` directory is treated as a prebuilt static subtree for one exact release. It is usually exported from the stable `/docs` surface, and at minimum it must include:
 
+- `.appsurface-docs-route-manifest.json` at the tree root for new exports
+  - The hidden manifest freezes the docs-root-relative canonical route and alias graph that existed when the release was exported.
+  - It stores route identity only. It does not store `PublicOrigin`, PathBase, `RouteRootPath`, exact-version mount roots, or absolute URLs.
+  - Missing manifests are supported for legacy archives; malformed manifests disable archive alias recovery for that release without disabling normal file serving.
 - `index.html` at the tree root
 - `search.html` at the tree root
   - The shell should contain useful server-rendered anchors before JavaScript runs: starter query URLs and browse recovery links for the strongest available docs entry points.
@@ -991,7 +1090,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `minisearch.min.js` at the tree root
 - any section, detail, partial, and asset routes that belong to the exported docs surface for that release
 
-AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. Exporters should validate `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
 
 ### Archive ordering
 
@@ -1012,6 +1111,7 @@ AppSurface Docs does not regenerate these trees at request time. It resolves ext
 - Do not point `recommendedVersion` at a hidden or broken release tree.
 - Do not assume `AppSurfaceDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
+- Do not hand-edit `.appsurface-docs-route-manifest.json` to add aliases. New exports validate duplicate aliases, aliases that collide with canonical routes, and aliases that equal their own canonical route. Runtime ignores ambiguous aliases from hand-edited or legacy manifests and keeps serving normal files.
 
 `AppSurfaceDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
 
@@ -1538,9 +1638,10 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `publicSectionLabel` for the reader-facing section label
 - `isSectionLanding` for authored section landing entry points
 - `entryPoints` for namespace-intro entry-point labels, summaries, targets, hrefs, and keywords when an intro source is consumed into a generated namespace page
+- `language` and `languageLabel` for generated API documentation language facets and result chrome
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
-Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, and namespace `entryPoints` as first-class MiniSearch fields with field-specific boosts. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
+Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, namespace `entryPoints`, and generated API `languageSearchText` as first-class MiniSearch fields with field-specific boosts. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
 
 When authored metadata uses `release-note` or `release-notes`, AppSurface Docs keeps the raw `pageType` metadata value in the payload but emits `pageTypeLabel = "Release"` and `pageTypeVariant = "release"` so built-in and custom clients can present release pages consistently.
 

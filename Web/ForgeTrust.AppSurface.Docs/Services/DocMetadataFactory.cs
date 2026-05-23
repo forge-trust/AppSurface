@@ -133,6 +133,7 @@ internal static class DocMetadataFactory
             AudienceIsDerived = false,
             Component = DeriveComponentFromNamespace(namespaceName),
             ComponentIsDerived = false,
+            CodeLanguage = "csharp",
             NavGroup = DocPublicSectionCatalog.GetLabel(DocPublicSection.ApiReference),
             NavGroupIsDerived = false,
             HideFromPublicNav = isInternalNamespace,

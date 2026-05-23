@@ -54,16 +54,49 @@ public class CSharpDocHarvester : IDocHarvester
         string rootPath,
         CancellationToken cancellationToken = default)
     {
+        return await HarvestAsync(rootPath, _pathPolicy, cancellationToken);
+    }
+
+    /// <summary>
+    /// Collects XML documentation with the repository-scoped path policy captured for the current aggregation pass.
+    /// </summary>
+    /// <param name="context">The harvest context containing the repository root and active path policy snapshot.</param>
+    /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
+    /// <returns>A collection of generated C# API documentation nodes.</returns>
+    /// <remarks>
+    /// This overload is used by the aggregator so VCS ignore exclusions are applied consistently across traversal and
+    /// file inclusion checks. Custom harvesters continue to use the public <see cref="HarvestAsync(string, CancellationToken)"/>
+    /// contract.
+    /// </remarks>
+    internal async Task<IReadOnlyList<DocNode>> HarvestAsync(
+        DocHarvestContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (GetType() != typeof(CSharpDocHarvester))
+        {
+            return await ((IDocHarvester)this).HarvestAsync(context.RepositoryRoot, cancellationToken);
+        }
+
+        return await HarvestAsync(context.RepositoryRoot, context.PathPolicy, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<DocNode>> HarvestAsync(
+        string rootPath,
+        IHarvestPathPolicy pathPolicy,
+        CancellationToken cancellationToken)
+    {
         var nodes = new List<DocNode>();
         var stubNodes = new List<DocNode>();
         var namespacePages = new Dictionary<string, NamespaceDocPage>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in EnumerateEligibleCSharpFiles(rootPath, cancellationToken))
+        foreach (var file in EnumerateEligibleCSharpFiles(rootPath, pathPolicy, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var relativePath = Path.GetRelativePath(rootPath, file)
                 .Replace('\\', '/'); // Normalize to forward slashes for URLs
-            if (!_pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.CSharp))
+            if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.CSharp))
             {
                 continue;
             }
@@ -282,9 +315,10 @@ public class CSharpDocHarvester : IDocHarvester
 
     private IEnumerable<string> EnumerateEligibleCSharpFiles(
         string rootPath,
+        IHarvestPathPolicy pathPolicy,
         CancellationToken cancellationToken)
     {
-        foreach (var file in _pathPolicy.EnumerateCandidateFiles(
+        foreach (var file in pathPolicy.EnumerateCandidateFiles(
                      rootPath,
                      AppSurfaceDocsHarvestSourceKind.CSharp,
                      "*.cs",

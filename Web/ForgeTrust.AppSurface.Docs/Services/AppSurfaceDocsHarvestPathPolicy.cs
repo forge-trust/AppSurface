@@ -7,12 +7,13 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </summary>
 /// <remarks>
 /// Policy order is intentionally fixed: built-in source candidates are checked first, then global includes,
-/// source-specific includes, default exclusion groups and their allows, global excludes, and source-specific excludes.
-/// Default groups protect build output, hidden directories, test projects, and C# source under <c>examples</c>. Directory
-/// pruning uses the same defaults and clear <c>/**</c> subtree excludes, but keeps a default-excluded subtree only when a
-/// configured group allow can match that directory or one of its descendants.
+/// source-specific includes, default exclusion groups and their allows, repository VCS ignore rules when a snapshot
+/// supplies them, global excludes, and source-specific excludes. Default groups protect build output, hidden directories,
+/// test projects, and C# source under <c>examples</c>. Directory pruning uses the same defaults and clear <c>/**</c>
+/// subtree excludes, but keeps a default-excluded subtree only when a configured group allow can match that directory or
+/// one of its descendants.
 /// </remarks>
-internal sealed class AppSurfaceDocsHarvestPathPolicy
+internal sealed class AppSurfaceDocsHarvestPathPolicy : IHarvestPathPolicy
 {
     private static readonly string[] TestProjectSuffixes =
     [
@@ -94,6 +95,14 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
     public AppSurfaceDocsHarvestPathDecision Evaluate(
         string relativePath,
         AppSurfaceDocsHarvestSourceKind sourceKind)
+    {
+        return Evaluate(relativePath, sourceKind, vcsIgnoreEvaluator: null);
+    }
+
+    internal AppSurfaceDocsHarvestPathDecision Evaluate(
+        string relativePath,
+        AppSurfaceDocsHarvestSourceKind sourceKind,
+        Func<string, AppSurfaceDocsHarvestSourceKind, AppSurfaceDocsHarvestVcsIgnoreMatch?>? vcsIgnoreEvaluator)
     {
         ArgumentNullException.ThrowIfNull(relativePath);
 
@@ -225,6 +234,37 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
             includeCode = AppSurfaceDocsHarvestPathDecisionCode.IncludedByDefaultGroupAllow;
         }
 
+        if (vcsIgnoreEvaluator is not null)
+        {
+            var vcsMatch = vcsIgnoreEvaluator(normalizedPath, sourceKind);
+            if (vcsMatch is not null)
+            {
+                var traceCode = vcsMatch.Ignored
+                    ? AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore
+                    : AppSurfaceDocsHarvestPathDecisionCode.MatchedVcsIgnoreNegation;
+                trace.Add(
+                    new AppSurfaceDocsHarvestPathRuleTrace(
+                        traceCode,
+                        "vcs-ignore:git",
+                        vcsMatch.Pattern,
+                        null,
+                        Matched: true,
+                        vcsMatch.SourcePath,
+                        vcsMatch.LineNumber));
+
+                if (vcsMatch.Ignored)
+                {
+                    return CreateDecision(
+                        included: false,
+                        normalizedPath,
+                        sourceKind,
+                        AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore,
+                        trace,
+                        matchedDefaultGroups.Select(group => group.ToString()).ToArray());
+                }
+            }
+        }
+
         if (_globalExcludeMatcher.HasPatterns)
         {
             var matchedPattern = _globalExcludeMatcher.MatchFirst(normalizedPath);
@@ -279,7 +319,7 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy
     }
 
     /// <summary>
-    /// Returns whether <paramref name="relativePath"/> is included by <see cref="Evaluate"/>.
+    /// Returns whether <paramref name="relativePath"/> is included by the path evaluator.
     /// </summary>
     public bool ShouldIncludeFilePath(
         string relativePath,
