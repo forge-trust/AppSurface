@@ -2464,15 +2464,7 @@ public class DocAggregator
         {
             document = XDocument.Load(projectFile);
         }
-        catch (IOException)
-        {
-            yield break;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            yield break;
-        }
-        catch (System.Xml.XmlException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
             yield break;
         }

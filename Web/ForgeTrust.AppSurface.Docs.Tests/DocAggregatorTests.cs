@@ -4273,6 +4273,39 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldWarnAndHideNamespaceMd_WhenColocatedProjectNameIsBlank()
+    {
+        var repositoryRoot = CreateTempRepositoryRoot();
+        try
+        {
+            var projectDirectory = Path.Join(repositoryRoot, "Web", "Package");
+            Directory.CreateDirectory(projectDirectory);
+            await File.WriteAllTextAsync(Path.Join(projectDirectory, ".csproj"), "<Project />");
+            var harvestedDocs = new List<DocNode>
+            {
+                new("RazorWire", "Namespaces/ForgeTrust.RazorWire", "<section class='doc-type'>Generated API body</section>"),
+                new("Namespace", "Web/Package/NAMESPACE.md", "<p>Namespace intro.</p>")
+            };
+            var harvester = A.Fake<IDocHarvester>();
+            A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+            var aggregator = CreateAggregatorWithRepositoryRoot(harvester, repositoryRoot);
+
+            var docs = await aggregator.GetDocsAsync();
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            Assert.DoesNotContain(docs, d => d.Path == "Web/Package/NAMESPACE.md");
+            Assert.Contains(
+                health.Diagnostics,
+                diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.NamespaceIntroTargetMissing
+                              && diagnostic.Severity == DocHarvestDiagnosticSeverity.Warning);
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ResolvePublicRouteAsync_ShouldRedirectConsumedNamespaceReadmeRoutes_ToNamespacePage()
     {
         var harvestedDocs = new List<DocNode>
