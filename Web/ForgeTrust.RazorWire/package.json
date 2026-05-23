@@ -1,5 +1,5 @@
 {
-  "name": "forge-trust-razorwire",
+  "name": "@forge-trust/razorwire-assets",
   "private": true,
   "type": "module",
   "scripts": {

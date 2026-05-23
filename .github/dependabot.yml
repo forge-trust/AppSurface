@@ -1,0 +1,49 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/New_York
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:15"
+      timezone: America/New_York
+    groups:
+      dotnet-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: nuget
+    directory: /benchmarks
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:30"
+      timezone: America/New_York
+    groups:
+      benchmark-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /Web/ForgeTrust.RazorWire
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:45"
+      timezone: America/New_York
+    groups:
+      razorwire-npm-dependencies:
+        patterns:
+          - "*"

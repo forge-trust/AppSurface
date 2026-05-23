@@ -27,6 +27,25 @@ jobs:
           dotnet-version: |
             10.0.x
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.1.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: Web/pnpm-lock.yaml
+
+      - name: Verify web assets
+        run: |
+          pnpm --dir Web install --frozen-lockfile
+          pnpm --dir Web run assets:typecheck
+          pnpm --dir Web run assets:test
+          pnpm --dir Web run assets:verify
+
       - name: Restore with isolated NuGet cache
         env:
           NUGET_PACKAGES: ${{ runner.temp }}/nuget-packages

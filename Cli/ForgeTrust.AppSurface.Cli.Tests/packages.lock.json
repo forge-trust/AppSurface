@@ -409,8 +409,10 @@
         "type": "Project",
         "dependencies": {
           "CliFx": "[2.3.6, )",
+          "CliWrap": "[3.10.1, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Docs.Standalone": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.RazorWire.Cli": "[0.1.0, )"
         }
       },
@@ -497,12 +499,6 @@
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
         }
       },
-      "Acornima": {
-        "type": "CentralTransitive",
-        "requested": "[1.6.1, )",
-        "resolved": "1.6.1",
-        "contentHash": "EB2vFgpNar8DrC+KLJv8MG6YIU2xqNyrq8GpL69vectPCXoaq6XyZGb/VHbfPVYul7dscO1Mw30eblrxs05RHg=="
-      },
       "forgetrust.razorwire.cli": {
         "type": "Project",
         "dependencies": {
@@ -511,6 +507,12 @@
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )"
         }
+      },
+      "Acornima": {
+        "type": "CentralTransitive",
+        "requested": "[1.6.1, )",
+        "resolved": "1.6.1",
+        "contentHash": "EB2vFgpNar8DrC+KLJv8MG6YIU2xqNyrq8GpL69vectPCXoaq6XyZGb/VHbfPVYul7dscO1Mw30eblrxs05RHg=="
       },
       "CliFx": {
         "type": "CentralTransitive",

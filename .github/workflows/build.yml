@@ -21,20 +21,25 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
           dotnet-version: |
             10.0.x
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.1.3
+
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: Web/ForgeTrust.RazorWire/package-lock.json
+          cache: pnpm
+          cache-dependency-path: Web/pnpm-lock.yaml
 
       - name: Verify generated package chooser
         run: |
@@ -44,13 +49,15 @@ jobs:
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj -- verify
 
+      - name: Verify web assets
+        run: |
+          pnpm --dir Web install --frozen-lockfile
+          pnpm --dir Web run assets:typecheck
+          pnpm --dir Web run assets:test
+          pnpm --dir Web run assets:verify
+
       - name: Build project
         run: dotnet build --configuration Release
-
-      - name: Run RazorWire runtime tests
-        run: |
-          npm ci --prefix Web/ForgeTrust.RazorWire
-          npm test --prefix Web/ForgeTrust.RazorWire
 
       - name: Run tests
         run: |
@@ -81,15 +88,27 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
           dotnet-version: |
             10.0.x
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.1.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: Web/pnpm-lock.yaml
 
       - name: Verify generated package chooser
         run: |
@@ -98,6 +117,13 @@ jobs:
       - name: Verify generated Markdown snippets
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj -- verify
+
+      - name: Verify web assets
+        run: |
+          pnpm --dir Web install --frozen-lockfile
+          pnpm --dir Web run assets:typecheck
+          pnpm --dir Web run assets:test
+          pnpm --dir Web run assets:verify
 
       - name: Build AppSurface CLI (Release)
         run: |
@@ -128,7 +154,7 @@ jobs:
 
       - name: Upload Pages artifact
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: ${{ runner.temp }}/appsurface-docs-pages
 
@@ -146,4 +172,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
