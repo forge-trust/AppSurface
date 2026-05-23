@@ -2,6 +2,7 @@ using System.Text;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.FileProviders.Physical;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -133,6 +134,175 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         Assert.True(await handler.TryHandleAsync(request));
         Assert.Equal("text/html", request.Response.ContentType);
         Assert.Contains("guide page", ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRedirectFrozenManifestAliases_ToMountedCanonicalRoutes()
+    {
+        var tree = CreatePublishedTree("release-with-frozen-manifest");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "packages/README.md",
+                  "canonicalRoutePath": "packages",
+                  "recoveryAliases": ["packages/README.md", "packages/README.md.html"],
+                  "declaredAliases": ["legacy/package"]
+                }
+              ]
+            }
+            """);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md", pathBase: "/base");
+        request.Request.QueryString = new QueryString("?view=compact");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status301MovedPermanently, request.Response.StatusCode);
+        Assert.Equal("/base/docs/v/1.2.3/packages?view=compact", request.Response.Headers.Location);
+        Assert.Equal(string.Empty, ReadBody(request));
+
+        var declaredAliasRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/legacy/package");
+
+        Assert.True(await handler.TryHandleAsync(declaredAliasRequest));
+        Assert.Equal("/docs/v/1.2.3/packages", declaredAliasRequest.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRedirectFrozenManifestAliases_ForRootMountedArchives()
+    {
+        var tree = CreatePublishedTree("root-mounted-frozen-manifest");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "packages/README.md",
+                  "canonicalRoutePath": "packages",
+                  "recoveryAliases": ["packages/README.md"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var handler = CreateHandler(tree, "/", previewRootPath: "/next", routeRootPath: "/");
+        var request = CreateContext(HttpMethods.Get, "/packages/README.md");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status301MovedPermanently, request.Response.StatusCode);
+        Assert.Equal("/packages", request.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldPlaceQueryBeforeFrozenCanonicalFragments()
+    {
+        var tree = CreatePublishedTree("fragment-frozen-manifest");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "guide.md#advanced",
+                  "canonicalRoutePath": "guide#advanced",
+                  "recoveryAliases": ["guide.md"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/guide.md");
+        request.Request.QueryString = new QueryString("?view=compact");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status301MovedPermanently, request.Response.StatusCode);
+        Assert.Equal("/docs/v/1.2.3/guide?view=compact#advanced", request.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldNotRedirectHiddenFrozenManifestAliases()
+    {
+        var tree = CreatePublishedTree("hidden-frozen-manifest-alias");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": ".drafts/guide.md",
+                  "canonicalRoutePath": "guide",
+                  "recoveryAliases": [".drafts/guide.md"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/.drafts/guide.md");
+
+        Assert.False(await handler.TryHandleAsync(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldIgnoreAmbiguousFrozenManifestAliases_AndContinueServingFiles()
+    {
+        var tree = CreatePublishedTree("ambiguous-frozen-manifest");
+        File.WriteAllText(Path.Combine(tree, "legacy.html"), "<!DOCTYPE html><html><body>legacy page</body></html>");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "first.md",
+                  "canonicalRoutePath": "first",
+                  "recoveryAliases": ["legacy"],
+                  "declaredAliases": []
+                },
+                {
+                  "sourcePath": "second.md",
+                  "canonicalRoutePath": "second",
+                  "recoveryAliases": ["legacy"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/legacy");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
+        Assert.Contains("legacy page", ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldDisableFrozenAliasRecovery_WhenManifestIsMalformed()
+    {
+        var tree = CreatePublishedTree("malformed-frozen-manifest");
+        Directory.CreateDirectory(Path.Combine(tree, "packages"));
+        File.WriteAllText(Path.Combine(tree, "packages", "README.md.html"), "<!DOCTYPE html><html><body>legacy artifact</body></html>");
+        WriteFrozenManifest(tree, "{");
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var aliasRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md");
+        var manifestRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/.appsurface-docs-route-manifest.json");
+
+        Assert.True(await handler.TryHandleAsync(aliasRequest));
+        Assert.Equal(StatusCodes.Status200OK, aliasRequest.Response.StatusCode);
+        Assert.Contains("legacy artifact", ReadBody(aliasRequest));
+        Assert.False(await handler.TryHandleAsync(manifestRequest));
+
+        var fileFallbackRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md.html");
+        Assert.True(await handler.TryHandleAsync(fileFallbackRequest));
+        Assert.Contains("legacy artifact", ReadBody(fileFallbackRequest));
     }
 
     [Fact]
@@ -520,11 +690,16 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         string previewRootPath = "/docs/next",
         string routeRootPath = DocsUrlBuilder.DocsEntryPath)
     {
-        var provider = new PhysicalFileProvider(treePath);
+        var provider = new PhysicalFileProvider(treePath, ExclusionFilters.None);
         _disposables.Add(provider);
 
         return CreateHandler(
-            [new AppSurfaceDocsPublishedTreeMount(mountRootPath, provider)],
+            [
+                new AppSurfaceDocsPublishedTreeMount(
+                    mountRootPath,
+                    provider,
+                    new AppSurfaceDocsFrozenRouteManifestCache(provider, treePath))
+            ],
             previewRootPath,
             routeRootPath);
     }
@@ -564,6 +739,11 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
 
         return root;
+    }
+
+    private static void WriteFrozenManifest(string treePath, string json)
+    {
+        File.WriteAllText(Path.Combine(treePath, ".appsurface-docs-route-manifest.json"), json);
     }
 
     private static DefaultHttpContext CreateContext(string method, string requestPath, string? pathBase = null)

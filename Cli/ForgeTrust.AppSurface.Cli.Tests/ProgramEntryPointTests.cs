@@ -671,6 +671,7 @@ public sealed class ProgramEntryPointTests
     public async Task AppSurfaceDocsExportContextConfigurator_Should_Register_RouteManifest_Seeds_And_Redirects()
     {
         using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
         var docs = new[]
         {
             new DocNode("Package", "packages/README.md", "<p>Package</p>"),
@@ -686,7 +687,7 @@ public sealed class ProgramEntryPointTests
         };
         using var host = new TrackingHost(
             configureServices: services => AddDocsAggregatorServices(services, repository.Path, docs));
-        var context = new ExportContext("dist", seedRoutesPath: null, baseUrl: "http://127.0.0.1:51234");
+        var context = new ExportContext(output.Path, seedRoutesPath: null, baseUrl: "http://127.0.0.1:51234");
 
         await new AppSurfaceDocsExportContextConfigurator().ConfigureAsync(host, context, CancellationToken.None);
 
@@ -708,6 +709,13 @@ public sealed class ProgramEntryPointTests
             context.RedirectArtifacts,
             artifact => artifact.AliasRoute == "/docs/legacy/intro"
                         && artifact.CanonicalRoute == "/docs/start-here/intro");
+        var frozenManifest = await File.ReadAllTextAsync(Path.Combine(output.Path, ".appsurface-docs-route-manifest.json"));
+        Assert.Contains("\"schema\": \"appsurface-docs-route-manifest-v1\"", frozenManifest);
+        Assert.Contains("\"canonicalRoutePath\": \"packages\"", frozenManifest);
+        Assert.Contains("\"packages/README.md\"", frozenManifest);
+        Assert.Contains("\"packages/README.md.html\"", frozenManifest);
+        Assert.Contains("\"declaredAliases\": [", frozenManifest);
+        Assert.Contains("\"legacy/intro\"", frozenManifest);
     }
 
     [Fact]

@@ -826,6 +826,7 @@ public class AppSurfaceDocsWebModuleTests
             Assert.Equal("/docs/v/1.2.3", mounts[0].MountRootPath);
             Assert.Equal("/docs", mounts[1].MountRootPath);
             Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
+            Assert.Same(mounts[0].FrozenRouteManifest, mounts[1].FrozenRouteManifest);
         }
         finally
         {
@@ -887,6 +888,7 @@ public class AppSurfaceDocsWebModuleTests
             Assert.Equal("/foo/bar/v/1.2.3", mounts[0].MountRootPath);
             Assert.Equal("/foo/bar", mounts[1].MountRootPath);
             Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
+            Assert.Same(mounts[0].FrozenRouteManifest, mounts[1].FrozenRouteManifest);
         }
         finally
         {
