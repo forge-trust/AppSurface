@@ -1,0 +1,16 @@
+{
+  "name": "@forge-trust/appsurface-docs-assets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs",
+    "build": "node scripts/build.mjs",
+    "verify-generated": "node scripts/verify-generated.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.0",
+    "minisearch": "7.2.0",
+    "typescript": "5.9.3"
+  }
+}

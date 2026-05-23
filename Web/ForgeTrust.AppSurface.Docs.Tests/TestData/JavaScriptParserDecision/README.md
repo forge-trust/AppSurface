@@ -94,8 +94,8 @@ dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Test
 | Fixture/file | Size | Parse time | Notes |
 | --- | ---: | ---: | --- |
 | `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js` | 41,380 bytes | 13.434 ms | real RazorWire dogfood file; parsed successfully with 4,380 AST nodes and 2 block comments |
-| `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/search-client.js` | 68,314 bytes | 4.560 ms | larger AppSurface Docs browser asset; parsed successfully with 9,460 AST nodes |
-| `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/minisearch.min.js` | 944 bytes | skipped | should stay excluded by `*.min.js` by default |
+| `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/outline-client.js` | current authored asset size | measured by test output | AppSurface Docs authored browser asset; generated/minified `search-client.js` is no longer a parser dogfood file |
+| `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/minisearch.min.js` | current generated asset size | skipped | should stay excluded by `*.min.js` by default |
 | `malformed.js` | 107 bytes | 0.450 ms | failure path; catchable parse exception |
 | synthetic large public-doclet fixture | 117,965 bytes | 5.563 ms | 750 public function doclets; parsed successfully with 4,503 AST nodes and 750 block comments |
 
@@ -115,4 +115,4 @@ The parser can accept more JavaScript than AppSurface Docs v1 should harvest. Th
 
 The first default should skip files larger than 256 KiB and continue excluding `*.min.js` by default.
 
-That threshold covers the current real dogfood files measured by this spike, leaves headroom above `search-client.js`, and avoids accidentally parsing large bundles before the harvester has production diagnostics and configuration.
+That threshold covers the current real dogfood files measured by this spike and avoids accidentally parsing generated bundles before the harvester has production diagnostics and configuration. Generated `wwwroot/docs/search-client.js` is intentionally excluded from parser-cost dogfood after the Docs asset pipeline moved authored source to TypeScript.

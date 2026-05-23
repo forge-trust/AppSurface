@@ -181,15 +181,15 @@ public class AppSurfaceDocsViewsTests
     {
         var searchClient = ReadSearchClientMarkup();
 
-        Assert.Contains("'pageTypeLabel'", searchClient);
-        Assert.Contains("'pageTypeVariant'", searchClient);
+        Assert.Contains("pageTypeLabel", searchClient);
+        Assert.Contains("pageTypeVariant", searchClient);
         Assert.Contains("function renderPageTypeBadge(item)", searchClient);
         Assert.Contains("docs-search-option-title-row", searchClient);
         Assert.Contains("docs-page-badge", searchClient);
-        Assert.Contains("function normalizePageTypeAlias(value)", searchClient);
+        Assert.Contains("export function normalizePageTypeAlias(value: any)", searchClient);
         Assert.Contains("function isPageTypeInGroup(doc, group)", searchClient);
         Assert.Contains("function getPageTypeDisplayLabel(doc)", searchClient);
-        Assert.Contains("function createSearchResultArticle(doc, queryTokens, options = {})", searchClient);
+        Assert.Contains("function createSearchResultArticle(doc, queryTokens, options: any = {})", searchClient);
         Assert.Contains("const link = createElement('a', 'docs-search-result-link');", searchClient);
         Assert.Contains("function createSearchResultLinkLabel(doc)", searchClient);
         Assert.Contains("link.setAttribute('aria-label', createSearchResultLinkLabel(doc));", searchClient);
@@ -3886,15 +3886,22 @@ public class AppSurfaceDocsViewsTests
     private static string ReadSearchClientMarkup()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var searchClientPath = Path.Combine(
+        var searchClientPath = Path.Join(
             repoRoot,
             "Web",
             "ForgeTrust.AppSurface.Docs",
-            "wwwroot",
-            "docs",
-            "search-client.js");
+            "assets",
+            "src",
+            "search-client.ts");
+        var searchCorePath = Path.Join(
+            repoRoot,
+            "Web",
+            "ForgeTrust.AppSurface.Docs",
+            "assets",
+            "src",
+            "search-core.ts");
 
-        return File.ReadAllText(searchClientPath);
+        return File.ReadAllText(searchClientPath) + Environment.NewLine + File.ReadAllText(searchCorePath);
     }
 
     private static string ReadOutlineClientMarkup()

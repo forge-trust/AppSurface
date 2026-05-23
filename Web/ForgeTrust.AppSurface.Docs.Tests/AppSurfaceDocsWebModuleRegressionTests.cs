@@ -381,7 +381,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     var previewAssetBody = await previewAssetResponse.Content.ReadAsStringAsync();
                     Assert.Equal(HttpStatusCode.OK, previewAssetResponse.StatusCode);
                     Assert.DoesNotContain("window.__releaseTree = true;", previewAssetBody);
-                    Assert.Contains("const rawConfig = window.__appSurfaceDocsConfig || {};", previewAssetBody);
+                    Assert.Contains("Generated from assets/src/search-client.ts", previewAssetBody);
+                    Assert.Contains("__appSurfaceDocsConfig", previewAssetBody);
 
                     using var exactVersionResponse = await client.GetAsync("/docs/v/1.2.3");
                     var exactVersionHtml = await exactVersionResponse.Content.ReadAsStringAsync();
@@ -928,7 +929,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     var previewAssetBody = await previewAssetResponse.Content.ReadAsStringAsync();
                     Assert.Equal(HttpStatusCode.OK, previewAssetResponse.StatusCode);
                     Assert.DoesNotContain("window.__releaseTree = true;", previewAssetBody);
-                    Assert.Contains("const rawConfig = window.__appSurfaceDocsConfig || {};", previewAssetBody);
+                    Assert.Contains("Generated from assets/src/search-client.ts", previewAssetBody);
+                    Assert.Contains("__appSurfaceDocsConfig", previewAssetBody);
 
                     using var previewCssResponse = await client.GetAsync("/docs/preview/search.css");
                     var previewCssBody = await previewCssResponse.Content.ReadAsStringAsync();

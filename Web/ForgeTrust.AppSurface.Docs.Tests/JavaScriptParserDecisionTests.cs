@@ -123,8 +123,8 @@ public sealed class JavaScriptParserDecisionTests
                 PathUnder(repoRoot, "Web", "ForgeTrust.RazorWire", "wwwroot", "razorwire", "razorwire.js"),
                 expectedSuccess: true),
             ParseCostCase.RealFile(
-                "search-client.js",
-                PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "docs", "search-client.js"),
+                "outline-client.js",
+                PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "wwwroot", "docs", "outline-client.js"),
                 expectedSuccess: true),
             ParseCostCase.SkippedFile(
                 "minisearch.min.js",
@@ -184,7 +184,9 @@ public sealed class JavaScriptParserDecisionTests
         var referencingProjects = FindProjectsReferencingPackage(repoRoot, "Acornima");
         Assert.Contains("Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj", referencingProjects);
         Assert.Contains("Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj", referencingProjects);
-        Assert.Equal(2, referencingProjects.Count);
+        Assert.DoesNotContain(
+            referencingProjects,
+            project => !project.StartsWith("Web/ForgeTrust.AppSurface.Docs", StringComparison.Ordinal));
 
         var notices = File.ReadAllText(PathUnder(repoRoot, "Web", "ForgeTrust.AppSurface.Docs", "THIRD-PARTY-NOTICES.md"));
         Assert.Contains("Acornima", notices, StringComparison.Ordinal);
@@ -251,7 +253,8 @@ public sealed class JavaScriptParserDecisionTests
             .EnumerateFiles(repoRoot, "*.csproj", SearchOption.AllDirectories)
             .Where(static path =>
                 !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                && !path.Contains($"{Path.DirectorySeparatorChar}.pnpm-store{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .Where(path => ProjectReferencesPackage(path, packageId))
             .Select(path => Path.GetRelativePath(repoRoot, path).Replace(Path.DirectorySeparatorChar, '/'))
             .Order(StringComparer.Ordinal)

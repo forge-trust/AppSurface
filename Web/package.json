@@ -1,0 +1,19 @@
+{
+  "name": "@forge-trust/web-assets",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.1.3",
+  "scripts": {
+    "assets:typecheck": "pnpm --filter @forge-trust/appsurface-docs-assets run typecheck",
+    "assets:test": "pnpm --filter @forge-trust/appsurface-docs-assets run test && pnpm --filter @forge-trust/razorwire-assets run test",
+    "assets:build": "pnpm --filter @forge-trust/appsurface-docs-assets run build",
+    "assets:verify": "pnpm --filter @forge-trust/appsurface-docs-assets run verify-generated"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.0",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "minisearch": "7.2.0"
+  }
+}
