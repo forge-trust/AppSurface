@@ -813,6 +813,8 @@ public class DocsController : Controller
         var audience = metadata?.AudienceIsDerived == true || string.IsNullOrWhiteSpace(metadata?.Audience)
             ? null
             : metadata!.Audience!.Trim();
+        var codeLanguage = DocMetadataPresentation.ResolveCodeLanguageValue(metadata?.CodeLanguage);
+        var codeLanguageLabel = DocMetadataPresentation.ResolveCodeLanguageLabel(codeLanguage);
         var currentSectionSnapshot = TryResolvePublicSection(metadata?.NavGroup, sections, out var publicSection)
             ? sections.First(section => section.Section == publicSection)
             : null;
@@ -854,6 +856,8 @@ public class DocsController : Controller
             PageTypeBadge = pageTypeBadge,
             Component = component,
             Audience = audience,
+            CodeLanguage = codeLanguage,
+            CodeLanguageLabel = codeLanguageLabel,
             Breadcrumbs = BuildBreadcrumbs(doc, currentSectionSnapshot, resolvedTitle, docs),
             PublicSection = currentSectionSnapshot?.Section,
             PublicSectionLabel = currentSectionSnapshot?.Label,

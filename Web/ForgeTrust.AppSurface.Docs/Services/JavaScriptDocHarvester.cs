@@ -702,6 +702,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         {
             PageType = pageType,
             Component = groupName,
+            CodeLanguage = "javascript",
             CanonicalSlug = $"api/javascript/{groupSlug}",
             Order = order,
             Keywords =

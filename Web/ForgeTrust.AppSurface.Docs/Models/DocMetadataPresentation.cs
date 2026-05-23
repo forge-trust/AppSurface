@@ -33,6 +33,44 @@ public sealed record DocPageTypeBadgePresentation
 public static class DocMetadataPresentation
 {
     /// <summary>
+    /// Resolves the normalized programming language value used by generated API documentation.
+    /// </summary>
+    /// <param name="codeLanguage">The raw programming language metadata value.</param>
+    /// <returns>A normalized token, or <see langword="null"/> when the value is blank.</returns>
+    public static string? ResolveCodeLanguageValue(string? codeLanguage)
+    {
+        var normalizedValue = NormalizeToken(codeLanguage);
+
+        return normalizedValue switch
+        {
+            "csharp" or "c-sharp" or "cs" => "csharp",
+            "javascript" or "java-script" or "js" => "javascript",
+            _ => normalizedValue
+        };
+    }
+
+    /// <summary>
+    /// Resolves the reader-facing programming language label used by generated API documentation.
+    /// </summary>
+    /// <param name="codeLanguage">The raw programming language metadata value.</param>
+    /// <returns>A display label such as <c>C#</c> or <c>JavaScript</c>, or <see langword="null"/> for blank values.</returns>
+    public static string? ResolveCodeLanguageLabel(string? codeLanguage)
+    {
+        var normalizedValue = ResolveCodeLanguageValue(codeLanguage);
+        if (normalizedValue is null)
+        {
+            return null;
+        }
+
+        return normalizedValue switch
+        {
+            "csharp" => "C#",
+            "javascript" => "JavaScript",
+            _ => BuildFallbackLabel(normalizedValue)
+        };
+    }
+
+    /// <summary>
     /// Resolves the built-in AppSurface Docs page-type badge presentation for a raw metadata value.
     /// </summary>
     /// <param name="pageType">The raw page-type metadata value, such as <c>guide</c>, <c>api-reference</c>, or <c>release-note</c>.</param>

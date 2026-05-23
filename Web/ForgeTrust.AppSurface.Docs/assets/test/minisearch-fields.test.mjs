@@ -17,13 +17,14 @@ test('real MiniSearch matches every AppSurface Docs search field', async () => {
       summary: 'SummaryNeedle',
       headings: ['HeadingNeedle'],
       bodyText: 'BodyNeedle',
-      entryPoints: [{ label: 'EntryNeedle' }]
+      entryPoints: [{ label: 'EntryNeedle' }],
+      language: 'js'
     })
   ];
 
   index.addAll(docs.map(createMiniSearchDocument));
 
-  for (const term of ['TitleNeedle', 'AliasNeedle', 'KeywordNeedle', 'SummaryNeedle', 'HeadingNeedle', 'BodyNeedle', 'EntryNeedle']) {
+  for (const term of ['TitleNeedle', 'AliasNeedle', 'KeywordNeedle', 'SummaryNeedle', 'HeadingNeedle', 'BodyNeedle', 'EntryNeedle', 'JavaScript']) {
     const results = index.search(term);
     assert.equal(results[0]?.id, 'field-probe', `${term} should match the indexed document`);
   }

@@ -65,6 +65,8 @@ internal sealed record DocsSearchIndexMetadata(
 /// <param name="Breadcrumbs">Authored breadcrumb labels displayed in result chrome.</param>
 /// <param name="SourcePath">Repository-relative source path retained for provenance and custom integrations.</param>
 /// <param name="EntryPoints">Namespace README entry-point terms projected for richer search consumers.</param>
+/// <param name="Language">Normalized programming language for generated API documentation.</param>
+/// <param name="LanguageLabel">Reader-facing programming language label for generated API documentation.</param>
 internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("path")] string Path,
@@ -93,7 +95,13 @@ internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("sourcePath")] string SourcePath = "",
     [property: JsonPropertyName("entryPoints")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<DocsSearchIndexEntryPoint>? EntryPoints = null);
+    IReadOnlyList<DocsSearchIndexEntryPoint>? EntryPoints = null,
+    [property: JsonPropertyName("language")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Language = null,
+    [property: JsonPropertyName("languageLabel")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? LanguageLabel = null);
 
 /// <summary>
 /// Search projection for one namespace README entry point.
@@ -1860,6 +1868,8 @@ public class DocAggregator
                         .Take(MaxHeadingsPerDocument)
                         .ToList();
                     var pageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge(d.Metadata?.PageType);
+                    var codeLanguage = DocMetadataPresentation.ResolveCodeLanguageValue(d.Metadata?.CodeLanguage);
+                    var codeLanguageLabel = DocMetadataPresentation.ResolveCodeLanguageLabel(codeLanguage);
                     var hasPublicSection = DocPublicSectionCatalog.TryResolve(d.Metadata?.NavGroup, out var publicSection);
 
                     return new DocsSearchIndexDocument(
@@ -1888,7 +1898,9 @@ public class DocAggregator
                         d.Metadata?.RelatedPages ?? [],
                         d.Metadata?.Breadcrumbs ?? [],
                         d.Path,
-                        entryPoints);
+                        entryPoints,
+                        codeLanguage,
+                        codeLanguageLabel);
                 })
             .Where(r => r is not null)
             .Select(r => r!)

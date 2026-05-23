@@ -2746,6 +2746,26 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSearchIndexPayloadAsync_ShouldProjectGeneratedCodeLanguage()
+    {
+        var harvestedDocs = new List<DocNode>
+        {
+            new(
+                "Calculator",
+                "Namespaces/ForgeTrust.Web",
+                "<section class='doc-type'>Calculator behavior.</section>",
+                Metadata: DocMetadataFactory.CreateApiReferenceMetadata("Calculator", "ForgeTrust.Web"))
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
+
+        var payload = await _aggregator.GetSearchIndexPayloadAsync();
+
+        var indexedDocument = Assert.Single(payload.Documents);
+        Assert.Equal("csharp", indexedDocument.Language);
+        Assert.Equal("C#", indexedDocument.LanguageLabel);
+    }
+
+    [Fact]
     public async Task GetSearchIndexPayloadAsync_ShouldOmitGeneratedSymbolSourceLinkText()
     {
         var harvester = A.Fake<IDocHarvester>();
