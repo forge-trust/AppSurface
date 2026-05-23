@@ -2988,6 +2988,137 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task RouteInspectorJson_ShouldReturnManifestWithoutProbe_WhenPathIsOmitted()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson());
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.Null(response.Probe);
+            Assert.Single(response.Entries);
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("https://example.com/docs/packages")]
+    [InlineData("//example.com/docs/packages")]
+    [InlineData("?path=packages")]
+    [InlineData("guides/../secret")]
+    public async Task RouteInspectorJson_ShouldReturnInvalidProbe_ForUnsafeInputs(string path)
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson(path));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("InvalidInput", response.Probe.Kind);
+            Assert.Null(response.Probe.NormalizedPath);
+            Assert.False(string.IsNullOrWhiteSpace(response.Probe.Message));
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldProbeDocsRootAsHomeRoute()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Home", "README.md", "<p>Home</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/docs"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("Canonical", response.Probe.Kind);
+            Assert.Equal(string.Empty, response.Probe.NormalizedPath);
+            Assert.Null(response.Probe.CanonicalLiveUrl);
+        }
+    }
+
+    [Theory]
+    [InlineData("_routes", "ReservedRoute")]
+    [InlineData("missing/page", "NotFound")]
+    [InlineData("Namespaces/Foo", "InternalSourceMatch")]
+    public async Task RouteInspectorJson_ShouldDescribeReservedMissingAndInternalRouteKinds(string path, string expectedKind)
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("API", "Namespaces/Foo", "<p>API</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson(path));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal(expectedKind, response.Probe.Kind);
+            Assert.False(string.IsNullOrWhiteSpace(response.Probe.Message));
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldStripQueryAndFragment_FromProbePath()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/docs/packages?utm=1#top"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("Canonical", response.Probe.Kind);
+            Assert.Equal("packages", response.Probe.NormalizedPath);
+        }
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, "Development", true)]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, "Production", false)]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.Always, "Production", true)]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.Never, "Development", false)]
+    [InlineData((AppSurfaceDocsHarvestHealthExposure)999, "Development", false)]
+    public void AppSurfaceDocsDiagnosticsVisibility_ShouldResolveExposure(
+        AppSurfaceDocsHarvestHealthExposure exposure,
+        string environmentName,
+        bool expected)
+    {
+        var environment = A.Fake<IHostEnvironment>();
+        A.CallTo(() => environment.EnvironmentName).Returns(environmentName);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = exposure
+            }
+        };
+
+        var exposed = AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(options, environment);
+
+        Assert.Equal(expected, exposed);
+    }
+
+    [Fact]
     public async Task RouteInspector_ShouldRenderViewWithManifest()
     {
         var harvester = A.Fake<IDocHarvester>();

@@ -1351,6 +1351,119 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task RouteInspectorView_ShouldRenderProbeAliasesAndDiagnostics()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new AppSurfaceDocsRouteInspectorResponse
+        {
+            Probe = new AppSurfaceDocsRouteProbeResponse
+            {
+                InputPath = "packages/README.md",
+                NormalizedPath = "packages/README.md",
+                Kind = "AliasRedirect",
+                SourcePath = "packages/README.md",
+                CanonicalRoutePath = "packages",
+                CanonicalLiveUrl = "/docs/packages",
+                Message = "This path redirects to the canonical public route."
+            },
+            Entries =
+            [
+                new AppSurfaceDocsRouteInspectorEntryResponse
+                {
+                    SourcePath = "packages/README.md",
+                    CanonicalRoutePath = "packages",
+                    CanonicalLiveUrl = "/docs/packages",
+                    SourcePathIsMarkdown = true,
+                    RecoveryAliases =
+                    [
+                        new AppSurfaceDocsRouteAliasResponse
+                        {
+                            RoutePath = "packages/README.md",
+                            LiveUrl = "/docs/packages/README.md",
+                            Kind = "MarkdownSource"
+                        }
+                    ],
+                    DeclaredAliases =
+                    [
+                        new AppSurfaceDocsRouteAliasResponse
+                        {
+                            RoutePath = "legacy/packages",
+                            LiveUrl = "/docs/legacy/packages",
+                            Kind = "DeclaredRedirect"
+                        }
+                    ]
+                }
+            ],
+            Diagnostics =
+            [
+                new AppSurfaceDocsHarvestDiagnosticResponse
+                {
+                    Code = DocHarvestDiagnosticCodes.DocRedirectAliasCollision,
+                    Severity = "Warning",
+                    HarvesterType = "MarkdownHarvester",
+                    Problem = "A redirect alias collided.",
+                    Fix = "Choose a different alias."
+                }
+            ]
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/RouteInspector.cshtml",
+            model,
+            pathBase: "/some-base");
+
+        Assert.Contains("Route Inspector", html);
+        Assert.Contains("AliasRedirect", html);
+        Assert.Contains("href=\"/some-base/docs/packages\"", html);
+        Assert.Contains("packages/README.md", html);
+        Assert.Contains("legacy/packages", html);
+        Assert.Contains(DocHarvestDiagnosticCodes.DocRedirectAliasCollision, html);
+        Assert.Contains("MarkdownHarvester", html);
+    }
+
+    [Fact]
+    public async Task RouteInspectorView_ShouldRenderEmptyAliasesAndHideDiagnostics_WhenAbsent()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new AppSurfaceDocsRouteInspectorResponse
+        {
+            Probe = new AppSurfaceDocsRouteProbeResponse
+            {
+                InputPath = "missing",
+                Kind = "NotFound",
+                Message = "No route identity matched this path."
+            },
+            Entries =
+            [
+                new AppSurfaceDocsRouteInspectorEntryResponse
+                {
+                    SourcePath = "guides/start.md",
+                    CanonicalRoutePath = "guides/start",
+                    CanonicalLiveUrl = "/docs/guides/start",
+                    SourcePathIsMarkdown = true,
+                    RecoveryAliases = [],
+                    DeclaredAliases = []
+                }
+            ],
+            Diagnostics = []
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/RouteInspector.cshtml",
+            model);
+
+        Assert.Contains("NotFound", html);
+        Assert.Contains("No route identity matched this path.", html);
+        Assert.Contains("1 route entries", html);
+        Assert.Contains(">None</span>", html);
+        Assert.DoesNotContain("route-diagnostics-heading", html);
+        Assert.DoesNotContain("Canonical:", html);
+        Assert.DoesNotContain("Source: <code", html);
+    }
+
+    [Fact]
     public async Task SidebarView_ShouldRenderBlankAndRelativeLinks_WithoutPathBaseRewriting()
     {
         using var services = CreateServiceProvider(CreateDocs());

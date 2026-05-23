@@ -625,13 +625,11 @@ public class DocsController : Controller
 
         var withoutPathBase = TrimAppRelativePrefix(trimmed, requestPathBase);
         var candidate = withoutPathBase;
-        if (candidate.StartsWith("/", StringComparison.Ordinal))
+        if (candidate.StartsWith("/", StringComparison.Ordinal)
+            && !TryTrimDocsRoot(candidate, docsRootPath, out candidate))
         {
-            if (!TryTrimDocsRoot(candidate, docsRootPath, out candidate))
-            {
-                invalidMessage = $"App-relative route probes must start with the active docs root '{docsRootPath}'.";
-                return false;
-            }
+            invalidMessage = $"App-relative route probes must start with the active docs root '{docsRootPath}'.";
+            return false;
         }
 
         candidate = candidate.Trim().Trim('/');
