@@ -1552,6 +1552,186 @@ public class AppSurfaceDocsWebModuleRegressionTests
     }
 
     [Fact]
+    public void ResolveBrandingAssetsDirectoryPath_ShouldReturnNull_WhenBrandingDirectoryIsNotConfigured()
+    {
+        using var provider = new ServiceCollection().BuildServiceProvider();
+
+        Assert.Null(
+            AppSurfaceDocsWebModule.ResolveBrandingAssetsDirectoryPath(
+                provider,
+                new AppSurfaceDocsOptions { Identity = null! }));
+        Assert.Null(
+            AppSurfaceDocsWebModule.ResolveBrandingAssetsDirectoryPath(
+                provider,
+                new AppSurfaceDocsOptions
+                {
+                    Identity = new AppSurfaceDocsIdentityOptions { BrandingAssets = null! }
+                }));
+    }
+
+    [Fact]
+    public void ResolveBrandingAssetsDirectoryPath_ShouldResolveConfiguredDirectoryAgainstExpectedBase()
+    {
+        using var noEnvironmentProvider = new ServiceCollection().BuildServiceProvider();
+        var currentDirectoryExpectedPath = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath("branding", Directory.GetCurrentDirectory()));
+        var currentDirectoryResult = AppSurfaceDocsWebModule.ResolveBrandingAssetsDirectoryPath(
+            noEnvironmentProvider,
+            new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions { DirectoryPath = "branding" }
+                }
+            });
+
+        Assert.Equal(currentDirectoryExpectedPath, currentDirectoryResult);
+
+        var tempDirectoryName = $"{nameof(ResolveBrandingAssetsDirectoryPath_ShouldResolveConfiguredDirectoryAgainstExpectedBase)}-{Guid.NewGuid():N}";
+        var contentRoot = Path.Join(Path.GetTempPath(), Path.GetFileName(tempDirectoryName));
+        var absoluteRepositoryRoot = Path.Join(contentRoot, "absolute-repo");
+        var absoluteBrandingDirectory = Path.Join(contentRoot, "absolute-branding");
+        Directory.CreateDirectory(contentRoot);
+
+        try
+        {
+            using var provider = CreateServiceProviderWithContentRoot(contentRoot);
+
+            var missingSourceResult = AppSurfaceDocsWebModule.ResolveBrandingAssetsDirectoryPath(
+                provider,
+                new AppSurfaceDocsOptions
+                {
+                    Source = null!,
+                    Identity = new AppSurfaceDocsIdentityOptions
+                    {
+                        BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions { DirectoryPath = "branding" }
+                    }
+                });
+            Assert.Equal(Path.GetFullPath(Path.Join(contentRoot, "branding")), missingSourceResult);
+
+            var absoluteDirectoryResult = AppSurfaceDocsWebModule.ResolveBrandingAssetsDirectoryPath(
+                provider,
+                new AppSurfaceDocsOptions
+                {
+                    Identity = new AppSurfaceDocsIdentityOptions
+                    {
+                        BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions
+                        {
+                            DirectoryPath = absoluteBrandingDirectory + Path.DirectorySeparatorChar
+                        }
+                    }
+                });
+            Assert.Equal(Path.TrimEndingDirectorySeparator(Path.GetFullPath(absoluteBrandingDirectory)), absoluteDirectoryResult);
+
+            var absoluteRepositoryResult = AppSurfaceDocsWebModule.ResolveBrandingAssetsDirectoryPath(
+                provider,
+                new AppSurfaceDocsOptions
+                {
+                    Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = absoluteRepositoryRoot },
+                    Identity = new AppSurfaceDocsIdentityOptions
+                    {
+                        BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions { DirectoryPath = "branding" }
+                    }
+                });
+            Assert.Equal(Path.GetFullPath(Path.Join(absoluteRepositoryRoot, "branding")), absoluteRepositoryResult);
+
+            var relativeRepositoryResult = AppSurfaceDocsWebModule.ResolveBrandingAssetsDirectoryPath(
+                provider,
+                new AppSurfaceDocsOptions
+                {
+                    Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = "relative-repo" },
+                    Identity = new AppSurfaceDocsIdentityOptions
+                    {
+                        BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions { DirectoryPath = "branding" }
+                    }
+                });
+            Assert.Equal(Path.GetFullPath(Path.Join(contentRoot, "relative-repo", "branding")), relativeRepositoryResult);
+        }
+        finally
+        {
+            Directory.Delete(contentRoot, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(null, "/branding")]
+    [InlineData("/brand/", "/brand")]
+    [InlineData("~/brand", "/brand")]
+    [InlineData("branding", null)]
+    [InlineData("/", null)]
+    public void ResolveBrandingAssetsRequestPath_ShouldNormalizeConfiguredDedicatedBrowserRoot(
+        string? configuredRequestPath,
+        string? expectedRequestPath)
+    {
+        if (configuredRequestPath is null)
+        {
+            Assert.Equal(
+                AppSurfaceDocsBrandingAssetsOptions.DefaultRequestPath,
+                AppSurfaceDocsWebModule.ResolveBrandingAssetsRequestPath(
+                    new AppSurfaceDocsOptions
+                    {
+                        Identity = new AppSurfaceDocsIdentityOptions { BrandingAssets = null! }
+                    }));
+        }
+
+        var options = configuredRequestPath is null
+            ? new AppSurfaceDocsOptions { Identity = null! }
+            : new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions
+                    {
+                        RequestPath = configuredRequestPath
+                    }
+                }
+            };
+
+        var result = AppSurfaceDocsWebModule.ResolveBrandingAssetsRequestPath(options);
+
+        Assert.Equal(expectedRequestPath, result);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("   ", null)]
+    [InlineData("favicon.svg", null)]
+    [InlineData("/favicon.ico", null)]
+    [InlineData("~/brand/favicon.svg", "/brand/favicon.svg")]
+    [InlineData("/brand/favicon.svg", "/brand/favicon.svg")]
+    public void ResolveConfiguredRootFaviconRedirectPath_ShouldReturnOnlyCustomSvgBrowserPaths(
+        string? configuredSvgPath,
+        string? expectedRedirectPath)
+    {
+        if (configuredSvgPath is null)
+        {
+            Assert.Null(
+                AppSurfaceDocsWebModule.ResolveConfiguredRootFaviconRedirectPath(
+                    new AppSurfaceDocsOptions
+                    {
+                        Identity = new AppSurfaceDocsIdentityOptions { Favicon = null! }
+                    }));
+        }
+
+        var options = configuredSvgPath is null
+            ? new AppSurfaceDocsOptions { Identity = null! }
+            : new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    Favicon = new AppSurfaceDocsFaviconOptions
+                    {
+                        SvgPath = configuredSvgPath
+                    }
+                }
+            };
+
+        var result = AppSurfaceDocsWebModule.ResolveConfiguredRootFaviconRedirectPath(options);
+
+        Assert.Equal(expectedRedirectPath, result);
+    }
+
+    [Fact]
     public async Task ConfigureEndpoints_Issue001_DoesNotRedirectRootStylesheet_WhenAppSurfaceDocsIsEmbedded()
     {
         var module = new AppSurfaceDocsWebModule();
@@ -1755,6 +1935,16 @@ public class AppSurfaceDocsWebModuleRegressionTests
         var rootModule = A.Fake<IAppSurfaceHostModule>();
         var environmentProvider = A.Fake<IEnvironmentProvider>();
         return new StartupContext(Array.Empty<string>(), rootModule, "TestApp", environmentProvider);
+    }
+
+    private static ServiceProvider CreateServiceProviderWithContentRoot(string contentRootPath)
+    {
+        var environment = A.Fake<IWebHostEnvironment>();
+        A.CallTo(() => environment.ContentRootPath).Returns(contentRootPath);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(environment);
+        return services.BuildServiceProvider();
     }
 
     private static StartupContext CreatePackagedModuleStartupContext(

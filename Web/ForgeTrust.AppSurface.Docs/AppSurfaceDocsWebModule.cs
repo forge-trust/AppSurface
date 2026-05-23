@@ -694,7 +694,10 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         }
     }
 
-    private static string? ResolveBrandingAssetsDirectoryPath(IServiceProvider services, AppSurfaceDocsOptions options)
+    /// <summary>
+    /// Resolves the configured branding asset directory against the repository root or content root.
+    /// </summary>
+    internal static string? ResolveBrandingAssetsDirectoryPath(IServiceProvider services, AppSurfaceDocsOptions options)
     {
         var configuredPath = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(options.Identity?.BrandingAssets?.DirectoryPath);
         if (configuredPath is null)
@@ -723,7 +726,10 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 : Path.GetFullPath(repositoryRoot, fullContentRootPath);
     }
 
-    private static string? ResolveBrandingAssetsRequestPath(AppSurfaceDocsOptions options)
+    /// <summary>
+    /// Resolves the browser route prefix used for configured branding assets.
+    /// </summary>
+    internal static string? ResolveBrandingAssetsRequestPath(AppSurfaceDocsOptions options)
     {
         var requestPath = AppSurfaceDocsIdentityPath.NormalizeTextOrNull(options.Identity?.BrandingAssets?.RequestPath)
                           ?? AppSurfaceDocsBrandingAssetsOptions.DefaultRequestPath;
@@ -830,7 +836,10 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         return AppSurfaceDocsStaticAssetBasePath;
     }
 
-    private static string? ResolveConfiguredRootFaviconRedirectPath(AppSurfaceDocsOptions options)
+    /// <summary>
+    /// Resolves the standalone root favicon redirect target for a configured SVG favicon.
+    /// </summary>
+    internal static string? ResolveConfiguredRootFaviconRedirectPath(AppSurfaceDocsOptions options)
     {
         if (!AppSurfaceDocsIdentityPath.TryNormalizeBrowserPath(
                 options.Identity?.Favicon?.SvgPath,
