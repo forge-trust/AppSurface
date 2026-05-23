@@ -629,6 +629,396 @@ public class MemoTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_ReturnsStaleAndRefreshesInBackground()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+        var revalidationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var revalidationRelease = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> Factory()
+        {
+            var call = Interlocked.Increment(ref callCount);
+            if (call == 1)
+            {
+                return Task.FromResult(1);
+            }
+
+            revalidationStarted.TrySetResult();
+            return revalidationRelease.Task;
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(50),
+            TimeSpan.FromSeconds(1));
+        async Task<int> GetValue() => await memo.GetAsync(Factory, policy);
+
+        Assert.Equal(1, await GetValue());
+        await Task.Delay(90);
+
+        var stale = await GetValue();
+
+        Assert.Equal(1, stale);
+        await revalidationStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(2, Volatile.Read(ref callCount));
+
+        revalidationRelease.SetResult(2);
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            if (await GetValue() == 2)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        Assert.Equal(2, await GetValue());
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_WhenStaleWindowExpires_WaitsForFactory()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondRelease = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> Factory()
+        {
+            var call = Interlocked.Increment(ref callCount);
+            if (call == 1)
+            {
+                return Task.FromResult(1);
+            }
+
+            secondStarted.TrySetResult();
+            return secondRelease.Task;
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(30),
+            TimeSpan.FromMilliseconds(40));
+        async Task<int> GetValue() => await memo.GetAsync(Factory, policy);
+
+        Assert.Equal(1, await GetValue());
+        await Task.Delay(120);
+
+        var refresh = GetValue();
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.False(refresh.IsCompleted);
+        secondRelease.SetResult(2);
+        Assert.Equal(2, await refresh);
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_WhenExpiredWaiterIsCanceled_DoesNotStartDuplicateRefresh()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+        var revalidationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var revalidationRelease = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> Factory()
+        {
+            var call = Interlocked.Increment(ref callCount);
+            if (call == 1)
+            {
+                return Task.FromResult(1);
+            }
+
+            revalidationStarted.TrySetResult();
+            return revalidationRelease.Task;
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(30),
+            TimeSpan.FromMilliseconds(80));
+        async Task<int> GetValue(CancellationToken cancellationToken = default) =>
+            await memo.GetAsync(Factory, policy, cancellationToken);
+
+        Assert.Equal(1, await GetValue());
+        await Task.Delay(50);
+
+        Assert.Equal(1, await GetValue());
+        await revalidationStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(2, Volatile.Read(ref callCount));
+
+        await Task.Delay(120);
+        using var canceled = new CancellationTokenSource();
+        await canceled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GetValue(canceled.Token));
+
+        var waiter = GetValue();
+        await Task.Delay(50);
+
+        Assert.False(waiter.IsCompleted);
+        Assert.Equal(2, Volatile.Read(ref callCount));
+
+        revalidationRelease.SetResult(2);
+        Assert.Equal(2, await waiter.WaitAsync(TimeSpan.FromSeconds(3)));
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_WhenExpiredWaiterIsCanceled_RetainsHeldLockUntilRefreshCompletes()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+        var refreshStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var refreshRelease = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> Factory()
+        {
+            var call = Interlocked.Increment(ref callCount);
+            if (call == 1)
+            {
+                return Task.FromResult(1);
+            }
+
+            refreshStarted.TrySetResult();
+            return refreshRelease.Task;
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(20),
+            TimeSpan.FromMilliseconds(20));
+        async Task<int> GetValue(CancellationToken cancellationToken = default) =>
+            await memo.GetAsync(Factory, policy, cancellationToken);
+
+        Assert.Equal(1, await GetValue());
+        await Task.Delay(80);
+
+        var refresh = GetValue();
+        await refreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(1, memo.ActiveLockCount);
+
+        using var canceled = new CancellationTokenSource();
+        var waiter = GetValue(canceled.Token);
+        await canceled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiter);
+        Assert.Equal(1, memo.ActiveLockCount);
+
+        refreshRelease.SetResult(2);
+        Assert.Equal(2, await refresh.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.Equal(0, memo.ActiveLockCount);
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_WhenAlreadyCanceled_RemovesUncontendedLock()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+
+        Task<int> Factory()
+        {
+            return Task.FromResult(Interlocked.Increment(ref callCount));
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(20),
+            TimeSpan.FromMilliseconds(20));
+        async Task<int> GetValue(CancellationToken cancellationToken = default) =>
+            await memo.GetAsync(Factory, policy, cancellationToken);
+
+        Assert.Equal(1, await GetValue());
+        await Task.Delay(80);
+
+        using var canceled = new CancellationTokenSource();
+        await canceled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GetValue(canceled.Token));
+        Assert.Equal(0, memo.ActiveLockCount);
+        Assert.Equal(1, Volatile.Read(ref callCount));
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_WhenBackgroundRefreshFails_KeepsStaleValue()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+        var revalidationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> Factory()
+        {
+            var call = Interlocked.Increment(ref callCount);
+            if (call == 1)
+            {
+                return Task.FromResult(1);
+            }
+
+            revalidationStarted.TrySetResult();
+            throw new InvalidOperationException("revalidation failed");
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(50),
+            TimeSpan.FromSeconds(1));
+        async Task<int> GetValue() => await memo.GetAsync(Factory, policy);
+
+        Assert.Equal(1, await GetValue());
+        await Task.Delay(90);
+
+        Assert.Equal(1, await GetValue());
+        await revalidationStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await Task.Delay(50);
+
+        Assert.Equal(0, memo.ActiveLockCount);
+        Assert.Equal(1, await GetValue());
+        Assert.True(Volatile.Read(ref callCount) >= 2);
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_WhenBackgroundRefreshIsCanceled_KeepsStaleValue()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+        var revalidationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> Factory()
+        {
+            var call = Interlocked.Increment(ref callCount);
+            if (call == 1)
+            {
+                return Task.FromResult(1);
+            }
+
+            revalidationStarted.TrySetResult();
+            throw new OperationCanceledException("revalidation canceled");
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(50),
+            TimeSpan.FromSeconds(1));
+        async Task<int> GetValue() => await memo.GetAsync(Factory, policy);
+
+        Assert.Equal(1, await GetValue());
+        await Task.Delay(90);
+
+        Assert.Equal(1, await GetValue());
+        await revalidationStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await Task.Delay(50);
+
+        Assert.Equal(0, memo.ActiveLockCount);
+        Assert.Equal(1, await GetValue());
+        Assert.True(Volatile.Read(ref callCount) >= 2);
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_BackgroundRefreshIgnoresCallerCancellation()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        using var callerCts = new CancellationTokenSource();
+        var callCount = 0;
+        var revalidationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> Factory(CancellationToken cancellationToken)
+        {
+            var call = Interlocked.Increment(ref callCount);
+            if (call == 1)
+            {
+                return Task.FromResult(1);
+            }
+
+            revalidationStarted.TrySetResult();
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(2);
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(50),
+            TimeSpan.FromSeconds(1));
+        async Task<int> GetValue(CancellationToken cancellationToken = default) =>
+            await memo.GetAsync(Factory, policy, cancellationToken);
+
+        Assert.Equal(1, await GetValue(callerCts.Token));
+        await Task.Delay(90);
+        await callerCts.CancelAsync();
+
+        Assert.Equal(1, await GetValue(callerCts.Token));
+        await revalidationStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            if (await GetValue() == 2)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        Assert.Equal(2, await GetValue());
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_CachesFactoryFailureForRetryWindow()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) },
+            TimeSpan.FromMinutes(1));
+        var callCount = 0;
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMinutes(1),
+            TimeSpan.FromMinutes(1));
+
+        Task<int> Factory()
+        {
+            callCount++;
+            throw new InvalidOperationException("transient miss");
+        }
+
+        async Task<int> GetValue() => await memo.GetAsync(Factory, policy);
+
+        var first = await Assert.ThrowsAsync<InvalidOperationException>(GetValue);
+        var second = await Assert.ThrowsAsync<InvalidOperationException>(GetValue);
+
+        Assert.Equal("transient miss", first.Message);
+        Assert.Equal("transient miss", second.Message);
+        Assert.Equal(1, callCount);
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_ReturnsExistingAbsoluteEntryForSameKey()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+
+        Task<int> Factory()
+        {
+            callCount++;
+
+            return Task.FromResult(callCount);
+        }
+
+        Task<int> GetValue(CachePolicy policy)
+        {
+            return memo.GetAsync(Factory, policy);
+        }
+
+        var absolute = await GetValue(CachePolicy.Absolute(TimeSpan.FromMinutes(1)));
+        var stale = await GetValue(
+            CachePolicy.AbsoluteWithStaleWhileRevalidate(
+                TimeSpan.FromMinutes(1),
+                TimeSpan.FromMinutes(1)));
+
+        Assert.Equal(1, absolute);
+        Assert.Equal(1, stale);
+        Assert.Equal(1, callCount);
+    }
+
+    [Fact]
     public async Task GetAsync_SlidingExpiration_KeepsAliveOnAccess()
     {
         var memo = CreateMemoWithOptions(

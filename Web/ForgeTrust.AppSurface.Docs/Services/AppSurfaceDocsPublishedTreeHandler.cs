@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using AngleSharp.Html.Parser;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
@@ -24,6 +25,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     private readonly IReadOnlyList<AppSurfaceDocsPublishedTreeMount> _mounts;
     private readonly string _previewRootPath;
     private readonly string _routeRootPath;
+    private readonly ILogger<AppSurfaceDocsPublishedTreeHandler> _logger;
 
     /// <summary>
     /// Initializes a new instance of <see cref="AppSurfaceDocsPublishedTreeHandler"/>.
@@ -31,10 +33,12 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     /// <param name="mounts">Published trees to expose, ordered arbitrarily.</param>
     /// <param name="previewRootPath">The live preview docs root that should bypass published-tree handling.</param>
     /// <param name="routeRootPath">The route-family root that owns archive and exact-version routes.</param>
+    /// <param name="logger">Logger used for frozen manifest diagnostics.</param>
     internal AppSurfaceDocsPublishedTreeHandler(
         IEnumerable<AppSurfaceDocsPublishedTreeMount> mounts,
         string previewRootPath,
-        string routeRootPath = DocsUrlBuilder.DocsEntryPath)
+        string routeRootPath = DocsUrlBuilder.DocsEntryPath,
+        ILogger<AppSurfaceDocsPublishedTreeHandler>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(mounts);
         ArgumentException.ThrowIfNullOrWhiteSpace(previewRootPath);
@@ -45,6 +49,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             .ToList();
         _previewRootPath = previewRootPath;
         _routeRootPath = routeRootPath;
+        _logger = logger ?? NullLogger<AppSurfaceDocsPublishedTreeHandler>.Instance;
     }
 
     /// <summary>
@@ -75,6 +80,12 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 return false;
             }
 
+            if (TryResolveFrozenManifestRedirect(httpContext, mount, requestPath, out var redirectUrl))
+            {
+                WritePermanentRedirect(httpContext, redirectUrl);
+                return true;
+            }
+
             if (!TryResolveFile(mount, requestPath, out var fileInfo, out var relativeFilePath))
             {
                 return false;
@@ -97,6 +108,82 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         return DocsUrlBuilder.IsUnderRoot(requestPath, _previewRootPath)
                || DocsUrlBuilder.IsUnderRoot(requestPath, DocsUrlBuilder.JoinPath(_routeRootPath, "versions"))
                || DocsUrlBuilder.IsUnderRoot(requestPath, DocsUrlBuilder.JoinPath(_routeRootPath, "v"));
+    }
+
+    private bool TryResolveFrozenManifestRedirect(
+        HttpContext httpContext,
+        AppSurfaceDocsPublishedTreeMount mount,
+        string requestPath,
+        out string redirectUrl)
+    {
+        redirectUrl = string.Empty;
+        if (mount.FrozenRouteManifest is null)
+        {
+            return false;
+        }
+
+        var relativeRequestPath = GetMountRelativeRequestPath(requestPath, mount.MountRootPath);
+        var aliasRoutePath = AppSurfaceDocsFrozenRouteManifest.NormalizeRoutePath(relativeRequestPath);
+        if (string.IsNullOrWhiteSpace(aliasRoutePath) || !AppSurfaceDocsFrozenRouteManifest.IsSafeRoutePath(aliasRoutePath))
+        {
+            return false;
+        }
+
+        var manifest = mount.FrozenRouteManifest.GetManifest(_logger);
+        if (!manifest.TryResolveAlias(aliasRoutePath, out var canonicalRoutePath))
+        {
+            return false;
+        }
+
+        if (!AppSurfaceDocsFrozenRouteManifest.IsSafeRoutePath(canonicalRoutePath))
+        {
+            return false;
+        }
+
+        redirectUrl = BuildRedirectUrl(
+            httpContext.Request.PathBase.Value,
+            mount.MountRootPath,
+            canonicalRoutePath,
+            httpContext.Request.QueryString.Value);
+        return true;
+    }
+
+    private static string GetMountRelativeRequestPath(string requestPath, string mountRootPath)
+    {
+        if (string.Equals(mountRootPath, "/", StringComparison.Ordinal))
+        {
+            return requestPath.Length <= 1 ? string.Empty : requestPath[1..];
+        }
+
+        return requestPath.Length == mountRootPath.Length
+            ? string.Empty
+            : requestPath[mountRootPath.Length..];
+    }
+
+    private static string BuildRedirectUrl(
+        string? requestPathBase,
+        string mountRootPath,
+        string canonicalRoutePath,
+        string? queryString)
+    {
+        var mountedUrl = DocsUrlBuilder.JoinPath(mountRootPath, canonicalRoutePath);
+        var pathBase = string.IsNullOrWhiteSpace(requestPathBase)
+            ? string.Empty
+            : requestPathBase.TrimEnd('/');
+        var fragmentIndex = mountedUrl.IndexOf('#', StringComparison.Ordinal);
+        if (fragmentIndex < 0)
+        {
+            return pathBase + mountedUrl + (queryString ?? string.Empty);
+        }
+
+        return pathBase + mountedUrl[..fragmentIndex] + (queryString ?? string.Empty) + mountedUrl[fragmentIndex..];
+    }
+
+    private static void WritePermanentRedirect(HttpContext httpContext, string redirectUrl)
+    {
+        httpContext.Response.StatusCode = StatusCodes.Status301MovedPermanently;
+        httpContext.Response.Headers.Location = redirectUrl;
+        httpContext.Response.ContentLength = 0;
     }
 
     private static bool IsRequestForMount(string requestPath, string mountRootPath)
@@ -331,9 +418,11 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
 /// </remarks>
 /// <param name="MountRootPath">The request-path root where the tree should appear.</param>
 /// <param name="FileProvider">The static file provider for the tree contents.</param>
+/// <param name="FrozenRouteManifest">Lazy cache for the tree's frozen route manifest, when one should be consulted.</param>
 internal sealed record AppSurfaceDocsPublishedTreeMount(
     string MountRootPath,
-    IFileProvider FileProvider);
+    IFileProvider FileProvider,
+    AppSurfaceDocsFrozenRouteManifestCache? FrozenRouteManifest = null);
 
 /// <summary>
 /// Rewrites stable-root published-tree content so the same artifact can be served from different mount roots.

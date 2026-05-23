@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text;
-using CliFx.Exceptions;
+using CliFx;
 using CliFx.Infrastructure;
 using FakeItEasy;
 using Microsoft.Extensions.Logging;

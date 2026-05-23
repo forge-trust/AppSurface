@@ -4,7 +4,7 @@ Modular bootstrapping for .NET Console applications using [CliFx](https://github
 
 ## Overview
 
-`ForgeTrust.AppSurface.Console` provides a structured way to build command-line tools. It automatically discovers and registers CliFx commands from modules, runs them inside the .NET Generic Host, and now exposes a startup options seam for console-specific behavior such as command-first output.
+`ForgeTrust.AppSurface.Console` provides a structured way to build command-line tools. It automatically discovers CliFx commands from modules, registers their source-generated CliFx descriptors, runs them inside the .NET Generic Host, and exposes a startup options seam for console-specific behavior such as command-first output.
 
 ## Release Guidance
 
@@ -47,9 +47,38 @@ await new MyConsoleStartup()
 
 ## Features
 
-- **Command Discovery**: Automatically registers classes implementing `ICommand` from the entry point assembly and dependent modules.
+- **Command Discovery**: Automatically finds classes implementing `ICommand` from the entry point assembly and dependent modules, then registers their CliFx 3 generated command descriptors.
 - **Hosted Runner**: Integrates with the .NET Generic Host to manage service lifecycles during command execution.
 - **Console Options**: `ConsoleOptions` lets entry points configure shared console behavior before the host is built.
+
+## Command authoring with CliFx 3
+
+AppSurface uses CliFx 3 source-generated command descriptors. Command classes keep the normal CliFx attribute model, but the compiler now generates the descriptor AppSurface registers at runtime.
+
+```csharp
+using CliFx;
+using CliFx.Binding;
+using CliFx.Infrastructure;
+
+[Command("greet", Description = "Prints a greeting.")]
+public sealed partial class GreetCommand : ICommand
+{
+    [CommandParameter(0, Description = "The name to greet.")]
+    public required string Name { get; set; }
+
+    public ValueTask ExecuteAsync(IConsole console)
+    {
+        console.Output.WriteLine($"Hello, {Name}!");
+        return ValueTask.CompletedTask;
+    }
+}
+```
+
+- Mark every command class as `partial` so CliFx can attach the generated `Descriptor` property.
+- If a command is nested, mark each containing type as `partial` too.
+- Use `set` on command-bound properties. CliFx 3 generated binders assign parsed values after construction.
+- Use C# `required` for required options and parameters. The older CliFx `IsRequired` attribute property is not part of CliFx 3.
+- Keep constructors DI-friendly. AppSurface still resolves command instances from the application service provider.
 
 ## ConsoleOptions
 
@@ -68,6 +97,7 @@ Use `CommandFirst` for public CLIs where first-touch output is part of the produ
 - Console options are applied before host creation. Configure them at the entry point or through `WithOptions(...)`, not inside command handlers.
 - `CustomRegistrations` overrides services late in the startup pipeline. Use it intentionally for host-level customization, not as a replacement for normal module service registration.
 - If you override console startup behavior in a derived startup class, keep the shared options path intact so entry-point configuration still reaches the host.
+- A command without generated CliFx metadata fails during startup with guidance to make the command and any enclosing types `partial`.
 
 ---
 [📂 Back to Console List](../README.md) | [🏠 Back to Root](../../README.md)

@@ -31,6 +31,7 @@ Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `
 - `AppSurfaceDocsWebModule` for wiring the docs UI into an AppSurface web host
 - `AddAppSurfaceDocs()` for typed options binding and core service registration
 - `DocAggregator` plus the built-in Markdown, C# API, and opt-in JavaScript public API harvesters, including structured harvest health diagnostics
+- A live harvest observatory that starts the first source-backed harvest during startup, streams real-time RazorWire progress, and keeps first navigation informative instead of appearing hung
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by AppSurface Docs consumers
 - `DocsUrlBuilder` plus the MVC surface used by AppSurface Docs consumers so the live docs root, search shell, and archive routes stay in one shared contract
 - `AppSurfaceDocsVersionCatalog` plus `AppSurfaceDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
@@ -271,6 +272,46 @@ An all-failed snapshot logs one critical message when that snapshot is generated
 `GetHarvestHealthAsync(cancellationToken)` observes caller cancellation only while the caller waits for the memoized snapshot. Canceling that wait does not cancel, poison, or evict the shared snapshot computation. A later caller can still receive the completed snapshot.
 
 Health and docs are computed from the same cached snapshot. This is deliberate: a host that reads `GetDocsAsync()` and then `GetHarvestHealthAsync()` sees health for the docs it is serving, not a second harvest with different timing or failures. Use `InvalidateCache()` when an operator explicitly asks AppSurface Docs to refresh source-backed docs.
+
+AppSurface Docs uses an absolute freshness window followed by a bounded stale-while-revalidate window of the same length. After `CacheExpirationMinutes` elapses, requests continue to receive the last good snapshot while one background harvest refreshes the cache. If that refresh succeeds, later reads use the new snapshot; if it fails, the stale snapshot remains available until the stale window ends. A cold start with no previous snapshot still waits for the initial harvest or renders the live harvest observatory.
+
+### Live Harvest Observatory
+
+AppSurface Docs starts the initial harvest in the background by default. If a user reaches a docs page before the first cached snapshot is ready, the request waits briefly and then renders a live harvest observatory instead of holding a blank or apparently hung page. The observatory uses RazorWire Server-Sent Events with replay enabled, so late subscribers receive the latest retained harvest state and continue with live updates.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "StartupMode": "Background",
+      "InitialRequestWaitBudgetMilliseconds": 350,
+      "TestingPreHarvestDelayMilliseconds": 0,
+      "TestingDelayPerHarvesterMilliseconds": 0,
+      "TestingDelayPerDocumentMilliseconds": 0
+    }
+  }
+}
+```
+
+`AppSurfaceDocs:Harvest:StartupMode` accepts:
+
+- `Background`: default. Startup schedules the memoized initial harvest and returns immediately unless strict failure mode is enabled.
+- `Blocking`: startup waits for the initial harvest to complete.
+- `Disabled`: startup does not pre-warm the docs cache; the first docs request starts harvest work.
+
+`InitialRequestWaitBudgetMilliseconds` controls how long a docs request waits for the initial harvest before showing the observatory. The default is `350`. Set it to `0` when you want the observatory immediately for any pending first harvest. Set it higher when a host usually harvests quickly and you prefer to avoid showing the progress page for sub-second starts.
+
+The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The defaults are `0`. Set `TestingPreHarvestDelayMilliseconds` to pause after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` to pause each active harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` to publish each harvester's document count one document at a time. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the observatory visibly unfold. Do not enable these for production traffic.
+
+When the harvest completes successfully, AppSurface Docs reloads the current app-relative URL after the configured completion delay. The reload lets the server render the originally requested docs page, including any permanent redirect for source-shaped Markdown routes. The completion view also renders a plain return link so no-JavaScript users can continue manually.
+
+The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints. In development it is exposed by default; non-development hosts must opt in with `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` if users should see the live progress stream.
+
+Pitfalls:
+
+- Do not put secrets, absolute filesystem paths, or raw exception details in harvester diagnostics. The observatory uses the same redacted diagnostic shape as harvest health.
+- Do not rely on file-level progress counts in v1. The current stream reports harvester-level progress and aggregate document counts.
+- Do not use `StartupMode=Disabled` for hosts where first navigation latency matters; that preserves the old lazy-harvest behavior.
 
 ### Operator Health Routes
 
@@ -999,6 +1040,10 @@ The version catalog is the release-level source of truth for version routing and
 
 Each `exactTreePath` directory is treated as a prebuilt static subtree for one exact release. It is usually exported from the stable `/docs` surface, and at minimum it must include:
 
+- `.appsurface-docs-route-manifest.json` at the tree root for new exports
+  - The hidden manifest freezes the docs-root-relative canonical route and alias graph that existed when the release was exported.
+  - It stores route identity only. It does not store `PublicOrigin`, PathBase, `RouteRootPath`, exact-version mount roots, or absolute URLs.
+  - Missing manifests are supported for legacy archives; malformed manifests disable archive alias recovery for that release without disabling normal file serving.
 - `index.html` at the tree root
 - `search.html` at the tree root
   - The shell should contain useful server-rendered anchors before JavaScript runs: starter query URLs and browse recovery links for the strongest available docs entry points.
@@ -1012,7 +1057,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `minisearch.min.js` at the tree root
 - any section, detail, partial, and asset routes that belong to the exported docs surface for that release
 
-AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. Exporters should validate `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
 
 ### Archive ordering
 
@@ -1033,6 +1078,7 @@ AppSurface Docs does not regenerate these trees at request time. It resolves ext
 - Do not point `recommendedVersion` at a hidden or broken release tree.
 - Do not assume `AppSurfaceDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
+- Do not hand-edit `.appsurface-docs-route-manifest.json` to add aliases. New exports validate duplicate aliases, aliases that collide with canonical routes, and aliases that equal their own canonical route. Runtime ignores ambiguous aliases from hand-edited or legacy manifests and keeps serving normal files.
 
 `AppSurfaceDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
 

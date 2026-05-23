@@ -18,6 +18,11 @@ public static class RazorWireEndpointRouteBuilderExtensions
     /// <param name="endpoints">The endpoint route builder to configure.</param>
     /// <remarks>
     /// The endpoint enforces channel subscription authorization, streams hub messages as SSE (each line emitted as a `data:` event), sends a 20-second heartbeat comment when idle, and unsubscribes on client disconnect.
+    /// A <c>replay</c> query value of <c>1</c> or <c>true</c> maps to
+    /// <see cref="RazorWireStreamSubscribeOptions.Replay"/> and asks the hub to deliver retained messages before live
+    /// messages. Replay is disabled when the query is absent or has any other value. The helper that parses this input is
+    /// intentionally narrow so live delivery remains the default and replay stays a one-time historical catch-up before
+    /// ongoing stream delivery.
     /// </remarks>
     /// <returns>The original <see cref="IEndpointRouteBuilder"/> instance.</returns>
     public static IEndpointRouteBuilder MapRazorWire(this IEndpointRouteBuilder endpoints)
@@ -51,7 +56,12 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     context.Response.Headers.Connection = "keep-alive";
                     context.Response.Headers.Pragma = "no-cache";
 
-                    var reader = hub.Subscribe(channel);
+                    var reader = hub.Subscribe(
+                        channel,
+                        new RazorWireStreamSubscribeOptions
+                        {
+                            Replay = IsReplayRequested(context.Request.Query)
+                        });
 
                     try
                     {
@@ -103,5 +113,16 @@ public static class RazorWireEndpointRouteBuilderExtensions
             .ExcludeFromDescription();
 
         return endpoints;
+    }
+
+    private static bool IsReplayRequested(IQueryCollection query)
+    {
+        if (!query.TryGetValue("replay", out var values))
+        {
+            return false;
+        }
+
+        return values.Any(value => value == "1"
+                                   || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase));
     }
 }
