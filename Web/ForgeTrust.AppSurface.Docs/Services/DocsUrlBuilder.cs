@@ -58,8 +58,8 @@ public sealed class DocsUrlBuilder
             Versions = BuildVersionsUrl(),
             Health = BuildHealthUrl(),
             HealthJson = BuildHealthJsonUrl(),
-            Routes = BuildRouteInspectorUrl(),
-            RoutesJson = BuildRouteInspectorJsonUrl()
+            RouteInspector = BuildRouteInspectorUrl(),
+            RouteInspectorJson = BuildRouteInspectorJsonUrl()
         };
     }
 
@@ -596,8 +596,8 @@ public sealed record AppSurfaceDocsRouteReferences
     /// <param name="versions">The route-family archive route.</param>
     /// <param name="health">The current live docs harvest health HTML route.</param>
     /// <param name="healthJson">The current live docs harvest health JSON route.</param>
-    /// <param name="routes">The current live docs route inspector HTML route.</param>
-    /// <param name="routesJson">The current live docs route inspector JSON route.</param>
+    /// <param name="routeInspector">The current live docs route inspector HTML route.</param>
+    /// <param name="routeInspectorJson">The current live docs route inspector JSON route.</param>
     public AppSurfaceDocsRouteReferences(
         string home,
         string search,
@@ -606,8 +606,8 @@ public sealed record AppSurfaceDocsRouteReferences
         string versions,
         string health,
         string healthJson,
-        string routes,
-        string routesJson)
+        string routeInspector,
+        string routeInspectorJson)
     {
         Home = home;
         Search = search;
@@ -616,8 +616,8 @@ public sealed record AppSurfaceDocsRouteReferences
         Versions = versions;
         Health = health;
         HealthJson = healthJson;
-        Routes = routes;
-        RoutesJson = routesJson;
+        RouteInspector = routeInspector;
+        RouteInspectorJson = routeInspectorJson;
     }
 
     /// <summary>
@@ -658,12 +658,12 @@ public sealed record AppSurfaceDocsRouteReferences
     /// <summary>
     /// Gets the current live docs route inspector HTML route.
     /// </summary>
-    public string Routes { get; init; } = string.Empty;
+    public string RouteInspector { get; init; } = string.Empty;
 
     /// <summary>
     /// Gets the current live docs route inspector JSON route.
     /// </summary>
-    public string RoutesJson { get; init; } = string.Empty;
+    public string RouteInspectorJson { get; init; } = string.Empty;
 
     /// <summary>
     /// Deconstructs the original route set for callers that used the positional record contract.
@@ -725,8 +725,8 @@ public sealed record AppSurfaceDocsRouteReferences
     /// <param name="versions">The route-family archive route.</param>
     /// <param name="health">The current live docs harvest health HTML route.</param>
     /// <param name="healthJson">The current live docs harvest health JSON route.</param>
-    /// <param name="routes">The current live docs route inspector HTML route.</param>
-    /// <param name="routesJson">The current live docs route inspector JSON route.</param>
+    /// <param name="routeInspector">The current live docs route inspector HTML route.</param>
+    /// <param name="routeInspectorJson">The current live docs route inspector JSON route.</param>
     public void Deconstruct(
         out string home,
         out string search,
@@ -735,8 +735,8 @@ public sealed record AppSurfaceDocsRouteReferences
         out string versions,
         out string health,
         out string healthJson,
-        out string routes,
-        out string routesJson)
+        out string routeInspector,
+        out string routeInspectorJson)
     {
         home = Home;
         search = Search;
@@ -745,7 +745,7 @@ public sealed record AppSurfaceDocsRouteReferences
         versions = Versions;
         health = Health;
         healthJson = HealthJson;
-        routes = Routes;
-        routesJson = RoutesJson;
+        routeInspector = RouteInspector;
+        routeInspectorJson = RouteInspectorJson;
     }
 }

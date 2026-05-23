@@ -1007,8 +1007,8 @@ internal sealed class DocRouteIdentityCatalog
         AddRouteReference(reserved, docsUrlBuilder.Routes.SearchIndex, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.Health, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.HealthJson, docsUrlBuilder.CurrentDocsRootPath);
-        AddRouteReference(reserved, docsUrlBuilder.Routes.Routes, docsUrlBuilder.CurrentDocsRootPath);
-        AddRouteReference(reserved, docsUrlBuilder.Routes.RoutesJson, docsUrlBuilder.CurrentDocsRootPath);
+        AddRouteReference(reserved, docsUrlBuilder.Routes.RouteInspector, docsUrlBuilder.CurrentDocsRootPath);
+        AddRouteReference(reserved, docsUrlBuilder.Routes.RouteInspectorJson, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.Versions, docsUrlBuilder.RouteRootPath);
         return reserved;
     }

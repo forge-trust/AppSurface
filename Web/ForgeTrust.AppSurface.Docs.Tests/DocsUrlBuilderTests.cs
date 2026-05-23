@@ -42,8 +42,8 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs/search-index.json?refresh=1", disabledBuilder.Routes.SearchIndexRefresh);
         Assert.Equal("/docs/_health", disabledBuilder.Routes.Health);
         Assert.Equal("/docs/_health.json", disabledBuilder.Routes.HealthJson);
-        Assert.Equal("/docs/_routes", disabledBuilder.Routes.Routes);
-        Assert.Equal("/docs/_routes.json", disabledBuilder.Routes.RoutesJson);
+        Assert.Equal("/docs/_routes", disabledBuilder.Routes.RouteInspector);
+        Assert.Equal("/docs/_routes.json", disabledBuilder.Routes.RouteInspectorJson);
         Assert.Equal("/docs/versions", disabledBuilder.Routes.Versions);
         Assert.Equal("/docs", enabledBuilder.RouteRootPath);
         Assert.Equal("/docs/next", enabledBuilder.CurrentDocsRootPath);
@@ -151,8 +151,8 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/next/search-index.json?refresh=1", builder.Routes.SearchIndexRefresh);
         Assert.Equal("/next/_health", builder.Routes.Health);
         Assert.Equal("/next/_health.json", builder.Routes.HealthJson);
-        Assert.Equal("/next/_routes", builder.Routes.Routes);
-        Assert.Equal("/next/_routes.json", builder.Routes.RoutesJson);
+        Assert.Equal("/next/_routes", builder.Routes.RouteInspector);
+        Assert.Equal("/next/_routes.json", builder.Routes.RouteInspectorJson);
     }
 
     [Fact]
@@ -167,15 +167,15 @@ public sealed class DocsUrlBuilderTests
             Versions = "/docs/versions",
             Health = "/docs/_health",
             HealthJson = "/docs/_health.json",
-            Routes = "/docs/_routes",
-            RoutesJson = "/docs/_routes.json"
+            RouteInspector = "/docs/_routes",
+            RouteInspectorJson = "/docs/_routes.json"
         };
 
         Assert.Equal("/docs", routes.Home);
         Assert.Equal("/docs/_health", routes.Health);
         Assert.Equal("/docs/_health.json", routes.HealthJson);
-        Assert.Equal("/docs/_routes", routes.Routes);
-        Assert.Equal("/docs/_routes.json", routes.RoutesJson);
+        Assert.Equal("/docs/_routes", routes.RouteInspector);
+        Assert.Equal("/docs/_routes.json", routes.RouteInspectorJson);
     }
 
     [Fact]
@@ -197,8 +197,8 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs/versions", versions);
         Assert.Equal(string.Empty, routes.Health);
         Assert.Equal(string.Empty, routes.HealthJson);
-        Assert.Equal(string.Empty, routes.Routes);
-        Assert.Equal(string.Empty, routes.RoutesJson);
+        Assert.Equal(string.Empty, routes.RouteInspector);
+        Assert.Equal(string.Empty, routes.RouteInspectorJson);
     }
 
     [Fact]

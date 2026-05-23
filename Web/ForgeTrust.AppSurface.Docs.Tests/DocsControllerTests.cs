@@ -3168,6 +3168,11 @@ public class DocsControllerTests : IDisposable
             Assert.NotNull(response.Probe);
             Assert.Equal(expectedKind, response.Probe.Kind);
             Assert.False(string.IsNullOrWhiteSpace(response.Probe.Message));
+            if (expectedKind is "ReservedRoute" or "NotFound")
+            {
+                Assert.Null(response.Probe.CanonicalRoutePath);
+                Assert.Null(response.Probe.CanonicalLiveUrl);
+            }
         }
     }
 

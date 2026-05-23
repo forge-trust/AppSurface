@@ -615,10 +615,10 @@ var home = routes.Home;
 var search = routes.Search;
 var searchIndexRefresh = routes.SearchIndexRefresh;
 var healthJson = routes.HealthJson;
-var routeInspectorJson = routes.RoutesJson;
+var routeInspectorJson = routes.RouteInspectorJson;
 ```
 
-`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, `HealthJson`, `Routes`, and `RoutesJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
+`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
 The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; keep `Routes.SearchIndexRefresh` for authenticated operator refresh flows.
 
