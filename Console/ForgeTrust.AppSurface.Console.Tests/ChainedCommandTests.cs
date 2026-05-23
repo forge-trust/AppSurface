@@ -1,4 +1,4 @@
-using CliFx.Exceptions;
+using CliFx;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;

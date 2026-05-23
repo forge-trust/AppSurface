@@ -1,12 +1,12 @@
 ﻿using CliFx;
-using CliFx.Attributes;
+using CliFx.Binding;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Config;
 
 namespace ConsoleAppExample;
 
 [Command("greet", Description = "Prints a greeting message.")]
-public class GreetCommand : ICommand
+public partial class GreetCommand : ICommand
 {
     private readonly FooConfig _foo;
     private readonly BarConfig _bar;

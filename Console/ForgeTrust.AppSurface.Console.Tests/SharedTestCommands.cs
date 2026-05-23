@@ -1,5 +1,5 @@
 using CliFx;
-using CliFx.Attributes;
+using CliFx.Binding;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,7 +10,7 @@ namespace ForgeTrust.AppSurface.Console.Tests;
 
 // All commands on an assembly are currently shared across all test classes
 [Command("first")]
-public class FirstCommand : ICommand
+public partial class FirstCommand : ICommand
 {
     private readonly ExecutionTracker _tracker;
 
@@ -19,8 +19,8 @@ public class FirstCommand : ICommand
         _tracker = tracker;
     }
 
-    [CommandOption("foo", IsRequired = true)]
-    public string? Foo { get; set; }
+    [CommandOption("foo")]
+    public required string? Foo { get; set; }
 
     public ValueTask ExecuteAsync(IConsole console)
     {
@@ -32,7 +32,7 @@ public class FirstCommand : ICommand
 }
 
 [Command("second")]
-public class SecondCommand : ICommand
+public partial class SecondCommand : ICommand
 {
     private readonly ExecutionTracker _tracker;
 
@@ -54,10 +54,10 @@ public class SecondCommand : ICommand
 }
 
 [Command("composite")]
-public class CompositeCommand : ChainedCommand
+public partial class CompositeCommand : ChainedCommand
 {
-    [CommandOption("foo", IsRequired = true)]
-    public string? Foo { get; set; }
+    [CommandOption("foo")]
+    public required string? Foo { get; set; }
 
     [CommandOption("bar")]
     public string? Bar { get; set; }
@@ -69,7 +69,7 @@ public class CompositeCommand : ChainedCommand
 }
 
 [Command("conditional")]
-public class ConditionalCompositeCommand : ChainedCommand
+public partial class ConditionalCompositeCommand : ChainedCommand
 {
     [CommandOption("foo")]
     public string? Foo { get; set; }
@@ -87,7 +87,7 @@ public class ConditionalCompositeCommand : ChainedCommand
 }
 
 [Command("third")]
-public class ThirdCommand : ICommand
+public partial class ThirdCommand : ICommand
 {
     private readonly ExecutionTracker _tracker;
 
@@ -96,8 +96,8 @@ public class ThirdCommand : ICommand
         _tracker = tracker;
     }
 
-    [CommandParameter(0, IsRequired = true)]
-    public string? Baz { get; set; }
+    [CommandParameter(0)]
+    public required string? Baz { get; set; }
 
     public ValueTask ExecuteAsync(IConsole console)
     {
@@ -109,10 +109,10 @@ public class ThirdCommand : ICommand
 }
 
 [Command("composite-with-param")]
-public class CompositeWithParamCommand : ChainedCommand
+public partial class CompositeWithParamCommand : ChainedCommand
 {
-    [CommandParameter(0, IsRequired = true)]
-    public string? Baz { get; set; }
+    [CommandParameter(0)]
+    public required string? Baz { get; set; }
 
     protected override void Configure(CommandChainBuilder builder) =>
         builder.Add<ThirdCommand>();
