@@ -74,13 +74,13 @@ test('normalizeSearchDocument preserves and labels generated code language', asy
     id: 'calculator',
     path: '/docs/Namespaces/Test#calculator',
     title: 'Calculator',
-    language: 'csharp'
+    language: 'C-Sharp'
   });
   const jsDoc = normalizeSearchDocument({
     id: 'runtime',
     path: '/docs/api/javascript/razorwire',
     title: 'RazorWire JavaScript API',
-    language: 'javascript'
+    language: 'js'
   });
 
   assert.equal(csharpDoc.language, 'csharp');

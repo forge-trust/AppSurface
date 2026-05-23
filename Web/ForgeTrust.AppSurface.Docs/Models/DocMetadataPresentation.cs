@@ -39,7 +39,14 @@ public static class DocMetadataPresentation
     /// <returns>A normalized token, or <see langword="null"/> when the value is blank.</returns>
     public static string? ResolveCodeLanguageValue(string? codeLanguage)
     {
-        return NormalizeToken(codeLanguage);
+        var normalizedValue = NormalizeToken(codeLanguage);
+
+        return normalizedValue switch
+        {
+            "csharp" or "c-sharp" or "cs" => "csharp",
+            "javascript" or "java-script" or "js" => "javascript",
+            _ => normalizedValue
+        };
     }
 
     /// <summary>
@@ -49,7 +56,7 @@ public static class DocMetadataPresentation
     /// <returns>A display label such as <c>C#</c> or <c>JavaScript</c>, or <see langword="null"/> for blank values.</returns>
     public static string? ResolveCodeLanguageLabel(string? codeLanguage)
     {
-        var normalizedValue = NormalizeToken(codeLanguage);
+        var normalizedValue = ResolveCodeLanguageValue(codeLanguage);
         if (normalizedValue is null)
         {
             return null;
@@ -57,8 +64,8 @@ public static class DocMetadataPresentation
 
         return normalizedValue switch
         {
-            "csharp" or "c-sharp" or "cs" => "C#",
-            "javascript" or "java-script" or "js" => "JavaScript",
+            "csharp" => "C#",
+            "javascript" => "JavaScript",
             _ => BuildFallbackLabel(normalizedValue)
         };
     }

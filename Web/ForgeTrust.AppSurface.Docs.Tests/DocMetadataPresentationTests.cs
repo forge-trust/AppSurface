@@ -78,8 +78,8 @@ public sealed class DocMetadataPresentationTests
 
     [Theory]
     [InlineData("csharp", "csharp", "C#")]
-    [InlineData("C-Sharp", "c-sharp", "C#")]
-    [InlineData("js", "js", "JavaScript")]
+    [InlineData("C-Sharp", "csharp", "C#")]
+    [InlineData("js", "javascript", "JavaScript")]
     [InlineData("javascript", "javascript", "JavaScript")]
     [InlineData("typed_python", "typed-python", "Typed Python")]
     public void ResolveCodeLanguage_ShouldNormalizeAndLabelLanguageValues(

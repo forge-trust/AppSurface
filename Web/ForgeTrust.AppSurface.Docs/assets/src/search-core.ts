@@ -150,11 +150,21 @@ function normalizeFacetValue(value: any) {
 }
 
 export function normalizeCodeLanguage(value: any) {
-  return normalizeFacetValue(value)
+  const normalized = normalizeFacetValue(value)
     .toLowerCase()
     .split(/[-_\s]+/)
     .filter(Boolean)
     .join('-');
+
+  if (normalized === 'csharp' || normalized === 'c-sharp' || normalized === 'cs' || normalized === 'c#') {
+    return 'csharp';
+  }
+
+  if (normalized === 'javascript' || normalized === 'java-script' || normalized === 'js') {
+    return 'javascript';
+  }
+
+  return normalized;
 }
 
 export function normalizeCodeLanguageLabel(language: any, label: any) {
@@ -164,11 +174,11 @@ export function normalizeCodeLanguageLabel(language: any, label: any) {
   }
 
   const normalized = normalizeCodeLanguage(language);
-  if (normalized === 'csharp' || normalized === 'c-sharp' || normalized === 'cs') {
+  if (normalized === 'csharp') {
     return 'C#';
   }
 
-  if (normalized === 'javascript' || normalized === 'java-script' || normalized === 'js') {
+  if (normalized === 'javascript') {
     return 'JavaScript';
   }
 
@@ -184,11 +194,11 @@ export function buildLanguageSearchText(language: any, label: any) {
   const displayLabel = normalizeCodeLanguageLabel(normalized, label);
   const terms = [normalized, displayLabel];
 
-  if (normalized === 'csharp' || normalized === 'c-sharp' || normalized === 'cs') {
+  if (normalized === 'csharp') {
     terms.push('csharp', 'CSharp', 'C-Sharp', 'C#');
   }
 
-  if (normalized === 'javascript' || normalized === 'java-script' || normalized === 'js') {
+  if (normalized === 'javascript') {
     terms.push('javascript', 'JavaScript', 'js');
   }
 

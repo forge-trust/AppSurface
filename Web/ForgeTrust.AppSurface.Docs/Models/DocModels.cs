@@ -1755,11 +1755,24 @@ public sealed record DocDetailsViewModel
     /// <summary>
     /// Gets the normalized programming language value shown and filtered by generated API documentation surfaces.
     /// </summary>
+    /// <remarks>
+    /// Values are stable programmatic identifiers such as <c>csharp</c> or <c>javascript</c>. A null value means the
+    /// source language is unknown or not applicable, and callers should treat blank values the same way. Use this
+    /// property for matching, indexing, URL filters, and other machine-readable behavior; use
+    /// <see cref="CodeLanguageLabel" /> for reader-facing UI. Do not match on the label, because labels may contain
+    /// punctuation, casing, or future localization choices that are not part of the canonical metadata contract.
+    /// </remarks>
     public string? CodeLanguage { get; init; }
 
     /// <summary>
     /// Gets the reader-facing programming language label shown for generated API documentation.
     /// </summary>
+    /// <remarks>
+    /// Labels are display text derived from <see cref="CodeLanguage" />, such as <c>C#</c> for <c>csharp</c> or
+    /// <c>JavaScript</c> for <c>javascript</c>. A null value means there is no language chip to render. Callers should
+    /// use this only for presentation chrome; programmatic comparisons, search filters, and persisted lookup keys should
+    /// use <see cref="CodeLanguage" /> instead so aliases and display spelling do not fragment behavior.
+    /// </remarks>
     public string? CodeLanguageLabel { get; init; }
 
     /// <summary>
