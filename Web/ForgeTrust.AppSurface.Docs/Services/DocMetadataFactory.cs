@@ -186,6 +186,11 @@ internal static class DocMetadataFactory
             return DocPublicSection.Releases;
         }
 
+        if (IsPackageReadmePath(normalizedPath))
+        {
+            return DocPublicSection.Packages;
+        }
+
         var fileName = Path.GetFileNameWithoutExtension(normalizedPath);
         if (IsStartHereLikeName(fileName))
         {
@@ -335,6 +340,32 @@ internal static class DocMetadataFactory
 
         return normalizedPath.StartsWith("releases/", StringComparison.OrdinalIgnoreCase)
                || normalizedPath.Equals("CHANGELOG.md", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPackageReadmePath(string path)
+    {
+        var normalizedPath = NormalizePath(path);
+        if (!normalizedPath.EndsWith("/README.md", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (normalizedPath.Equals("packages/README.md", StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.StartsWith("packages/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return normalizedPath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Any(IsPackageIdentitySegment);
+    }
+
+    private static bool IsPackageIdentitySegment(string segment)
+    {
+        return segment.StartsWith(AppSurfaceNamespacePrefix, StringComparison.OrdinalIgnoreCase)
+               || segment.Equals(AppSurfaceNamespaceRoot, StringComparison.OrdinalIgnoreCase)
+               || segment.StartsWith(RazorWireNamespacePrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? NormalizeMetadataValue(string? value)

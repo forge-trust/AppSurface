@@ -1,3 +1,4 @@
+namespace: ForgeTrust.RazorWire
 title: ForgeTrust.RazorWire
 summary: Start here for RazorWire registration, endpoint mapping, options, and stream-result entry points.
 aliases:

@@ -15,6 +15,7 @@ public sealed class DocPublicSectionCatalogTests
         Assert.Equal(5, (int)DocPublicSection.Troubleshooting);
         Assert.Equal(6, (int)DocPublicSection.Internals);
         Assert.Equal(7, (int)DocPublicSection.Releases);
+        Assert.Equal(8, (int)DocPublicSection.Packages);
     }
 
     [Theory]
@@ -24,6 +25,9 @@ public sealed class DocPublicSectionCatalogTests
     [InlineData("release-notes", DocPublicSection.Releases)]
     [InlineData("changelog", DocPublicSection.Releases)]
     [InlineData("start_here", DocPublicSection.StartHere)]
+    [InlineData("Packages", DocPublicSection.Packages)]
+    [InlineData("package", DocPublicSection.Packages)]
+    [InlineData("packages", DocPublicSection.Packages)]
     public void TryResolve_ShouldAcceptCanonicalLabelsSlugsAndAliases(string value, DocPublicSection expectedSection)
     {
         var resolved = DocPublicSectionCatalog.TryResolve(value, out var section);
@@ -36,6 +40,7 @@ public sealed class DocPublicSectionCatalogTests
     [InlineData("api-reference", true, DocPublicSection.ApiReference)]
     [InlineData("API-REFERENCE", true, DocPublicSection.ApiReference)]
     [InlineData("releases", true, DocPublicSection.Releases)]
+    [InlineData("packages", true, DocPublicSection.Packages)]
     [InlineData("api", false, default)]
     [InlineData("reference", false, default)]
     [InlineData("release-notes", false, default)]

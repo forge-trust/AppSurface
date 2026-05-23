@@ -53,6 +53,12 @@ internal static class DocPublicSectionCatalog
             "Inspect concrete, working proof that shows the system behaving in practice.",
             "example"),
         new(
+            DocPublicSection.Packages,
+            "Packages",
+            "packages",
+            "Review package entry points, install choices, and package-level adoption guidance.",
+            "package"),
+        new(
             DocPublicSection.ApiReference,
             "API Reference",
             "api-reference",

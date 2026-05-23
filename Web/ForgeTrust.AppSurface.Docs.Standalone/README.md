@@ -59,7 +59,7 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 
 ## Dogfood Harvest Boundary
 
-The standalone host ships an `appsettings.json` that dogfoods the reusable harvest path policy for this repository. It keeps the live AppSurface docs surface focused on intentional public docs paths such as the root `README.md`, `LICENSE`, package READMEs, web package READMEs, authored docs folders, releases, guides, troubleshooting, and example READMEs. It also excludes host-specific generated and test-result paths:
+The standalone host ships an `appsettings.json` that dogfoods the reusable harvest path policy for this repository. It keeps the live AppSurface docs surface focused on intentional public docs paths such as the root `README.md`, `LICENSE`, package READMEs, colocated `NAMESPACE.md` namespace intros, authored docs folders, releases, guides, troubleshooting, and example READMEs. It also excludes host-specific generated and test-result paths:
 
 ```json
 {
@@ -71,6 +71,7 @@ The standalone host ships an `appsettings.json` that dogfoods the reusable harve
           "LICENSE",
           "packages/**/README.md",
           "Web/**/README.md",
+          "Web/**/NAMESPACE.md",
           "**/*.cs"
         ],
         "ExcludeGlobs": [

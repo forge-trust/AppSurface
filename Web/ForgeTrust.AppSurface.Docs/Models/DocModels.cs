@@ -44,6 +44,16 @@ public sealed record DocMetadata
     public string? Component { get; init; }
 
     /// <summary>
+    /// Gets the generated namespace page that namespace-intro source content should merge into.
+    /// </summary>
+    /// <remarks>
+    /// This value is authored with the <c>namespace</c> metadata key. AppSurface Docs currently consumes it only from
+    /// namespace-intro source documents such as <c>NAMESPACE.md</c>; ordinary pages preserve the value for metadata
+    /// consistency but do not use it for route selection.
+    /// </remarks>
+    public string? Namespace { get; init; }
+
+    /// <summary>
     /// Gets alternate terms that should resolve to this page in search.
     /// </summary>
     public IReadOnlyList<string>? Aliases { get; init; }
@@ -245,6 +255,7 @@ public sealed record DocMetadata
             AudienceIsDerived = audienceIsDerived,
             Component = component,
             ComponentIsDerived = componentIsDerived,
+            Namespace = DocTrustMergeHelpers.PreferNonBlank(primary.Namespace, fallback.Namespace),
             Aliases = MergeLists(primary.Aliases, fallback.Aliases),
             RedirectAliases = MergeLists(primary.RedirectAliases, fallback.RedirectAliases),
             Keywords = MergeLists(primary.Keywords, fallback.Keywords),
@@ -1009,6 +1020,16 @@ public static class DocHarvestDiagnosticCodes
     public const string NamespaceEntryPointTargetUnresolved = "appsurfacedocs.namespace.entry_point_target_unresolved";
 
     /// <summary>
+    /// A namespace-intro source file could not resolve to an existing generated namespace page.
+    /// </summary>
+    public const string NamespaceIntroTargetMissing = "appsurfacedocs.namespace.intro_target_missing";
+
+    /// <summary>
+    /// A namespace-intro source file matched multiple possible project contexts and needs explicit metadata.
+    /// </summary>
+    public const string NamespaceIntroTargetAmbiguous = "appsurfacedocs.namespace.intro_target_ambiguous";
+
+    /// <summary>
     /// A localized document variant declared or inferred an unsupported locale.
     /// </summary>
     public const string LocalizationUnsupportedLocale = "appsurfacedocs.localization.unsupported_locale";
@@ -1087,7 +1108,12 @@ public enum DocPublicSection
     /// <summary>
     /// Release notes, changelogs, upgrade policies, and other version-facing project history.
     /// </summary>
-    Releases = 7
+    Releases = 7,
+
+    /// <summary>
+    /// Package entry points, package chooser pages, and install-facing package documentation.
+    /// </summary>
+    Packages = 8
 }
 
 /// <summary>
