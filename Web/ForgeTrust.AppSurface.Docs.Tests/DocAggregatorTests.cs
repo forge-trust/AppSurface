@@ -5,6 +5,7 @@ using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.RazorWire.Streams;
 using Ganss.Xss;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
@@ -3259,6 +3260,38 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldPublishTerminalProgress_ForTimedOutAndCanceledHarvesters()
+    {
+        var timeoutHarvester = new DelayingHarvester();
+        var canceledHarvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => canceledHarvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Throws(new OperationCanceledException());
+        var services = A.Fake<IServiceProvider>();
+        A.CallTo(() => services.GetService(typeof(IRazorWireStreamHub))).Returns(null);
+        var progress = new AppSurfaceDocsHarvestProgressReporter(
+            services,
+            A.Fake<ILogger<AppSurfaceDocsHarvestProgressReporter>>());
+        var aggregator = CreateHarvestHealthAggregator(
+            [timeoutHarvester, canceledHarvester],
+            harvesterTimeout: TimeSpan.FromMilliseconds(10),
+            harvestProgress: progress);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+        var progressSnapshot = progress.CurrentSnapshot;
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Failed, progressSnapshot.State);
+        Assert.Equal(2, progressSnapshot.CompletedHarvesters);
+        Assert.Contains(
+            progressSnapshot.Harvesters,
+            item => item.HarvesterType == nameof(DelayingHarvester)
+                    && item.Status == DocHarvesterHealthStatus.TimedOut.ToString());
+        Assert.Contains(
+            progressSnapshot.Harvesters,
+            item => item.Status == DocHarvesterHealthStatus.Canceled.ToString());
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldReturnDefensiveCopyOfSnapshotLists()
     {
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
@@ -4900,7 +4933,8 @@ public class DocAggregatorTests : IDisposable
         IEnumerable<IDocHarvester> harvesters,
         ILogger<DocAggregator>? logger = null,
         TimeSpan? harvesterTimeout = null,
-        Func<DateTimeOffset>? utcNow = null)
+        Func<DateTimeOffset>? utcNow = null,
+        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null)
     {
         return new DocAggregator(
             harvesters,
@@ -4918,7 +4952,8 @@ public class DocAggregatorTests : IDisposable
             resolveGitLastUpdatedUtcAsync: null,
             harvesterTimeout: harvesterTimeout,
             contributorFreshnessTimeout: null,
-            utcNow: utcNow);
+            utcNow: utcNow,
+            harvestProgress: harvestProgress);
     }
 
     private DocAggregator CreateAggregatorWithRepositoryRoot(IDocHarvester harvester, string repositoryRoot)

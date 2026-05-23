@@ -849,6 +849,63 @@ public class MemoTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_CachesFactoryFailureForRetryWindow()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) },
+            TimeSpan.FromMinutes(1));
+        var callCount = 0;
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMinutes(1),
+            TimeSpan.FromMinutes(1));
+
+        Task<int> Factory()
+        {
+            callCount++;
+            throw new InvalidOperationException("transient miss");
+        }
+
+        async Task<int> GetValue() => await memo.GetAsync(Factory, policy);
+
+        var first = await Assert.ThrowsAsync<InvalidOperationException>(GetValue);
+        var second = await Assert.ThrowsAsync<InvalidOperationException>(GetValue);
+
+        Assert.Equal("transient miss", first.Message);
+        Assert.Equal("transient miss", second.Message);
+        Assert.Equal(1, callCount);
+    }
+
+    [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_ReturnsExistingAbsoluteEntryForSameKey()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+
+        Task<int> Factory()
+        {
+            callCount++;
+
+            return Task.FromResult(callCount);
+        }
+
+        Task<int> GetValue(CachePolicy policy)
+        {
+            return memo.GetAsync(Factory, policy);
+        }
+
+        var absolute = await GetValue(CachePolicy.Absolute(TimeSpan.FromMinutes(1)));
+        var stale = await GetValue(
+            CachePolicy.AbsoluteWithStaleWhileRevalidate(
+                TimeSpan.FromMinutes(1),
+                TimeSpan.FromMinutes(1)));
+
+        Assert.Equal(1, absolute);
+        Assert.Equal(1, stale);
+        Assert.Equal(1, callCount);
+    }
+
+    [Fact]
     public async Task GetAsync_SlidingExpiration_KeepsAliveOnAccess()
     {
         var memo = CreateMemoWithOptions(

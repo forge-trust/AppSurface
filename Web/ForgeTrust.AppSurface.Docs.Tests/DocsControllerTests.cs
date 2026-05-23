@@ -7,6 +7,7 @@ using ForgeTrust.AppSurface.Docs.Controllers;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.RazorWire.Bridge;
+using ForgeTrust.RazorWire.Streams;
 using Ganss.Xss;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -2141,6 +2142,78 @@ public class DocsControllerTests : IDisposable
         Assert.Equal("Search Documentation", model.Title);
         Assert.Contains(model.FailureFallbackLinks, link => link.Href == "/docs" && !link.UsesDocsFrame);
         AssertWarningLogged();
+    }
+
+    [Fact]
+    public async Task Search_ShouldRenderHarvesting_WhenInitialHarvestIsStillPending()
+    {
+        var release = new TaskCompletionSource<IReadOnlyList<DocNode>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns(release.Task);
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                InitialRequestWaitBudgetMilliseconds = 0
+            }
+        };
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var memo = new Memo(cache);
+        var environment = A.Fake<IWebHostEnvironment>();
+        var sanitizer = A.Fake<IAppSurfaceDocsHtmlSanitizer>();
+        var aggregatorLogger = A.Fake<ILogger<DocAggregator>>();
+        var controllerLogger = A.Fake<ILogger<DocsController>>();
+        var services = A.Fake<IServiceProvider>();
+        A.CallTo(() => environment.ContentRootPath).Returns(Path.GetTempPath());
+        A.CallTo(() => sanitizer.Sanitize(A<string>._)).ReturnsLazily((string input) => input);
+        A.CallTo(() => services.GetService(typeof(IRazorWireStreamHub))).Returns(null);
+
+        var aggregator = new DocAggregator(
+            [harvester],
+            options,
+            environment,
+            memo,
+            sanitizer,
+            aggregatorLogger);
+        var progress = new AppSurfaceDocsHarvestProgressReporter(
+            services,
+            A.Fake<ILogger<AppSurfaceDocsHarvestProgressReporter>>());
+        var coordinator = new AppSurfaceDocsHarvestCoordinator(aggregator, progress);
+        var initialHarvest = coordinator.EnsureStarted();
+        var docsUrlBuilder = new DocsUrlBuilder(options);
+        var controller = new DocsController(
+            aggregator,
+            docsUrlBuilder,
+            CreateDefaultVersionCatalogService(options),
+            new DocFeaturedPageResolver(_featuredPageResolverLoggerFake, docsUrlBuilder),
+            options,
+            environment,
+            controllerLogger,
+            coordinator)
+        {
+            ControllerContext = CreateControllerContext(new DefaultHttpContext())
+        };
+        controller.ControllerContext.HttpContext.Request.Path = "/docs/search";
+        controller.Url = new UrlHelper(controller.ControllerContext);
+
+        try
+        {
+            var result = await controller.Search();
+
+            var viewResult = Assert.IsType<ViewResult>(result);
+            Assert.Equal("Harvesting", viewResult.ViewName);
+            var model = Assert.IsType<AppSurfaceDocsHarvestingViewModel>(viewResult.Model);
+            Assert.Equal("/docs/search", model.ReturnUrl);
+        }
+        finally
+        {
+            release.TrySetResult([]);
+            await initialHarvest.WaitAsync(TimeSpan.FromSeconds(3));
+            memo.Dispose();
+            cache.Dispose();
+        }
     }
 
     [Fact]

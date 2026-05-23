@@ -372,7 +372,8 @@ public class DocAggregator
             resolveGitLastUpdatedUtcAsync,
             harvesterTimeout,
             contributorFreshnessTimeout,
-            utcNow)
+            utcNow,
+            harvestProgress)
     {
     }
 
