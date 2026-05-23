@@ -761,7 +761,12 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             return false;
         }
 
-        var decodedPath = Uri.UnescapeDataString(rawPath);
+        if (ContainsMalformedPercentEncoding(rawPath))
+        {
+            return false;
+        }
+
+        var decodedPath = DecodeBrandingAssetPath(rawPath);
         if (decodedPath.StartsWith("/", StringComparison.Ordinal)
             || decodedPath.Contains('\\', StringComparison.Ordinal)
             || decodedPath.Any(char.IsControl))
@@ -782,6 +787,49 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
 
         assetPath = decodedPath;
         return true;
+    }
+
+    private static bool ContainsMalformedPercentEncoding(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (value[index] != '%')
+            {
+                continue;
+            }
+
+            if (index + 2 >= value.Length
+                || !IsHexDigit(value[index + 1])
+                || !IsHexDigit(value[index + 2]))
+            {
+                return true;
+            }
+
+            index += 2;
+        }
+
+        return false;
+    }
+
+    [ExcludeFromCodeCoverage(
+        Justification = "Defensive adapter for platform URI decoding failures; caller rejects malformed percent escapes before decoding.")]
+    private static string DecodeBrandingAssetPath(string rawPath)
+    {
+        try
+        {
+            return Uri.UnescapeDataString(rawPath);
+        }
+        catch (UriFormatException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool IsHexDigit(char value)
+    {
+        return value is >= '0' and <= '9'
+            or >= 'a' and <= 'f'
+            or >= 'A' and <= 'F';
     }
 
     [ExcludeFromCodeCoverage(

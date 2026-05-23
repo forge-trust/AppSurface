@@ -1543,9 +1543,12 @@ public class AppSurfaceDocsWebModuleRegressionTests
             { string.Empty, false, string.Empty },
             { "/secret.svg", false, string.Empty },
             { "nested\\secret.svg", false, string.Empty },
+            { "bad%zz.svg", false, string.Empty },
+            { "bad%.svg", false, string.Empty },
             { "bad\u0001.svg", false, string.Empty },
             { "../secret.svg", false, string.Empty },
             { "notes.txt", false, string.Empty },
+            { "literal%25.svg", true, "literal%.svg" },
             { "favicon.SVG", true, "favicon.SVG" },
             { "nested/favicon.svg", true, "nested/favicon.svg" }
         };
