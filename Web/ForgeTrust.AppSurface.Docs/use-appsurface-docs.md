@@ -275,6 +275,18 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - For package maintainers changing built-in Docs browser assets, run `pnpm --dir Web run assets:build` and `pnpm --dir Web run assets:verify` before building or exporting docs. AppSurface Docs embeds `wwwroot/docs/search-client.js` and `wwwroot/docs/minisearch.min.js`, so stale generated assets can otherwise ship inside the package assembly.
 - Run the standalone host or export pipeline in CI before publishing a public docs surface.
 
+## Search fallback checks
+
+Treat the search page as useful server-rendered content, not as a blank client-only workspace. The first response for `/docs/search` should include starter query links and browse links for high-value routes such as Start Here, Examples, Packages, Troubleshooting, and API Reference. The browser script can replace the loading skeleton with live results after `search-index.json` loads, but a crawler, no-JS reader, or temporarily blocked index request must still have those links.
+
+When validating a host or release artifact:
+
+- Open `/docs/search` before the client search index settles. Confirm starter searches point at `/docs/search?q=...` and browse cards point at real docs routes.
+- Block or rename `/docs/search-index.json`. The page should show a specific search-index failure message and retry button while keeping the starter and browse links visible.
+- Confirm the failure panel does not contain replacement navigation links. The durable fallback links live in the server-rendered browse section so they stay available before and after client initialization.
+- For custom docs roots or path bases, confirm the search config, starter query URLs, and browse fallback anchors all include the mounted root.
+- For static exports or published release trees, inspect `search.html` and confirm `search-index.json`, starter query URLs, and fallback anchors are rewritten to the exact release root, including any path base.
+
 ## Where to go next
 
 - [AppSurface Docs package reference](./README.md)

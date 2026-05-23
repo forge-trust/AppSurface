@@ -201,7 +201,11 @@ public class AppSurfaceDocsViewsTests
         Assert.Contains("createSearchResultBadge(formatFacetValue(doc.audience), true)", searchClient);
         Assert.Contains("docs-search-result-meta-line", searchClient);
         Assert.Contains("docs-search-page-starter-docs", searchClient);
+        Assert.Contains("page.failure.hidden = false;", searchClient);
+        Assert.Contains("page.starter.hidden = false;", searchClient);
         Assert.Contains("page.recovery.hidden = false;", searchClient);
+        Assert.Contains("page.results.replaceChildren();", searchClient);
+        Assert.Contains("setSearchPageBusy(page, false);", searchClient);
         Assert.Contains("setStatus(page.status, 'Search index could not be loaded.');", searchClient);
         Assert.Contains("event.preventDefault();", searchClient);
         Assert.DoesNotContain("title.append(link);", searchClient);
@@ -3265,6 +3269,91 @@ public class AppSurfaceDocsViewsTests
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         Assert.Equal(string.Empty, document.QuerySelector("#docs-search-page-failure")?.TextContent.Trim());
         Assert.NotNull(document.QuerySelector("#docs-search-page-recovery a[href]"));
+    }
+
+    [Fact]
+    public async Task SearchView_ShouldRenderNoJsCrawlerFallbackSurface_WithCuratedBrowseLinks()
+    {
+        var docs = new List<DocNode>
+        {
+            new(
+                "Start Landing",
+                "start/index.md",
+                "<p>Start body</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "Start Here",
+                    SectionLanding = true,
+                    Order = 1
+                }),
+            new(
+                "Example",
+                "examples/hello.md",
+                "<p>Example body</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "Examples",
+                    SectionLanding = true,
+                    Order = 2
+                }),
+            new(
+                "Packages",
+                "packages/README.md",
+                "<p>Package body</p>",
+                Metadata: new DocMetadata
+                {
+                    Order = 3
+                }),
+            new(
+                "Troubleshooting",
+                "troubleshooting/search.md",
+                "<p>Troubleshooting body</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "Troubleshooting",
+                    SectionLanding = true,
+                    Order = 4
+                }),
+            new(
+                "API",
+                "Namespaces/ForgeTrust.AppSurface.Web",
+                "<p>API body</p>",
+                Metadata: new DocMetadata
+                {
+                    NavGroup = "API Reference",
+                    SectionLanding = true,
+                    Order = 5
+                })
+        };
+        using var services = CreateServiceProvider(docs);
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Search",
+            c => c.Search());
+
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var starterQueries = document.QuerySelectorAll("#docs-search-page-starter a[data-rw-search-suggestion]");
+        var recoveryLinks = document.QuerySelectorAll("#docs-search-page-recovery a[href]");
+        var failure = document.QuerySelector("#docs-search-page-failure");
+        var results = document.QuerySelector("#docs-search-page-results");
+
+        Assert.Contains(starterQueries, link => link.GetAttribute("href") == "/docs/search?q=getting%20started");
+        Assert.Contains(starterQueries, link => link.GetAttribute("href") == "/docs/search?q=API%20reference");
+        Assert.Contains(starterQueries, link => link.GetAttribute("href") == "/docs/search?q=troubleshooting");
+        Assert.Collection(
+            recoveryLinks.Select(link => link.TextContent).ToArray(),
+            text => Assert.Contains("Start Here", text),
+            text => Assert.Contains("Examples", text),
+            text => Assert.Contains("Packages", text),
+            text => Assert.Contains("Troubleshooting", text),
+            text => Assert.Contains("API Reference", text));
+        Assert.All(recoveryLinks, link => Assert.Equal("doc-content", link.GetAttribute("data-turbo-frame")));
+        Assert.NotNull(failure);
+        Assert.True(failure!.HasAttribute("hidden"));
+        Assert.Equal(string.Empty, failure.TextContent.Trim());
+        Assert.Equal("true", results?.GetAttribute("aria-busy"));
+        Assert.Equal(3, document.QuerySelectorAll("#docs-search-page-results .docs-search-result-skeleton").Length);
     }
 
     [Fact]
