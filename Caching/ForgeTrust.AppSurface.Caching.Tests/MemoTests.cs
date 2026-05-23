@@ -877,6 +877,43 @@ public class MemoTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_StaleWhileRevalidate_WhenBackgroundRefreshIsCanceled_KeepsStaleValue()
+    {
+        var memo = CreateMemoWithOptions(
+            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var callCount = 0;
+        var revalidationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> Factory()
+        {
+            var call = Interlocked.Increment(ref callCount);
+            if (call == 1)
+            {
+                return Task.FromResult(1);
+            }
+
+            revalidationStarted.TrySetResult();
+            throw new OperationCanceledException("revalidation canceled");
+        }
+
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMilliseconds(50),
+            TimeSpan.FromSeconds(1));
+        async Task<int> GetValue() => await memo.GetAsync(Factory, policy);
+
+        Assert.Equal(1, await GetValue());
+        await Task.Delay(90);
+
+        Assert.Equal(1, await GetValue());
+        await revalidationStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await Task.Delay(50);
+
+        Assert.Equal(0, memo.ActiveLockCount);
+        Assert.Equal(1, await GetValue());
+        Assert.True(Volatile.Read(ref callCount) >= 2);
+    }
+
+    [Fact]
     public async Task GetAsync_StaleWhileRevalidate_BackgroundRefreshIgnoresCallerCancellation()
     {
         var memo = CreateMemoWithOptions(
