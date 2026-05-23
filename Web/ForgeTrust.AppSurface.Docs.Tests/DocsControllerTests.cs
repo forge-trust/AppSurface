@@ -2968,6 +2968,53 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task RouteInspectorJson_ShouldReturnInvalidProbe_ForPathBaseOnlyPath()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        controller.Request.PathBase = "/preview";
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/preview"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("InvalidInput", response.Probe.Kind);
+            Assert.Contains("active docs root", response.Probe.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldProbeAppRelativePath_WhenDocsRootIsRootMounted()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Routing = new AppSurfaceDocsRoutingOptions
+            {
+                DocsRootPath = "/"
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/packages"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("Canonical", response.Probe.Kind);
+            Assert.Equal("packages", response.Probe.NormalizedPath);
+            Assert.Equal("/packages", response.Probe.CanonicalLiveUrl);
+        }
+    }
+
+    [Fact]
     public async Task RouteInspectorJson_ShouldReturnInvalidProbe_ForOutsideAppRelativePath()
     {
         var harvester = A.Fake<IDocHarvester>();
@@ -3093,6 +3140,25 @@ public class DocsControllerTests : IDisposable
     }
 
     [Theory]
+    [InlineData((int)DocRouteResolutionKind.CollisionLoser, "This path belongs to a document that lost canonical route ownership.")]
+    [InlineData(999, "The route result is not recognized by this AppSurface Docs version.")]
+    public void RouteProbeResponse_ShouldDescribeUncommonResolutionKinds(
+        int kindValue,
+        string expectedMessage)
+    {
+        var kind = (DocRouteResolutionKind)kindValue;
+        var response = AppSurfaceDocsRouteProbeResponse.FromResolution(
+            "input",
+            "normalized",
+            new DocRouteResolution(kind, "source.md", "source"),
+            new DocsUrlBuilder(new AppSurfaceDocsOptions()));
+
+        Assert.Equal(kind.ToString(), response.Kind);
+        Assert.Equal(expectedMessage, response.Message);
+        Assert.Equal("/docs/source", response.CanonicalLiveUrl);
+    }
+
+    [Theory]
     [InlineData(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, "Development", true)]
     [InlineData(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, "Production", false)]
     [InlineData(AppSurfaceDocsHarvestHealthExposure.Always, "Production", true)]
@@ -3116,6 +3182,21 @@ public class DocsControllerTests : IDisposable
         var exposed = AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(options, environment);
 
         Assert.Equal(expected, exposed);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsDiagnosticsVisibility_ShouldDefaultToDevelopmentOnly_WhenDiagnosticsOptionsAreNull()
+    {
+        var environment = A.Fake<IHostEnvironment>();
+        A.CallTo(() => environment.EnvironmentName).Returns(Environments.Development);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = null!
+        };
+
+        var exposed = AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(options, environment);
+
+        Assert.True(exposed);
     }
 
     [Fact]

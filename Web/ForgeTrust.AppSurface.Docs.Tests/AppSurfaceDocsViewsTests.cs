@@ -1463,6 +1463,37 @@ public class AppSurfaceDocsViewsTests
         Assert.DoesNotContain("Source: <code", html);
     }
 
+    [Theory]
+    [InlineData("Canonical", "border-emerald-400/35")]
+    [InlineData("ReservedRoute", "border-amber-400/35")]
+    [InlineData("InternalSourceMatch", "border-slate-600")]
+    public async Task RouteInspectorView_ShouldRenderProbeStatusStyle_ForRouteKinds(
+        string probeKind,
+        string expectedClass)
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new AppSurfaceDocsRouteInspectorResponse
+        {
+            Probe = new AppSurfaceDocsRouteProbeResponse
+            {
+                InputPath = probeKind,
+                NormalizedPath = probeKind,
+                Kind = probeKind,
+                Message = "Probe message."
+            },
+            Entries = [],
+            Diagnostics = []
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/RouteInspector.cshtml",
+            model);
+
+        Assert.Contains(expectedClass, html);
+        Assert.Contains(probeKind, html);
+    }
+
     [Fact]
     public async Task SidebarView_ShouldRenderBlankAndRelativeLinks_WithoutPathBaseRewriting()
     {
