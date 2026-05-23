@@ -1432,7 +1432,7 @@ The current-surface `search-index.json` payload continues to emit the raw `pageT
 - `entryPoints` for namespace README entry-point labels, summaries, targets, hrefs, and keywords when a README is consumed into a generated namespace page
 These fields let custom search clients stay visually aligned with the landing and detail experiences without re-implementing the mapping table.
 
-Search runtime note: the current bundled `minisearch.min.js` asset is a small AppSurface-owned shim that primarily scores `title`, `headings`, and `bodyText`. Entry-point terms are emitted in the payload and duplicated into namespace `bodyText`, but full field-specific scoring for `entryPoints`, `aliases`, `keywords`, and `summary` is tracked separately in GitHub issue #331.
+Search runtime note: the bundled `minisearch.min.js` asset is generated from the pinned upstream MiniSearch browser bundle, not a CDN or hand-maintained compatibility shim. The built-in search client indexes `title`, `aliases`, `keywords`, `summary`, `headings`, `bodyText`, and namespace `entryPoints` as first-class MiniSearch fields with field-specific boosts. Package maintainers changing the search runtime should update the pinned package, rebuild the generated asset, verify the third-party notice, and run the asset verification scripts before shipping.
 
 When authored metadata uses `release-note` or `release-notes`, AppSurface Docs keeps the raw `pageType` metadata value in the payload but emits `pageTypeLabel = "Release"` and `pageTypeVariant = "release"` so built-in and custom clients can present release pages consistently.
 
