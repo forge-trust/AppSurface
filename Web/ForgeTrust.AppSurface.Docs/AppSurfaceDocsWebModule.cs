@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Services;
@@ -36,6 +37,10 @@ namespace ForgeTrust.AppSurface.Docs;
 public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
 {
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
+    private static readonly Regex MalformedPercentEncodingPattern = new(
+        "%(?![0-9A-Fa-f]{2})",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static readonly HashSet<string> AllowedBrandingAssetExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".avif",
@@ -761,7 +766,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             return false;
         }
 
-        if (ContainsMalformedPercentEncoding(rawPath))
+        if (MalformedPercentEncodingPattern.IsMatch(rawPath))
         {
             return false;
         }
@@ -789,28 +794,6 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         return true;
     }
 
-    private static bool ContainsMalformedPercentEncoding(string value)
-    {
-        for (var index = 0; index < value.Length; index++)
-        {
-            if (value[index] != '%')
-            {
-                continue;
-            }
-
-            if (index + 2 >= value.Length
-                || !IsHexDigit(value[index + 1])
-                || !IsHexDigit(value[index + 2]))
-            {
-                return true;
-            }
-
-            index += 2;
-        }
-
-        return false;
-    }
-
     [ExcludeFromCodeCoverage(
         Justification = "Defensive adapter for platform URI decoding failures; caller rejects malformed percent escapes before decoding.")]
     private static string DecodeBrandingAssetPath(string rawPath)
@@ -823,13 +806,6 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         {
             return string.Empty;
         }
-    }
-
-    private static bool IsHexDigit(char value)
-    {
-        return value is >= '0' and <= '9'
-            or >= 'a' and <= 'f'
-            or >= 'A' and <= 'F';
     }
 
     [ExcludeFromCodeCoverage(
