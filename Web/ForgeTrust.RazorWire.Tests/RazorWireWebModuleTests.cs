@@ -1,4 +1,5 @@
 using System.Net;
+using System.Threading.Channels;
 using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire.Bridge;
@@ -8,6 +9,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -139,6 +141,45 @@ public class RazorWireWebModuleTests
         Assert.Equal("/_rw/streams/{channel}", routeEndpoint.RoutePattern.RawText);
     }
 
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("?replay=1", true)]
+    [InlineData("?replay=true", true)]
+    [InlineData("?replay=TRUE", true)]
+    [InlineData("?replay=false", false)]
+    public async Task ConfigureEndpoints_PassesReplayQueryToStreamHub(string queryString, bool expectedReplay)
+    {
+        // Arrange
+        var builder = WebApplication.CreateBuilder();
+        var hub = new RecordingRazorWireStreamHub();
+        builder.Services.AddSingleton(new RazorWireOptions());
+        builder.Services.AddSingleton<IRazorWireChannelAuthorizer, DefaultRazorWireChannelAuthorizer>();
+        builder.Services.AddSingleton<IRazorWireStreamHub>(hub);
+        await using var app = builder.Build();
+        var module = new RazorWireWebModule();
+
+        module.ConfigureEndpoints(CreateContext(isDevelopment: false), app);
+
+        var routeEndpoint = GetRazorWireStreamsEndpoint(app);
+        var context = new DefaultHttpContext
+        {
+            RequestServices = app.Services
+        };
+        context.Request.RouteValues["channel"] = "orders";
+        context.Request.QueryString = new QueryString(queryString);
+        await using var responseBody = new MemoryStream();
+        context.Response.Body = responseBody;
+
+        // Act
+        await routeEndpoint.RequestDelegate!(context);
+
+        // Assert
+        Assert.Equal("orders", hub.SubscribedChannel);
+        Assert.Equal(expectedReplay, hub.SubscribedOptions?.Replay ?? false);
+        Assert.Equal("orders", hub.UnsubscribedChannel);
+        Assert.Same(hub.Reader, hub.UnsubscribedReader);
+    }
+
     [Fact]
     public async Task ConfigureEndpoints_ServesEmbeddedRuntimeAssets_WhenStaticWebAssetsAreUnavailable()
     {
@@ -198,6 +239,15 @@ public class RazorWireWebModuleTests
         }
     }
 
+    private static RouteEndpoint GetRazorWireStreamsEndpoint(IEndpointRouteBuilder routeBuilder)
+    {
+        return Assert.Single(
+            routeBuilder.DataSources
+                .SelectMany(ds => ds.Endpoints)
+                .OfType<RouteEndpoint>(),
+            endpoint => endpoint.RoutePattern.RawText == "/_rw/streams/{channel}");
+    }
+
     [Fact]
     public void NoOpMethods_DoNotThrow()
     {
@@ -250,6 +300,47 @@ public class RazorWireWebModuleTests
 
         public void RegisterDependentModules(ModuleDependencyBuilder builder)
         {
+        }
+    }
+
+    private sealed class RecordingRazorWireStreamHub : IRazorWireStreamHub
+    {
+        private readonly Channel<string> channel = Channel.CreateUnbounded<string>();
+
+        public RecordingRazorWireStreamHub()
+        {
+            channel.Writer.Complete();
+        }
+
+        public ChannelReader<string> Reader => channel.Reader;
+
+        public string? SubscribedChannel { get; private set; }
+
+        public RazorWireStreamSubscribeOptions? SubscribedOptions { get; private set; }
+
+        public string? UnsubscribedChannel { get; private set; }
+
+        public ChannelReader<string>? UnsubscribedReader { get; private set; }
+
+        public ValueTask PublishAsync(string channel, string message) => ValueTask.CompletedTask;
+
+        public ChannelReader<string> Subscribe(string channel)
+        {
+            return Subscribe(channel, options: null);
+        }
+
+        public ChannelReader<string> Subscribe(string channel, RazorWireStreamSubscribeOptions? options)
+        {
+            SubscribedChannel = channel;
+            SubscribedOptions = options;
+
+            return Reader;
+        }
+
+        public void Unsubscribe(string channel, ChannelReader<string> reader)
+        {
+            UnsubscribedChannel = channel;
+            UnsubscribedReader = reader;
         }
     }
 

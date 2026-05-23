@@ -1511,6 +1511,8 @@ public sealed class AppSurfaceDocsOptionsTests
         {
             Harvest = new AppSurfaceDocsHarvestOptions
             {
+                StartupMode = (AppSurfaceDocsHarvestStartupMode)999,
+                InitialRequestWaitBudgetMilliseconds = -1,
                 TestingPreHarvestDelayMilliseconds = -1,
                 TestingDelayPerHarvesterMilliseconds = -1,
                 TestingDelayPerDocumentMilliseconds = -1
@@ -1520,6 +1522,16 @@ public sealed class AppSurfaceDocsOptionsTests
         var result = validator.Validate(Options.DefaultName, options);
 
         Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains(
+                "Unsupported AppSurface Docs harvest startup mode",
+                StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains(
+                "AppSurfaceDocs:Harvest:InitialRequestWaitBudgetMilliseconds must be greater than or equal to zero",
+                StringComparison.OrdinalIgnoreCase));
         Assert.Contains(
             result.Failures,
             failure => failure.Contains(
