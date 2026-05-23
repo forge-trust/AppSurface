@@ -1,5 +1,5 @@
 using CliFx;
-using CliFx.Attributes;
+using CliFx.Binding;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -68,13 +68,13 @@ internal class CommandService : CriticalService
 
     protected override async Task RunAsync(CancellationToken stoppingToken)
     {
-        var builder = new CliApplicationBuilder();
+        var builder = new CommandLineApplicationBuilder();
         var serviceProvider = PrimaryServiceProvider;
         ArgumentNullException.ThrowIfNull(serviceProvider);
 
         foreach (var cmd in _commands)
         {
-            builder.AddCommand(cmd.GetType());
+            builder.AddCommand(CommandDescriptorResolver.GetRequiredDescriptor(cmd.GetType()));
         }
 
         if (!string.IsNullOrWhiteSpace(_executableName))
@@ -87,7 +87,7 @@ internal class CommandService : CriticalService
         var console = consoleFromDi ?? createdConsole!;
 
         var app = builder
-            .UseTypeActivator(serviceProvider)
+            .UseTypeInstantiator(serviceProvider)
             .UseConsole(console)
             .Build();
 
@@ -149,7 +149,7 @@ internal class CommandService : CriticalService
         validOptions.Add("--help");
         validOptions.Add("--version");
 
-        Type? commandType = null;
+        CommandDescriptor? commandDescriptor = null;
 
         // Basic routing: Check if first arg is a command
         if (args.Length > 0)
@@ -157,59 +157,36 @@ internal class CommandService : CriticalService
             var commandName = args[0];
             if (!commandName.StartsWith("-"))
             {
-                var command = _commands.FirstOrDefault(c =>
-                {
-                    var attr =
-                        c.GetType().GetCustomAttributes(typeof(CommandAttribute), false).FirstOrDefault() as
-                            CommandAttribute;
-
-                    return attr?.Name?.Equals(commandName, StringComparison.OrdinalIgnoreCase) == true;
-                });
-
-                if (command != null)
-                {
-                    commandType = command.GetType();
-                }
+                commandDescriptor = _commands
+                    .Select(c => CommandDescriptorResolver.TryGetDescriptor(c.GetType()))
+                    .FirstOrDefault(d => d?.Name?.Equals(commandName, StringComparison.OrdinalIgnoreCase) == true);
             }
         }
 
         // Fallback to default/root command
-        if (commandType == null)
+        if (commandDescriptor == null)
         {
-            var rootCommand = _commands.FirstOrDefault(c =>
-            {
-                var attr =
-                    c.GetType().GetCustomAttributes(typeof(CommandAttribute), false).FirstOrDefault() as
-                        CommandAttribute;
-
-                return attr is { Name: null };
-            });
-            commandType = rootCommand?.GetType();
+            commandDescriptor = _commands
+                .Select(c => CommandDescriptorResolver.TryGetDescriptor(c.GetType()))
+                .FirstOrDefault(d => d is { Name: null });
         }
 
-        if (commandType != null)
+        if (commandDescriptor != null)
         {
-            var props = commandType.GetProperties();
-            foreach (var prop in props)
+            foreach (var option in commandDescriptor.Inputs.OfType<CommandOptionDescriptor>())
             {
-                if (prop.GetCustomAttributes(typeof(CommandOptionAttribute), false).FirstOrDefault() is not
-                    CommandOptionAttribute optionAttr)
+                var requiresArg = option.Property.Type != typeof(bool);
+
+                if (!string.IsNullOrEmpty(option.Name))
                 {
-                    continue;
+                    validOptions.Add("--" + option.Name);
+                    if (requiresArg) optionRequiresValue.Add("--" + option.Name);
                 }
 
-                var requiresArg = prop.PropertyType != typeof(bool);
-
-                if (!string.IsNullOrEmpty(optionAttr.Name))
+                if (option.ShortName != null)
                 {
-                    validOptions.Add("--" + optionAttr.Name);
-                    if (requiresArg) optionRequiresValue.Add("--" + optionAttr.Name);
-                }
-
-                if (optionAttr.ShortName != '\0')
-                {
-                    validOptions.Add("-" + optionAttr.ShortName);
-                    if (requiresArg) optionRequiresValue.Add("-" + optionAttr.ShortName);
+                    validOptions.Add("-" + option.ShortName);
+                    if (requiresArg) optionRequiresValue.Add("-" + option.ShortName);
                 }
             }
         }

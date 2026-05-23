@@ -1,6 +1,5 @@
 using CliFx;
-using CliFx.Attributes;
-using CliFx.Exceptions;
+using CliFx.Binding;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Console;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ForgeTrust.AppSurface.Console.Tests;
 
 [Collection(CommandServiceStateCollection.Name)]
-public class ChainedCommandEdgeCaseTests
+public partial class ChainedCommandEdgeCaseTests
 {
     private static bool _requiredChildExecuted;
     private static bool _typeMismatchChildExecuted;
@@ -16,6 +15,7 @@ public class ChainedCommandEdgeCaseTests
     private static string? _typeMismatchChildMetadata;
     private static bool _nullableChildExecuted;
     private static int? _nullableChildValue;
+    private static bool _requiredNonInputChildExecuted;
 
     [Fact]
     public async Task ExecuteAsync_WhenRequiredChildOptionIsMissingOnParent_ThrowsBeforeExecution()
@@ -109,6 +109,27 @@ public class ChainedCommandEdgeCaseTests
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_WhenRequiredChildMemberIsNotCliInput_DoesNotValidateIt()
+    {
+        // Arrange
+        ResetTracker();
+        var (command, provider) = CreateCommand<RequiredNonInputCompositeCommand>(
+            services =>
+            {
+                services.AddTransient<RequiredNonInputCompositeCommand>();
+                services.AddTransient<RequiredNonInputChildCommand>();
+            });
+        using (provider)
+        {
+            // Act
+            await command.ExecuteAsync(new FakeConsole());
+
+            // Assert
+            Assert.True(_requiredNonInputChildExecuted);
+        }
+    }
+
     private static (TCommand Command, ServiceProvider Provider) CreateCommand<TCommand>(
         Action<IServiceCollection> registerCommands)
         where TCommand : class, ICommand
@@ -130,13 +151,14 @@ public class ChainedCommandEdgeCaseTests
         _typeMismatchChildMetadata = null;
         _nullableChildExecuted = false;
         _nullableChildValue = null;
+        _requiredNonInputChildExecuted = false;
     }
 
     [Command("edge-required-child")]
-    public sealed class RequiredChildCommand : ICommand
+    public sealed partial class RequiredChildCommand : ICommand
     {
-        [CommandOption("required", IsRequired = true)]
-        public string? Required { get; set; }
+        [CommandOption("required")]
+        public required string? Required { get; set; }
 
         public ValueTask ExecuteAsync(IConsole console)
         {
@@ -146,7 +168,7 @@ public class ChainedCommandEdgeCaseTests
     }
 
     [Command("edge-missing-parent-composite")]
-    public sealed class MissingParentCompositeCommand : ChainedCommand
+    public sealed partial class MissingParentCompositeCommand : ChainedCommand
     {
         protected override void Configure(CommandChainBuilder builder)
         {
@@ -155,7 +177,7 @@ public class ChainedCommandEdgeCaseTests
     }
 
     [Command("edge-type-mismatch-child")]
-    public sealed class TypeMismatchChildCommand : ICommand
+    public sealed partial class TypeMismatchChildCommand : ICommand
     {
         [CommandOption("value")]
         public int Value { get; set; }
@@ -174,7 +196,7 @@ public class ChainedCommandEdgeCaseTests
     }
 
     [Command("edge-type-mismatch-composite")]
-    public sealed class TypeMismatchCompositeCommand : ChainedCommand
+    public sealed partial class TypeMismatchCompositeCommand : ChainedCommand
     {
         [CommandOption("value")]
         public string? Value { get; set; }
@@ -189,7 +211,7 @@ public class ChainedCommandEdgeCaseTests
     }
 
     [Command("edge-nullable-child")]
-    public sealed class NullableChildCommand : ICommand
+    public sealed partial class NullableChildCommand : ICommand
     {
         [CommandOption("count")]
         public int? Count { get; set; } = 7;
@@ -203,7 +225,7 @@ public class ChainedCommandEdgeCaseTests
     }
 
     [Command("edge-nullable-parent")]
-    public sealed class NullableParentCompositeCommand : ChainedCommand
+    public sealed partial class NullableParentCompositeCommand : ChainedCommand
     {
         [CommandOption("count")]
         public int? Count { get; set; }
@@ -215,11 +237,32 @@ public class ChainedCommandEdgeCaseTests
     }
 
     [Command("edge-empty-chain")]
-    public sealed class EmptyChainCompositeCommand : ChainedCommand
+    public sealed partial class EmptyChainCompositeCommand : ChainedCommand
     {
         protected override void Configure(CommandChainBuilder builder)
         {
             builder.AddIf<RequiredChildCommand>(() => false);
+        }
+    }
+
+    [Command("edge-required-non-input-child")]
+    public sealed partial class RequiredNonInputChildCommand : ICommand
+    {
+        public required string RuntimeValue { get; set; }
+
+        public ValueTask ExecuteAsync(IConsole console)
+        {
+            _requiredNonInputChildExecuted = true;
+            return default;
+        }
+    }
+
+    [Command("edge-required-non-input")]
+    public sealed partial class RequiredNonInputCompositeCommand : ChainedCommand
+    {
+        protected override void Configure(CommandChainBuilder builder)
+        {
+            builder.Add<RequiredNonInputChildCommand>();
         }
     }
 }

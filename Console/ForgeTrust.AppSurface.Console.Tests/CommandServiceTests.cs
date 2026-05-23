@@ -1,6 +1,6 @@
 using System.Reflection;
 using CliFx;
-using CliFx.Attributes;
+using CliFx.Binding;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,10 +9,10 @@ using Microsoft.Extensions.Hosting;
 namespace ForgeTrust.AppSurface.Console.Tests;
 
 [Collection(CommandServiceStateCollection.Name)]
-public class CommandServiceTests
+public partial class CommandServiceTests
 {
     [Command("test-cmd")]
-    public class TestCommand : ICommand
+    public partial class TestCommand : ICommand
     {
         [CommandOption("force")] public bool Force { get; set; }
         [CommandOption("another", 'a')] public string? Another { get; set; }
@@ -24,7 +24,7 @@ public class CommandServiceTests
     }
 
     [Command("throw")]
-    public class ThrowingCommand : ICommand
+    public partial class ThrowingCommand : ICommand
     {
         public ValueTask ExecuteAsync(IConsole console) => throw new InvalidOperationException("Test");
     }
@@ -38,7 +38,7 @@ public class CommandServiceTests
     }
 
     [Command]
-    public class RootTestCommand : ICommand
+    public partial class RootTestCommand : ICommand
     {
         [CommandOption("output")] public string Output { get; set; } = string.Empty;
 
