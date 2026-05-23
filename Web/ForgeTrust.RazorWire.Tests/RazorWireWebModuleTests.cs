@@ -305,14 +305,14 @@ public class RazorWireWebModuleTests
 
     private sealed class RecordingRazorWireStreamHub : IRazorWireStreamHub
     {
-        private readonly Channel<string> channel = Channel.CreateUnbounded<string>();
+        private readonly Channel<string> _streamChannel = Channel.CreateUnbounded<string>();
 
         public RecordingRazorWireStreamHub()
         {
-            channel.Writer.Complete();
+            _streamChannel.Writer.Complete();
         }
 
-        public ChannelReader<string> Reader => channel.Reader;
+        public ChannelReader<string> Reader => _streamChannel.Reader;
 
         public string? SubscribedChannel { get; private set; }
 
@@ -322,24 +322,24 @@ public class RazorWireWebModuleTests
 
         public ChannelReader<string>? UnsubscribedReader { get; private set; }
 
-        public ValueTask PublishAsync(string channel, string message) => ValueTask.CompletedTask;
+        public ValueTask PublishAsync(string channelName, string message) => ValueTask.CompletedTask;
 
-        public ChannelReader<string> Subscribe(string channel)
+        public ChannelReader<string> Subscribe(string channelName)
         {
-            return Subscribe(channel, options: null);
+            return Subscribe(channelName, options: null);
         }
 
-        public ChannelReader<string> Subscribe(string channel, RazorWireStreamSubscribeOptions? options)
+        public ChannelReader<string> Subscribe(string channelName, RazorWireStreamSubscribeOptions? options)
         {
-            SubscribedChannel = channel;
+            SubscribedChannel = channelName;
             SubscribedOptions = options;
 
             return Reader;
         }
 
-        public void Unsubscribe(string channel, ChannelReader<string> reader)
+        public void Unsubscribe(string channelName, ChannelReader<string> reader)
         {
-            UnsubscribedChannel = channel;
+            UnsubscribedChannel = channelName;
             UnsubscribedReader = reader;
         }
     }
