@@ -876,8 +876,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     public async Task GenerateAsync_OmitsOptionalReleaseReadinessLinksWhenTargetsAreMissing()
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: false);
-        File.Delete(Path.Combine(_repositoryRoot, "releases", "v0.1-preview.md"));
-        File.Delete(Path.Combine(_repositoryRoot, "releases", "unreleased.md"));
+        File.Delete(Path.GetFullPath(Path.Join("releases", "v0.1-preview.md"), _repositoryRoot));
+        File.Delete(Path.GetFullPath(Path.Join("releases", "unreleased.md"), _repositoryRoot));
 
         var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
         {
@@ -911,7 +911,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     [Fact]
     public void ResolveRepositoryFilePath_ThrowsWhenPathIsRooted()
     {
-        var rootedPath = Path.Combine(_repositoryRoot, "releases", "v0.1-preview.md");
+        var rootedPath = Path.GetFullPath(Path.Join("releases", "v0.1-preview.md"), _repositoryRoot);
 
         var error = Assert.Throws<PackageIndexException>(
             () => PackageIndexGenerator.ResolveRepositoryFilePath(_repositoryRoot, rootedPath, "Release preview"));
