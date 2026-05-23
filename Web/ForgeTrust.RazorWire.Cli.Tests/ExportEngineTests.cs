@@ -2058,11 +2058,9 @@ public class ExportEngineTests
         });
     }
 
-    private static async Task<HttpResponseMessage> NotFound()
+    private static Task<HttpResponseMessage> NotFound()
     {
-        var response = await Text(string.Empty, "text/plain");
-        response.StatusCode = HttpStatusCode.NotFound;
-        return response;
+        return Text(string.Empty, "text/plain", HttpStatusCode.NotFound);
     }
 
     private static Task<HttpResponseMessage> Bytes(string mediaType)
