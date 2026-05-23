@@ -1499,7 +1499,8 @@ public sealed class AppSurfaceDocsOptionsTests
                     {
                         DisabledGroups = null!,
                         AllowGlobs = null!
-                    }
+                    },
+                    VcsIgnore = null!
                 },
                 Markdown = null!,
                 CSharp = new AppSurfaceDocsCSharpHarvestOptions
@@ -1522,11 +1523,36 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Paths:ExcludeGlobs must not be null.", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups must not be null.", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Paths:DefaultExclusions:AllowGlobs must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Paths:VcsIgnore must not be null.", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Markdown must not be null.", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:CSharp:DefaultExclusions must not be null.", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs must not be null.", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:ExcludeGlobs must not be null.", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:DefaultExclusions must not be null.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNullVcsIgnoreAllowGlobs()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Paths = new AppSurfaceDocsHarvestPathOptions
+                {
+                    VcsIgnore = new AppSurfaceDocsHarvestVcsIgnoreOptions
+                    {
+                        AllowGlobs = null!
+                    }
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Paths:VcsIgnore:AllowGlobs must not be null.", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -44,12 +45,34 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluate_WhenVcsIgnoreIsDisabledDoesNotExcludeOrPrune()
+    {
+        await WriteAsync(".gitignore", "bower_components/\n");
+        var snapshot = CreateSnapshot(options => options.Harvest.Paths.VcsIgnore.Enabled = false);
+
+        var decision = snapshot.Evaluate("bower_components/jquery/README.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.True(decision.Included);
+        Assert.False(snapshot.ShouldPruneDirectory("bower_components", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.False(snapshot.GetVcsIgnoreDiagnostics().Enabled);
+    }
+
+    [Fact]
     public async Task ShouldPruneDirectory_WhenIgnoredDirectoryHasNoReachableNegationPrunesSubtree()
     {
         await WriteAsync(".gitignore", "bower_components/\n");
         var snapshot = CreateSnapshot();
 
         Assert.True(snapshot.ShouldPruneDirectory("bower_components", AppSurfaceDocsHarvestSourceKind.JavaScript));
+    }
+
+    [Fact]
+    public async Task ShouldPruneDirectory_WhenAllowGlobCanRestoreDescendantKeepsDirectoryEnumerable()
+    {
+        await WriteAsync(".gitignore", "generated/\n");
+        var snapshot = CreateSnapshot(options => options.Harvest.Paths.VcsIgnore.AllowGlobs = ["generated/public/**"]);
+
+        Assert.False(snapshot.ShouldPruneDirectory("generated", AppSurfaceDocsHarvestSourceKind.Markdown));
     }
 
     [Fact]
@@ -90,6 +113,19 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         var snapshot = CreateSnapshot();
 
         Assert.False(snapshot.ShouldPruneDirectory("dist", AppSurfaceDocsHarvestSourceKind.Markdown));
+    }
+
+    [Fact]
+    public async Task ShouldPruneDirectory_WhenNestedIgnoreNegationCanRestoreSubtreeFileKeepsDirectoryEnumerable()
+    {
+        await WriteAsync(".gitignore", "/dist/**\n");
+        await WriteAsync("dist/.gitignore", "!README.md\n");
+        var snapshot = CreateSnapshot();
+
+        var restored = snapshot.Evaluate("dist/README.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.False(snapshot.ShouldPruneDirectory("dist", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(restored.Included);
     }
 
     [Fact]
@@ -156,6 +192,18 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluate_WhenNestedRepositoryBoundaryExistsDoesNotReadNestedIgnoreFile()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "nested", ".git"));
+        await WriteAsync("nested/.gitignore", "Hidden.md\n");
+        var snapshot = CreateSnapshot();
+
+        var decision = snapshot.Evaluate("nested/Hidden.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.True(decision.Included);
+    }
+
+    [Fact]
     public async Task Evaluate_GitParityFixtureMatchesCheckIgnoreWhenGitIsAvailable()
     {
         if (!await IsGitAvailableAsync())
@@ -219,7 +267,11 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             var result = await RunProcessAsync(Directory.GetCurrentDirectory(), "git", "--version");
             return result.ExitCode == 0;
         }
-        catch
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (Win32Exception)
         {
             return false;
         }
@@ -258,7 +310,15 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         {
             Directory.Delete(_root, recursive: true);
         }
-        catch
+        catch (DirectoryNotFoundException)
+        {
+            // Best effort cleanup for temp fixture directories.
+        }
+        catch (IOException)
+        {
+            // Best effort cleanup for temp fixture directories.
+        }
+        catch (UnauthorizedAccessException)
         {
             // Best effort cleanup for temp fixture directories.
         }
