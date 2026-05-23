@@ -9,6 +9,10 @@ The Core library is designed to be lightweight and implementation-agnostic. It p
 - Manage **Dependency Graphs** between modules.
 - Provide a consistent **Startup Pipeline** (`AppSurfaceStartup`) that sits on top of the .NET Generic Host.
 
+## Release Guidance
+
+AppSurface is preparing the first coordinated `v0.1.0` release. Before installing this package from a prerelease feed, read the [v0.1 release preview](../releases/v0.1-preview.md) for current release risk, provisional migration guidance, and the finalization path to the tagged release note.
+
 ## Key Concepts
 
 - **`IAppSurfaceModule`**: The base interface for any unit of functionality that needs to register services or configure the application.

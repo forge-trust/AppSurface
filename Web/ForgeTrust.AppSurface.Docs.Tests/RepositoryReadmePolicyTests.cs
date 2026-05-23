@@ -1,10 +1,11 @@
+using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
-public sealed class RepositoryReadmePolicyTests
+public sealed partial class RepositoryReadmePolicyTests
 {
     [Fact]
     public void AuthoredReadmes_ShouldNotStartWithYamlFrontMatter()
@@ -36,6 +37,48 @@ public sealed class RepositoryReadmePolicyTests
         Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/AppSurfaceDocsOptions.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
         Assert.False(policy.ShouldIncludeFilePath("examples/web-app/Program.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Web.Tests/Fixture.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
+    }
+
+    [Fact]
+    public void PublicPackageReadmes_ShouldLinkToV01ReleasePreview()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var entries = ReadPackageManifestEntries(repoRoot);
+        var requiredReadmes = entries
+            .Where(entry => string.Equals(entry.Classification, "public", StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(entry.PublishDecision, "publish", StringComparison.OrdinalIgnoreCase)
+                            && !string.IsNullOrWhiteSpace(entry.StartHerePath))
+            .Select(entry => entry.StartHerePath!)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var nonRequiredReadmes = entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.StartHerePath)
+                            && !requiredReadmes.Contains(entry.StartHerePath, StringComparer.OrdinalIgnoreCase))
+            .Select(entry => entry.StartHerePath!)
+            .ToArray();
+
+        Assert.Equal(12, requiredReadmes.Length);
+        Assert.Contains("Web/ForgeTrust.AppSurface.Docs/README.md", nonRequiredReadmes);
+        Assert.Contains("Web/ForgeTrust.RazorWire.Cli/README.md", nonRequiredReadmes);
+
+        foreach (var readmePath in requiredReadmes)
+        {
+            var fullReadmePath = Path.Combine(repoRoot, readmePath.Replace('/', Path.DirectorySeparatorChar));
+            var content = File.ReadAllText(fullReadmePath);
+
+            Assert.Contains("## Release Guidance", content, StringComparison.Ordinal);
+
+            var match = ReleasePreviewLinkRegex().Match(content);
+            Assert.True(match.Success, $"{readmePath} must link to the v0.1 release preview.");
+
+            var resolvedTarget = Path.GetFullPath(
+                Path.Combine(
+                    Path.GetDirectoryName(fullReadmePath)!,
+                    match.Groups["href"].Value.Replace('/', Path.DirectorySeparatorChar)));
+            var expectedTarget = Path.GetFullPath(Path.Combine(repoRoot, "releases", "v0.1-preview.md"));
+
+            Assert.Equal(expectedTarget, resolvedTarget);
+        }
     }
 
     [Fact]
@@ -107,4 +150,70 @@ public sealed class RepositoryReadmePolicyTests
             .TrimStart('\uFEFF')
             .StartsWith("---\n", StringComparison.Ordinal);
     }
+
+    private static IReadOnlyList<PackageManifestReadmeEntry> ReadPackageManifestEntries(string repoRoot)
+    {
+        var entries = new List<PackageManifestReadmeEntry>();
+        PackageManifestReadmeEntry? current = null;
+        var manifestPath = Path.Combine(repoRoot, "packages", "package-index.yml");
+
+        foreach (var rawLine in File.ReadLines(manifestPath))
+        {
+            var line = rawLine.TrimEnd();
+            if (line.StartsWith("- project:", StringComparison.Ordinal) || line.StartsWith("  - project:", StringComparison.Ordinal))
+            {
+                if (current is not null)
+                {
+                    entries.Add(current);
+                }
+
+                current = new PackageManifestReadmeEntry(
+                    ReadYamlScalar(line, "project:"),
+                    string.Empty,
+                    string.Empty,
+                    null);
+                continue;
+            }
+
+            if (current is null)
+            {
+                continue;
+            }
+
+            if (line.TrimStart().StartsWith("classification:", StringComparison.Ordinal))
+            {
+                current = current with { Classification = ReadYamlScalar(line, "classification:") };
+            }
+            else if (line.TrimStart().StartsWith("publish_decision:", StringComparison.Ordinal))
+            {
+                current = current with { PublishDecision = ReadYamlScalar(line, "publish_decision:") };
+            }
+            else if (line.TrimStart().StartsWith("start_here_path:", StringComparison.Ordinal))
+            {
+                current = current with { StartHerePath = ReadYamlScalar(line, "start_here_path:") };
+            }
+        }
+
+        if (current is not null)
+        {
+            entries.Add(current);
+        }
+
+        return entries;
+    }
+
+    private static string ReadYamlScalar(string line, string key)
+    {
+        var value = line[(line.IndexOf(key, StringComparison.Ordinal) + key.Length)..].Trim();
+        return value.Trim('"', '\'');
+    }
+
+    [GeneratedRegex(@"\[v0\.1 release preview\]\((?<href>[^)]+)\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ReleasePreviewLinkRegex();
+
+    private sealed record PackageManifestReadmeEntry(
+        string Project,
+        string Classification,
+        string PublishDecision,
+        string? StartHerePath);
 }

@@ -99,6 +99,39 @@ public sealed class RepositoryAppSurfaceEvaluatorDocsTests
             keywords: []);
     }
 
+    [Fact]
+    public async Task ReleasePreview_ShouldBeHarvestedWithTrustMetadata_AndIndexedAsRelease()
+    {
+        var docs = await HarvestRepositoryDocsAsync();
+        var preview = SingleDoc(docs, "releases/v0.1-preview.md");
+
+        Assert.Equal("AppSurface v0.1.0 Release Preview", preview.Metadata?.Title);
+        Assert.Equal("release-note", preview.Metadata?.PageType);
+        Assert.Equal("Releases", preview.Metadata?.NavGroup);
+        Assert.Equal(["Releases", "v0.1.0 Preview"], preview.Metadata?.Breadcrumbs);
+        Assert.Equal("Release preview", preview.Metadata?.Trust?.Status);
+        Assert.Equal("/docs/releases/upgrade-policy", preview.Metadata?.Trust?.Migration?.Href);
+        Assert.Contains("releases/unreleased.md is the current merged-work proof artifact.", preview.Metadata?.Trust?.Sources ?? []);
+
+        var aggregator = CreateAggregator(docs);
+        var details = await aggregator.GetDocDetailsAsync("releases/v0.1-preview.md");
+
+        Assert.NotNull(details);
+        Assert.Equal("release-note", details!.Document.Metadata?.PageType);
+        Assert.Equal("Release preview", details.Document.Metadata?.Trust?.Status);
+
+        var searchIndex = await aggregator.GetSearchIndexPayloadAsync();
+        var searchDocument = Assert.Single(
+            searchIndex.Documents,
+            document => string.Equals(document.SourcePath, "releases/v0.1-preview.md", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Equal("/docs/releases/v0.1-preview", searchDocument.Path);
+        Assert.Equal("release-note", searchDocument.PageType);
+        Assert.Equal("Release", searchDocument.PageTypeLabel);
+        Assert.Equal("release", searchDocument.PageTypeVariant);
+        Assert.Equal("Releases", searchDocument.NavGroup);
+    }
+
     private static async Task<IReadOnlyList<DocNode>> HarvestRepositoryDocsAsync()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);

@@ -20,6 +20,7 @@ internal sealed class PackageIndexGenerator
     private const string WebPackageId = "ForgeTrust.AppSurface.Web";
     private const string RazorWireCliPackageId = "ForgeTrust.RazorWire.Cli";
     private const string ReleaseHubPath = "releases/README.md";
+    private const string V01PreviewPath = "releases/v0.1-preview.md";
     private const string UnreleasedPath = "releases/unreleased.md";
     private const string ChangelogPath = "CHANGELOG.md";
     private const string UpgradePolicyPath = "releases/upgrade-policy.md";
@@ -472,6 +473,11 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");
+        if (File.Exists(Path.Combine(repositoryRoot, V01PreviewPath.Replace('/', Path.DirectorySeparatorChar))))
+        {
+            builder.AppendLine($"- {FormatMarkdownLink("v0.1.0 Release Preview", GetRelativeDocPath(request, V01PreviewPath))} is the consumer-facing story for the first coordinated release. It stays provisional until the tag is cut.");
+        }
+
         if (File.Exists(Path.Combine(repositoryRoot, UnreleasedPath.Replace('/', Path.DirectorySeparatorChar))))
         {
             builder.AppendLine($"- {FormatMarkdownLink("Unreleased proof artifact", GetRelativeDocPath(request, UnreleasedPath))} shows what is queued for the next coordinated version.");
@@ -686,12 +692,7 @@ internal sealed class PackageIndexGenerator
 
         if (!string.IsNullOrWhiteSpace(entry.ReleaseNotesPath))
         {
-            var releaseNotesFullPath = Path.Combine(
-                request.RepositoryRoot,
-                entry.ReleaseNotesPath.Replace('/', Path.DirectorySeparatorChar));
-            parts.Add(File.Exists(releaseNotesFullPath)
-                ? FormatMarkdownLink("notes", GetRelativeDocPath(request, entry.ReleaseNotesPath))
-                : "notes pending");
+            parts.Add(FormatMarkdownLink("notes", GetRelativeDocPath(request, entry.ReleaseNotesPath)));
         }
 
         return parts.Count == 0 ? "Not declared" : string.Join("<br />", parts);
