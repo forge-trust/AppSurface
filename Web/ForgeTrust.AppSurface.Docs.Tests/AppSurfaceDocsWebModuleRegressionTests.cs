@@ -1461,7 +1461,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions
                     {
                         DirectoryPath = "branding",
-                        RequestPath = "/brand"
+                        RequestPath = "~/brand"
                     },
                     Favicon = new AppSurfaceDocsFaviconOptions
                     {
@@ -1520,6 +1520,35 @@ public class AppSurfaceDocsWebModuleRegressionTests
             await app.StopAsync();
             Directory.Delete(tempDirectory, recursive: true);
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(BrandingAssetPathCases))]
+    public void TryResolveSafeBrandingAssetPath_ShouldAcceptOnlyRelativeBrandImageAssets(
+        object? routeValue,
+        bool expectedResult,
+        string expectedAssetPath)
+    {
+        var result = AppSurfaceDocsWebModule.TryResolveSafeBrandingAssetPath(routeValue, out var assetPath);
+
+        Assert.Equal(expectedResult, result);
+        Assert.Equal(expectedAssetPath, assetPath);
+    }
+
+    public static TheoryData<object?, bool, string> BrandingAssetPathCases()
+    {
+        return new TheoryData<object?, bool, string>
+        {
+            { null, false, string.Empty },
+            { string.Empty, false, string.Empty },
+            { "/secret.svg", false, string.Empty },
+            { "nested\\secret.svg", false, string.Empty },
+            { "bad\u0001.svg", false, string.Empty },
+            { "../secret.svg", false, string.Empty },
+            { "notes.txt", false, string.Empty },
+            { "favicon.SVG", true, "favicon.SVG" },
+            { "nested/favicon.svg", true, "nested/favicon.svg" }
+        };
     }
 
     [Fact]

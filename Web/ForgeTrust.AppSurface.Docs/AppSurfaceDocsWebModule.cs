@@ -743,7 +743,10 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         return rootPath.TrimEnd('/');
     }
 
-    private static bool TryResolveSafeBrandingAssetPath(object? routeValue, out string assetPath)
+    /// <summary>
+    /// Resolves a route-captured branding asset path only when it stays relative and points at an allowed image asset.
+    /// </summary>
+    internal static bool TryResolveSafeBrandingAssetPath(object? routeValue, out string assetPath)
     {
         assetPath = string.Empty;
         var rawPath = Convert.ToString(routeValue, CultureInfo.InvariantCulture);

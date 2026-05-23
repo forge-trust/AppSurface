@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Text;
 using FakeItEasy;
@@ -2059,13 +2058,11 @@ public class ExportEngineTests
         });
     }
 
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "The test HttpMessageHandler transfers HttpResponseMessage ownership to HttpClient, which disposes responses through the normal caller flow.")]
-    private static Task<HttpResponseMessage> NotFound()
+    private static async Task<HttpResponseMessage> NotFound()
     {
-        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        var response = await Text(string.Empty, "text/plain");
+        response.StatusCode = HttpStatusCode.NotFound;
+        return response;
     }
 
     private static Task<HttpResponseMessage> Bytes(string mediaType)
