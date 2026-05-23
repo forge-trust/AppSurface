@@ -761,9 +761,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         }
 
         var segments = decodedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (segments.Any(segment =>
-                string.Equals(segment, ".", StringComparison.Ordinal)
-                || string.Equals(segment, "..", StringComparison.Ordinal)))
+        if (segments.Any(segment => string.Equals(segment, "..", StringComparison.Ordinal)))
         {
             return false;
         }

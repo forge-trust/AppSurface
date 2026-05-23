@@ -1176,8 +1176,12 @@ public class AppSurfaceDocsWebModuleRegressionTests
         }
     }
 
-    [Fact]
-    public async Task ConfigureEndpoints_ShouldRedirectRootFaviconToConfiguredSvg_WhenRootModuleOverridesFavicon()
+    [Theory]
+    [InlineData("/branding/appsurface-site-icon.svg", "/branding/appsurface-site-icon.svg")]
+    [InlineData("~/branding/appsurface-site-icon.svg", "/branding/appsurface-site-icon.svg")]
+    public async Task ConfigureEndpoints_ShouldRedirectRootFaviconToConfiguredSvg_WhenRootModuleOverridesFavicon(
+        string configuredPath,
+        string expectedPath)
     {
         var module = new AppSurfaceDocsWebModule();
         var context = new StartupContext([], module);
@@ -1192,7 +1196,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
                 {
                     Favicon = new AppSurfaceDocsFaviconOptions
                     {
-                        SvgPath = "/branding/appsurface-site-icon.svg"
+                        SvgPath = configuredPath
                     }
                 }
             });
@@ -1213,8 +1217,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
                 BaseAddress = new Uri(baseAddress)
             };
 
-            await AssertRedirectAsync(client, RootFaviconPath, "/branding/appsurface-site-icon.svg");
-            await AssertRedirectAsync(client, HttpMethod.Head, RootFaviconPath, "/branding/appsurface-site-icon.svg");
+            await AssertRedirectAsync(client, RootFaviconPath, expectedPath);
+            await AssertRedirectAsync(client, HttpMethod.Head, RootFaviconPath, expectedPath);
         }
         finally
         {
@@ -1504,6 +1508,9 @@ public class AppSurfaceDocsWebModuleRegressionTests
 
             using var backslashAssetResponse = await client.GetAsync("/brand/%5Csecret.svg");
             Assert.Equal(HttpStatusCode.NotFound, backslashAssetResponse.StatusCode);
+
+            using var rootedAssetResponse = await client.GetAsync("/brand/%2Fsecret.svg");
+            Assert.Equal(HttpStatusCode.NotFound, rootedAssetResponse.StatusCode);
 
             using var controlCharacterAssetResponse = await client.GetAsync("/brand/%01secret.svg");
             Assert.Equal(HttpStatusCode.NotFound, controlCharacterAssetResponse.StatusCode);
