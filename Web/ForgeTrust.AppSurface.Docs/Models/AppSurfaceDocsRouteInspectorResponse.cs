@@ -134,6 +134,7 @@ public sealed record AppSurfaceDocsRouteAliasResponse
     /// <remarks>
     /// Values currently include <c>MarkdownSource</c> for implicit source-shaped recovery aliases and
     /// <c>DeclaredRedirect</c> for aliases declared by documentation metadata.
+    /// Consumers should treat unknown values as alias categories from newer servers rather than as parse failures.
     /// </remarks>
     [JsonPropertyName("kind")]
     public string Kind { get; init; } = string.Empty;
