@@ -40,6 +40,28 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
     }
 
     [Fact]
+    public async Task WriteAsync_ShouldRejectAliasesThatCollideWithFragmentedCanonicalRoutes()
+    {
+        var manifest = new AppSurfaceDocsRouteManifest(
+            [
+                Entry(
+                    sourcePath: "first.md",
+                    canonicalRoutePath: "first",
+                    aliases: ["second#legacy"]),
+                Entry(
+                    sourcePath: "second.md#advanced",
+                    canonicalRoutePath: "second#advanced",
+                    aliases: [])
+            ],
+            []);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => AppSurfaceDocsFrozenRouteManifest.WriteAsync(_tempDirectory, manifest, CancellationToken.None));
+
+        Assert.Contains("collides with a canonical route", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task WriteAsync_ShouldAllowDocsRootCanonicalRoutes()
     {
         var manifest = new AppSurfaceDocsRouteManifest(
@@ -218,6 +240,29 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
     }
 
     [Fact]
+    public void Load_ShouldIgnoreAliasThatMatchesFragmentedCanonicalRoutePath()
+    {
+        var manifest = LoadFrozenManifest(
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "guide.md#advanced",
+                  "canonicalRoutePath": "guide#advanced",
+                  "recoveryAliases": [ "guide#legacy", "guide.md" ],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+
+        Assert.False(manifest.TryResolveAlias("guide#legacy", out _));
+        Assert.True(manifest.TryResolveAlias("guide.md", out var canonicalRoutePath));
+        Assert.Equal("guide#advanced", canonicalRoutePath);
+    }
+
+    [Fact]
     public void Load_ShouldIgnoreAliasesThatCollideWithCanonicalRoutes()
     {
         var manifest = LoadFrozenManifest(
@@ -242,6 +287,35 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
             """);
 
         Assert.False(manifest.TryResolveAlias("second", out _));
+        Assert.True(manifest.TryResolveAlias("first.md", out var canonicalRoutePath));
+        Assert.Equal("first", canonicalRoutePath);
+    }
+
+    [Fact]
+    public void Load_ShouldIgnoreAliasesThatCollideWithFragmentedCanonicalRoutes()
+    {
+        var manifest = LoadFrozenManifest(
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "first.md",
+                  "canonicalRoutePath": "first",
+                  "recoveryAliases": [ "second#legacy", "first.md" ],
+                  "declaredAliases": []
+                },
+                {
+                  "sourcePath": "second.md#advanced",
+                  "canonicalRoutePath": "second#advanced",
+                  "recoveryAliases": [],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+
+        Assert.False(manifest.TryResolveAlias("second#legacy", out _));
         Assert.True(manifest.TryResolveAlias("first.md", out var canonicalRoutePath));
         Assert.Equal("first", canonicalRoutePath);
     }
@@ -316,6 +390,28 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
                 Entry(
                     sourcePath: "second.md",
                     canonicalRoutePath: "guide",
+                    aliases: ["second"])
+            ],
+            []);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => AppSurfaceDocsFrozenRouteManifest.WriteAsync(_tempDirectory, manifest, CancellationToken.None));
+
+        Assert.Contains("duplicate canonical route", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WriteAsync_ShouldRejectDuplicateCanonicalRoutePathsWithDifferentFragments()
+    {
+        var manifest = new AppSurfaceDocsRouteManifest(
+            [
+                Entry(
+                    sourcePath: "first.md#overview",
+                    canonicalRoutePath: "guide#overview",
+                    aliases: ["first"]),
+                Entry(
+                    sourcePath: "second.md#advanced",
+                    canonicalRoutePath: "guide#advanced",
                     aliases: ["second"])
             ],
             []);

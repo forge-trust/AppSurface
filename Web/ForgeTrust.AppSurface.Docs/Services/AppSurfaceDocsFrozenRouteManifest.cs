@@ -179,10 +179,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
     internal static bool IsSafeRoutePath(string? routePath)
     {
         var normalizedRoutePath = NormalizeRoutePath(routePath);
-        var fragmentIndex = normalizedRoutePath.IndexOf('#', StringComparison.Ordinal);
-        var pathPart = fragmentIndex < 0
-            ? normalizedRoutePath
-            : normalizedRoutePath[..fragmentIndex];
+        var pathPart = GetRoutePathPart(normalizedRoutePath);
 
         if (pathPart.Length == 0)
         {
@@ -231,6 +228,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
             }
 
             var canonicalRoutePath = NormalizeRoutePath(entry.CanonicalRoutePath);
+            var canonicalRoutePathPart = GetRoutePathPart(canonicalRoutePath);
             if (!IsSafeRoutePath(canonicalRoutePath))
             {
                 if (strict)
@@ -243,7 +241,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
                 continue;
             }
 
-            if (!canonicalRoutes.Add(canonicalRoutePath) && strict)
+            if (!canonicalRoutes.Add(canonicalRoutePathPart) && strict)
             {
                 throw new InvalidOperationException($"Frozen AppSurface Docs route manifest contains duplicate canonical route '{canonicalRoutePath}'.");
             }
@@ -259,6 +257,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
             }
 
             var canonicalRoutePath = NormalizeRoutePath(entry.CanonicalRoutePath);
+            var canonicalRoutePathPart = GetRoutePathPart(canonicalRoutePath);
             if (unsafeCanonicalRoutes.Contains(canonicalRoutePath))
             {
                 continue;
@@ -284,7 +283,8 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
                     continue;
                 }
 
-                if (string.Equals(aliasRoutePath, canonicalRoutePath, StringComparison.OrdinalIgnoreCase))
+                var aliasRoutePathPart = GetRoutePathPart(aliasRoutePath);
+                if (string.Equals(aliasRoutePathPart, canonicalRoutePathPart, StringComparison.OrdinalIgnoreCase))
                 {
                     if (strict)
                     {
@@ -296,7 +296,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
                     continue;
                 }
 
-                if (canonicalRoutes.Contains(aliasRoutePath))
+                if (canonicalRoutes.Contains(aliasRoutePathPart))
                 {
                     if (strict)
                     {
@@ -335,6 +335,14 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         }
 
         return canonicalRouteByAlias;
+    }
+
+    private static string GetRoutePathPart(string routePath)
+    {
+        var fragmentIndex = routePath.IndexOf('#', StringComparison.Ordinal);
+        return fragmentIndex < 0
+            ? routePath
+            : routePath[..fragmentIndex];
     }
 
     private sealed record FrozenRouteManifestDocument(
