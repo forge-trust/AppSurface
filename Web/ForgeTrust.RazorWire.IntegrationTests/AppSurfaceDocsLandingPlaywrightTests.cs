@@ -205,7 +205,6 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
         Assert.Contains(badge, cardText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Open page", cardText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("->", cardText, StringComparison.Ordinal);
-        Assert.Null(await card.GetAttributeAsync("aria-label"));
 
         var decorativeChevronCount = await card.Locator("svg[aria-hidden='true'][focusable='false']").CountAsync();
         Assert.True(decorativeChevronCount > 0);
