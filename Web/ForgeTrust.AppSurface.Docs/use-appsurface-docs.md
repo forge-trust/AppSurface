@@ -140,7 +140,7 @@ Start with pages that answer adoption questions before you tune visuals:
 - `examples/.../README.md` for exportable proof paths.
 - `releases/README.md`, `CHANGELOG.md`, or upgrade-policy pages when release risk matters.
 - Troubleshooting pages for the failure modes your users actually hit.
-- `NAMESPACE.md` files beside package/project files when generated API reference needs human orientation above the symbol list. Docs-owned namespace README files such as `Docs/ForgeTrust.RazorWire/README.md` are still supported for portable folder-index layouts, but `NAMESPACE.md` is the AppSurface house style.
+- `NAMESPACE.md` files beside package/project files when generated API reference needs human orientation above the symbol list. Docs-owned namespace README files such as `docs/ForgeTrust.RazorWire/README.md` are still supported for portable folder-index layouts, but `NAMESPACE.md` is the AppSurface house style.
 
 Use sidecar metadata for portability-sensitive files such as README pages:
 

@@ -1134,7 +1134,7 @@ When `target` resolves, the whole editorial row is one real anchor to the genera
 
 Use `NAMESPACE.md` when AppSurface-authored content is specifically about a namespace API surface: concepts, intended usage, lifecycle notes, or cross-type orientation for that namespace. When `NAMESPACE.md.yml` includes `namespace: Dotted.Namespace`, that explicit target wins; without it, AppSurface Docs infers only from exactly one colocated `.csproj` and an exact generated namespace page match. If inference fails or multiple project files are colocated, the `NAMESPACE.md` source is hidden from public routes and harvest health reports a warning so the author can add explicit metadata.
 
-Docs-owned namespace README paths such as `Docs/ForgeTrust.RazorWire/README.md` and `Namespaces/ForgeTrust.RazorWire/README.md` remain supported for compatibility with existing content and portable folder-index README layouts. They are not the internal AppSurface house style for new namespace intros.
+Docs-owned namespace README paths such as `docs/ForgeTrust.RazorWire/README.md` and `Namespaces/ForgeTrust.RazorWire/README.md` remain supported for compatibility with existing content and portable folder-index README layouts. They are not the internal AppSurface house style for new namespace intros.
 
 Use a package README when the content is about package adoption: installation, package-level configuration, examples, compatibility, and links to broader guides. Package READMEs such as `Web/ForgeTrust.AppSurface.Web/README.md` and `src/ForgeTrust.AppSurface.Web/README.md` do not automatically become namespace intros, even when the folder name matches a namespace. That boundary is intentional so package docs do not disappear into API pages by folder-name coincidence.
 
