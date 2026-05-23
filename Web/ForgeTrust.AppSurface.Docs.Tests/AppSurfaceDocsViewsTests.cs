@@ -818,8 +818,8 @@ public class AppSurfaceDocsViewsTests
 
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         var startHereLink = Assert.Single(document.QuerySelectorAll("a[aria-label='Browse Start Here']"));
-        var featuredPageLink = Assert.Single(document.QuerySelectorAll("a[aria-label='View Quickstart']"));
-        var routeLink = Assert.Single(document.QuerySelectorAll("a[aria-label='View Deep Dive']"));
+        var featuredPageLink = Assert.Single(document.QuerySelectorAll("main a[href='/docs/guides/quickstart']"));
+        var routeLink = Assert.Single(document.QuerySelectorAll("main a[href='/docs/concepts/deep-dive']"));
 
         Assert.Equal("/docs/sections/start-here", startHereLink.GetAttribute("href"));
         Assert.DoesNotContain("Open Start Here", startHereLink.TextContent, StringComparison.Ordinal);
@@ -830,16 +830,20 @@ public class AppSurfaceDocsViewsTests
         Assert.Equal("/docs/guides/quickstart", featuredPageLink.GetAttribute("href"));
         Assert.Equal("doc-content", featuredPageLink.GetAttribute("data-turbo-frame"));
         Assert.Equal("advance", featuredPageLink.GetAttribute("data-turbo-action"));
+        Assert.Null(featuredPageLink.GetAttribute("aria-label"));
         Assert.DoesNotContain("Open page", featuredPageLink.TextContent, StringComparison.Ordinal);
         Assert.DoesNotContain("->", featuredPageLink.TextContent, StringComparison.Ordinal);
+        AssertDoesNotContainStandaloneText(featuredPageLink, "Open");
         AssertDecorativeChevron(featuredPageLink);
 
         Assert.Contains("href=\"/docs/sections/concepts\"", html);
         Assert.Equal("/docs/concepts/deep-dive", routeLink.GetAttribute("href"));
         Assert.Equal("doc-content", routeLink.GetAttribute("data-turbo-frame"));
         Assert.Equal("advance", routeLink.GetAttribute("data-turbo-action"));
+        Assert.Null(routeLink.GetAttribute("aria-label"));
         Assert.DoesNotContain("Open page", routeLink.TextContent, StringComparison.Ordinal);
         Assert.DoesNotContain("->", routeLink.TextContent, StringComparison.Ordinal);
+        AssertDoesNotContainStandaloneText(routeLink, "Open");
         AssertDecorativeChevron(routeLink);
 
         Assert.Contains("Build the mental model before you choose an implementation path.", html);
@@ -4599,6 +4603,28 @@ public class AppSurfaceDocsViewsTests
         Assert.Equal("10", circle.GetAttribute("cy"));
         Assert.Equal("7", circle.GetAttribute("r"));
         Assert.Equal("M8.5 6.75L11.75 10 8.5 13.25", path.GetAttribute("d"));
+    }
+
+    private static void AssertDoesNotContainStandaloneText(IElement element, string unexpectedText)
+    {
+        var matchingTextNodes = new List<string>();
+        CollectMatchingTextNodes(element);
+
+        Assert.Empty(matchingTextNodes);
+
+        void CollectMatchingTextNodes(INode node)
+        {
+            foreach (var child in node.ChildNodes)
+            {
+                if (child.NodeType == NodeType.Text &&
+                    string.Equals(child.TextContent.Trim(), unexpectedText, StringComparison.Ordinal))
+                {
+                    matchingTextNodes.Add(child.TextContent);
+                }
+
+                CollectMatchingTextNodes(child);
+            }
+        }
     }
 
     private sealed class StaticDocHarvester : IDocHarvester
