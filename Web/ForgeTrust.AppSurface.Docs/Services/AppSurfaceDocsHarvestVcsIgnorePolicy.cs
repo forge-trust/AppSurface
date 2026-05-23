@@ -171,7 +171,7 @@ internal sealed class AppSurfaceDocsHarvestVcsIgnorePolicy
         {
             var ignoredParent = GetAncestorDirectories(normalizedPath)
                 .Select(parent => Evaluate(parent, isDirectory: true))
-                .FirstOrDefault(parentMatch => parentMatch is { Ignored: true });
+                .LastOrDefault(parentMatch => parentMatch is { Ignored: true });
             if (ignoredParent is not null)
             {
                 return ignoredParent;

@@ -163,6 +163,41 @@ public sealed class AppSurfaceDocsHarvestPathPolicySnapshotTests : IDisposable
     }
 
     [Fact]
+    public async Task EnumerateCandidateFiles_WhenFileIsReparsePointSkipsCandidate()
+    {
+        var externalFile = Path.Join(_externalRoot, "External.md");
+        await File.WriteAllTextAsync(externalFile, "# external");
+        var linkPath = Path.Join(_root, "Linked.md");
+
+        try
+        {
+            File.CreateSymbolicLink(linkPath, externalFile);
+        }
+        catch (IOException)
+        {
+            return;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        var snapshot = CreateSnapshot();
+
+        var candidates = snapshot.EnumerateCandidateFiles(
+            _root,
+            AppSurfaceDocsHarvestSourceKind.Markdown,
+            "*.md",
+            CancellationToken.None).ToArray();
+
+        Assert.DoesNotContain(candidates, path => path.EndsWith("Linked.md", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task EnumerateCandidateFiles_ShouldRejectNullArguments()
     {
         var snapshot = CreateSnapshot();

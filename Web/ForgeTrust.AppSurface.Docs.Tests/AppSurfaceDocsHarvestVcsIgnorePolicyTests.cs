@@ -188,6 +188,27 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluate_WhenNestedIgnoredAncestorsBlockNegatedFileUsesClosestIgnoredAncestor()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            build/
+            build/generated/
+            !build/generated/public.md
+            """);
+        var snapshot = CreateSnapshot();
+
+        var decision = snapshot.Evaluate("build/generated/public.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.False(decision.Included);
+        Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore, decision.Code);
+        var trace = Assert.Single(decision.Trace, trace => trace.Code == AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore);
+        Assert.Equal(2, trace.LineNumber);
+        Assert.Equal("build/generated/", trace.Pattern);
+    }
+
+    [Fact]
     public async Task Evaluate_WhenParentAndChildAreUnignoredRestoresChild()
     {
         await WriteAsync(

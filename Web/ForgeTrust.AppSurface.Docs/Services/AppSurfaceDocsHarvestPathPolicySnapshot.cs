@@ -63,11 +63,12 @@ internal sealed class AppSurfaceDocsHarvestPathPolicySnapshot : IHarvestPathPoli
     /// <remarks>
     /// Traversal is lazy and depth-first using an explicit stack. File paths are yielded as absolute paths, directory
     /// paths are normalized to forward-slash repository-relative values before pruning, and directory reparse points
-    /// are skipped to avoid following symlinks or junctions outside the repository. Cancellation is checked before each
-    /// directory expansion, so callers can stop large repository walks without waiting for every descendant to be listed.
-    /// The method throws <see cref="ArgumentNullException"/> for a <see langword="null"/> <paramref name="rootPath"/> or
-    /// <paramref name="searchPattern"/>; file-system enumeration exceptions are allowed to flow to the harvester so the
-    /// aggregation layer can report the failure consistently.
+    /// are skipped to avoid following symlinks or junctions outside the repository. File reparse points are skipped for
+    /// the same reason, so symlinked files cannot point harvesters at content outside the repository boundary.
+    /// Cancellation is checked before each directory expansion, so callers can stop large repository walks without
+    /// waiting for every descendant to be listed. The method throws <see cref="ArgumentNullException"/> for a
+    /// <see langword="null"/> <paramref name="rootPath"/> or <paramref name="searchPattern"/>; file-system enumeration
+    /// exceptions are allowed to flow to the harvester so the aggregation layer can report the failure consistently.
     /// </remarks>
     public IEnumerable<string> EnumerateCandidateFiles(
         string rootPath,
@@ -88,6 +89,12 @@ internal sealed class AppSurfaceDocsHarvestPathPolicySnapshot : IHarvestPathPoli
             var currentDirectory = pendingDirectories.Pop();
             foreach (var file in Directory.EnumerateFiles(currentDirectory, searchPattern, SearchOption.TopDirectoryOnly))
             {
+                var attributes = File.GetAttributes(file);
+                if (attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    continue;
+                }
+
                 yield return file;
             }
 
