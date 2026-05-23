@@ -1,0 +1,49 @@
+name: Code Quality
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: code-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet-format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Restore packages
+        run: dotnet restore ForgeTrust.AppSurface.slnx --locked-mode
+
+      - name: Build project
+        run: dotnet build ForgeTrust.AppSurface.slnx --configuration Release --no-restore
+
+      - name: Verify generated package chooser
+        run: dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj --configuration Release --no-build --no-restore -- verify
+
+      - name: Verify generated Markdown snippets
+        run: dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-build --no-restore -- verify
+
+      - name: Verify formatting
+        run: dotnet format ForgeTrust.AppSurface.slnx --verify-no-changes --no-restore --verbosity diagnostic

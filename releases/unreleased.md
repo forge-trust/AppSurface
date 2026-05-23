@@ -35,6 +35,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface now exposes focused GitHub issue forms for bug reports, feature requests, and docs/developer-experience feedback, with the root README and contribution guide pointing developers to that feedback path.
 - Public contribution surfaces now steer suspected vulnerabilities away from issue forms and into a private security reporting path.
 - GitHub issue template support links now point first-time adopters to the package chooser and release/upgrade contract when they are evaluating install path or migration risk.
+- The repository now advertises its trust signals from the root README and backs them with Dependabot updates, a formatting-based code-quality workflow, and the repo's existing CodeQL code-scanning setup.
 
 ### Console and CLI polish
 
