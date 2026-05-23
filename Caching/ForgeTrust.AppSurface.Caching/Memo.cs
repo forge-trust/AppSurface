@@ -1045,16 +1045,9 @@ public sealed class Memo : IMemo, IDisposable
 
     private void RemoveUncontendedLock(object key, SemaphoreSlim keyLock)
     {
-        try
+        if (keyLock.CurrentCount > 0)
         {
-            if (keyLock.CurrentCount > 0)
-            {
-                _locks.TryRemove(new KeyValuePair<object, SemaphoreSlim>(key, keyLock));
-            }
-        }
-        catch (ObjectDisposedException)
-        {
-            // Ignore: the Memo instance or the lock was disposed concurrently.
+            _locks.TryRemove(new KeyValuePair<object, SemaphoreSlim>(key, keyLock));
         }
     }
 
