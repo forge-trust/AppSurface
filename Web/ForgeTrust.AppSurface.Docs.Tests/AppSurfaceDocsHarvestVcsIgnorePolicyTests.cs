@@ -312,6 +312,25 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         Assert.Null(policy.EvaluateFile("[!]", AppSurfaceDocsHarvestSourceKind.Markdown));
     }
 
+    [Theory]
+    [InlineData("[", "[")]
+    [InlineData("[!", "[!")]
+    [InlineData("[]", "[]")]
+    [InlineData("[^]", "^")]
+    [InlineData("[[]", "[")]
+    public async Task EvaluateFile_WhenCharacterClassFallsBackOrEscapesMatchesExpectedLiteral(
+        string pattern,
+        string candidatePath)
+    {
+        await WriteAsync(".gitignore", $"{pattern}\n");
+        var policy = new AppSurfaceDocsHarvestVcsIgnorePolicy(
+            _root,
+            new AppSurfaceDocsHarvestVcsIgnoreOptions(),
+            NullLogger.Instance);
+
+        Assert.NotNull(policy.EvaluateFile(candidatePath, AppSurfaceDocsHarvestSourceKind.Markdown));
+    }
+
     [Fact]
     public async Task Evaluate_WhenIgnorePatternContainsMalformedCharacterClassSkipsRule()
     {
