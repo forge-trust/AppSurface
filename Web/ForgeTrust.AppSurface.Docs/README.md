@@ -31,6 +31,7 @@ Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `
 - `AppSurfaceDocsWebModule` for wiring the docs UI into an AppSurface web host
 - `AddAppSurfaceDocs()` for typed options binding and core service registration
 - `DocAggregator` plus the built-in Markdown, C# API, and opt-in JavaScript public API harvesters, including structured harvest health diagnostics
+- A live harvest observatory that starts the first source-backed harvest during startup, streams real-time RazorWire progress, and keeps first navigation informative instead of appearing hung
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by AppSurface Docs consumers
 - `DocsUrlBuilder` plus the MVC surface used by AppSurface Docs consumers so the live docs root, search shell, and archive routes stay in one shared contract
 - `AppSurfaceDocsVersionCatalog` plus `AppSurfaceDocsVersionCatalogService` for mounting exact published release trees and surfacing release-level status in the public archive
@@ -271,6 +272,46 @@ An all-failed snapshot logs one critical message when that snapshot is generated
 `GetHarvestHealthAsync(cancellationToken)` observes caller cancellation only while the caller waits for the memoized snapshot. Canceling that wait does not cancel, poison, or evict the shared snapshot computation. A later caller can still receive the completed snapshot.
 
 Health and docs are computed from the same cached snapshot. This is deliberate: a host that reads `GetDocsAsync()` and then `GetHarvestHealthAsync()` sees health for the docs it is serving, not a second harvest with different timing or failures. Use `InvalidateCache()` when an operator explicitly asks AppSurface Docs to refresh source-backed docs.
+
+AppSurface Docs uses an absolute freshness window followed by a bounded stale-while-revalidate window of the same length. After `CacheExpirationMinutes` elapses, requests continue to receive the last good snapshot while one background harvest refreshes the cache. If that refresh succeeds, later reads use the new snapshot; if it fails, the stale snapshot remains available until the stale window ends. A cold start with no previous snapshot still waits for the initial harvest or renders the live harvest observatory.
+
+### Live Harvest Observatory
+
+AppSurface Docs starts the initial harvest in the background by default. If a user reaches a docs page before the first cached snapshot is ready, the request waits briefly and then renders a live harvest observatory instead of holding a blank or apparently hung page. The observatory uses RazorWire Server-Sent Events with replay enabled, so late subscribers receive the latest retained harvest state and continue with live updates.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "StartupMode": "Background",
+      "InitialRequestWaitBudgetMilliseconds": 350,
+      "TestingPreHarvestDelayMilliseconds": 0,
+      "TestingDelayPerHarvesterMilliseconds": 0,
+      "TestingDelayPerDocumentMilliseconds": 0
+    }
+  }
+}
+```
+
+`AppSurfaceDocs:Harvest:StartupMode` accepts:
+
+- `Background`: default. Startup schedules the memoized initial harvest and returns immediately unless strict failure mode is enabled.
+- `Blocking`: startup waits for the initial harvest to complete.
+- `Disabled`: startup does not pre-warm the docs cache; the first docs request starts harvest work.
+
+`InitialRequestWaitBudgetMilliseconds` controls how long a docs request waits for the initial harvest before showing the observatory. The default is `350`. Set it to `0` when you want the observatory immediately for any pending first harvest. Set it higher when a host usually harvests quickly and you prefer to avoid showing the progress page for sub-second starts.
+
+The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The defaults are `0`. Set `TestingPreHarvestDelayMilliseconds` to pause after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` to pause each active harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` to publish each harvester's document count one document at a time. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the observatory visibly unfold. Do not enable these for production traffic.
+
+When the harvest completes successfully, AppSurface Docs reloads the current app-relative URL after the configured completion delay. The reload lets the server render the originally requested docs page, including any permanent redirect for source-shaped Markdown routes. The completion view also renders a plain return link so no-JavaScript users can continue manually.
+
+The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints. In development it is exposed by default; non-development hosts must opt in with `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` if users should see the live progress stream.
+
+Pitfalls:
+
+- Do not put secrets, absolute filesystem paths, or raw exception details in harvester diagnostics. The observatory uses the same redacted diagnostic shape as harvest health.
+- Do not rely on file-level progress counts in v1. The current stream reports harvester-level progress and aggregate document counts.
+- Do not use `StartupMode=Disabled` for hosts where first navigation latency matters; that preserves the old lazy-harvest behavior.
 
 ### Operator Health Routes
 

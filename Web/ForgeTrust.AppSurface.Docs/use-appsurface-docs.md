@@ -170,6 +170,30 @@ Use `VcsIgnore:AllowGlobs` only for intentionally public docs under ignored path
 
 Those allow globs use AppSurface glob syntax, not Git-ignore syntax. They restore only VCS-ignore exclusions; AppSurface default exclusions and configured `ExcludeGlobs` still win. If a host needs the pre-existing behavior, set `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled=false`.
 
+## Understand first harvest behavior
+
+AppSurface Docs starts the first source-backed harvest during application startup by default. If the docs cache is still warming when a user opens `/docs`, the request waits for `AppSurfaceDocs:Harvest:InitialRequestWaitBudgetMilliseconds` and then shows a live RazorWire harvest observatory. The default wait budget is `350` milliseconds.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "StartupMode": "Background",
+      "InitialRequestWaitBudgetMilliseconds": 350,
+      "TestingPreHarvestDelayMilliseconds": 0,
+      "TestingDelayPerHarvesterMilliseconds": 0,
+      "TestingDelayPerDocumentMilliseconds": 0
+    }
+  }
+}
+```
+
+Use `StartupMode=Background` for normal hosts, `Blocking` for hosts that must finish docs warmup before accepting traffic, and `Disabled` only when you intentionally want the old first-request lazy harvest. Strict startup failure still comes from `Harvest:FailOnFailure=true`; when strict mode is enabled, startup waits for harvest health and fails only when every active harvester fails.
+
+For manual UI testing, set the `Testing*Delay*Milliseconds` knobs to positive values. `TestingPreHarvestDelayMilliseconds` pauses after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` pauses each harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` publishes each harvester's document count one document at a time. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the live observatory easy to inspect locally. Keep them at `0` for production traffic.
+
+The live observatory uses the same redacted diagnostics as harvest health. Do not put secrets, absolute repository paths, or raw exception messages into diagnostic fields that can reach client-visible UI.
+
 ## Author the first useful page set
 
 Start with pages that answer adoption questions before you tune visuals:

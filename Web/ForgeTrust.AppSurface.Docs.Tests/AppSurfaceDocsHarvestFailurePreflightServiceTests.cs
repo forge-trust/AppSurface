@@ -86,6 +86,35 @@ public sealed class AppSurfaceDocsHarvestFailurePreflightServiceTests : IDisposa
     }
 
     [Fact]
+    public async Task StartAsync_ShouldStartBackgroundWarmup_WhenStrictModeIsDisabledAndStartupModeIsBackground()
+    {
+        var harvester = new SignalingHarvester();
+        var aggregator = CreateAggregator([harvester]);
+        var service = CreateService(aggregator, failOnFailure: false, AppSurfaceDocsHarvestStartupMode.Background);
+
+        await service.StartAsync(CancellationToken.None);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        await harvester.Started.Task.WaitAsync(cts.Token);
+        harvester.Complete();
+    }
+
+    [Fact]
+    public async Task StartAsync_ShouldBlockWarmup_WhenStartupModeIsBlocking()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]);
+        var aggregator = CreateAggregator([harvester]);
+        var service = CreateService(aggregator, failOnFailure: false, AppSurfaceDocsHarvestStartupMode.Blocking);
+
+        await service.StartAsync(CancellationToken.None);
+
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
     public async Task StartAsync_ShouldContinue_WhenStrictModeIsEnabledAndHarvestIsEmpty()
     {
         var harvester = A.Fake<IDocHarvester>();
@@ -271,18 +300,38 @@ public sealed class AppSurfaceDocsHarvestFailurePreflightServiceTests : IDisposa
 
     private AppSurfaceDocsHarvestFailurePreflightService CreateService(
         DocAggregator aggregator,
-        bool failOnFailure)
+        bool failOnFailure,
+        AppSurfaceDocsHarvestStartupMode startupMode = AppSurfaceDocsHarvestStartupMode.Disabled)
     {
         return new AppSurfaceDocsHarvestFailurePreflightService(
             new AppSurfaceDocsOptions
             {
                 Harvest = new AppSurfaceDocsHarvestOptions
                 {
-                    FailOnFailure = failOnFailure
+                    FailOnFailure = failOnFailure,
+                    StartupMode = startupMode
                 }
             },
             aggregator,
             _preflightLogger);
+    }
+
+    private sealed class SignalingHarvester : IDocHarvester
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private readonly TaskCompletionSource<IReadOnlyList<DocNode>> _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            return _completed.Task;
+        }
+
+        public void Complete()
+        {
+            _completed.TrySetResult([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]);
+        }
     }
 
     private static void AssertCriticalLogIncludesException(

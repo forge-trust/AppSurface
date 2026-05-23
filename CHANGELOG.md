@@ -29,6 +29,9 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs detail pages now expose copy-link actions for outline rows and section headers so readers can share deep links without navigating away from their current position.
 - AppSurface Docs now exposes `DocAggregator.GetHarvestHealthAsync(...)` plus structured harvest health models so hosts can distinguish healthy, empty, degraded, and all-failed source harvest snapshots without parsing logs.
 - AppSurface Docs hosts, preview runs, and static exports can now set a public canonical origin so metadata names the published domain even when the host is crawled through loopback.
+- AppSurface Docs cold requests now show a RazorWire-powered harvest observatory while the first source snapshot is being assembled, with background startup warmup, operator-safe progress, and local testing delays for deterministic QA.
+- RazorWire streams now support opt-in bounded replay, letting late subscribers receive the latest retained state snapshots before live stream events.
+- AppSurface Caching now supports absolute stale-while-revalidate memo policies so callers can serve bounded stale data immediately while one background refresh updates the cached value.
 - RazorWire forms now have convention-based failed-submission UX with default form-local fallbacks, server helpers for handled validation errors, development anti-forgery diagnostics, runtime events, and sample coverage.
 - The root README now includes a single hello-world web quickstart with an explicit local port and a concrete expected response.
 - AppSurface now ships GitHub issue templates for bug reports and documentation feedback.
@@ -67,6 +70,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Code that expected custom AppSurface labels from `IHostEnvironment.ApplicationName` should use `StartupContext.ApplicationName`; host environment application names now remain tied to assembly identity so ASP.NET static web assets continue to resolve.
 - Web apps with custom conventional 404 overrides should replace `NotFoundPageModel` with `BrowserStatusPageModel`. The old `ConventionalNotFoundPageMode`, `NotFoundPageMode`, `UseConventionalNotFoundPage()`, and `DisableNotFoundPage()` API names have moved to the `BrowserStatusPage*` naming surface before the first public tag.
 - AppSurface Docs hosts that need operational status for source-backed docs should call `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` and diagnostic codes instead of scraping warning or critical log messages.
+- AppSurface Docs hosts with expensive or side-effecting harvesters can set `AppSurfaceDocs:Harvest:StartupMode` to `Disabled` or adjust `InitialRequestWaitBudgetMilliseconds`; the `Testing*DelayMilliseconds` options are intended only for local and automated observatory testing.
 
 ## No tagged releases yet
 

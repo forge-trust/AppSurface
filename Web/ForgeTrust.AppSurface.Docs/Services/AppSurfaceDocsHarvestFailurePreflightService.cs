@@ -4,13 +4,13 @@ using Microsoft.Extensions.Hosting;
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Performs the optional strict AppSurface Docs harvest-health startup preflight.
+/// Starts the optional AppSurface Docs harvest warmup and performs the strict harvest-health startup preflight.
 /// </summary>
 /// <remarks>
-/// The service is always registered by <c>AddAppSurfaceDocs()</c>, but it is inert unless
-/// <see cref="AppSurfaceDocsHarvestOptions.FailOnFailure"/> is enabled. Strict mode reads
-/// <see cref="DocAggregator.GetHarvestHealthAsync(CancellationToken)"/> so startup observes the same cached snapshot
-/// that docs requests use instead of running a second harvest pipeline.
+/// The service is always registered by <c>AddAppSurfaceDocs()</c>. By default it starts the same memoized harvest used by
+/// docs requests in the background so the first reader does not pay the full cold-start cost. Strict mode reads
+/// <see cref="DocAggregator.GetHarvestHealthAsync(CancellationToken)"/> and fails startup only when the aggregate
+/// snapshot is failed.
 /// </remarks>
 internal sealed class AppSurfaceDocsHarvestFailurePreflightService : IHostedService
 {
@@ -45,13 +45,39 @@ internal sealed class AppSurfaceDocsHarvestFailurePreflightService : IHostedServ
     /// </exception>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (_options.Harvest?.FailOnFailure is not true)
+        var harvestOptions = _options.Harvest;
+        if (harvestOptions is null)
         {
             return;
         }
 
+        if (harvestOptions.StartupMode == AppSurfaceDocsHarvestStartupMode.Disabled
+            && !harvestOptions.FailOnFailure)
+        {
+            return;
+        }
+
+        if (harvestOptions.StartupMode == AppSurfaceDocsHarvestStartupMode.Background
+            && !harvestOptions.FailOnFailure)
+        {
+            _ = Task.Run(
+                async () =>
+                {
+                    try
+                    {
+                        await _aggregator.GetHarvestHealthAsync(CancellationToken.None);
+                    }
+                    catch (Exception ex) when (!IsFatalException(ex))
+                    {
+                        _logger.LogWarning(ex, "AppSurface Docs background harvest warmup failed.");
+                    }
+                },
+                CancellationToken.None);
+            return;
+        }
+
         var health = await _aggregator.GetHarvestHealthAsync(cancellationToken);
-        if (health.Status != DocHarvestHealthStatus.Failed)
+        if (!harvestOptions.FailOnFailure || health.Status != DocHarvestHealthStatus.Failed)
         {
             return;
         }
@@ -73,5 +99,10 @@ internal sealed class AppSurfaceDocsHarvestFailurePreflightService : IHostedServ
     public Task StopAsync(CancellationToken cancellationToken)
     {
         return Task.CompletedTask;
+    }
+
+    private static bool IsFatalException(Exception exception)
+    {
+        return exception is OutOfMemoryException or StackOverflowException or AccessViolationException;
     }
 }
