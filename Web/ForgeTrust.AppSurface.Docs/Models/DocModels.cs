@@ -945,6 +945,16 @@ public static class DocHarvestDiagnosticCodes
     public const string AllFailed = "appsurfacedocs.harvest.all_failed";
 
     /// <summary>
+    /// Repository-owned Git ignore rules excluded one or more harvest candidates.
+    /// </summary>
+    public const string VcsIgnoreSummary = "appsurfacedocs.harvest.vcs_ignore_summary";
+
+    /// <summary>
+    /// AppSurface Docs could not read or normalize part of the repository-owned Git ignore policy.
+    /// </summary>
+    public const string VcsIgnoreWarning = "appsurfacedocs.harvest.vcs_ignore_warning";
+
+    /// <summary>
     /// A JavaScript source file matched the configured include set but exceeded the configured parse size limit.
     /// </summary>
     public const string JavaScriptFileTooLarge = "appsurfacedocs.javascript.file_too_large";

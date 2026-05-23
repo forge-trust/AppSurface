@@ -1,4 +1,4 @@
-﻿# .github/workflows/benchmarks.yml
+# .github/workflows/benchmarks.yml
 name: Benchmarks
 
 env:
@@ -29,10 +29,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
         with:
           dotnet-version: |
             10.0.x
@@ -42,7 +42,7 @@ jobs:
           dotnet run --project 'benchmarks/AppSurfaceBenchmarks/AppSurfaceBenchmarks.csproj' -c Release -- --filter '*'
 
       - name: Publish BenchmarkDotNet artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
           name: artifacts
@@ -57,7 +57,7 @@ jobs:
           "repo-name=${repoName}" >> ${env:GITHUB_OUTPUT}
 
       - name: Publish results
-        uses: martincostello/benchmarkdotnet-results-publisher@ac86c486fd2192a48c0945be2824752632aa1314 # v2.0.0
+        uses: martincostello/benchmarkdotnet-results-publisher@0f2a458a28dbd963b1bcb029efaec245b677c7b3 # v2.0.3
         with:
           branch: ${{ github.ref_name }}
           comment-on-threshold: true

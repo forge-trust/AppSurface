@@ -1725,6 +1725,30 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task IndexView_ShouldRenderConfiguredLogoAsLandingHeroIcon()
+    {
+        using var services = CreateServiceProvider(
+            CreateDocs(),
+            new Dictionary<string, string?>
+            {
+                ["AppSurfaceDocs:Identity:Logo:Path"] = "/brand/logo.svg",
+                ["AppSurfaceDocs:Identity:Favicon:SvgPath"] = "/brand/favicon.svg"
+            });
+
+        var html = await RenderDocsViewAsync(
+            services,
+            "Index",
+            c => c.Index(),
+            pathBase: "/some-base");
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var landingMark = document.QuerySelector(".docs-hero-panel img.docs-brand-mark--lg");
+
+        Assert.NotNull(landingMark);
+        Assert.Equal("/some-base/brand/logo.svg", landingMark!.GetAttribute("src"));
+        Assert.DoesNotContain("appsurface-docs-icon.svg", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task IndexView_ShouldLeaveRelativeLinksUnchanged_AndSuppressBlankStartHereHref()
     {
         using var services = CreateServiceProvider(CreateDocs());
