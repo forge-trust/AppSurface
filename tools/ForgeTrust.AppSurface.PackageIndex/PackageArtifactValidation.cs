@@ -124,7 +124,7 @@ internal sealed class PackageArtifactValidator
 
         RequireMetadata(expected.PackageId, "license", inspected.License);
         RequireMetadata(expected.PackageId, "project url", inspected.ProjectUrl);
-        if (!IsRequiredPackageProjectUrl(inspected.ProjectUrl))
+        if (!IsRequiredPackageProjectUrl(inspected.ProjectUrl!))
         {
             throw new PackageIndexException(
                 $"Package '{expected.PackageId}' project url must be '{RequiredPackageProjectUrl}', found '{inspected.ProjectUrl}'.");
@@ -392,10 +392,10 @@ internal sealed class PackageArtifactValidator
         }
     }
 
-    private static bool IsRequiredPackageProjectUrl(string? projectUrl)
+    private static bool IsRequiredPackageProjectUrl(string projectUrl)
     {
         return string.Equals(
-            projectUrl?.TrimEnd('/'),
+            projectUrl.TrimEnd('/'),
             RequiredPackageProjectUrl,
             StringComparison.OrdinalIgnoreCase);
     }
