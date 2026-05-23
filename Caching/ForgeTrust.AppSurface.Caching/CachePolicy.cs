@@ -52,6 +52,14 @@ public sealed record CachePolicy
     /// <summary>
     /// Creates an absolute-expiration policy that can serve stale values while one background refresh runs.
     /// </summary>
+    /// <remarks>
+    /// Use this factory when a caller wants a single declaration for <paramref name="freshDuration"/> absolute
+    /// freshness followed by a bounded <paramref name="staleDuration"/> revalidation window; use
+    /// <see cref="Absolute(TimeSpan)"/> followed by <see cref="WithStaleWhileRevalidate(TimeSpan)"/> when composing
+    /// or modifying an existing absolute policy. During the stale window, callers can receive out-of-date data while
+    /// one background refresh per key runs; refresh failures keep the stale entry available until a later access
+    /// retries. The stale-while-revalidate pattern is incompatible with sliding expiration policies.
+    /// </remarks>
     /// <param name="freshDuration">The duration for which the cached value is considered fresh.</param>
     /// <param name="staleDuration">The additional duration for which the stale value can be served while revalidating.</param>
     /// <returns>A <see cref="CachePolicy"/> with absolute freshness and stale-while-revalidate behavior.</returns>

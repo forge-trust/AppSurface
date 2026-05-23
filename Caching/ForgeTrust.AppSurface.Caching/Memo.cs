@@ -1017,7 +1017,7 @@ public sealed class Memo : IMemo, IDisposable
             StoreStaleEntry(key, result, policy, keyLock);
             refreshed = true;
         }
-        catch (Exception ex) when (ex is not ObjectDisposedException)
+        catch (Exception)
         {
             // Background revalidation keeps serving the stale value and lets a later access retry.
         }

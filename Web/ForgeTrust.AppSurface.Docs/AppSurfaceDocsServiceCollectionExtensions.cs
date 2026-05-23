@@ -63,6 +63,17 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// <see cref="AppSurfaceDocsVersionCatalogService"/> as singleton downstream services alongside the standard
     /// harvesters, memo cache, and <see cref="DocAggregator"/>. <see cref="AppSurfaceDocsAssetVersioner"/> supplies
     /// content-derived cache keys for AppSurface Docs-owned CSS and JavaScript assets rendered by the package views.
+    /// It also registers RazorWire through <see cref="RazorWireServiceCollectionExtensions"/> and adds harvest
+    /// observability services such as <see cref="AppSurfaceDocsHarvestCoordinator"/>,
+    /// <see cref="AppSurfaceDocsHarvestProgressReporter"/>, and <see cref="AppSurfaceDocsHarvestPathPolicy"/>.
+    /// </para>
+    /// <para>
+    /// If an <see cref="IRazorWireChannelAuthorizer"/> is already registered, AppSurface Docs wraps that authorizer with
+    /// <see cref="AppSurfaceDocsHarvestChannelAuthorizer"/> so its harvest-progress channel rules run before delegating
+    /// to the existing authorizer. Register a custom authorizer before calling this method to participate in that
+    /// wrapper, or register one after this method when the application intentionally wants to replace the AppSurface Docs
+    /// wrapper. Call this method once during startup; repeated registration can nest authorizer wrappers and obscure the
+    /// intended channel policy.
     /// Consumers that resolve <see cref="AppSurfaceDocsOptions"/> directly should expect the normalized values rather than
     /// raw configuration text, and applications that need custom routing or catalog paths should provide those values
     /// before this method runs so the normalized singleton graph stays consistent.

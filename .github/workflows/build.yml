@@ -60,9 +60,6 @@ jobs:
           pnpm --dir Web run assets:test
           pnpm --dir Web run assets:verify
 
-      - name: Build project
-        run: dotnet build --configuration Release
-
       - name: Run tests
         env:
           BUILD_CONFIGURATION: Release
@@ -79,7 +76,7 @@ jobs:
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         if: ${{ !cancelled() && env.CODECOV_TOKEN_PRESENT == 'true' }}
         with:
-          files: '**/junit.xml'
+          files: 'TestResults/coverage-merged/junit-*.xml'
           report_type: test_results
           token: ${{ secrets.CODECOV_TOKEN }}
 

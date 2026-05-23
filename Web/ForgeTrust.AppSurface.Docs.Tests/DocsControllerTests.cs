@@ -3807,9 +3807,15 @@ public class DocsControllerTests : IDisposable
         public async ValueTask DisposeAsync()
         {
             _release.TrySetResult([]);
-            await _initialHarvest.WaitAsync(TimeSpan.FromSeconds(3));
-            _memo.Dispose();
-            _cache.Dispose();
+            try
+            {
+                await _initialHarvest.WaitAsync(TimeSpan.FromSeconds(3));
+            }
+            finally
+            {
+                _memo.Dispose();
+                _cache.Dispose();
+            }
         }
     }
 }

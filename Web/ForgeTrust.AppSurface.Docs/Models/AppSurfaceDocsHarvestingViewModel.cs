@@ -31,7 +31,7 @@ public sealed record AppSurfaceDocsHarvestProgressSnapshot
     /// <summary>
     /// Gets the empty snapshot used before a harvest run has started.
     /// </summary>
-    public static AppSurfaceDocsHarvestProgressSnapshot Idle { get; } = new()
+    public static AppSurfaceDocsHarvestProgressSnapshot Idle => new()
     {
         State = AppSurfaceDocsHarvestRunState.Idle,
         StartedUtc = DateTimeOffset.UtcNow

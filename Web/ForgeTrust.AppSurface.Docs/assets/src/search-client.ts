@@ -2217,7 +2217,12 @@ declare global {
   }
 
   function scheduleHarvestCompletionNavigation() {
-    const completion = document.querySelector('[data-appsurface-docs-harvest-complete="true"]');
+    const page = document.getElementById('docs-harvest-page');
+    if (!page) {
+      return;
+    }
+
+    const completion = page.querySelector('[data-appsurface-docs-harvest-complete="true"]');
     if (!completion) {
       return;
     }
@@ -2226,9 +2231,8 @@ declare global {
       return;
     }
 
-    const page = document.getElementById('docs-harvest-page');
     harvestCompletionNavigationScheduled = true;
-    const configuredDelay = page?.getAttribute('data-appsurface-docs-harvest-delay')
+    const configuredDelay = page.getAttribute('data-appsurface-docs-harvest-delay')
       || completion.getAttribute('data-appsurface-docs-harvest-delay');
     const delay = Number.parseInt(configuredDelay || '900', 10);
     harvestObserver?.disconnect();

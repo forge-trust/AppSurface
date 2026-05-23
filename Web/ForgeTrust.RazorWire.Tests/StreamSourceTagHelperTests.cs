@@ -18,6 +18,17 @@ public sealed class StreamSourceTagHelperTests
         tagHelper.Process(CreateContext(), output);
 
         Assert.Equal("/_rw/streams/harvest?replay=1", output.Attributes["src"].Value);
+
+        var liveOnlyTagHelper = new StreamSourceTagHelper(new RazorWireOptions())
+        {
+            Channel = "harvest",
+            Replay = false
+        };
+        var liveOnlyOutput = CreateOutput();
+
+        liveOnlyTagHelper.Process(CreateContext(), liveOnlyOutput);
+
+        Assert.Equal("/_rw/streams/harvest", liveOnlyOutput.Attributes["src"].Value);
     }
 
     private static TagHelperContext CreateContext()

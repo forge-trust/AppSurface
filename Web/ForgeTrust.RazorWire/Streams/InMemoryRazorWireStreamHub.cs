@@ -16,7 +16,8 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
     private readonly ConcurrentDictionary<ChannelWriter<string>, ChannelReader<string>> _writerToReader = new();
     private readonly ConcurrentDictionary<string, Queue<string>> _replayMessages = new();
     private readonly ConcurrentDictionary<string, object> _replayLocks = new();
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _replayTouchedUtc = new();
+    private readonly ConcurrentDictionary<string, ReplayTouch> _replayTouched = new();
+    private long _replayTouchSequence;
 
     /// <summary>
     /// Publishes a message to all subscribers of the specified channel. Any subscribers that are closed or unable to accept the message are removed during the process.
@@ -122,7 +123,7 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
                     if (!_replayMessages.ContainsKey(channel))
                     {
                         _replayLocks.TryRemove(channel, out _);
-                        _replayTouchedUtc.TryRemove(channel, out _);
+                        _replayTouched.TryRemove(channel, out _);
                     }
                 }
             }
@@ -171,7 +172,9 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
             messages.Dequeue();
         }
 
-        _replayTouchedUtc[channel] = DateTimeOffset.UtcNow;
+        _replayTouched[channel] = new ReplayTouch(
+            DateTimeOffset.UtcNow,
+            Interlocked.Increment(ref _replayTouchSequence));
     }
 
     private IReadOnlyList<string> GetReplayMessagesLocked(string channel)
@@ -191,8 +194,9 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
             return;
         }
 
-        foreach (var channel in _replayTouchedUtc
-            .OrderBy(item => item.Value)
+        foreach (var channel in _replayTouched
+            .OrderBy(item => item.Value.TouchedUtc)
+            .ThenBy(item => item.Value.Sequence)
             .Select(item => item.Key)
             .Take(_replayMessages.Count - MaxReplayChannels))
         {
@@ -203,7 +207,9 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
 
             _replayMessages.TryRemove(channel, out _);
             _replayLocks.TryRemove(channel, out _);
-            _replayTouchedUtc.TryRemove(channel, out _);
+            _replayTouched.TryRemove(channel, out _);
         }
     }
+
+    private readonly record struct ReplayTouch(DateTimeOffset TouchedUtc, long Sequence);
 }

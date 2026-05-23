@@ -75,6 +75,15 @@ public class CachePolicyTests
     }
 
     [Fact]
+    public void WithStaleWhileRevalidate_WhenPolicyIsSlidingWithAbsolute_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            CachePolicy
+                .SlidingWithAbsolute(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(10))
+                .WithStaleWhileRevalidate(TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
     public void Sliding_ZeroWindow_Throws()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => CachePolicy.Sliding(TimeSpan.Zero));

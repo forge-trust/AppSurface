@@ -209,7 +209,7 @@ RazorWire is designed for a fast feedback loop during development:
 - `Subscribe(channel)` receives only live messages published after subscription.
 - `Subscribe(channel, new RazorWireStreamSubscribeOptions { Replay = true })` receives retained replay messages first, then continues with live messages.
 
-Replay is opt in and intentionally small. The in-memory hub keeps a bounded per-channel buffer and drops the oldest retained fragments first. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
+Replay is opt-in and intentionally small. The in-memory hub keeps a bounded per-channel buffer and drops the oldest retained fragments first. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
 
 ### `this.RazorWireStream()` (controller extension)
 
