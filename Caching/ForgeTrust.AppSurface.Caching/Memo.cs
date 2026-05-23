@@ -992,7 +992,6 @@ public sealed class Memo : IMemo, IDisposable
         CachePolicy policy)
     {
         var keyLock = _locks.GetOrAdd(key, static _ => new SemaphoreSlim(1, 1));
-        var refreshed = false;
 
         try
         {
@@ -1015,7 +1014,6 @@ public sealed class Memo : IMemo, IDisposable
             var result = await factory(state, CancellationToken.None);
             ThrowIfDisposed();
             StoreStaleEntry(key, result, policy, keyLock);
-            refreshed = true;
         }
         catch (ObjectDisposedException)
         {
@@ -1041,10 +1039,22 @@ public sealed class Memo : IMemo, IDisposable
                 // Ignore: the Memo instance or the lock was disposed concurrently.
             }
 
-            if (refreshed)
+            RemoveUncontendedLock(key, keyLock);
+        }
+    }
+
+    private void RemoveUncontendedLock(object key, SemaphoreSlim keyLock)
+    {
+        try
+        {
+            if (keyLock.CurrentCount > 0)
             {
-                _locks.TryRemove(key, out _);
+                _locks.TryRemove(new KeyValuePair<object, SemaphoreSlim>(key, keyLock));
             }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Ignore: the Memo instance or the lock was disposed concurrently.
         }
     }
 

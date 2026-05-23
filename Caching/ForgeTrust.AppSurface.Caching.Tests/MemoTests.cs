@@ -871,6 +871,7 @@ public class MemoTests : IDisposable
         await revalidationStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
         await Task.Delay(50);
 
+        Assert.Equal(0, memo.ActiveLockCount);
         Assert.Equal(1, await GetValue());
         Assert.True(Volatile.Read(ref callCount) >= 2);
     }
