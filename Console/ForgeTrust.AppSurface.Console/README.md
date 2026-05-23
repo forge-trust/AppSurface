@@ -6,6 +6,10 @@ Modular bootstrapping for .NET Console applications using [CliFx](https://github
 
 `ForgeTrust.AppSurface.Console` provides a structured way to build command-line tools. It automatically discovers and registers CliFx commands from modules, runs them inside the .NET Generic Host, and now exposes a startup options seam for console-specific behavior such as command-first output.
 
+## Release Guidance
+
+AppSurface is preparing the first coordinated `v0.1.0` release. Before installing this package from a prerelease feed, read the [v0.1 release preview](../../releases/v0.1-preview.md) for current release risk, provisional migration guidance, and the finalization path to the tagged release note.
+
 ## Usage
 
 Create a startup class that inherits from `ConsoleStartup<TModule>`:

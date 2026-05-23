@@ -6,6 +6,10 @@ Strongly typed configuration primitives for AppSurface applications.
 
 This package provides the configuration layer for AppSurface modules. It combines file-based configuration, environment-aware providers, and strongly typed configuration objects so modules can consume configuration without hard-coding access patterns throughout the codebase.
 
+## Release Guidance
+
+AppSurface is preparing the first coordinated `v0.1.0` release. Before installing this package from a prerelease feed, read the [v0.1 release preview](../../releases/v0.1-preview.md) for current release risk, provisional migration guidance, and the finalization path to the tagged release note.
+
 ## Key Types
 
 - **`AppSurfaceConfigModule`**: Registers the configuration services for an AppSurface application.

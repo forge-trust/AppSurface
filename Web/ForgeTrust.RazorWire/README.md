@@ -19,6 +19,10 @@ Wait for the `Permanent Island` card to load, then click the `+` button. The `In
 
 When consuming package builds from a configured feed, reference `ForgeTrust.RazorWire` first and then continue at [Add the Module](#add-the-module). Public NuGet install commands will replace this note when the `v0.1` publishing path is live.
 
+## Release Guidance
+
+AppSurface is preparing the first coordinated `v0.1.0` release. Before installing this package from a prerelease feed, read the [v0.1 release preview](../../releases/v0.1-preview.md) for current release risk, provisional migration guidance, and the finalization path to the tagged release note.
+
 ## Hero Proof
 
 `examples/razorwire-mvc/Views/Shared/Components/Counter/Default.cshtml`

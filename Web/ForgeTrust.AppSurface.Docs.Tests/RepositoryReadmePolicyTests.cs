@@ -1,10 +1,13 @@
+using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
-public sealed class RepositoryReadmePolicyTests
+public sealed partial class RepositoryReadmePolicyTests
 {
     [Fact]
     public void AuthoredReadmes_ShouldNotStartWithYamlFrontMatter()
@@ -36,6 +39,48 @@ public sealed class RepositoryReadmePolicyTests
         Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/AppSurfaceDocsOptions.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
         Assert.False(policy.ShouldIncludeFilePath("examples/web-app/Program.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Web.Tests/Fixture.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
+    }
+
+    [Fact]
+    public void PublicPackageReadmes_ShouldLinkToV01ReleasePreview()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var entries = ReadPackageManifestEntries(repoRoot);
+        var requiredReadmes = entries
+            .Where(entry => string.Equals(entry.Classification, "public", StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(entry.PublishDecision, "publish", StringComparison.OrdinalIgnoreCase)
+                            && !string.IsNullOrWhiteSpace(entry.StartHerePath))
+            .Select(entry => entry.StartHerePath!)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var nonRequiredReadmes = entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.StartHerePath)
+                            && !requiredReadmes.Contains(entry.StartHerePath, StringComparer.OrdinalIgnoreCase))
+            .Select(entry => entry.StartHerePath!)
+            .ToArray();
+
+        Assert.Equal(12, requiredReadmes.Length);
+        Assert.Contains("Web/ForgeTrust.AppSurface.Docs/README.md", nonRequiredReadmes);
+        Assert.Contains("Web/ForgeTrust.RazorWire.Cli/README.md", nonRequiredReadmes);
+
+        foreach (var readmePath in requiredReadmes)
+        {
+            var fullReadmePath = ResolveRepositoryRelativePath(repoRoot, readmePath, $"{readmePath} README path");
+            var content = File.ReadAllText(fullReadmePath);
+
+            Assert.Contains("## Release Guidance", content, StringComparison.Ordinal);
+
+            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1-preview.md"), repoRoot);
+            var linksToPreview = MarkdownLinkRegex()
+                .Matches(content)
+                .Select(match => ResolveRelativeLinkTarget(
+                    Path.GetDirectoryName(fullReadmePath)!,
+                    match.Groups["href"].Value,
+                    readmePath))
+                .Any(target => string.Equals(target, expectedTarget, StringComparison.Ordinal));
+
+            Assert.True(linksToPreview, $"{readmePath} must link to the v0.1 release preview.");
+        }
     }
 
     [Fact]
@@ -106,5 +151,52 @@ public sealed class RepositoryReadmePolicyTests
             .Replace("\r\n", "\n", StringComparison.Ordinal)
             .TrimStart('\uFEFF')
             .StartsWith("---\n", StringComparison.Ordinal);
+    }
+
+    private static IReadOnlyList<PackageManifestReadmeEntry> ReadPackageManifestEntries(string repoRoot)
+    {
+        var manifestPath = Path.GetFullPath(Path.Join("packages", "package-index.yml"), repoRoot);
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .IgnoreUnmatchedProperties()
+            .Build();
+        var manifest = deserializer.Deserialize<PackageReadmeManifest>(File.ReadAllText(manifestPath));
+
+        return manifest.Packages;
+    }
+
+    private static string ResolveRepositoryRelativePath(string repoRoot, string repositoryRelativePath, string description)
+    {
+        var normalizedPath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
+        Assert.False(Path.IsPathRooted(normalizedPath), $"{description} must be repository-relative.");
+
+        return Path.GetFullPath(normalizedPath, repoRoot);
+    }
+
+    private static string ResolveRelativeLinkTarget(string baseDirectory, string href, string readmePath)
+    {
+        var hrefPath = href.Replace('/', Path.DirectorySeparatorChar);
+        Assert.False(Path.IsPathRooted(hrefPath), $"{readmePath} release guidance link must be relative.");
+
+        return Path.GetFullPath(hrefPath, baseDirectory);
+    }
+
+    [GeneratedRegex(@"\[[^\]]+\]\((?<href>[^)]+)\)", RegexOptions.CultureInvariant)]
+    private static partial Regex MarkdownLinkRegex();
+
+    private sealed class PackageReadmeManifest
+    {
+        public List<PackageManifestReadmeEntry> Packages { get; init; } = [];
+    }
+
+    private sealed class PackageManifestReadmeEntry
+    {
+        public string Project { get; init; } = string.Empty;
+
+        public string Classification { get; init; } = string.Empty;
+
+        public string PublishDecision { get; init; } = string.Empty;
+
+        public string? StartHerePath { get; init; }
     }
 }

@@ -507,6 +507,10 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
 
         await page.EvaluateAsync(
             """
@@ -567,15 +571,35 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('docs-page-outline')?.dataset.outlineEnhanced === 'true'",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
 
         await page.EvaluateAsync(
             """
             () => {
-              const main = document.getElementById('main-content');
-              const examples = document.getElementById('examples');
-              const rootTop = main?.getBoundingClientRect().top ?? 0;
-              const targetTop = examples?.getBoundingClientRect().top ?? 0;
-              main?.scrollTo(0, main.scrollTop + targetTop - rootTop + 220);
+              const shell = document.getElementById('docs-page-outline');
+              if (!(shell instanceof HTMLElement)) {
+                return;
+              }
+
+              shell.style.height = '220px';
+              shell.style.maxHeight = '220px';
+              shell.style.overflowY = 'auto';
+              shell.scrollTop = 0;
+
+              const links = Array.from(shell.querySelectorAll("a[data-doc-outline-link='true']"))
+                .filter(link => link instanceof HTMLElement);
+              for (const link of links) {
+                delete link.dataset.outlineQaTarget;
+              }
+
+              const target = links.find(link => link.getBoundingClientRect().bottom > shell.getBoundingClientRect().bottom + 56);
+              if (target) {
+                target.dataset.outlineQaTarget = 'true';
+                target.click();
+              }
             }
             """);
 
@@ -583,7 +607,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             """
             () => {
               const shell = document.getElementById('docs-page-outline');
-              const active = document.querySelector("#docs-page-outline a[href='#examples']");
+              const active = shell?.querySelector("a[data-outline-qa-target='true']");
               if (!shell || active?.getAttribute('aria-current') !== 'location') {
                 return false;
               }

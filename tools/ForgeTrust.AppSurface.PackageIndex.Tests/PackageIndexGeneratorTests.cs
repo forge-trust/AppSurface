@@ -574,6 +574,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/README.md", "# RazorWire CLI");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
         await WriteFileAsync("releases/README.md", "# Releases");
+        await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
         await WriteFileAsync("CHANGELOG.md", "# Changelog");
 
@@ -628,6 +629,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("```bash", markdown, StringComparison.Ordinal);
         Assert.Contains("dotnet package add ForgeTrust.AppSurface.Web", markdown, StringComparison.Ordinal);
         Assert.Contains("[examples/web-app/README.md](../examples/web-app/README.md)", markdown, StringComparison.Ordinal);
+        Assert.Contains("[v0.1.0 Release Preview](../releases/v0.1-preview.md)", markdown, StringComparison.Ordinal);
         Assert.Contains("| `ForgeTrust.AppSurface.Web` |", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain('\r', markdown);
         Assert.EndsWith("\n", markdown, StringComparison.Ordinal);
@@ -666,6 +668,24 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
 
         Assert.Contains("Pre-1.0 upgrade policy", error.Message, StringComparison.Ordinal);
+        Assert.Contains("missing documentation", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ThrowsWhenDeclaredReleaseNotesPathIsMissing()
+    {
+        await WriteProgramRepoAsync(releaseNotesPath: "releases/v0.1-preview.md");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.GenerateAsync(CreateRequest()));
+
+        Assert.Contains("Chooser link target 'releases/v0.1-preview.md'", error.Message, StringComparison.Ordinal);
         Assert.Contains("missing documentation", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -712,6 +732,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web.Tailwind/README.md", "# Tailwind");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
         await WriteFileAsync("releases/README.md", "# Releases");
+        await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
         await WriteFileAsync("CHANGELOG.md", "# Changelog");
 
@@ -849,6 +870,54 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         var markdown = await generator.GenerateAsync(CreateRequest());
 
         Assert.Contains("Not published yet", markdown, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_OmitsOptionalReleaseReadinessLinksWhenTargetsAreMissing()
+    {
+        await WriteCommonChooserFilesAsync(includeUnreleased: false);
+        File.Delete(Path.GetFullPath(Path.Join("releases", "v0.1-preview.md"), _repositoryRoot));
+        File.Delete(Path.GetFullPath(Path.Join("releases", "unreleased.md"), _repositoryRoot));
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj",
+                "ForgeTrust.AppSurface.Web.OpenApi"),
+            ["Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj",
+                "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64"),
+            ["Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj",
+                "ForgeTrust.AppSurface.Docs"),
+            ["Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj",
+                "ForgeTrust.RazorWire.Cli",
+                isTool: true,
+                outputType: "Exe")
+        });
+
+        var markdown = await generator.GenerateAsync(CreateRequest());
+
+        Assert.Contains("[Release hub](../releases/README.md)", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("v0.1.0 Release Preview", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("[Unreleased proof artifact]", markdown, StringComparison.Ordinal);
+        Assert.Contains("Unreleased proof artifact: Not published yet", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveRepositoryFilePath_ThrowsWhenPathIsRooted()
+    {
+        var rootedPath = Path.GetFullPath(Path.Join("releases", "v0.1-preview.md"), _repositoryRoot);
+
+        var error = Assert.Throws<PackageIndexException>(
+            () => PackageIndexGenerator.ResolveRepositoryFilePath(_repositoryRoot, rootedPath, "Release preview"));
+
+        Assert.Contains("repository-relative", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(rootedPath, error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2104,6 +2173,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/README.md", "# RazorWire CLI");
         await WriteFileAsync("examples/web-app/README.md", "# Example");
         await WriteFileAsync("releases/README.md", "# Releases");
+        await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
         await WriteFileAsync("releases/upgrade-policy.md", "# Policy");
         await WriteFileAsync("CHANGELOG.md", "# Changelog");
         if (includeUnreleased)

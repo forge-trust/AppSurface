@@ -20,6 +20,7 @@ internal sealed class PackageIndexGenerator
     private const string WebPackageId = "ForgeTrust.AppSurface.Web";
     private const string RazorWireCliPackageId = "ForgeTrust.RazorWire.Cli";
     private const string ReleaseHubPath = "releases/README.md";
+    private const string V01PreviewPath = "releases/v0.1-preview.md";
     private const string UnreleasedPath = "releases/unreleased.md";
     private const string ChangelogPath = "CHANGELOG.md";
     private const string UpgradePolicyPath = "releases/upgrade-policy.md";
@@ -472,7 +473,12 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");
-        if (File.Exists(Path.Combine(repositoryRoot, UnreleasedPath.Replace('/', Path.DirectorySeparatorChar))))
+        if (RepositoryFileExists(repositoryRoot, V01PreviewPath))
+        {
+            builder.AppendLine($"- {FormatMarkdownLink("v0.1.0 Release Preview", GetRelativeDocPath(request, V01PreviewPath))} is the consumer-facing story for the first coordinated release. It stays provisional until the tag is cut.");
+        }
+
+        if (RepositoryFileExists(repositoryRoot, UnreleasedPath))
         {
             builder.AppendLine($"- {FormatMarkdownLink("Unreleased proof artifact", GetRelativeDocPath(request, UnreleasedPath))} shows what is queued for the next coordinated version.");
         }
@@ -610,6 +616,40 @@ internal sealed class PackageIndexGenerator
             .Replace('\\', '/');
     }
 
+    /// <summary>
+    /// Checks whether a known repository-relative chooser support file exists under the repository root.
+    /// </summary>
+    /// <param name="repositoryRoot">Repository root used as the path-resolution base; relative roots are normalized with <see cref="Path.GetFullPath(string)" />.</param>
+    /// <param name="repositoryRelativePath">Repository-relative file path, conventionally using <c>/</c> separators.</param>
+    /// <returns><c>true</c> when the normalized file exists; otherwise, <c>false</c>.</returns>
+    /// <remarks>
+    /// Use this only for trusted, optional chooser links. It normalizes separators and resolves <c>..</c> segments before
+    /// checking existence, but missing files are not errors. Manifest-supplied or required documentation targets should
+    /// use <see cref="ResolveRepositoryFilePath" /> so rooted, escaping, or missing paths fail loudly.
+    /// </remarks>
+    private static bool RepositoryFileExists(string repositoryRoot, string repositoryRelativePath)
+    {
+        var normalizedRoot = Path.GetFullPath(repositoryRoot);
+        var normalizedRelativePath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
+        return File.Exists(Path.GetFullPath(normalizedRelativePath, normalizedRoot));
+    }
+
+    /// <summary>
+    /// Resolves a required repository-relative documentation target and validates that it exists under the repository root.
+    /// </summary>
+    /// <param name="repositoryRoot">Repository root used as the resolution boundary; relative roots are normalized with <see cref="Path.GetFullPath(string)" />.</param>
+    /// <param name="repositoryRelativePath">Repository-relative file path supplied by chooser metadata, conventionally using <c>/</c> separators.</param>
+    /// <param name="description">Human-readable label included in validation errors.</param>
+    /// <returns>The normalized absolute path to the validated file.</returns>
+    /// <exception cref="PackageIndexException">
+    /// Thrown when <paramref name="repositoryRelativePath" /> is blank, rooted, escapes the repository root after
+    /// normalization, or points at missing documentation.
+    /// </exception>
+    /// <remarks>
+    /// The resolver replaces <c>/</c> with <see cref="Path.DirectorySeparatorChar" /> and normalizes <c>..</c> segments.
+    /// Callers should keep inputs repository-relative and avoid leading separators, because absolute-looking paths are
+    /// rejected before they can bypass the repository boundary.
+    /// </remarks>
     internal static string ResolveRepositoryFilePath(string repositoryRoot, string repositoryRelativePath, string description)
     {
         if (string.IsNullOrWhiteSpace(repositoryRelativePath))
@@ -618,8 +658,14 @@ internal sealed class PackageIndexGenerator
         }
 
         var normalizedRoot = Path.GetFullPath(repositoryRoot);
-        var resolvedPath = Path.GetFullPath(
-            Path.Combine(normalizedRoot, repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+        var normalizedRelativePath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedRelativePath))
+        {
+            throw new PackageIndexException(
+                $"{description} must be repository-relative: '{repositoryRelativePath}'.");
+        }
+
+        var resolvedPath = Path.GetFullPath(normalizedRelativePath, normalizedRoot);
         var rootPrefix = normalizedRoot.EndsWith(Path.DirectorySeparatorChar)
             ? normalizedRoot
             : normalizedRoot + Path.DirectorySeparatorChar;
@@ -686,12 +732,7 @@ internal sealed class PackageIndexGenerator
 
         if (!string.IsNullOrWhiteSpace(entry.ReleaseNotesPath))
         {
-            var releaseNotesFullPath = Path.Combine(
-                request.RepositoryRoot,
-                entry.ReleaseNotesPath.Replace('/', Path.DirectorySeparatorChar));
-            parts.Add(File.Exists(releaseNotesFullPath)
-                ? FormatMarkdownLink("notes", GetRelativeDocPath(request, entry.ReleaseNotesPath))
-                : "notes pending");
+            parts.Add(FormatMarkdownLink("notes", GetRelativeDocPath(request, entry.ReleaseNotesPath)));
         }
 
         return parts.Count == 0 ? "Not declared" : string.Join("<br />", parts);
