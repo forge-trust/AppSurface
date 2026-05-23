@@ -8,6 +8,12 @@
         "resolved": "2.3.6",
         "contentHash": "7Q6rbhCxpEoAtPrcBm4sJ4QlDeY+0Dp4in0oXAxrJJ/4L1LV/YkDQSqfUMwK56GbnpUo4fIrpOxoxM+ta44B1g=="
       },
+      "CliWrap": {
+        "type": "Direct",
+        "requested": "[3.10.1, )",
+        "resolved": "3.10.1",
+        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
+      },
       "AngleSharp": {
         "type": "Transitive",
         "resolved": "0.17.1",
@@ -370,12 +376,6 @@
           "Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation": "[10.0.2, )"
         }
       },
-      "Acornima": {
-        "type": "CentralTransitive",
-        "requested": "[1.6.1, )",
-        "resolved": "1.6.1",
-        "contentHash": "EB2vFgpNar8DrC+KLJv8MG6YIU2xqNyrq8GpL69vectPCXoaq6XyZGb/VHbfPVYul7dscO1Mw30eblrxs05RHg=="
-      },
       "forgetrust.razorwire.cli": {
         "type": "Project",
         "dependencies": {
@@ -385,11 +385,11 @@
           "ForgeTrust.RazorWire": "[0.1.0, )"
         }
       },
-      "CliWrap": {
+      "Acornima": {
         "type": "CentralTransitive",
-        "requested": "[3.10.1, )",
-        "resolved": "3.10.1",
-        "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
+        "requested": "[1.6.1, )",
+        "resolved": "1.6.1",
+        "contentHash": "EB2vFgpNar8DrC+KLJv8MG6YIU2xqNyrq8GpL69vectPCXoaq6XyZGb/VHbfPVYul7dscO1Mw30eblrxs05RHg=="
       },
       "HtmlSanitizer": {
         "type": "CentralTransitive",

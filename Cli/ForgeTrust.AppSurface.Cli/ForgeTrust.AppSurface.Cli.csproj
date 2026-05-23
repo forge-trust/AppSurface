@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Console\ForgeTrust.AppSurface.Console\ForgeTrust.AppSurface.Console.csproj" />
+    <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Web\ForgeTrust.AppSurface.Web.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.AppSurface.Docs.Standalone\ForgeTrust.AppSurface.Docs.Standalone.csproj" />
     <ProjectReference Include="..\..\Web\ForgeTrust.RazorWire.Cli\ForgeTrust.RazorWire.Cli.csproj" />
   </ItemGroup>
@@ -26,6 +27,7 @@
 
   <ItemGroup>
     <PackageReference Include="CliFx" />
+    <PackageReference Include="CliWrap" />
   </ItemGroup>
 
 </Project>
