@@ -473,12 +473,12 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");
-        if (File.Exists(Path.Combine(repositoryRoot, V01PreviewPath.Replace('/', Path.DirectorySeparatorChar))))
+        if (RepositoryFileExists(repositoryRoot, V01PreviewPath))
         {
             builder.AppendLine($"- {FormatMarkdownLink("v0.1.0 Release Preview", GetRelativeDocPath(request, V01PreviewPath))} is the consumer-facing story for the first coordinated release. It stays provisional until the tag is cut.");
         }
 
-        if (File.Exists(Path.Combine(repositoryRoot, UnreleasedPath.Replace('/', Path.DirectorySeparatorChar))))
+        if (RepositoryFileExists(repositoryRoot, UnreleasedPath))
         {
             builder.AppendLine($"- {FormatMarkdownLink("Unreleased proof artifact", GetRelativeDocPath(request, UnreleasedPath))} shows what is queued for the next coordinated version.");
         }
@@ -616,6 +616,18 @@ internal sealed class PackageIndexGenerator
             .Replace('\\', '/');
     }
 
+    private static bool RepositoryFileExists(string repositoryRoot, string repositoryRelativePath)
+    {
+        var normalizedRelativePath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedRelativePath))
+        {
+            throw new PackageIndexException($"Chooser link target '{repositoryRelativePath}' must be repository-relative.");
+        }
+
+        var fullPath = Path.GetFullPath(normalizedRelativePath, Path.GetFullPath(repositoryRoot));
+        return File.Exists(fullPath);
+    }
+
     internal static string ResolveRepositoryFilePath(string repositoryRoot, string repositoryRelativePath, string description)
     {
         if (string.IsNullOrWhiteSpace(repositoryRelativePath))
@@ -624,8 +636,14 @@ internal sealed class PackageIndexGenerator
         }
 
         var normalizedRoot = Path.GetFullPath(repositoryRoot);
-        var resolvedPath = Path.GetFullPath(
-            Path.Combine(normalizedRoot, repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+        var normalizedRelativePath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedRelativePath))
+        {
+            throw new PackageIndexException(
+                $"{description} must be repository-relative: '{repositoryRelativePath}'.");
+        }
+
+        var resolvedPath = Path.GetFullPath(normalizedRelativePath, normalizedRoot);
         var rootPrefix = normalizedRoot.EndsWith(Path.DirectorySeparatorChar)
             ? normalizedRoot
             : normalizedRoot + Path.DirectorySeparatorChar;

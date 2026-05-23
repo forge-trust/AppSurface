@@ -172,14 +172,6 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
         Assert.True(overflowIsIntentional);
     }
 
-    private static async Task WaitForPathAsync(IPage page, string expectedPath)
-    {
-        await page.WaitForFunctionAsync(
-            "path => window.location.pathname === path",
-            expectedPath,
-            new PageWaitForFunctionOptions { Timeout = 15_000 });
-    }
-
     private static async Task WaitForPathAndHeadingAsync(IPage page, string expectedPath, string expectedHeading)
     {
         await page.WaitForFunctionAsync(

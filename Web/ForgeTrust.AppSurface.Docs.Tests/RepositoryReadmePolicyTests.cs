@@ -2,6 +2,8 @@ using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -63,21 +65,21 @@ public sealed partial class RepositoryReadmePolicyTests
 
         foreach (var readmePath in requiredReadmes)
         {
-            var fullReadmePath = Path.Combine(repoRoot, readmePath.Replace('/', Path.DirectorySeparatorChar));
+            var fullReadmePath = ResolveRepositoryRelativePath(repoRoot, readmePath, $"{readmePath} README path");
             var content = File.ReadAllText(fullReadmePath);
 
             Assert.Contains("## Release Guidance", content, StringComparison.Ordinal);
 
-            var match = ReleasePreviewLinkRegex().Match(content);
-            Assert.True(match.Success, $"{readmePath} must link to the v0.1 release preview.");
-
-            var resolvedTarget = Path.GetFullPath(
-                Path.Combine(
+            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1-preview.md"), repoRoot);
+            var linksToPreview = MarkdownLinkRegex()
+                .Matches(content)
+                .Select(match => ResolveRelativeLinkTarget(
                     Path.GetDirectoryName(fullReadmePath)!,
-                    match.Groups["href"].Value.Replace('/', Path.DirectorySeparatorChar)));
-            var expectedTarget = Path.GetFullPath(Path.Combine(repoRoot, "releases", "v0.1-preview.md"));
+                    match.Groups["href"].Value,
+                    readmePath))
+                .Any(target => string.Equals(target, expectedTarget, StringComparison.Ordinal));
 
-            Assert.Equal(expectedTarget, resolvedTarget);
+            Assert.True(linksToPreview, $"{readmePath} must link to the v0.1 release preview.");
         }
     }
 
@@ -153,67 +155,48 @@ public sealed partial class RepositoryReadmePolicyTests
 
     private static IReadOnlyList<PackageManifestReadmeEntry> ReadPackageManifestEntries(string repoRoot)
     {
-        var entries = new List<PackageManifestReadmeEntry>();
-        PackageManifestReadmeEntry? current = null;
-        var manifestPath = Path.Combine(repoRoot, "packages", "package-index.yml");
+        var manifestPath = Path.GetFullPath(Path.Join("packages", "package-index.yml"), repoRoot);
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .IgnoreUnmatchedProperties()
+            .Build();
+        var manifest = deserializer.Deserialize<PackageReadmeManifest>(File.ReadAllText(manifestPath));
 
-        foreach (var rawLine in File.ReadLines(manifestPath))
-        {
-            var line = rawLine.TrimEnd();
-            if (line.StartsWith("- project:", StringComparison.Ordinal) || line.StartsWith("  - project:", StringComparison.Ordinal))
-            {
-                if (current is not null)
-                {
-                    entries.Add(current);
-                }
-
-                current = new PackageManifestReadmeEntry(
-                    ReadYamlScalar(line, "project:"),
-                    string.Empty,
-                    string.Empty,
-                    null);
-                continue;
-            }
-
-            if (current is null)
-            {
-                continue;
-            }
-
-            if (line.TrimStart().StartsWith("classification:", StringComparison.Ordinal))
-            {
-                current = current with { Classification = ReadYamlScalar(line, "classification:") };
-            }
-            else if (line.TrimStart().StartsWith("publish_decision:", StringComparison.Ordinal))
-            {
-                current = current with { PublishDecision = ReadYamlScalar(line, "publish_decision:") };
-            }
-            else if (line.TrimStart().StartsWith("start_here_path:", StringComparison.Ordinal))
-            {
-                current = current with { StartHerePath = ReadYamlScalar(line, "start_here_path:") };
-            }
-        }
-
-        if (current is not null)
-        {
-            entries.Add(current);
-        }
-
-        return entries;
+        return manifest.Packages;
     }
 
-    private static string ReadYamlScalar(string line, string key)
+    private static string ResolveRepositoryRelativePath(string repoRoot, string repositoryRelativePath, string description)
     {
-        var value = line[(line.IndexOf(key, StringComparison.Ordinal) + key.Length)..].Trim();
-        return value.Trim('"', '\'');
+        var normalizedPath = repositoryRelativePath.Replace('/', Path.DirectorySeparatorChar);
+        Assert.False(Path.IsPathRooted(normalizedPath), $"{description} must be repository-relative.");
+
+        return Path.GetFullPath(normalizedPath, repoRoot);
     }
 
-    [GeneratedRegex(@"\[v0\.1 release preview\]\((?<href>[^)]+)\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ReleasePreviewLinkRegex();
+    private static string ResolveRelativeLinkTarget(string baseDirectory, string href, string readmePath)
+    {
+        var hrefPath = href.Replace('/', Path.DirectorySeparatorChar);
+        Assert.False(Path.IsPathRooted(hrefPath), $"{readmePath} release guidance link must be relative.");
 
-    private sealed record PackageManifestReadmeEntry(
-        string Project,
-        string Classification,
-        string PublishDecision,
-        string? StartHerePath);
+        return Path.GetFullPath(hrefPath, baseDirectory);
+    }
+
+    [GeneratedRegex(@"\[[^\]]+\]\((?<href>[^)]+)\)", RegexOptions.CultureInvariant)]
+    private static partial Regex MarkdownLinkRegex();
+
+    private sealed class PackageReadmeManifest
+    {
+        public List<PackageManifestReadmeEntry> Packages { get; init; } = [];
+    }
+
+    private sealed class PackageManifestReadmeEntry
+    {
+        public string Project { get; init; } = string.Empty;
+
+        public string Classification { get; init; } = string.Empty;
+
+        public string PublishDecision { get; init; } = string.Empty;
+
+        public string? StartHerePath { get; init; }
+    }
 }
