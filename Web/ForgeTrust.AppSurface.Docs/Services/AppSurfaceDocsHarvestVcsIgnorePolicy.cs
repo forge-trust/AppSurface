@@ -620,13 +620,10 @@ internal sealed record AppSurfaceDocsHarvestVcsIgnoreRule(
                 continue;
             }
 
-            if (character == '[')
+            if (character == '[' && TryAppendCharacterClass(pattern, index, builder, out var end))
             {
-                if (TryAppendCharacterClass(pattern, index, builder, out var end))
-                {
-                    index = end;
-                    continue;
-                }
+                index = end;
+                continue;
             }
 
             builder.Append(Regex.Escape(character.ToString()));
