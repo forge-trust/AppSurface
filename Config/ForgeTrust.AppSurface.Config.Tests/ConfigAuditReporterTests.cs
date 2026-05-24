@@ -146,6 +146,15 @@ public class ConfigAuditReporterTests
         public string Secret { get; set; } = "nested-secret-from-collection";
     }
 
+    private sealed class NamedEndpoint
+    {
+        public string? Name { get; set; }
+
+        public string? Url { get; set; }
+
+        public string? Password { get; set; }
+    }
+
     [Fact]
     public void GetReport_WithContractFixture_ReportsStatesSourcesPatchesAndRedaction()
     {
@@ -405,12 +414,346 @@ public class ConfigAuditReporterTests
 
         var entry = AssertEntry(report, "Services", ConfigAuditEntryState.Resolved, null);
         Assert.False(entry.IsRedacted);
+        Assert.Empty(entry.Children);
         var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
         Assert.DoesNotContain("password-from-collection", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("token-from-collection", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-from-collection", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("api-key-from-collection", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("nested-secret-from-collection", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_TraversesOptInListElementsWithExactFileSources()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDir, "appsettings.Production.json"),
+                """
+                {
+                  "Services": [
+                    {
+                      "Name": "billing",
+                      "Url": "https://billing.example",
+                      "Password": "first-secret"
+                    },
+                    {
+                      "Name": "search",
+                      "Url": "https://search.example",
+                      "Password": "second-secret"
+                    },
+                    null
+                  ]
+                }
+                """);
+            var environment = A.Fake<IEnvironmentProvider>();
+            A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+            var services = CreateServices(tempDir, environment);
+            services.AddConfigAuditKey<List<NamedEndpoint>>(
+                "Services",
+                options => options.TraverseCollectionElements = true);
+
+            var provider = services.BuildServiceProvider();
+            var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
+
+            var entry = AssertEntry(report, "Services", ConfigAuditEntryState.Resolved, null);
+            Assert.Equal(["Services[0]", "Services[1]", "Services[2]"], entry.Children.Select(child => child.Key));
+            Assert.All(entry.Children, child => Assert.Equal(ConfigAuditElementKind.ListItem, child.Element?.Kind));
+            Assert.Equal(0, entry.Children[0].Element?.Index);
+            Assert.Equal(2, entry.Children[2].Element?.Index);
+            Assert.Null(entry.Children[2].DisplayValue);
+            Assert.Empty(entry.Children[2].Children);
+            Assert.Contains(entry.Children[2].Sources, source => source.ConfigPath == "Services.2");
+            Assert.Contains(entry.Children[0].Sources, source => source.ConfigPath == "Services.0");
+            Assert.Equal("billing", entry.Children[0].Children.Single(child => child.Key == "Services[0].Name").DisplayValue);
+            Assert.Contains(
+                entry.Children[0].Children.Single(child => child.Key == "Services[0].Name").Sources,
+                source => source.ConfigPath == "Services.0.Name");
+            Assert.True(entry.Children[0].Children.Single(child => child.Key == "Services[0].Password").IsRedacted);
+
+            var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
+            Assert.DoesNotContain("first-secret", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("second-secret", rendered, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void GetReport_RedactsSensitiveDictionaryKeysBeforePublicFields()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Tenants"] = new Dictionary<string, string?>
+                    {
+                        ["tenant-secret-token"] = "alpha",
+                        ["tenant-password"] = "beta",
+                        ["safe.name"] = "visible",
+                        ["quoted\"name"] = "quoted",
+                        ["bracket[name]"] = "bracket",
+                        ["0"] = "numeric-looking"
+                    }
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string?>>(
+            "Tenants",
+            options => options.TraverseCollectionElements = true);
+
+        var provider = services.BuildServiceProvider();
+        var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        Assert.Contains(entry.Children, child => child.Key == "Tenants[[redacted-key-1]]");
+        Assert.Contains(entry.Children, child => child.Key == "Tenants[[redacted-key-2]]");
+        Assert.Contains(entry.Children, child => child.Key == "Tenants[\"safe.name\"]");
+        Assert.Contains(entry.Children, child => child.Key == "Tenants[\"quoted\\\"name\"]");
+        Assert.Contains(entry.Children, child => child.Key == "Tenants[\"bracket[name]\"]");
+        Assert.Contains(entry.Children, child => child.Key == "Tenants[\"0\"]");
+        Assert.All(
+            entry.Children.Where(child => child.Element?.IsKeyRedacted == true),
+            child =>
+            {
+                Assert.True(child.IsRedacted);
+                Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-source-inherited");
+            });
+
+        var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
+        var serialized = JsonSerializer.Serialize(report);
+        Assert.DoesNotContain("tenant-secret-token", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-password", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-token", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-password", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("beta", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_TraversesNonStringDictionaryKeysAndCanHideLabels()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Codes"] = new Hashtable
+                    {
+                        [7] = "seven"
+                    },
+                    ["Hidden"] = new Dictionary<string, string>
+                    {
+                        ["public-name"] = "visible"
+                    }
+                }));
+        services.AddConfigAuditKey<Hashtable>(
+            "Codes",
+            options => options.TraverseCollectionElements = true);
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Hidden",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.DisplayDictionaryKeys = false;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var code = Assert.Single(AssertEntry(report, "Codes", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("Codes[\"7\"]", code.Key);
+        Assert.Equal("7", code.Element?.KeyLabel);
+        Assert.False(code.Element?.IsKeyRedacted);
+
+        var hidden = Assert.Single(AssertEntry(report, "Hidden", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("Hidden[[key]]", hidden.Key);
+        Assert.Equal("[key]", hidden.Element?.KeyLabel);
+        Assert.True(hidden.Element?.IsKeyRedacted);
+    }
+
+    [Fact]
+    public void GetReport_ReportsCollectionTraversalLimitsAndUnsupportedShapes()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Limited.Items"] = new List<int> { 1, 2, 3 },
+                    ["Budget.Items"] = new List<int> { 1, 2, 3 },
+                    ["Deep.Items"] = new List<object> { new List<string> { "too-deep" } },
+                    ["Unsupported.Items"] = new ThrowingEnumerable(),
+                    ["Matrix.Items"] = new int[1, 1]
+                }));
+        services.AddConfigAuditKey<List<int>>(
+            "Limited.Items",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxCollectionElements = 2;
+            });
+        services.AddConfigAuditKey<List<int>>(
+            "Budget.Items",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxReportNodes = 1;
+            });
+        services.AddConfigAuditKey<List<object>>(
+            "Deep.Items",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxCollectionDepth = 1;
+            });
+        services.AddConfigAuditKey<ThrowingEnumerable>(
+            "Unsupported.Items",
+            options => options.TraverseCollectionElements = true);
+        services.AddConfigAuditKey<int[,]>(
+            "Matrix.Items",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var limited = AssertEntry(report, "Limited.Items", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal(2, limited.Children.Count);
+        Assert.Contains(limited.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
+
+        var budget = AssertEntry(report, "Budget.Items", ConfigAuditEntryState.Resolved, null);
+        Assert.Single(budget.Children);
+        Assert.Contains(budget.Diagnostics, diagnostic => diagnostic.Code == "config-audit-report-node-limit");
+
+        var deep = AssertEntry(report, "Deep.Items", ConfigAuditEntryState.Resolved, null);
+        Assert.Contains(deep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
+
+        Assert.Contains(
+            AssertEntry(report, "Unsupported.Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
+            diagnostic => diagnostic.Code == "config-audit-collection-kind-unsupported");
+        Assert.Contains(
+            AssertEntry(report, "Matrix.Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
+            diagnostic => diagnostic.Code == "config-audit-collection-kind-unsupported");
+    }
+
+    [Fact]
+    public void GetReport_HandlesCyclesAndUnknownElementSources()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var cyclic = new List<object>();
+        cyclic.Add(cyclic);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new NoSourceProvider("Cycle.List", cyclic));
+        services.AddConfigAuditKey<List<object>>(
+            "Cycle.List",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Cycle.List", ConfigAuditEntryState.Resolved, null);
+        var element = Assert.Single(entry.Children);
+        Assert.Empty(element.Children);
+        Assert.Empty(element.Sources);
+        Assert.Contains(element.Diagnostics, diagnostic => diagnostic.Code == "config-audit-source-unavailable");
+    }
+
+    [Fact]
+    public void GetReport_ReportsInvalidOptionsAndUsesSafeTraversalDefaults()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Invalid.Options"] = new List<int> { 1, 2 }
+                }));
+        services.AddConfigAuditKey<List<int>>(
+            "Invalid.Options",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxReportNodes = 0;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Invalid.Options", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal(2, entry.Children.Count);
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-options-invalid");
+    }
+
+    [Fact]
+    public void ConfigAuditTextRenderer_OrdersCollectionElementsByNumericIndex()
+    {
+        var report = new ConfigAuditReport
+        {
+            Environment = "Production",
+            GeneratedAt = DateTimeOffset.UnixEpoch,
+            Redaction = new ConfigAuditRedaction
+            {
+                Enabled = true,
+                Placeholder = "[redacted]"
+            },
+            Entries =
+            [
+                new ConfigAuditEntry
+                {
+                    Key = "Items",
+                    State = ConfigAuditEntryState.Resolved,
+                    Children =
+                    [
+                        new ConfigAuditEntry
+                        {
+                            Key = "Items[10]",
+                            State = ConfigAuditEntryState.Resolved,
+                            DisplayValue = "ten",
+                            Element = new ConfigAuditElementIdentity
+                            {
+                                Kind = ConfigAuditElementKind.ListItem,
+                                Index = 10
+                            }
+                        },
+                        new ConfigAuditEntry
+                        {
+                            Key = "Items[2]",
+                            State = ConfigAuditEntryState.Resolved,
+                            DisplayValue = "two",
+                            Element = new ConfigAuditElementIdentity
+                            {
+                                Kind = ConfigAuditElementKind.ListItem,
+                                Index = 2
+                            }
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var rendered = new ConfigAuditTextRenderer().Render(report);
+
+        Assert.True(rendered.IndexOf("Items[2]", StringComparison.Ordinal) < rendered.IndexOf("Items[10]", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -794,6 +1137,41 @@ public class ConfigAuditReporterTests
                     }
                 ],
                 []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
+    private sealed class NoSourceProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        private readonly string _key;
+        private readonly object _value;
+
+        public NoSourceProvider(string key, object value)
+        {
+            _key = key;
+            _value = value;
+        }
+
+        public int Priority => 20;
+
+        public string Name => nameof(NoSourceProvider);
+
+        public T? GetValue<T>(string environment, string key) =>
+            string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            return new ConfigValueResolution(key, ConfigAuditEntryState.Resolved, _value, [], []);
         }
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];

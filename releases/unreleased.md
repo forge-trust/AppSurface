@@ -180,6 +180,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs search result rows now use one semantic full-row link, so touch users can tap anywhere in a visible result while keyboard focus, copied links, and open-in-new-tab behavior stay native.
 - First localization foundation slice for AppSurface Docs: disabled-by-default locale configuration, localized front matter metadata, inferred `README.fr.md`-style variant grouping, diagnostics for unsupported or ambiguous locale signals, and an internal route/search graph seam for later visible localized pages.
 - AppSurface Docs JavaScript public API harvesting now runs by default for policy-approved `.js` files while still publishing only explicit `@public` browser contracts. Hosts can opt out with `AppSurfaceDocs:Harvest:JavaScript:Enabled=false`, narrow scanning with JavaScript include globs, and keep broad discovery best-effort unless `StrictHealth=true` is enabled.
+- AppSurface Config audit reports now support opt-in safe collection element traversal with bounded depth, element, and node limits, source-aware array/list provenance, redacted dictionary key labels, element identity metadata, deterministic numeric rendering, and diagnostics for unsupported or truncated traversal.
 
 ### RazorWire form UX
 

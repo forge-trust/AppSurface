@@ -77,6 +77,15 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
             };
 
         source = source.WithRole(role);
+        var sources = origins == null
+            ? [source]
+            : origins
+                .Where(origin => string.Equals(origin.Key, key, StringComparison.OrdinalIgnoreCase)
+                                 || origin.Key.StartsWith($"{key}.", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(origin => origin.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(origin => origin.Value.WithRole(role))
+                .DefaultIfEmpty(source)
+                .ToList();
         try
         {
             var value = node.Deserialize(valueType);
@@ -99,7 +108,10 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                 ConfigAuditEntryState.Resolved,
                 value,
                 [source],
-                diagnostics);
+                diagnostics)
+            {
+                AuditSources = sources
+            };
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
@@ -310,18 +322,18 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                     // override earlier values for the same key.
                     RemoveDescendantOrigins(origins, path);
                     target[kvp.Key] = kvp.Value.DeepClone();
-                    if (kvp.Value is JsonObject replacementObj)
+                    if (kvp.Value is JsonObject or JsonArray)
                     {
-                        RecordOrigins(replacementObj, origins, file, path, diagnostics);
+                        RecordOrigins(kvp.Value, origins, file, path, diagnostics);
                     }
                 }
             }
             else
             {
                 target[kvp.Key] = kvp.Value.DeepClone();
-                if (kvp.Value is JsonObject sourceObj)
+                if (kvp.Value is JsonObject or JsonArray)
                 {
-                    RecordOrigins(sourceObj, origins, file, path, diagnostics);
+                    RecordOrigins(kvp.Value, origins, file, path, diagnostics);
                 }
             }
         }
@@ -336,31 +348,53 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
     }
 
     private void RecordOrigins(
-        JsonObject source,
+        JsonNode source,
         Dictionary<string, ConfigAuditSourceRecord> origins,
         string file,
         string parentPath,
         List<ConfigAuditDiagnostic> diagnostics)
     {
-        foreach (var kvp in source)
+        if (source is JsonObject obj)
         {
-            var path = $"{parentPath}.{kvp.Key}";
-            if (kvp.Value == null)
+            foreach (var kvp in obj)
             {
-                diagnostics.Add(new ConfigAuditDiagnostic
+                var path = $"{parentPath}.{kvp.Key}";
+                if (kvp.Value == null)
                 {
-                    Severity = ConfigAuditDiagnosticSeverity.Info,
-                    Code = "config-file-null-skipped",
-                    ConfigPath = path,
-                    Message = $"Skipping null file value at '{path}'."
-                });
-                continue;
-            }
+                    diagnostics.Add(new ConfigAuditDiagnostic
+                    {
+                        Severity = ConfigAuditDiagnosticSeverity.Info,
+                        Code = "config-file-null-skipped",
+                        ConfigPath = path,
+                        Message = $"Skipping null file value at '{path}'."
+                    });
+                    continue;
+                }
 
-            origins[path] = CreateFileSource(file, path);
-            if (kvp.Value is JsonObject child)
+                origins[path] = CreateFileSource(file, path);
+                if (kvp.Value is JsonObject or JsonArray)
+                {
+                    RecordOrigins(kvp.Value, origins, file, path, diagnostics);
+                }
+            }
+        }
+        else if (source is JsonArray array)
+        {
+            for (var i = 0; i < array.Count; i++)
             {
-                RecordOrigins(child, origins, file, path, diagnostics);
+                var path = $"{parentPath}.{i}";
+                var item = array[i];
+                if (item == null)
+                {
+                    origins[path] = CreateFileSource(file, path);
+                    continue;
+                }
+
+                origins[path] = CreateFileSource(file, path);
+                if (item is JsonObject or JsonArray)
+                {
+                    RecordOrigins(item, origins, file, path, diagnostics);
+                }
             }
         }
     }

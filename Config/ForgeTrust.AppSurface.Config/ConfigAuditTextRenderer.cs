@@ -66,10 +66,26 @@ public sealed class ConfigAuditTextRenderer
         }
 
         builder.AppendLine($"{indent}  Children:");
-        foreach (var child in entry.Children.OrderBy(child => child.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (var child in OrderChildren(entry.Children))
         {
             RenderEntry(builder, child, indent + "    ");
         }
+    }
+
+    private static IEnumerable<ConfigAuditEntry> OrderChildren(IReadOnlyList<ConfigAuditEntry> children)
+    {
+        if (children.Any(child => child.Element?.Index != null))
+        {
+            return children
+                .Select((child, ordinal) => new { Child = child, Ordinal = ordinal })
+                .OrderBy(item => item.Child.Element?.Index ?? int.MaxValue)
+                .ThenBy(item => item.Ordinal)
+                .Select(item => item.Child);
+        }
+
+        return children.Any(child => child.Element != null)
+            ? children
+            : children.OrderBy(child => child.Key, StringComparer.OrdinalIgnoreCase);
     }
 
     private static string FormatSource(ConfigAuditSourceRecord source) =>

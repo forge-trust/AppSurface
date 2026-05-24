@@ -53,6 +53,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     private readonly IReadOnlyList<ConfigAuditKnownEntry> _knownEntries;
     private readonly IServiceProvider _serviceProvider;
     private readonly ConfigAuditRedactor _redactor;
+    private readonly ConfigAuditValueTraverser _traverser;
 
     public ConfigAuditReporter(
         IEnvironmentConfigProvider environmentProvider,
@@ -69,12 +70,13 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                           ?? [];
         _knownEntries = knownEntries?
                             .GroupBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
-                            .Select(group => group.OrderBy(entry => entry.ConfigType == null ? 1 : 0).First())
+                            .Select(MergeKnownEntries)
                             .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
                             .ToList()
                         ?? [];
         _serviceProvider = serviceProvider;
         _redactor = redactor;
+        _traverser = new ConfigAuditValueTraverser(redactor);
     }
 
     public ConfigAuditReport GetReport(string environment)
@@ -155,13 +157,21 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         var sources = inspection.DefaultSource != null
             ? [inspection.DefaultSource]
             : resolution.Sources;
-        var diagnostics = resolution.Diagnostics.Concat(inspection.Diagnostics).ToList();
-        var children = BuildChildren(
-            knownEntry.Key,
+        var optionsDiagnostics = knownEntry.OptionsSnapshot.Validate(knownEntry.Key);
+        var options = optionsDiagnostics.Count == 0 ? knownEntry.OptionsSnapshot : knownEntry.OptionsSnapshot.Normalize();
+        var traversal = _traverser.BuildChildren(
+            ConfigAuditPath.Root(knownEntry.Key),
             rawValue,
-            sources,
-            new HashSet<object>(ReferenceEqualityComparer.Instance));
-        if (children.Any(child => child.Sources.Any(source => source.Role == ConfigAuditSourceRole.Patch))
+            resolution.AuditSources.Count == 0 ? sources : resolution.AuditSources,
+            options,
+            new HashSet<object>(ReferenceEqualityComparer.Instance),
+            new ConfigAuditDictionaryLabelSet());
+        var diagnostics = resolution.Diagnostics
+            .Concat(inspection.Diagnostics)
+            .Concat(optionsDiagnostics)
+            .Concat(traversal.Diagnostics)
+            .ToList();
+        if (traversal.Children.Any(IsPartiallyResolved)
             && state == ConfigAuditEntryState.Resolved)
         {
             state = ConfigAuditEntryState.PartiallyResolved;
@@ -176,7 +186,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             DisplayValue = redacted.DisplayValue,
             IsRedacted = redacted.IsRedacted,
             Sources = sources,
-            Children = children,
+            Children = traversal.Children,
             Diagnostics = diagnostics
         };
     }
@@ -236,7 +246,10 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                         ConfigAuditEntryState.PartiallyResolved,
                         patch.Value,
                         sourceRecords,
-                        diagnostics);
+                        diagnostics)
+                    {
+                        AuditSources = providerResolution.AuditSources.Concat(patch.Sources).ToList()
+                    };
                 }
             }
         }
@@ -359,133 +372,19 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         return inspectable.Inspect(knownEntry.Key, resolution.Value, resolution.State);
     }
 
-    private IReadOnlyList<ConfigAuditEntry> BuildChildren(
-        string key,
-        object? value,
-        IReadOnlyList<ConfigAuditSourceRecord> parentSources,
-        HashSet<object> visited)
+    private static ConfigAuditKnownEntry MergeKnownEntries(IGrouping<string, ConfigAuditKnownEntry> group)
     {
-        if (value == null || ConfigScalarTypes.IsScalar(value.GetType()))
-        {
-            return [];
-        }
-
-        if (!visited.Add(value))
-        {
-            return [];
-        }
-
-        var valueType = value.GetType();
-        var entries = new List<ConfigAuditEntry>();
-        try
-        {
-            foreach (var property in valueType.GetProperties(BindingFlags.Instance | BindingFlags.Public))
-            {
-                if (property.GetIndexParameters().Length != 0 || property.GetMethod == null)
-                {
-                    continue;
-                }
-
-                object? childValue;
-                try
-                {
-                    childValue = property.GetValue(value);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                var childKey = $"{key}.{property.Name}";
-                entries.Add(BuildChild(childKey, childValue, parentSources, visited));
-            }
-
-            foreach (var field in valueType.GetFields(BindingFlags.Instance | BindingFlags.Public))
-            {
-                if (field.IsInitOnly)
-                {
-                    continue;
-                }
-
-                var childKey = $"{key}.{field.Name}";
-                entries.Add(BuildChild(childKey, field.GetValue(value), parentSources, visited));
-            }
-        }
-        finally
-        {
-            visited.Remove(value);
-        }
-
-        return entries;
+        var selected = group.OrderBy(entry => entry.ConfigType == null ? 1 : 0).First();
+        var optionSource = group.FirstOrDefault(entry => entry.HasNonDefaultOptions) ?? selected;
+        return ReferenceEquals(selected, optionSource)
+            ? selected
+            : selected.WithOptions(optionSource.OptionsSnapshot);
     }
 
-    private ConfigAuditEntry BuildChild(
-        string childKey,
-        object? childValue,
-        IReadOnlyList<ConfigAuditSourceRecord> parentSources,
-        HashSet<object> visited)
-    {
-        var childSources = SelectChildSources(parentSources, childKey);
-        var redacted = _redactor.FormatValue(childKey, childValue, childSources);
-        var children = BuildChildren(childKey, childValue, parentSources, visited);
-        var state = children.Any(child => child.State == ConfigAuditEntryState.PartiallyResolved
-                                          || child.Sources.Any(source => source.Role == ConfigAuditSourceRole.Patch))
-            ? ConfigAuditEntryState.PartiallyResolved
-            : ConfigAuditEntryState.Resolved;
-        return new ConfigAuditEntry
-        {
-            Key = childKey,
-            DeclaredType = childValue?.GetType().FullName,
-            State = state,
-            DisplayValue = redacted.DisplayValue,
-            IsRedacted = redacted.IsRedacted,
-            Sources = childSources,
-            Children = children
-        };
-    }
-
-    private static IReadOnlyList<ConfigAuditSourceRecord> SelectChildSources(
-        IReadOnlyList<ConfigAuditSourceRecord> parentSources,
-        string childKey)
-    {
-        var matches = parentSources
-            .Select(source => new { Source = source, Specificity = GetSourceSpecificity(source, childKey) })
-            .Where(match => match.Specificity >= 0)
-            .ToList();
-        if (matches.Count == 0)
-        {
-            return parentSources.FirstOrDefault() is { } fallback ? [fallback] : [];
-        }
-
-        var maxSpecificity = matches.Max(match => match.Specificity);
-        return matches
-            .Where(match => match.Specificity == maxSpecificity)
-            .Select(match => match.Source)
-            .ToList();
-    }
-
-    private static int GetSourceSpecificity(ConfigAuditSourceRecord source, string childKey) =>
-        Math.Max(
-            GetPathSpecificity(source.AppliedToPath, childKey, allowDescendant: source.Role is ConfigAuditSourceRole.Base or ConfigAuditSourceRole.Patch),
-            GetPathSpecificity(source.ConfigPath, childKey, allowDescendant: false));
-
-    private static int GetPathSpecificity(string? sourcePath, string childKey, bool allowDescendant)
-    {
-        if (sourcePath == null)
-        {
-            return -1;
-        }
-
-        if (string.Equals(sourcePath, childKey, StringComparison.OrdinalIgnoreCase))
-        {
-            return sourcePath.Length;
-        }
-
-        return allowDescendant
-               && childKey.StartsWith($"{sourcePath}.", StringComparison.OrdinalIgnoreCase)
-            ? sourcePath.Length
-            : -1;
-    }
+    private static bool IsPartiallyResolved(ConfigAuditEntry entry) =>
+        entry.State == ConfigAuditEntryState.PartiallyResolved
+        || entry.Sources.Any(source => source.Role == ConfigAuditSourceRole.Patch)
+        || entry.Children.Any(IsPartiallyResolved);
 
     private static ConfigValueResolution CreateProviderExceptionResolution(
         IConfigProvider provider,
@@ -548,6 +447,8 @@ internal sealed record ConfigValueResolution(
     IReadOnlyList<ConfigAuditSourceRecord> Sources,
     IReadOnlyList<ConfigAuditDiagnostic> Diagnostics)
 {
+    public IReadOnlyList<ConfigAuditSourceRecord> AuditSources { get; init; } = Sources;
+
     /// <summary>
     /// Creates a missing resolution with a synthetic missing source record for <paramref name="key"/>.
     /// </summary>
