@@ -33,6 +33,7 @@ public class DocsController : Controller
     private readonly AppSurfaceDocsOptions _options;
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<DocsController> _logger;
+    private readonly AppSurfaceDocsHarvestCoordinator? _harvestCoordinator;
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocsController"/> for ad hoc callers that only supply the doc aggregator and logger.
@@ -123,6 +124,7 @@ public class DocsController : Controller
     /// <param name="options">Typed AppSurface Docs options used for operator health visibility.</param>
     /// <param name="environment">Host environment used for development-default health visibility.</param>
     /// <param name="logger">Logger used for search index diagnostics.</param>
+    /// <param name="harvestCoordinator">Optional initial-harvest coordinator used to render the live harvest observatory during cold starts.</param>
     [ActivatorUtilitiesConstructor]
     public DocsController(
         DocAggregator aggregator,
@@ -131,7 +133,8 @@ public class DocsController : Controller
         DocFeaturedPageResolver featuredPageResolver,
         AppSurfaceDocsOptions options,
         IWebHostEnvironment environment,
-        ILogger<DocsController> logger)
+        ILogger<DocsController> logger,
+        AppSurfaceDocsHarvestCoordinator? harvestCoordinator = null)
     {
         _aggregator = aggregator ?? throw new ArgumentNullException(nameof(aggregator));
         _docsUrlBuilder = docsUrlBuilder ?? throw new ArgumentNullException(nameof(docsUrlBuilder));
@@ -140,6 +143,7 @@ public class DocsController : Controller
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _harvestCoordinator = harvestCoordinator;
     }
 
     /// <summary>
@@ -152,6 +156,11 @@ public class DocsController : Controller
     /// </returns>
     public async Task<IActionResult> Index()
     {
+        if (await TryRenderHarvestingIfInitialHarvestPendingAsync() is { } harvestingResult)
+        {
+            return harvestingResult;
+        }
+
         var docs = await _aggregator.GetDocsAsync(HttpContext.RequestAborted);
         var sections = await _aggregator.GetPublicSectionsAsync(HttpContext.RequestAborted);
         var viewModel = BuildLandingViewModel(docs, sections);
@@ -202,6 +211,11 @@ public class DocsController : Controller
     /// </returns>
     public async Task<IActionResult> Section(string sectionSlug)
     {
+        if (await TryRenderHarvestingIfInitialHarvestPendingAsync() is { } harvestingResult)
+        {
+            return harvestingResult;
+        }
+
         var sections = await _aggregator.GetPublicSectionsAsync(HttpContext.RequestAborted);
         var startHereHref = ResolveStartHereHref(sections);
 
@@ -265,6 +279,11 @@ public class DocsController : Controller
         if (string.IsNullOrWhiteSpace(resolvedPath))
         {
             return NotFound();
+        }
+
+        if (await TryRenderHarvestingIfInitialHarvestPendingAsync() is { } harvestingResult)
+        {
+            return harvestingResult;
         }
 
         var routeResolution = await _aggregator.ResolvePublicRouteAsync(resolvedPath, HttpContext.RequestAborted);
@@ -360,6 +379,11 @@ public class DocsController : Controller
     /// </returns>
     public async Task<IActionResult> Search()
     {
+        if (await TryRenderHarvestingIfInitialHarvestPendingAsync() is { } harvestingResult)
+        {
+            return harvestingResult;
+        }
+
         ViewData["Title"] = "Search";
         IReadOnlyList<DocNode> docs = [];
 
@@ -485,6 +509,73 @@ public class DocsController : Controller
     }
 
     /// <summary>
+    /// Displays the human-facing route inspector for the current live docs surface.
+    /// </summary>
+    /// <param name="path">
+    /// Optional path to probe. Values are trimmed, may be docs-root-relative or app-relative, may include the active
+    /// <see cref="HttpRequest.PathBase"/>, and have any query string or fragment stripped before route lookup. Absolute
+    /// URLs, protocol-relative URLs, paths outside the active docs root, empty post-strip values, and <c>.</c> or
+    /// <c>..</c> path segments produce an invalid-input probe instead of route lookup.
+    /// </param>
+    /// <returns>
+    /// A no-store route inspector page when diagnostics are exposed for the current environment; otherwise
+    /// <see cref="NotFoundResult"/>. The page uses <see cref="BuildRouteInspectorResponseAsync(string?)"/> for the same
+    /// manifest and optional probe shape as the JSON endpoint.
+    /// </returns>
+    /// <remarks>
+    /// Use this endpoint for interactive maintainer inspection. It is intentionally separate from reader navigation and
+    /// is hidden by <see cref="AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(AppSurfaceDocsOptions, IHostEnvironment)"/>
+    /// when the current environment or explicit diagnostics settings do not expose route diagnostics.
+    /// </remarks>
+    [HttpGet]
+    public async Task<IActionResult> RouteInspector([FromQuery(Name = "path")] string? path = null)
+    {
+        if (!AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(_options, _environment))
+        {
+            return NotFound();
+        }
+
+        SetNoStoreCacheControl();
+        var response = await BuildRouteInspectorResponseAsync(path);
+        ViewData["Title"] = "Route Inspector";
+
+        return View("RouteInspector", response);
+    }
+
+    /// <summary>
+    /// Returns machine-readable route identity for the current live docs surface.
+    /// </summary>
+    /// <param name="path">
+    /// Optional path to probe. Values are trimmed, may be docs-root-relative or app-relative, may include the active
+    /// <see cref="HttpRequest.PathBase"/>, and have any query string or fragment stripped before route lookup. Absolute
+    /// URLs, protocol-relative URLs, paths outside the active docs root, empty post-strip values, and <c>.</c> or
+    /// <c>..</c> path segments produce an invalid-input probe in the JSON response.
+    /// </param>
+    /// <returns>
+    /// A no-store JSON route inspector response when diagnostics are exposed for the current environment; otherwise
+    /// <see cref="NotFoundResult"/>.
+    /// </returns>
+    /// <remarks>
+    /// Use this endpoint for scripts, tests, and maintainer tools that need the
+    /// <see cref="AppSurfaceDocsRouteInspectorResponse"/> wire contract produced by
+    /// <see cref="BuildRouteInspectorResponseAsync(string?)"/>. Use <see cref="RouteInspector(string?)"/> instead when a
+    /// human needs the compact HTML probing surface.
+    /// </remarks>
+    [HttpGet]
+    public async Task<IActionResult> RouteInspectorJson([FromQuery(Name = "path")] string? path = null)
+    {
+        if (!AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(_options, _environment))
+        {
+            return NotFound();
+        }
+
+        SetNoStoreCacheControl();
+        var response = await BuildRouteInspectorResponseAsync(path);
+
+        return new JsonResult(response);
+    }
+
+    /// <summary>
     /// Determines whether the search index cache should be refreshed based on the presence of a "refresh" query parameter.
     /// </summary>
     /// <param name="query">The collection of query parameters from the HTTP request.</param>
@@ -514,6 +605,213 @@ public class DocsController : Controller
     {
         var health = await _aggregator.GetHarvestHealthAsync(HttpContext.RequestAborted);
         return AppSurfaceDocsHarvestHealthResponse.FromSnapshot(health);
+    }
+
+    private async Task<AppSurfaceDocsRouteInspectorResponse> BuildRouteInspectorResponseAsync(string? path)
+    {
+        AppSurfaceDocsRouteProbeResponse? probe = null;
+        if (path is not null || Request.Query.ContainsKey("path"))
+        {
+            var input = path ?? string.Empty;
+            if (TryNormalizeRouteInspectorProbePath(
+                    input,
+                    Request.PathBase.Value,
+                    _docsUrlBuilder.CurrentDocsRootPath,
+                    out var normalizedPath,
+                    out var invalidMessage))
+            {
+                var resolution = await _aggregator.ResolvePublicRouteAsync(normalizedPath, HttpContext.RequestAborted);
+                probe = AppSurfaceDocsRouteProbeResponse.FromResolution(input, normalizedPath, resolution, _docsUrlBuilder);
+            }
+            else
+            {
+                probe = AppSurfaceDocsRouteProbeResponse.Invalid(input, invalidMessage);
+            }
+        }
+
+        var manifest = await _aggregator.GetRouteManifestAsync(HttpContext.RequestAborted);
+        return AppSurfaceDocsRouteInspectorResponse.FromManifest(manifest, probe);
+    }
+
+    private static bool TryNormalizeRouteInspectorProbePath(
+        string input,
+        string? requestPathBase,
+        string docsRootPath,
+        out string normalizedPath,
+        out string invalidMessage)
+    {
+        normalizedPath = string.Empty;
+        invalidMessage = string.Empty;
+
+        var trimmed = input.Trim();
+        if (trimmed.Length == 0)
+        {
+            invalidMessage = "Enter a route path to probe.";
+            return false;
+        }
+
+        if (trimmed.StartsWith("//", StringComparison.Ordinal)
+            || trimmed.Contains("://", StringComparison.Ordinal))
+        {
+            invalidMessage = "Route probes must be docs-root-relative or app-relative paths, not absolute URLs.";
+            return false;
+        }
+
+        var queryIndex = trimmed.IndexOfAny(['?', '#']);
+        if (queryIndex >= 0)
+        {
+            trimmed = trimmed[..queryIndex].Trim();
+        }
+
+        if (trimmed.Length == 0)
+        {
+            invalidMessage = "Route probes must include a path before any query string or fragment.";
+            return false;
+        }
+
+        trimmed = trimmed.Replace('\\', '/');
+
+        var withoutPathBase = TrimAppRelativePrefix(trimmed, requestPathBase);
+        var candidate = withoutPathBase;
+        if (candidate.StartsWith("/", StringComparison.Ordinal)
+            && !TryTrimDocsRoot(candidate, docsRootPath, out candidate))
+        {
+            invalidMessage = $"App-relative route probes must start with the active docs root '{docsRootPath}'.";
+            return false;
+        }
+
+        candidate = candidate.Trim().Trim('/');
+        if (candidate.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Any(static segment => segment is "." or ".."))
+        {
+            invalidMessage = "Route probes cannot contain '.' or '..' path segments.";
+            return false;
+        }
+
+        normalizedPath = candidate;
+        return true;
+    }
+
+    private static string TrimAppRelativePrefix(string value, string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix) || prefix == "/")
+        {
+            return value;
+        }
+
+        var normalizedPrefix = "/" + prefix.Trim().Trim('/');
+        if (value.Equals(normalizedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return "/";
+        }
+
+        return value.StartsWith(normalizedPrefix + "/", StringComparison.OrdinalIgnoreCase)
+            ? value[normalizedPrefix.Length..]
+            : value;
+    }
+
+    private static bool TryTrimDocsRoot(string value, string docsRootPath, out string routePath)
+    {
+        var normalizedRoot = string.IsNullOrWhiteSpace(docsRootPath)
+            ? "/docs"
+            : "/" + docsRootPath.Trim().Trim('/');
+
+        if (normalizedRoot == "/")
+        {
+            routePath = value.TrimStart('/');
+            return true;
+        }
+
+        if (value.Equals(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            routePath = string.Empty;
+            return true;
+        }
+
+        if (value.StartsWith(normalizedRoot + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            routePath = value[normalizedRoot.Length..].TrimStart('/');
+            return true;
+        }
+
+        routePath = string.Empty;
+        return false;
+    }
+
+    private async Task<IActionResult?> TryRenderHarvestingIfInitialHarvestPendingAsync()
+    {
+        var harvestOptions = _options.Harvest;
+        if (_harvestCoordinator is null || harvestOptions is null || harvestOptions.StartupMode == AppSurfaceDocsHarvestStartupMode.Disabled)
+        {
+            return null;
+        }
+
+        var waitBudget = TimeSpan.FromMilliseconds(Math.Max(0, harvestOptions.InitialRequestWaitBudgetMilliseconds));
+        var completed = await _harvestCoordinator.WaitForCompletionAsync(waitBudget, HttpContext.RequestAborted);
+        if (completed)
+        {
+            return null;
+        }
+
+        SetNoStoreCacheControl();
+        ViewData["Title"] = "Assembling docs";
+        return View(
+            "Harvesting",
+            new AppSurfaceDocsHarvestingViewModel
+            {
+                Progress = _harvestCoordinator.CurrentProgress,
+                ReturnUrl = ResolveCurrentRequestReturnUrl(),
+                CompletionNavigationDelayMilliseconds = _harvestCoordinator.CompletionDelay
+            });
+    }
+
+    private string ResolveCurrentRequestReturnUrl()
+    {
+        var returnUrl = string.Concat(
+            Request.PathBase.ToUriComponent(),
+            Request.Path.ToUriComponent(),
+            Request.QueryString.ToUriComponent());
+
+        if (IsSafeAppRelativeUrl(returnUrl))
+        {
+            return returnUrl;
+        }
+
+        return PathBaseAware(_docsUrlBuilder.BuildHomeUrl());
+    }
+
+    /// <summary>
+    /// Determines whether a return URL is safe to use as an app-relative navigation target.
+    /// </summary>
+    /// <param name="url">The candidate URL to validate.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="url"/> is a non-empty app-relative path that starts with
+    /// <c>/</c>, is not protocol-relative, is not slash-backslash rooted, and contains no backslashes or control
+    /// characters; otherwise <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// Use <see cref="IsSafeAppRelativeUrl(string?)"/> before echoing request-derived return URLs into redirects,
+    /// links, or local path decisions. The helper intentionally rejects <see langword="null"/>, empty or whitespace
+    /// input, paths that do not start with <c>/</c>, <c>//</c>, <c>/\</c>, any <c>\</c> character, and any control
+    /// character such as CR or LF. Checks are ordinal and culture-invariant; the method does not URL-decode or
+    /// normalize Unicode, so callers should decode first when validating encoded input.
+    /// </remarks>
+    internal static bool IsSafeAppRelativeUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)
+            || url[0] != '/'
+            || url.Length > 1 && (url[1] == '/' || url[1] == '\\')
+            || url.Contains('\\', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (url.Any(char.IsControl))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private void SetNoStoreCacheControl()
@@ -813,6 +1111,8 @@ public class DocsController : Controller
         var audience = metadata?.AudienceIsDerived == true || string.IsNullOrWhiteSpace(metadata?.Audience)
             ? null
             : metadata!.Audience!.Trim();
+        var codeLanguage = DocMetadataPresentation.ResolveCodeLanguageValue(metadata?.CodeLanguage);
+        var codeLanguageLabel = DocMetadataPresentation.ResolveCodeLanguageLabel(codeLanguage);
         var currentSectionSnapshot = TryResolvePublicSection(metadata?.NavGroup, sections, out var publicSection)
             ? sections.First(section => section.Section == publicSection)
             : null;
@@ -854,6 +1154,8 @@ public class DocsController : Controller
             PageTypeBadge = pageTypeBadge,
             Component = component,
             Audience = audience,
+            CodeLanguage = codeLanguage,
+            CodeLanguageLabel = codeLanguageLabel,
             Breadcrumbs = BuildBreadcrumbs(doc, currentSectionSnapshot, resolvedTitle, docs),
             PublicSection = currentSectionSnapshot?.Section,
             PublicSectionLabel = currentSectionSnapshot?.Label,

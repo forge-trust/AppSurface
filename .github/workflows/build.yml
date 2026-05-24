@@ -60,17 +60,11 @@ jobs:
           pnpm --dir Web run assets:test
           pnpm --dir Web run assets:verify
 
-      - name: Build project
-        run: dotnet build --configuration Release
-
       - name: Run tests
+        env:
+          BUILD_CONFIGURATION: Release
         run: |
-          dotnet test --configuration Release --no-build --verbosity normal \
-          /p:CollectCoverage=true \
-          /p:CoverletOutputFormat=cobertura \
-          /p:CoverletOutput=TestResults/ \
-          "--logger:GitHubActions;report-warnings=false" \
-          "--logger:junit;LogFilePath=junit.xml"
+          ./scripts/coverage-solution.sh
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
@@ -82,7 +76,7 @@ jobs:
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         if: ${{ !cancelled() && env.CODECOV_TOKEN_PRESENT == 'true' }}
         with:
-          files: '**/junit.xml'
+          files: 'TestResults/coverage-merged/junit-*.xml'
           report_type: test_results
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -155,6 +149,7 @@ jobs:
           AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js
         run: |
           printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/appsurface-docs-seeds.txt"
+          # CI docs export can spend just over 10s in cold host startup while generating the first harvest snapshot.
           dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
             docs export \
             --repo . \
@@ -162,6 +157,7 @@ jobs:
             --seeds "$RUNNER_TEMP/appsurface-docs-seeds.txt" \
             --output "$RUNNER_TEMP/appsurface-docs-pages" \
             --public-origin https://forge-trust.com \
+            --startup-timeout-seconds 30 \
             --strict
 
       - name: Upload Pages artifact

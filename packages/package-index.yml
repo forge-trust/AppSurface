@@ -44,7 +44,7 @@ packages:
     release_notes_path: releases/v0.1-preview.md
     order: 40
     use_when: Start here for CLI apps and worker-style entry points that should run through the AppSurface startup pipeline with CliFx.
-    includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx command discovery through AppSurface modules.
+    includes: ConsoleStartup, ConsoleApp, hosted command execution, and CliFx source-generated command discovery through AppSurface modules.
     does_not_include: ASP.NET Core hosting, OpenAPI surfaces, or Razor-based UI composition.
     start_here_path: Console/ForgeTrust.AppSurface.Console/README.md
     recipe_summary: Start with `ForgeTrust.AppSurface.Console` for CLI commands or worker-style processes that should share AppSurface module composition.

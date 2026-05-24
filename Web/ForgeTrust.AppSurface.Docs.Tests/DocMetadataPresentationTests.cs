@@ -75,4 +75,29 @@ public sealed class DocMetadataPresentationTests
 
         Assert.Null(normalized);
     }
+
+    [Theory]
+    [InlineData("csharp", "csharp", "C#")]
+    [InlineData("C-Sharp", "csharp", "C#")]
+    [InlineData("js", "javascript", "JavaScript")]
+    [InlineData("javascript", "javascript", "JavaScript")]
+    [InlineData("typed_python", "typed-python", "Typed Python")]
+    public void ResolveCodeLanguage_ShouldNormalizeAndLabelLanguageValues(
+        string rawValue,
+        string expectedValue,
+        string expectedLabel)
+    {
+        Assert.Equal(expectedValue, DocMetadataPresentation.ResolveCodeLanguageValue(rawValue));
+        Assert.Equal(expectedLabel, DocMetadataPresentation.ResolveCodeLanguageLabel(rawValue));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ResolveCodeLanguage_ShouldReturnNull_ForBlankValues(string? rawValue)
+    {
+        Assert.Null(DocMetadataPresentation.ResolveCodeLanguageValue(rawValue));
+        Assert.Null(DocMetadataPresentation.ResolveCodeLanguageLabel(rawValue));
+    }
 }

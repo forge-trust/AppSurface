@@ -127,12 +127,16 @@
         </nav>
     }
 
-    @if (Model.PageTypeBadge is not null || Model.Component is not null || Model.Audience is not null)
+    @if (Model.PageTypeBadge is not null || Model.Component is not null || Model.Audience is not null || Model.CodeLanguageLabel is not null)
     {
         <div class="docs-page-meta">
             @if (Model.PageTypeBadge is not null)
             {
                 <span class="docs-page-badge docs-page-badge--@Model.PageTypeBadge.Variant">@Model.PageTypeBadge.Label</span>
+            }
+            @if (Model.CodeLanguageLabel is not null)
+            {
+                <span class="docs-metadata-chip">Language: @Model.CodeLanguageLabel</span>
             }
             @if (Model.Component is not null)
             {

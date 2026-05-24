@@ -126,6 +126,26 @@ public class ConfigAuditReporterTests
         public CyclicOptions? Self { get; set; }
     }
 
+    private sealed class ServiceSecretOptions
+    {
+        public string Name { get; set; } = "billing";
+
+        public string Password { get; set; } = "password-from-collection";
+
+        public string Token { get; set; } = "token-from-collection";
+
+        public string Secret { get; set; } = "secret-from-collection";
+
+        public string ApiKey { get; set; } = "api-key-from-collection";
+
+        public NestedSecretOptions Nested { get; set; } = new();
+    }
+
+    private sealed class NestedSecretOptions
+    {
+        public string Secret { get; set; } = "nested-secret-from-collection";
+    }
+
     [Fact]
     public void GetReport_WithContractFixture_ReportsStatesSourcesPatchesAndRedaction()
     {
@@ -326,6 +346,71 @@ public class ConfigAuditReporterTests
 
         Assert.True(redacted.IsRedacted);
         Assert.Equal("[redacted]", redacted.DisplayValue);
+    }
+
+    [Fact]
+    public void Redactor_OmitsNonSensitiveCollections()
+    {
+        var redactor = new ConfigAuditRedactor();
+
+        var formatted = redactor.FormatValue("Values", new[] { "one", "two", "three" }, []);
+
+        Assert.Null(formatted.DisplayValue);
+        Assert.False(formatted.IsRedacted);
+    }
+
+    [Fact]
+    public void Redactor_RedactsCollectionsWhenSourceMetadataIsSensitive()
+    {
+        var redactor = new ConfigAuditRedactor();
+
+        var redacted = redactor.FormatValue(
+            "Values",
+            new[] { "one", "two", "three" },
+            [
+                new ConfigAuditSourceRecord
+                {
+                    Kind = ConfigAuditSourceKind.Provider,
+                    ProviderName = "SecretProvider",
+                    ConfigPath = "Values",
+                    AppliedToPath = "Values",
+                    Role = ConfigAuditSourceRole.Base,
+                    Sensitivity = ConfigAuditSensitivity.Sensitive
+                }
+            ]);
+
+        Assert.True(redacted.IsRedacted);
+        Assert.Equal("[redacted]", redacted.DisplayValue);
+    }
+
+    [Fact]
+    public void GetReport_OmitsCollectionDisplayValuesWithoutLeakingNestedSecrets()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Services"] = new List<ServiceSecretOptions>
+                    {
+                        new()
+                    }
+                }));
+        services.AddConfigAuditKey<List<ServiceSecretOptions>>("Services");
+
+        var provider = services.BuildServiceProvider();
+        var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
+
+        var entry = AssertEntry(report, "Services", ConfigAuditEntryState.Resolved, null);
+        Assert.False(entry.IsRedacted);
+        var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
+        Assert.DoesNotContain("password-from-collection", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("token-from-collection", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-from-collection", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("api-key-from-collection", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("nested-secret-from-collection", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -577,7 +662,7 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
-    public void Redactor_FallsBackWhenEnumerableCannotSerialize()
+    public void Redactor_OmitsEnumerablesThatWouldHaveFailedSerialization()
     {
         var redactor = new ConfigAuditRedactor();
 
@@ -586,13 +671,13 @@ public class ConfigAuditReporterTests
         var invalidOperation = redactor.FormatValue("Values", new InvalidOperationEnumerable(), []);
         var throwingToString = redactor.FormatValue("Values", new ThrowingToStringEnumerable(), []);
 
-        Assert.Equal(nameof(ThrowingEnumerable), formatted.DisplayValue);
+        Assert.Null(formatted.DisplayValue);
         Assert.False(formatted.IsRedacted);
-        Assert.Equal(nameof(JsonExceptionEnumerable), json.DisplayValue);
+        Assert.Null(json.DisplayValue);
         Assert.False(json.IsRedacted);
-        Assert.Equal(nameof(InvalidOperationEnumerable), invalidOperation.DisplayValue);
+        Assert.Null(invalidOperation.DisplayValue);
         Assert.False(invalidOperation.IsRedacted);
-        Assert.Equal(nameof(ThrowingToStringEnumerable), throwingToString.DisplayValue);
+        Assert.Null(throwingToString.DisplayValue);
         Assert.False(throwingToString.IsRedacted);
     }
 

@@ -18,6 +18,18 @@ public class StreamSourceTagHelper : TagHelper
     /// </summary>
     public bool Permanent { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether retained channel messages should be delivered before live messages.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="false"/>. When <see cref="Replay"/> is <see langword="true"/>,
+    /// <see cref="StreamSourceTagHelper"/> appends <c>?replay=1</c> to the generated stream URL so
+    /// <c>MapRazorWire</c> can request retained messages before live delivery. Use replay for clients that need recent
+    /// context before subscribing to new events. Replay can increase initial latency and bandwidth, may duplicate messages
+    /// a client already processed before reconnecting, and depends on the hub implementation's retention policy.
+    /// </remarks>
+    public bool Replay { get; set; }
+
     private readonly RazorWireOptions _options;
 
     /// <summary>
@@ -46,7 +58,9 @@ public class StreamSourceTagHelper : TagHelper
                 $"The 'channel' attribute is required for the 'rw:stream-source' tag helper.");
         }
 
-        var src = $"{_options.Streams.BasePath}/{Channel}";
+        var src = Replay
+            ? $"{_options.Streams.BasePath}/{Channel}?replay=1"
+            : $"{_options.Streams.BasePath}/{Channel}";
         output.Attributes.SetAttribute("src", src);
 
         if (Permanent)

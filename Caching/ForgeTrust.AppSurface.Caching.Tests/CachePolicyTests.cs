@@ -20,6 +20,67 @@ public class CachePolicyTests
         var policy = CachePolicy.Absolute(TimeSpan.FromMinutes(5));
         Assert.Equal(TimeSpan.FromMinutes(5), policy.AbsoluteExpiration);
         Assert.Null(policy.SlidingExpiration);
+        Assert.Null(policy.StaleWhileRevalidate);
+    }
+
+    [Fact]
+    public void AbsoluteWithStaleWhileRevalidate_ZeroFreshDuration_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            CachePolicy.AbsoluteWithStaleWhileRevalidate(TimeSpan.Zero, TimeSpan.FromMinutes(5)));
+    }
+
+    [Fact]
+    public void AbsoluteWithStaleWhileRevalidate_ZeroStaleDuration_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            CachePolicy.AbsoluteWithStaleWhileRevalidate(TimeSpan.FromMinutes(5), TimeSpan.Zero));
+    }
+
+    [Fact]
+    public void AbsoluteWithStaleWhileRevalidate_ValidArgs_SetsProperties()
+    {
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromMinutes(1));
+
+        Assert.Equal(TimeSpan.FromMinutes(5), policy.AbsoluteExpiration);
+        Assert.Equal(TimeSpan.FromMinutes(1), policy.StaleWhileRevalidate);
+        Assert.Null(policy.SlidingExpiration);
+    }
+
+    [Fact]
+    public void WithStaleWhileRevalidate_WhenAbsolutePolicy_SetsStaleWindow()
+    {
+        var policy = CachePolicy.Absolute(TimeSpan.FromMinutes(5))
+            .WithStaleWhileRevalidate(TimeSpan.FromMinutes(1));
+
+        Assert.Equal(TimeSpan.FromMinutes(5), policy.AbsoluteExpiration);
+        Assert.Equal(TimeSpan.FromMinutes(1), policy.StaleWhileRevalidate);
+        Assert.Null(policy.SlidingExpiration);
+    }
+
+    [Fact]
+    public void WithStaleWhileRevalidate_WhenDurationIsZero_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            CachePolicy.Absolute(TimeSpan.FromMinutes(5)).WithStaleWhileRevalidate(TimeSpan.Zero));
+    }
+
+    [Fact]
+    public void WithStaleWhileRevalidate_WhenPolicyIsSliding_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            CachePolicy.Sliding(TimeSpan.FromMinutes(5)).WithStaleWhileRevalidate(TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public void WithStaleWhileRevalidate_WhenPolicyIsSlidingWithAbsolute_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            CachePolicy
+                .SlidingWithAbsolute(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(10))
+                .WithStaleWhileRevalidate(TimeSpan.FromMinutes(1)));
     }
 
     [Fact]

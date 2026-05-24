@@ -17,6 +17,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(0, (int)AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly);
         Assert.Equal(1, (int)AppSurfaceDocsHarvestHealthExposure.Always);
         Assert.Equal(2, (int)AppSurfaceDocsHarvestHealthExposure.Never);
+        Assert.Equal(0, (int)AppSurfaceDocsHarvestStartupMode.Disabled);
+        Assert.Equal(1, (int)AppSurfaceDocsHarvestStartupMode.Background);
+        Assert.Equal(2, (int)AppSurfaceDocsHarvestStartupMode.Blocking);
         Assert.Equal(0, (int)AppSurfaceDocsLastUpdatedMode.None);
         Assert.Equal(1, (int)AppSurfaceDocsLastUpdatedMode.Git);
         Assert.Equal(0, (int)AppSurfaceDocsVersionSupportState.Current);
@@ -379,6 +382,13 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.NotNull(options.Harvest);
         Assert.False(options.Harvest.FailOnFailure);
+        Assert.Equal(AppSurfaceDocsHarvestStartupMode.Background, options.Harvest.StartupMode);
+        Assert.Equal(
+            AppSurfaceDocsHarvestOptions.DefaultInitialRequestWaitBudgetMilliseconds,
+            options.Harvest.InitialRequestWaitBudgetMilliseconds);
+        Assert.Equal(0, options.Harvest.TestingPreHarvestDelayMilliseconds);
+        Assert.Equal(0, options.Harvest.TestingDelayPerHarvesterMilliseconds);
+        Assert.Equal(0, options.Harvest.TestingDelayPerDocumentMilliseconds);
     }
 
     [Fact]
@@ -522,6 +532,7 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups:0"] = " testprojects ",
                         ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:DisabledGroups:1"] = "TestProjects",
                         ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:AllowGlobs:HiddenDirectories:0"] = " .github\\workflows\\** ",
+                        ["AppSurfaceDocs:Harvest:Paths:DefaultExclusions:AllowGlobs: HiddenDirectories :0"] = "docs\\.github\\**",
                         ["AppSurfaceDocs:Harvest:Markdown:IncludeGlobs:0"] = "docs\\guides\\**",
                         ["AppSurfaceDocs:Harvest:Markdown:ExcludeGlobs:0"] = "docs\\drafts\\**",
                         ["AppSurfaceDocs:Harvest:Markdown:DefaultExclusions:AllowGlobs:BuildOutput:0"] = "docs\\bin\\README.md",
@@ -548,7 +559,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.False(options.Harvest.Paths.VcsIgnore.Enabled);
         Assert.Equal(["docs/generated-public/**"], options.Harvest.Paths.VcsIgnore.AllowGlobs);
         Assert.Equal(["TestProjects"], options.Harvest.Paths.DefaultExclusions.DisabledGroups);
-        Assert.Equal([".github/workflows/**"], options.Harvest.Paths.DefaultExclusions.AllowGlobs["HiddenDirectories"]);
+        Assert.Equal(
+            [".github/workflows/**", "docs/.github/**"],
+            options.Harvest.Paths.DefaultExclusions.AllowGlobs["HiddenDirectories"].Order(StringComparer.Ordinal));
         Assert.Equal(["docs/guides/**"], options.Harvest.Markdown.IncludeGlobs);
         Assert.Equal(["docs/drafts/**"], options.Harvest.Markdown.ExcludeGlobs);
         Assert.Equal(["docs/bin/README.md"], options.Harvest.Markdown.DefaultExclusions.AllowGlobs["BuildOutput"]);
@@ -718,6 +731,8 @@ public sealed class AppSurfaceDocsOptionsTests
     [InlineData("search-index.json")]
     [InlineData("_health")]
     [InlineData("_health.json")]
+    [InlineData("_routes")]
+    [InlineData("_routes.json")]
     [InlineData("sections")]
     [InlineData("versions")]
     [InlineData("v")]
@@ -777,6 +792,35 @@ public sealed class AppSurfaceDocsOptionsTests
         var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
 
         Assert.True(options.Harvest.FailOnFailure);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindConfiguredHarvestStartupOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:StartupMode"] = "Blocking",
+                        ["AppSurfaceDocs:Harvest:InitialRequestWaitBudgetMilliseconds"] = "125",
+                        ["AppSurfaceDocs:Harvest:TestingPreHarvestDelayMilliseconds"] = "250",
+                        ["AppSurfaceDocs:Harvest:TestingDelayPerHarvesterMilliseconds"] = "500",
+                        ["AppSurfaceDocs:Harvest:TestingDelayPerDocumentMilliseconds"] = "750"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal(AppSurfaceDocsHarvestStartupMode.Blocking, options.Harvest.StartupMode);
+        Assert.Equal(125, options.Harvest.InitialRequestWaitBudgetMilliseconds);
+        Assert.Equal(250, options.Harvest.TestingPreHarvestDelayMilliseconds);
+        Assert.Equal(500, options.Harvest.TestingDelayPerHarvesterMilliseconds);
+        Assert.Equal(750, options.Harvest.TestingDelayPerDocumentMilliseconds);
     }
 
     [Fact]
@@ -1175,6 +1219,10 @@ public sealed class AppSurfaceDocsOptionsTests
         var source = new AppSurfaceDocsSourceOptions { RepositoryRoot = " /tmp/configured-root " };
         var harvest = new AppSurfaceDocsHarvestOptions { FailOnFailure = true };
         harvest.Health.ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never;
+        var diagnostics = new AppSurfaceDocsDiagnosticsOptions
+        {
+            ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always
+        };
         var bundle = new AppSurfaceDocsBundleOptions { Path = " /tmp/docs.bundle.json " };
         var sidebar = new AppSurfaceDocsSidebarOptions
         {
@@ -1208,6 +1256,7 @@ public sealed class AppSurfaceDocsOptionsTests
             {
                 options.Source = source;
                 options.Harvest = harvest;
+                options.Diagnostics = diagnostics;
                 options.Bundle = bundle;
                 options.Sidebar = sidebar;
                 options.Contributor = contributor;
@@ -1221,6 +1270,7 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Same(source, options.Source);
         Assert.Same(harvest, options.Harvest);
+        Assert.Same(diagnostics, options.Diagnostics);
         Assert.Same(bundle, options.Bundle);
         Assert.Same(sidebar, options.Sidebar);
         Assert.Same(contributor, options.Contributor);
@@ -1228,6 +1278,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("/tmp/configured-root", options.Source.RepositoryRoot);
         Assert.True(options.Harvest.FailOnFailure);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal("/tmp/docs.bundle.json", options.Bundle.Path);
         Assert.Equal(["Contoso.Product."], options.Sidebar.NamespacePrefixes);
         Assert.Equal("main", options.Contributor.DefaultBranch);
@@ -1262,6 +1313,7 @@ public sealed class AppSurfaceDocsOptionsTests
                 };
                 options.Source = null!;
                 options.Harvest = null!;
+                options.Diagnostics = null!;
                 options.Bundle = null!;
                 options.Sidebar = null!;
                 options.Contributor = null!;
@@ -1279,6 +1331,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Source);
         Assert.NotNull(options.Harvest);
         Assert.NotNull(options.Harvest.Health);
+        Assert.NotNull(options.Diagnostics);
         Assert.NotNull(options.Harvest.Paths);
         Assert.NotNull(options.Harvest.Paths.DefaultExclusions);
         Assert.NotNull(options.Harvest.Markdown);
@@ -1292,6 +1345,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.False(options.Harvest.FailOnFailure);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ExposeRouteInspector);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
         Assert.False(options.Localization.Enabled);
@@ -1462,6 +1516,87 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.True(result.Failed);
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:Health must not be null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNullDiagnosticsOptions()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = null!
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Diagnostics must not be null", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectUnsupportedRouteInspectorExposureValue()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = (AppSurfaceDocsHarvestHealthExposure)999
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("Unsupported AppSurface Docs route inspector exposure mode", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectNegativeHarvestTestingDelays()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                StartupMode = (AppSurfaceDocsHarvestStartupMode)999,
+                InitialRequestWaitBudgetMilliseconds = -1,
+                TestingPreHarvestDelayMilliseconds = -1,
+                TestingDelayPerHarvesterMilliseconds = -1,
+                TestingDelayPerDocumentMilliseconds = -1
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains(
+                "Unsupported AppSurface Docs harvest startup mode",
+                StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains(
+                "AppSurfaceDocs:Harvest:InitialRequestWaitBudgetMilliseconds must be greater than or equal to zero",
+                StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains(
+                "AppSurfaceDocs:Harvest:TestingPreHarvestDelayMilliseconds must be greater than or equal to zero",
+                StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains(
+                "AppSurfaceDocs:Harvest:TestingDelayPerHarvesterMilliseconds must be greater than or equal to zero",
+                StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains(
+                "AppSurfaceDocs:Harvest:TestingDelayPerDocumentMilliseconds must be greater than or equal to zero",
+                StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]

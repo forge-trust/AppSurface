@@ -6,6 +6,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Web.Tailwind;
 using ForgeTrust.RazorWire;
+using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -82,6 +83,12 @@ public class AppSurfaceDocsWebModuleTests
             services,
             s => s.ServiceType == typeof(IDocHarvester) && s.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(services, s => s.ServiceType == typeof(DocAggregator));
+        Assert.Contains(services, s => s.ServiceType == typeof(AppSurfaceDocsHarvestProgressReporter));
+        Assert.Contains(services, s => s.ServiceType == typeof(AppSurfaceDocsHarvestCoordinator));
+        Assert.Contains(
+            services,
+            s => s.ServiceType == typeof(IRazorWireChannelAuthorizer)
+                 && s.ImplementationFactory is not null);
         Assert.Contains(services, s => s.ServiceType == typeof(AppSurfaceDocsHarvestPathPolicy));
         Assert.Contains(
             services,
@@ -105,7 +112,12 @@ public class AppSurfaceDocsWebModuleTests
         Assert.NotNull(serviceProvider.GetService<AppSurfaceDocsOptions>());
         Assert.NotNull(serviceProvider.GetRequiredService<IMemoryCache>());
         Assert.NotNull(serviceProvider.GetRequiredService<IMemo>());
+        Assert.NotNull(serviceProvider.GetRequiredService<RazorWireOptions>());
+        Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireStreamHub>());
+        Assert.NotNull(serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>());
         Assert.NotNull(serviceProvider.GetRequiredService<DocAggregator>());
+        Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestProgressReporter>());
+        Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestCoordinator>());
         Assert.NotNull(serviceProvider.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>());
         Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is MarkdownHarvester);
         Assert.Contains(serviceProvider.GetServices<IDocHarvester>(), harvester => harvester is JavaScriptDocHarvester);
@@ -122,6 +134,106 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("class", sanitizer.InnerSanitizer.AllowedAttributes);
         Assert.Contains("id", sanitizer.InnerSanitizer.AllowedAttributes);
         Assert.Contains("open", sanitizer.InnerSanitizer.AllowedAttributes);
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostHasNoCustomChannelAuthorizer_AllowsOnlyVisibleHarvestChannel()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.False(await authorizer.CanSubscribeAsync(context, "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostHasCustomChannelAuthorizer_StillEnforcesHarvestVisibility()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Never"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireChannelAuthorizer, AllowAllChannelAuthorizer>();
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+
+        Assert.False(await authorizer.CanSubscribeAsync(
+            new DefaultHttpContext { RequestServices = serviceProvider },
+            AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.True(await authorizer.CanSubscribeAsync(
+            new DefaultHttpContext { RequestServices = serviceProvider },
+            "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostChannelAuthorizerIsInstance_DelegatesHostChannels()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireChannelAuthorizer>(new DenyAllChannelAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+
+        Assert.False(await authorizer.CanSubscribeAsync(
+            new DefaultHttpContext { RequestServices = serviceProvider },
+            "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostChannelAuthorizerIsFactory_DelegatesHostChannels()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireChannelAuthorizer>(_ => new DenyAllChannelAuthorizer());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+
+        Assert.False(await authorizer.CanSubscribeAsync(
+            new DefaultHttpContext { RequestServices = serviceProvider },
+            "host-channel"));
     }
 
     [Fact]
@@ -207,6 +319,8 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("docs/search-index.json", routePatterns);
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_routes", routePatterns);
+        Assert.Contains("docs/_routes.json", routePatterns);
         Assert.Contains("docs/{*path}", routePatterns);
         Assert.DoesNotContain("{controller=Docs}/{action=Index}/{path?}", routePatterns);
 
@@ -222,14 +336,20 @@ public class AppSurfaceDocsWebModuleTests
         var searchIndex = prioritizedPatterns.IndexOf("docs/search");
         var healthIndex = prioritizedPatterns.IndexOf("docs/_health");
         var healthJsonIndex = prioritizedPatterns.IndexOf("docs/_health.json");
+        var routeInspectorIndex = prioritizedPatterns.IndexOf("docs/_routes");
+        var routeInspectorJsonIndex = prioritizedPatterns.IndexOf("docs/_routes.json");
         var catchAllIndex = prioritizedPatterns.IndexOf("docs/{*path}");
         Assert.True(searchIndex >= 0, "Expected docs/search route declaration.");
         Assert.True(healthIndex >= 0, "Expected docs/_health route declaration.");
         Assert.True(healthJsonIndex >= 0, "Expected docs/_health.json route declaration.");
+        Assert.True(routeInspectorIndex >= 0, "Expected docs/_routes route declaration.");
+        Assert.True(routeInspectorJsonIndex >= 0, "Expected docs/_routes.json route declaration.");
         Assert.True(catchAllIndex >= 0, "Expected docs/{*path} route declaration.");
         Assert.True(searchIndex < catchAllIndex, "docs/search must be prioritized before docs/{*path}.");
         Assert.True(healthIndex < catchAllIndex, "docs/_health must be prioritized before docs/{*path}.");
         Assert.True(healthJsonIndex < catchAllIndex, "docs/_health.json must be prioritized before docs/{*path}.");
+        Assert.True(routeInspectorIndex < catchAllIndex, "docs/_routes must be prioritized before docs/{*path}.");
+        Assert.True(routeInspectorJsonIndex < catchAllIndex, "docs/_routes.json must be prioritized before docs/{*path}.");
     }
 
     [Fact]
@@ -387,6 +507,8 @@ public class AppSurfaceDocsWebModuleTests
 
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_routes", routePatterns);
+        Assert.Contains("docs/_routes.json", routePatterns);
     }
 
     [Fact]
@@ -414,6 +536,8 @@ public class AppSurfaceDocsWebModuleTests
 
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_routes", routePatterns);
+        Assert.Contains("docs/_routes.json", routePatterns);
     }
 
     [Fact]
@@ -454,6 +578,8 @@ public class AppSurfaceDocsWebModuleTests
 
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_routes", routePatterns);
+        Assert.Contains("docs/_routes.json", routePatterns);
     }
 
     [Fact]
@@ -494,6 +620,8 @@ public class AppSurfaceDocsWebModuleTests
 
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
+        Assert.Contains("docs/_routes", routePatterns);
+        Assert.Contains("docs/_routes.json", routePatterns);
     }
 
     [Fact]
@@ -826,6 +954,9 @@ public class AppSurfaceDocsWebModuleTests
             Assert.Equal("/docs/v/1.2.3", mounts[0].MountRootPath);
             Assert.Equal("/docs", mounts[1].MountRootPath);
             Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
+            Assert.NotNull(mounts[0].FrozenRouteManifest);
+            Assert.NotNull(mounts[1].FrozenRouteManifest);
+            Assert.Same(mounts[0].FrozenRouteManifest, mounts[1].FrozenRouteManifest);
         }
         finally
         {
@@ -887,6 +1018,9 @@ public class AppSurfaceDocsWebModuleTests
             Assert.Equal("/foo/bar/v/1.2.3", mounts[0].MountRootPath);
             Assert.Equal("/foo/bar", mounts[1].MountRootPath);
             Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
+            Assert.NotNull(mounts[0].FrozenRouteManifest);
+            Assert.NotNull(mounts[1].FrozenRouteManifest);
+            Assert.Same(mounts[0].FrozenRouteManifest, mounts[1].FrozenRouteManifest);
         }
         finally
         {
@@ -1046,6 +1180,22 @@ public class AppSurfaceDocsWebModuleTests
         public object? GetService(Type serviceType)
         {
             return serviceType == _hiddenServiceType ? null : _inner.GetService(serviceType);
+        }
+    }
+
+    private sealed class AllowAllChannelAuthorizer : IRazorWireChannelAuthorizer
+    {
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            return new ValueTask<bool>(true);
+        }
+    }
+
+    private sealed class DenyAllChannelAuthorizer : IRazorWireChannelAuthorizer
+    {
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            return new ValueTask<bool>(false);
         }
     }
 

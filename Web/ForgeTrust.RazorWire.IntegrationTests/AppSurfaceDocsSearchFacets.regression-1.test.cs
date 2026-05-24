@@ -23,7 +23,73 @@ public sealed class AppSurfaceDocsSearchFacetsRegression1Tests
     {
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
-        var payload = CreateSearchPayload(
+        var payload = CreateFacetSearchPayload();
+
+        await RouteSearchPayloadAsync(page, payload);
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+
+        Assert.Equal(0, await page.GetByRole(AriaRole.Heading, new() { Name = "Status" }).CountAsync());
+        Assert.Equal(0, await page.Locator("[data-rw-facet-key='status']").CountAsync());
+        var componentSelect = page.Locator("select[data-rw-facet-key='component']");
+        Assert.Equal(1, await componentSelect.CountAsync());
+        var componentLabelId = await componentSelect.First.GetAttributeAsync("aria-labelledby");
+        Assert.False(string.IsNullOrWhiteSpace(componentLabelId));
+        Assert.Equal("Component", await page.Locator($"#{componentLabelId}").TextContentAsync());
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search?status=beta");
+        await WaitForSearchPageSettledAsync(page);
+
+        Assert.Equal(1, await page.GetByRole(AriaRole.Heading, new() { Name = "Status" }).CountAsync());
+        var selectedStatusFacet = page.Locator("[data-rw-facet-key='status'][data-rw-facet-value='beta']");
+        Assert.Equal(1, await selectedStatusFacet.CountAsync());
+        Assert.Equal("true", await selectedStatusFacet.First.GetAttributeAsync("aria-pressed"));
+    }
+
+    [Fact]
+    public async Task SearchPage_DisplaysLanguageFacet_AndFiltersResultsByCanonicalLanguage()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        var payload = CreateFacetSearchPayload();
+
+        await RouteSearchPayloadAsync(page, payload);
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search");
+        await WaitForSearchPageSettledAsync(page);
+
+        Assert.Equal(1, await page.GetByRole(AriaRole.Heading, new() { Name = "Language" }).CountAsync());
+
+        await page.GotoAsync($"{_fixture.DocsUrl}/search?q=Start&language=js&component=SDK");
+        await WaitForSearchPageSettledAsync(page);
+
+        var results = page.Locator("#docs-search-page-results");
+        var selectedLanguageFacet = page.Locator("[data-rw-facet-key='language'][data-rw-facet-value='javascript']");
+        Assert.Equal(1, await selectedLanguageFacet.CountAsync());
+        Assert.Equal("true", await selectedLanguageFacet.First.GetAttributeAsync("aria-pressed"));
+        Assert.Equal("SDK", await page.Locator("select[data-rw-facet-key='component']").InputValueAsync());
+        Assert.Contains("Quick Start", await results.TextContentAsync() ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("Language: JavaScript", await results.TextContentAsync() ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("Getting Started", await results.TextContentAsync() ?? string.Empty, StringComparison.Ordinal);
+
+        await page.Locator("[data-rw-clear-facet-key='language']").ClickAsync();
+        await WaitForSearchPageSettledAsync(page);
+
+        Assert.Equal("false", await selectedLanguageFacet.First.GetAttributeAsync("aria-pressed"));
+        Assert.Contains("Quick Start", await results.TextContentAsync() ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("Getting Started", await results.TextContentAsync() ?? string.Empty, StringComparison.Ordinal);
+
+        await page.Locator("[data-rw-clear-facet-key='component']").ClickAsync();
+        await WaitForSearchPageSettledAsync(page);
+
+        Assert.Contains("Quick Start", await results.TextContentAsync() ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("Getting Started", await results.TextContentAsync() ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    private static string CreateFacetSearchPayload()
+    {
+        return CreateSearchPayload(
             new
             {
                 id = "guides/getting-started",
@@ -36,6 +102,8 @@ public sealed class AppSurfaceDocsSearchFacetsRegression1Tests
                 pageType = "guide",
                 audience = string.Empty,
                 component = "CLI",
+                language = "C-Sharp",
+                languageLabel = "C#",
                 aliases = Array.Empty<string>(),
                 keywords = Array.Empty<string>(),
                 status = string.Empty,
@@ -56,6 +124,8 @@ public sealed class AppSurfaceDocsSearchFacetsRegression1Tests
                 pageType = "example",
                 audience = string.Empty,
                 component = "SDK",
+                language = "js",
+                languageLabel = "JavaScript",
                 aliases = Array.Empty<string>(),
                 keywords = Array.Empty<string>(),
                 status = string.Empty,
@@ -64,7 +134,10 @@ public sealed class AppSurfaceDocsSearchFacetsRegression1Tests
                 relatedPages = Array.Empty<string>(),
                 breadcrumbs = Array.Empty<string>()
             });
+    }
 
+    private static async Task RouteSearchPayloadAsync(IPage page, string payload)
+    {
         await page.RouteAsync(
             $"**{SearchIndexPath}",
             async route =>
@@ -76,25 +149,6 @@ public sealed class AppSurfaceDocsSearchFacetsRegression1Tests
                     Body = payload
                 });
             });
-
-        await page.GotoAsync($"{_fixture.DocsUrl}/search");
-        await WaitForSearchPageSettledAsync(page);
-
-        Assert.Equal(0, await page.GetByRole(AriaRole.Heading, new() { Name = "Status" }).CountAsync());
-        Assert.Equal(0, await page.Locator("[data-rw-facet-key='status']").CountAsync());
-        var componentSelect = page.Locator("select[data-rw-facet-key='component']");
-        Assert.Equal(1, await componentSelect.CountAsync());
-        var componentLabelId = await componentSelect.First.GetAttributeAsync("aria-labelledby");
-        Assert.False(string.IsNullOrWhiteSpace(componentLabelId));
-        Assert.Equal("Component", await page.Locator($"#{componentLabelId}").TextContentAsync());
-
-        await page.GotoAsync($"{_fixture.DocsUrl}/search?status=beta");
-        await WaitForSearchPageSettledAsync(page);
-
-        Assert.Equal(1, await page.GetByRole(AriaRole.Heading, new() { Name = "Status" }).CountAsync());
-        var selectedStatusFacet = page.Locator("[data-rw-facet-key='status'][data-rw-facet-value='beta']");
-        Assert.Equal(1, await selectedStatusFacet.CountAsync());
-        Assert.Equal("true", await selectedStatusFacet.First.GetAttributeAsync("aria-pressed"));
     }
 
     private static string CreateSearchPayload(params object[] documents)

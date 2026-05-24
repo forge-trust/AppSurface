@@ -1,4 +1,4 @@
-using CliFx.Exceptions;
+using CliFx;
 using FakeItEasy;
 using Microsoft.Extensions.Logging;
 

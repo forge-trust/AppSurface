@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.FileProviders.Physical;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
@@ -161,7 +162,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var publishedTreeHandler = new AppSurfaceDocsPublishedTreeHandler(
             mounts,
             docsUrlBuilder.CurrentDocsRootPath,
-            docsUrlBuilder.RouteRootPath);
+            docsUrlBuilder.RouteRootPath,
+            app.ApplicationServices.GetService<ILogger<AppSurfaceDocsPublishedTreeHandler>>());
         app.Use(
             async (httpContext, next) =>
             {
@@ -181,6 +183,13 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// Public exact-version mounts always preserve the authored catalog order. When the recommended release points at a
     /// public exact tree, this helper adds the configured route-family root alias as an extra mount root that reuses the
     /// same <see cref="PhysicalFileProvider" /> instance instead of duplicating file watchers for the same export path.
+    /// Frozen route manifest caches follow the same reuse rule: exact tree paths are resolved to full paths, trimmed of
+    /// trailing directory separators, and compared with <see cref="StringComparer.OrdinalIgnoreCase" /> so canonical and
+    /// recommended mounts that point at the same tree share one <see cref="AppSurfaceDocsFrozenRouteManifestCache" />.
+    /// Consumers should treat the cache as an immutable mount dependency. The cache lazy-loads the hidden manifest in a
+    /// thread-safe manner on first use, and its lifetime is tied to the returned mount/provider collection; do not mutate
+    /// or replace it per mount because recommended aliases and public version mounts intentionally observe the same
+    /// frozen archive read model.
     /// </remarks>
     /// <param name="catalog">The resolved version catalog that describes available published trees.</param>
     /// <param name="docsUrlBuilder">The configured URL builder that supplies the route-family alias root.</param>
@@ -195,18 +204,27 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         ArgumentNullException.ThrowIfNull(docsUrlBuilder);
 
         var providersByPath = new Dictionary<string, PhysicalFileProvider>(StringComparer.OrdinalIgnoreCase);
+        var manifestCachesByPath = new Dictionary<string, AppSurfaceDocsFrozenRouteManifestCache>(StringComparer.OrdinalIgnoreCase);
         var mounts = new List<AppSurfaceDocsPublishedTreeMount>();
 
         foreach (var version in catalog.PublicVersions.Where(version => version.IsAvailable && version.ExactTreePath is not null))
         {
             var provider = GetOrCreateProvider(version.ExactTreePath!, providersByPath);
-            mounts.Add(new AppSurfaceDocsPublishedTreeMount(version.ExactRootUrl, provider));
+            var manifestCache = GetOrCreateFrozenRouteManifestCache(
+                version.ExactTreePath!,
+                provider,
+                manifestCachesByPath);
+            mounts.Add(new AppSurfaceDocsPublishedTreeMount(version.ExactRootUrl, provider, manifestCache));
         }
 
         if (catalog.RecommendedVersion is { IsAvailable: true, ExactTreePath: not null } recommendedVersion)
         {
             var provider = GetOrCreateProvider(recommendedVersion.ExactTreePath, providersByPath);
-            mounts.Add(new AppSurfaceDocsPublishedTreeMount(docsUrlBuilder.DocsEntryRootPath, provider));
+            var manifestCache = GetOrCreateFrozenRouteManifestCache(
+                recommendedVersion.ExactTreePath,
+                provider,
+                manifestCachesByPath);
+            mounts.Add(new AppSurfaceDocsPublishedTreeMount(docsUrlBuilder.DocsEntryRootPath, provider, manifestCache));
         }
 
         return (mounts, providersByPath.Values.ToList());
@@ -222,9 +240,25 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             return provider;
         }
 
-        provider = new PhysicalFileProvider(normalizedPath);
+        provider = new PhysicalFileProvider(normalizedPath, ExclusionFilters.None);
         providersByPath[normalizedPath] = provider;
         return provider;
+    }
+
+    private static AppSurfaceDocsFrozenRouteManifestCache GetOrCreateFrozenRouteManifestCache(
+        string exactTreePath,
+        PhysicalFileProvider provider,
+        IDictionary<string, AppSurfaceDocsFrozenRouteManifestCache> manifestCachesByPath)
+    {
+        var normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(exactTreePath));
+        if (manifestCachesByPath.TryGetValue(normalizedPath, out var cache))
+        {
+            return cache;
+        }
+
+        cache = new AppSurfaceDocsFrozenRouteManifestCache(provider, normalizedPath);
+        manifestCachesByPath[normalizedPath] = cache;
+        return cache;
     }
 
     private static void RegisterMountedProviderDisposal(IServiceProvider services, IReadOnlyList<PhysicalFileProvider> providers)
@@ -288,16 +322,21 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// decide what <c>/</c> and <c>/favicon.ico</c> mean.
     /// </para>
     /// <para>
-    /// The operator-facing harvest health route patterns are always registered before the catch-all docs route so
-    /// <c>{DocsRootPath}/_health</c> and <c>{DocsRootPath}/_health.json</c> remain reserved operator paths rather than
-    /// falling through to document lookup. The route named <c>appsurfacedocs_harvest_health</c> maps the current docs root
-    /// health pattern from <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
+    /// The operator-facing diagnostics route patterns are always registered before the catch-all docs route so
+    /// <c>{DocsRootPath}/_health</c>, <c>{DocsRootPath}/_health.json</c>, <c>{DocsRootPath}/_routes</c>, and
+    /// <c>{DocsRootPath}/_routes.json</c> remain reserved operator paths rather than falling through to document lookup.
+    /// The route named <c>appsurfacedocs_harvest_health</c> maps the current docs root health pattern from
+    /// <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
     /// <c>appsurfacedocs_harvest_health_json</c> maps <see cref="DocsUrlBuilder.BuildHealthJsonUrl"/> to
-    /// <c>DocsController.HarvestHealthJson</c>. The controller actions still gate responses with
+    /// <c>DocsController.HarvestHealthJson</c>. Route inspector routes map
+    /// <see cref="DocsUrlBuilder.BuildRouteInspectorUrl"/> and <see cref="DocsUrlBuilder.BuildRouteInspectorJsonUrl"/>
+    /// to <c>DocsController.RouteInspector</c> and <c>DocsController.RouteInspectorJson</c>. The controller actions still gate
+    /// responses with their exposure options: harvest health uses
     /// <see cref="AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(AppSurfaceDocsOptions, IHostEnvironment)"/>: by default
     /// they return health only in Development, while production hosts must opt in with
-    /// <see cref="AppSurfaceDocsHarvestHealthOptions.ExposeRoutes"/>. These routes are intended for local and operator
-    /// verification, not as unauthenticated public reader navigation.
+    /// <see cref="AppSurfaceDocsHarvestHealthOptions.ExposeRoutes"/>; route inspector uses
+    /// <see cref="AppSurfaceDocsDiagnosticsOptions.ExposeRouteInspector"/>. These routes are intended for local and
+    /// operator verification, not as unauthenticated public reader navigation.
     /// </para>
     /// </remarks>
     /// <param name="context">Startup context for the application and environment.</param>
@@ -384,6 +423,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var currentSearchIndexPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexUrl());
         var currentHealthPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthUrl());
         var currentHealthJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthJsonUrl());
+        var currentRouteInspectorPattern = TrimLeadingSlash(docsUrlBuilder.BuildRouteInspectorUrl());
+        var currentRouteInspectorJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildRouteInspectorJsonUrl());
         var currentSectionPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "sections/{sectionSlug}"));
         var currentDetailsPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "{*path}"));
 
@@ -436,6 +477,24 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             {
                 controller = "Docs",
                 action = "HarvestHealthJson"
+            });
+
+        endpoints.MapControllerRoute(
+            name: "appsurfacedocs_route_inspector",
+            pattern: currentRouteInspectorPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "RouteInspector"
+            });
+
+        endpoints.MapControllerRoute(
+            name: "appsurfacedocs_route_inspector_json",
+            pattern: currentRouteInspectorJsonPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "RouteInspectorJson"
             });
 
         endpoints.MapControllerRoute(

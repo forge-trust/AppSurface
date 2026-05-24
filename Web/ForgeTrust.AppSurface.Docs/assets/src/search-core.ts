@@ -1,4 +1,4 @@
-export const searchFields = ['title', 'aliases', 'keywords', 'summary', 'headings', 'bodyText', 'entryPoints'];
+export const searchFields = ['title', 'aliases', 'keywords', 'summary', 'headings', 'bodyText', 'entryPoints', 'languageSearchText'];
 
 export const storeFields = [
   'id',
@@ -11,6 +11,8 @@ export const storeFields = [
   'pageTypeLabel',
   'pageTypeVariant',
   'component',
+  'language',
+  'languageLabel',
   'audience',
   'status',
   'navGroup'
@@ -19,7 +21,7 @@ export const storeFields = [
 export const defaultSearchOptions = {
   prefix: true,
   fuzzy: 0.1,
-  boost: { title: 6, aliases: 4, headings: 3, keywords: 2, summary: 2, entryPoints: 2, bodyText: 1 }
+  boost: { title: 6, aliases: 4, headings: 3, keywords: 2, summary: 2, entryPoints: 2, languageSearchText: 2, bodyText: 1 }
 };
 
 export function createMiniSearchConfiguration() {
@@ -49,6 +51,8 @@ export function normalizeSearchDocument(doc: any) {
     pageTypeVariant: normalizeFacetValue(doc?.pageTypeVariant),
     audience: normalizeFacetValue(doc?.audience),
     component: normalizeFacetValue(doc?.component),
+    language: normalizeCodeLanguage(doc?.language),
+    languageLabel: normalizeCodeLanguageLabel(doc?.language, doc?.languageLabel),
     aliases: toStringArray(doc?.aliases),
     keywords: toStringArray(doc?.keywords),
     entryPoints: flattenEntryPoints(doc?.entryPoints),
@@ -68,6 +72,7 @@ export function createMiniSearchDocument(doc: any) {
     aliases: doc.aliases.join(' '),
     keywords: doc.keywords.join(' '),
     entryPoints: doc.entryPoints,
+    languageSearchText: buildLanguageSearchText(doc.language, doc.languageLabel),
     summary: doc.summary,
     headings: doc.headings.join(' '),
     bodyText: doc.bodyText,
@@ -77,6 +82,8 @@ export function createMiniSearchDocument(doc: any) {
     pageTypeLabel: doc.pageTypeLabel ?? '',
     pageTypeVariant: doc.pageTypeVariant ?? '',
     component: doc.component,
+    language: doc.language,
+    languageLabel: doc.languageLabel ?? '',
     audience: doc.audience,
     status: doc.status,
     navGroup: doc.navGroup
@@ -140,6 +147,62 @@ function toStringArray(value: any) {
 
 function normalizeFacetValue(value: any) {
   return String(value ?? '').trim();
+}
+
+export function normalizeCodeLanguage(value: any) {
+  const normalized = normalizeFacetValue(value)
+    .toLowerCase()
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .join('-');
+
+  if (normalized === 'csharp' || normalized === 'c-sharp' || normalized === 'cs' || normalized === 'c#') {
+    return 'csharp';
+  }
+
+  if (normalized === 'javascript' || normalized === 'java-script' || normalized === 'js') {
+    return 'javascript';
+  }
+
+  return normalized;
+}
+
+export function normalizeCodeLanguageLabel(language: any, label: any) {
+  const explicitLabel = normalizeFacetValue(label);
+  if (explicitLabel) {
+    return explicitLabel;
+  }
+
+  const normalized = normalizeCodeLanguage(language);
+  if (normalized === 'csharp') {
+    return 'C#';
+  }
+
+  if (normalized === 'javascript') {
+    return 'JavaScript';
+  }
+
+  return normalized
+    .split('-')
+    .filter(Boolean)
+    .map((segment) => segment === segment.toUpperCase() ? segment : `${segment.charAt(0).toUpperCase()}${segment.slice(1)}`)
+    .join(' ');
+}
+
+export function buildLanguageSearchText(language: any, label: any) {
+  const normalized = normalizeCodeLanguage(language);
+  const displayLabel = normalizeCodeLanguageLabel(normalized, label);
+  const terms = [normalized, displayLabel];
+
+  if (normalized === 'csharp') {
+    terms.push('csharp', 'CSharp', 'C-Sharp', 'C#');
+  }
+
+  if (normalized === 'javascript') {
+    terms.push('javascript', 'JavaScript', 'js');
+  }
+
+  return [...new Set(terms.map((term) => String(term ?? '').trim()).filter(Boolean))].join(' ');
 }
 
 export function normalizePageTypeAlias(value: any) {

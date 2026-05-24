@@ -29,6 +29,10 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs detail pages now expose copy-link actions for outline rows and section headers so readers can share deep links without navigating away from their current position.
 - AppSurface Docs now exposes `DocAggregator.GetHarvestHealthAsync(...)` plus structured harvest health models so hosts can distinguish healthy, empty, degraded, and all-failed source harvest snapshots without parsing logs.
 - AppSurface Docs hosts, preview runs, and static exports can now set a public canonical origin so metadata names the published domain even when the host is crawled through loopback.
+- AppSurface Docs generated C# and JavaScript API documentation now carries source-language metadata, renders language chips, and exposes a searchable `Language` facet.
+- AppSurface Docs cold requests now show a RazorWire-powered harvest observatory while the first source snapshot is being assembled, with background startup warmup, operator-safe progress, and local testing delays for deterministic QA.
+- RazorWire streams now support opt-in bounded replay, letting late subscribers receive the latest retained state snapshots before live stream events.
+- AppSurface Caching now supports absolute stale-while-revalidate memo policies so callers can serve bounded stale data immediately while one background refresh updates the cached value.
 - RazorWire forms now have convention-based failed-submission UX with default form-local fallbacks, server helpers for handled validation errors, development anti-forgery diagnostics, runtime events, and sample coverage.
 - The root README now includes a single hello-world web quickstart with an explicit local port and a concrete expected response.
 - AppSurface now ships GitHub issue templates for bug reports and documentation feedback.
@@ -42,6 +46,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Pull requests are expected to use Conventional Commits titles and to update `releases/unreleased.md` unless maintainers explicitly opt out.
 - Markdown-only changes on `main` now trigger the build-and-export workflow so release-note and policy updates publish with the docs surface.
 - AppSurface Docs search result rows now expose the whole visible result as one semantic link, making mobile taps easier while preserving keyboard focus, copied links, and open-in-new-tab browser behavior.
+- AppSurface Docs homepage navigation rows now use title-led scan paths with quiet decorative chevron affordances instead of repeated "Open..." labels.
 - RazorWire CLI validation errors now include a concrete next command and `razorwire export --help` hint so failed exports are easier to recover from.
 - RazorWire CLI export now defaults to CDN-safe output: managed internal links, frames, scripts, stylesheets, images, `<img>` and `<source>` `srcset`, conventional `404.html`, and CSS `url(...)` references rewrite to emitted static artifacts, with `--mode hybrid` available for extensionless server-routed deployments.
 - Tailwind development watch mode now logs a warning, not a startup error, when the standalone CLI is unavailable and the app can continue serving existing CSS.
@@ -66,6 +71,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Code that expected custom AppSurface labels from `IHostEnvironment.ApplicationName` should use `StartupContext.ApplicationName`; host environment application names now remain tied to assembly identity so ASP.NET static web assets continue to resolve.
 - Web apps with custom conventional 404 overrides should replace `NotFoundPageModel` with `BrowserStatusPageModel`. The old `ConventionalNotFoundPageMode`, `NotFoundPageMode`, `UseConventionalNotFoundPage()`, and `DisableNotFoundPage()` API names have moved to the `BrowserStatusPage*` naming surface before the first public tag.
 - AppSurface Docs hosts that need operational status for source-backed docs should call `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` and diagnostic codes instead of scraping warning or critical log messages.
+- AppSurface Docs hosts with expensive or side-effecting harvesters can set `AppSurfaceDocs:Harvest:StartupMode` to `Disabled` or adjust `InitialRequestWaitBudgetMilliseconds`; the `Testing*DelayMilliseconds` options are intended only for local and automated observatory testing.
 
 ## No tagged releases yet
 

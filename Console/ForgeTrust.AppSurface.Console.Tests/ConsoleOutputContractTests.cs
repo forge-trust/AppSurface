@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using CliFx;
-using CliFx.Attributes;
+using CliFx.Binding;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace ForgeTrust.AppSurface.Console.Tests;
 
 [Collection(CommandServiceStateCollection.Name)]
-public class ConsoleOutputContractTests
+public partial class ConsoleOutputContractTests
 {
     [Fact]
     public async Task RunAsync_DefaultOutputMode_EmitsLifecycleLogsAndProgress()
@@ -147,7 +147,7 @@ public class ConsoleOutputContractTests
     }
 
     [Command("logged-progress", Description = "Logs command-owned progress for console output contract tests.")]
-    public class LoggedProgressCommand(ILogger<LoggedProgressCommand> logger) : ICommand
+    public partial class LoggedProgressCommand(ILogger<LoggedProgressCommand> logger) : ICommand
     {
         public ValueTask ExecuteAsync(IConsole console)
         {
@@ -157,7 +157,7 @@ public class ConsoleOutputContractTests
     }
 
     [Command("warn-progress", Description = "Logs a warning for console output contract tests.")]
-    public class WarnProgressCommand(ILogger<WarnProgressCommand> logger) : ICommand
+    public partial class WarnProgressCommand(ILogger<WarnProgressCommand> logger) : ICommand
     {
         public ValueTask ExecuteAsync(IConsole console)
         {

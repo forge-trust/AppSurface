@@ -1,12 +1,12 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
-using CliFx.Attributes;
+using CliFx.Binding;
 using CliFx.Infrastructure;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Aspire;
 using Microsoft.Extensions.Logging;
 
-public class AspireProfileTests
+public partial class AspireProfileTests
 {
     [Fact]
     public async Task ExecuteAsync_ResolvesDependenciesBeforeOwnComponents()
@@ -76,7 +76,7 @@ public class AspireProfileTests
     }
 
     [Command("test-profile")]
-    public sealed class TestProfile : AspireProfile
+    public sealed partial class TestProfile : AspireProfile
     {
         private readonly IReadOnlyList<AspireProfile>? _dependencies;
         private readonly IReadOnlyList<IAspireComponent>? _components;

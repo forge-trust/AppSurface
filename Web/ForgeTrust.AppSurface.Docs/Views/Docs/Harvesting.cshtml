@@ -1,0 +1,22 @@
+@model ForgeTrust.AppSurface.Docs.Models.AppSurfaceDocsHarvestingViewModel
+@using ForgeTrust.AppSurface.Docs.Services
+@{
+    ViewData["Title"] = "Assembling docs";
+    ViewData["SuppressSidebar"] = true;
+}
+
+<div id="docs-harvest-page"
+     class="docs-harvest-page"
+     data-appsurface-docs-harvest-return-url="@Model.ReturnUrl"
+     data-appsurface-docs-harvest-delay="@Model.CompletionNavigationDelayMilliseconds">
+    <rw:stream-source channel="@AppSurfaceDocsHarvestProgressReporter.ChannelName" replay="true"></rw:stream-source>
+    <div id="docs-harvest-observatory">
+        @Html.Raw(AppSurfaceDocsHarvestProgressRenderer.Render(
+            Model.Progress,
+            Model.ReturnUrl,
+            Model.CompletionNavigationDelayMilliseconds))
+    </div>
+    <p class="docs-harvest-return-link">
+        <a href="@Model.ReturnUrl">Continue to your docs page</a>
+    </p>
+</div>

@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Xml;
 using System.Xml.Linq;
-using CliFx.Exceptions;
+using CliFx;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.RazorWire.Cli;
