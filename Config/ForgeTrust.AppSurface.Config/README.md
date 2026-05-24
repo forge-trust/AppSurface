@@ -114,9 +114,16 @@ Redaction is deliberately conservative. It does not expose string lengths, sensi
 nested values. Source metadata remains visible unless a provider marks the source metadata itself as sensitive. This
 keeps reports safe to paste into support issues while still showing where a value came from.
 
+Collection parent values are omitted instead of serialized when the collection key and source metadata are not
+sensitive. This avoids leaking nested element fields such as `Password`, `Token`, `Secret`, or `ApiKey` through a raw
+JSON dump. Use source records, diagnostics, and object child entries that the reporter already exposes to inspect
+structure; collection element traversal is intentionally outside the first audit surface.
+
 ### Audit Pitfalls
 
 - Audit reports cover AppSurface-known entries, not every raw process environment variable or every unused file key.
+- Collection display values are intentionally omitted rather than summarized or serialized; register more specific
+  keys when element-level audit visibility is required.
 - Provider-discovered raw key enumeration is intentionally separate from the first audit surface.
 - File origins include file path and config path. Line and column origins are not part of the first report.
 - Validation diagnostics name keys and rules; they do not include attempted secret values.

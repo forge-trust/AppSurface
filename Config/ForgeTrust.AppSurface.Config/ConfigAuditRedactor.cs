@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Globalization;
-using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Config;
 
@@ -9,9 +8,10 @@ namespace ForgeTrust.AppSurface.Config;
 /// </summary>
 /// <remarks>
 /// Matching is fragment based and case-insensitive across keys, config paths, applied paths, and environment variable
-/// names. Sensitive values are replaced with a fixed placeholder before rendering. Non-sensitive complex objects may
-/// produce a <see langword="null"/> display value so callers can rely on child entries instead of an unsafe dump.
-/// Formatting failures are swallowed intentionally to keep audit generation best-effort.
+/// names. Sensitive values are replaced with a fixed placeholder before rendering. Non-sensitive complex values,
+/// including collections, may produce a <see langword="null"/> display value so callers can rely on source records and
+/// supported child entries instead of an unsafe dump. Formatting failures are swallowed intentionally to keep audit
+/// generation best-effort.
 /// </remarks>
 internal sealed class ConfigAuditRedactor
 {
@@ -94,24 +94,9 @@ internal sealed class ConfigAuditRedactor
             return s;
         }
 
-        if (value is IEnumerable && value.GetType() != typeof(string))
+        if (value is IEnumerable)
         {
-            try
-            {
-                return JsonSerializer.Serialize(value);
-            }
-            catch (NotSupportedException)
-            {
-                return SafeToString(value);
-            }
-            catch (JsonException)
-            {
-                return SafeToString(value);
-            }
-            catch (InvalidOperationException)
-            {
-                return SafeToString(value);
-            }
+            return null;
         }
 
         if (!ConfigScalarTypes.IsScalar(value.GetType()))

@@ -77,8 +77,9 @@ public sealed class ConfigAuditProvider
 /// <remarks>
 /// <see cref="State"/> summarizes the entry as a whole. Object entries can contain <see cref="Children"/> with more
 /// specific provenance, including nested <see cref="ConfigAuditEntryState.PartiallyResolved"/> states when descendants
-/// are patched. <see cref="DisplayValue"/> is already redacted and can be <see langword="null"/> for complex values;
-/// callers should inspect children instead of assuming a full object dump is available.
+/// are patched. <see cref="DisplayValue"/> is already redacted and can be <see langword="null"/> for complex values,
+/// including collections whose elements are not dumped into parent display strings. Callers should inspect source
+/// records and available children instead of assuming a full object dump is available.
 /// </remarks>
 public sealed class ConfigAuditEntry
 {
@@ -98,7 +99,8 @@ public sealed class ConfigAuditEntry
     public required ConfigAuditEntryState State { get; init; }
 
     /// <summary>
-    /// Gets the display-safe value. Sensitive values are already redacted.
+    /// Gets the display-safe value. Sensitive values are already redacted, and collection parent values may be omitted
+    /// so nested element data cannot leak through a serialized dump.
     /// </summary>
     public string? DisplayValue { get; init; }
 
