@@ -17,26 +17,47 @@ public interface IRazorWireChannelAuthorizer
 }
 
 /// <summary>
-/// Provides a default implementation of <see cref="IRazorWireChannelAuthorizer"/> that permits all subscriptions.
+/// Provides a built-in implementation of <see cref="IRazorWireChannelAuthorizer"/> that denies all subscriptions.
 /// </summary>
-public class DefaultRazorWireChannelAuthorizer : IRazorWireChannelAuthorizer
+/// <remarks>
+/// This is RazorWire's safe default when no app-specific authorizer is registered. Use
+/// <see cref="AllowAllRazorWireChannelAuthorizer"/> or
+/// <see cref="RazorWireStreamOptions.AuthorizationMode"/> only for public/demo streams, and register a custom
+/// <see cref="IRazorWireChannelAuthorizer"/> for user, tenant, or workflow-specific channels.
+/// </remarks>
+public sealed class DenyAllRazorWireChannelAuthorizer : IRazorWireChannelAuthorizer
 {
     /// <summary>
-    /// Determine whether the request represented by the <paramref name="context"/> may subscribe to the specified channel.
+    /// Determines whether the request represented by the <paramref name="context"/> may subscribe to the specified channel.
+    /// </summary>
+    /// <param name="context">The HTTP context of the requesting client.</param>
+    /// <param name="channel">The name of the channel to subscribe to.</param>
+    /// <returns><see langword="false"/> for every request.</returns>
+    public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+    {
+        return new ValueTask<bool>(false);
+    }
+}
+
+/// <summary>
+/// Provides a built-in implementation of <see cref="IRazorWireChannelAuthorizer"/> that permits all subscriptions.
+/// </summary>
+/// <remarks>
+/// This authorizer is intended for public, demo, or local-development streams only. Do not use it for channels that
+/// include user-specific, tenant-specific, workflow-specific, or otherwise sensitive data.
+/// </remarks>
+public sealed class AllowAllRazorWireChannelAuthorizer : IRazorWireChannelAuthorizer
+{
+    /// <summary>
+    /// Determines whether the request represented by the <paramref name="context"/> may subscribe to the specified channel.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <strong>SECURITY WARNING:</strong> This default implementation allows ALL subscriptions to ANY channel.
-    /// It is intended for development and prototyping only.
-    /// </para>
-    /// <para>
-    /// In a production environment, you should replace this service with an implementation that enforces
-    /// your application's specific authorization rules (e.g., checking user claims or roles).
-    /// </para>
+    /// Prefer a custom <see cref="IRazorWireChannelAuthorizer"/> for production streams that depend on
+    /// <see cref="HttpContext.User"/> or other request state.
     /// </remarks>
     /// <param name="context">The HTTP context of the requesting client.</param>
     /// <param name="channel">The name of the channel to subscribe to.</param>
-    /// <returns>`true` if subscription is allowed, `false` otherwise.</returns>
+    /// <returns><see langword="true"/> for every request.</returns>
     public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
     {
         return new ValueTask<bool>(true);

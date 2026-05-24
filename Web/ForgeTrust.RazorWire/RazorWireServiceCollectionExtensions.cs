@@ -30,7 +30,23 @@ public static class RazorWireServiceCollectionExtensions
             sp.GetRequiredService<IOptions<RazorWireOptions>>().Value);
 
         services.TryAddSingleton<IRazorWireStreamHub, InMemoryRazorWireStreamHub>();
-        services.TryAddSingleton<IRazorWireChannelAuthorizer, DefaultRazorWireChannelAuthorizer>();
+        services.TryAddSingleton<DenyAllRazorWireChannelAuthorizer>();
+        services.TryAddSingleton<AllowAllRazorWireChannelAuthorizer>();
+        services.TryAddSingleton<IRazorWireChannelAuthorizer>(sp =>
+        {
+            var mode = sp.GetRequiredService<IOptions<RazorWireOptions>>().Value.Streams.AuthorizationMode;
+
+            return mode switch
+            {
+                RazorWireStreamAuthorizationMode.DenyAll => sp.GetRequiredService<DenyAllRazorWireChannelAuthorizer>(),
+                RazorWireStreamAuthorizationMode.AllowAll => sp.GetRequiredService<AllowAllRazorWireChannelAuthorizer>(),
+                _ => throw new InvalidOperationException(
+                    $"Unknown RazorWire stream authorization mode '{mode}'. " +
+                    $"Use {nameof(RazorWireStreamAuthorizationMode.DenyAll)}, " +
+                    $"{nameof(RazorWireStreamAuthorizationMode.AllowAll)}, or register a custom " +
+                    $"{nameof(IRazorWireChannelAuthorizer)}.")
+            };
+        });
         services.TryAddSingleton<IRazorPartialRenderer, RazorPartialRenderer>();
         services.TryAddSingleton<RazorWireFormRequestClassifier>();
         services.TryAddScoped<RazorWireAntiforgeryFailureFilter>();

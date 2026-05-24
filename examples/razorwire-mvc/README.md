@@ -111,6 +111,8 @@ The sample also demonstrates live multi-client updates.
 - `ReactivityController.PublishMessage()` pushes new messages to every connected client.
 - `ReactivityController.BroadcastUserPresenceAsync()` updates the user list and online count across sessions.
 
+RazorWire stream subscriptions deny by default. This sample explicitly sets `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll` in `RazorWireExampleModule.ConfigureServices` because the `reactivity` channel is a public demo channel. Production apps should register `IRazorWireChannelAuthorizer` when channels depend on the current user, tenant, or workflow state.
+
 ### Registration and Message Publishing
 
 The reactivity page includes two additional form flows:
@@ -136,6 +138,7 @@ See the package guide for the API contract and troubleshooting notes: [Failed Fo
 ## Project Structure
 
 - `Controllers/ReactivityController.cs`: main demo controller for islands, form posts, and stream responses.
+- `RazorWireExampleModule.cs`: AppSurface module registration, including the demo-only `AllowAll` stream authorization mode.
 - `Views/Reactivity/`: reactivity page plus registration, message, and counter partials.
 - `Views/Shared/`: shared island and view component rendering.
 - `ViewComponents/`: view component entry points such as `Counter` and `UserList`.

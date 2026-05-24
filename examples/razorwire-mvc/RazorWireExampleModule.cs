@@ -18,6 +18,11 @@ public class RazorWireExampleModule : IAppSurfaceWebModule
     /// <param name="services">The service collection to which module services are added.</param>
     public void ConfigureServices(StartupContext context, IServiceCollection services)
     {
+        services.Configure<RazorWireOptions>(options =>
+        {
+            options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+        });
+
         services.AddSingleton<Services.IUserPresenceService, InMemoryUserPresenceService>();
         services.AddSingleton<Services.IMessageStore, Services.InMemoryMessageStore>();
         services.AddHostedService<Services.UserPresenceBackgroundService>();
