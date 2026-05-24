@@ -581,7 +581,14 @@ internal readonly record struct AppSurfaceDocsHostArgs(
 /// <param name="SeedRoutesPath">Optional absolute seed-route file path.</param>
 /// <param name="InitialSeedRoutes">Optional in-memory seed routes used when <paramref name="SeedRoutesPath"/> is null.</param>
 /// <param name="Mode">RazorWire static export mode.</param>
-/// <param name="RedirectStrategy">Redirect alias materialization strategy.</param>
+/// <param name="RedirectStrategy">
+/// Redirect alias materialization strategy carried into the RazorWire export context. <see cref="ExportRedirectStrategy.Html"/>
+/// is the command default and writes portable fallback HTML pages for source-shaped aliases. Use
+/// <see cref="ExportRedirectStrategy.Netlify"/> only with <see cref="ExportMode.Cdn"/> when publishing to Netlify or a
+/// compatible host that reads a root <c>_redirects</c> file; export rejects that provider strategy with
+/// <see cref="ExportMode.Hybrid"/> because the generated rules target publish-root static routes. The selected strategy
+/// affects only alias materialization after the loopback host is crawled from <paramref name="RequestedBaseUrl"/>.
+/// </param>
 /// <param name="RequestedBaseUrl">Loopback URL passed to Kestrel. The default uses port 0 so the OS chooses a free port.</param>
 internal readonly record struct AppSurfaceDocsExportArgs(
     AppSurfaceDocsHostArgs HostArgs,

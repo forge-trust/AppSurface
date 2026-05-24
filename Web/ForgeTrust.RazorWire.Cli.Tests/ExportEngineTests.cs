@@ -100,7 +100,9 @@ public class ExportEngineTests
     }
 
     [Theory]
+    [InlineData("/docs/example\n", "/docs/example", "aliasRoute")]
     [InlineData("/docs/example\r", "/docs/example", "aliasRoute")]
+    [InlineData("/docs/example", "/docs/example\n", "canonicalRoute")]
     [InlineData("/docs/example", "/docs/example\t", "canonicalRoute")]
     public void AddRedirectAlias_Should_Reject_Control_Characters(
         string aliasRoute,
@@ -1228,6 +1230,41 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Netlify_Redirect_Route_Cannot_Be_Serialized()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.RedirectArtifacts.Add(new ExportRedirectArtifact("//bad", "/docs/example"));
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(
+                exception.Diagnostics,
+                item => item.Code == "RWEXPORT005"
+                        && item.Message.Contains("cannot be represented in _redirects output", StringComparison.Ordinal));
+            Assert.Equal("//bad", diagnostic.Route);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Netlify_Redirects_File_Would_Overwrite_Exported_Artifact()
     {
         var tempDir = Directory.CreateTempSubdirectory().FullName;
@@ -1317,6 +1354,39 @@ public class ExportEngineTests
             var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
             Assert.Equal("/_redirects", diagnostic.Route);
             Assert.Contains("require CDN export mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Netlify_Redirect_Alias_Collides_With_NonHtml_Route()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/", "/docs/example.txt"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/docs/example.txt", "/docs/example");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
+            Assert.Equal("/docs/example.txt", diagnostic.Route);
+            Assert.Contains("conflicts with an exported route at the same published path", diagnostic.Message);
         }
         finally
         {
@@ -2761,6 +2831,11 @@ public class ExportEngineTests
             if (path == "/docs/other")
             {
                 return Html("<html><body><h1>Other</h1></body></html>");
+            }
+
+            if (path == "/docs/example.txt")
+            {
+                return Text("Example text", "text/plain");
             }
 
             if (_aliasReturnsBody && path == "/docs/example/README.md.html")

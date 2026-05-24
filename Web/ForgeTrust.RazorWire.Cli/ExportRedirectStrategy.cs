@@ -9,7 +9,8 @@ namespace ForgeTrust.RazorWire.Cli;
 /// Netlify-compatible static hosting and does not emit alias HTML files. Netlify redirect output is intended for
 /// <see cref="ExportMode.Cdn"/> exports only because the rules point at publish-root static routes. Netlify rules reserve
 /// the root <c>_redirects</c> file, reject aliases that serialize to their own canonical target, and reject aliases that
-/// serialize to the same provider source path while pointing at different targets.
+/// serialize to the same provider source path while pointing at different targets. New values must only be appended so
+/// existing serialized, configured, or logged enum values remain stable.
 /// </remarks>
 public enum ExportRedirectStrategy
 {

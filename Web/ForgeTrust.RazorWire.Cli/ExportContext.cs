@@ -189,10 +189,6 @@ public class ExportContext
     /// The export mode. <see cref="ExportMode.Cdn"/> is the default and validates plus rewrites exporter-managed URLs for static
     /// hosting. Use <see cref="ExportMode.Hybrid"/> when the exported output will still be served by application-aware routing.
     /// </param>
-    /// <param name="redirectStrategy">
-    /// Strategy used to materialize redirect aliases. <see cref="ExportRedirectStrategy.Html"/> is the default generic
-    /// static-host strategy.
-    /// </param>
     /// <remarks>
     /// The context tracks crawl state across a staged pipeline: seed routes are scheduled first, references discovered from fetched
     /// markup and CSS can enqueue more managed routes, and CDN validation runs only after the artifact map is complete. Unmanaged URLs
@@ -202,8 +198,51 @@ public class ExportContext
         string outputPath,
         string? seedRoutesPath,
         string baseUrl,
-        ExportMode mode = ExportMode.Cdn,
-        ExportRedirectStrategy redirectStrategy = ExportRedirectStrategy.Html)
+        ExportMode mode = ExportMode.Cdn)
+        : this(outputPath, seedRoutesPath, initialSeedRoutes: null, baseUrl, mode, ExportRedirectStrategy.Html)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="ExportContext"/> with a redirect strategy.
+    /// </summary>
+    /// <param name="outputPath">The target directory for export.</param>
+    /// <param name="seedRoutesPath">The path to initial seed routes, if any.</param>
+    /// <param name="baseUrl">The base URL of the site to export.</param>
+    /// <param name="redirectStrategy">Strategy used to materialize redirect aliases.</param>
+    /// <remarks>
+    /// This overload preserves the default <see cref="ExportMode.Cdn"/> mode while letting hosts opt into provider-native
+    /// redirect output such as <see cref="ExportRedirectStrategy.Netlify"/>.
+    /// </remarks>
+    public ExportContext(
+        string outputPath,
+        string? seedRoutesPath,
+        string baseUrl,
+        ExportRedirectStrategy redirectStrategy)
+        : this(outputPath, seedRoutesPath, initialSeedRoutes: null, baseUrl, ExportMode.Cdn, redirectStrategy)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="ExportContext"/> with the specified export mode and redirect strategy.
+    /// </summary>
+    /// <param name="outputPath">The target directory for export.</param>
+    /// <param name="seedRoutesPath">The path to initial seed routes, if any.</param>
+    /// <param name="baseUrl">The base URL of the site to export.</param>
+    /// <param name="mode">
+    /// The export mode. <see cref="ExportMode.Cdn"/> is the default and validates plus rewrites exporter-managed URLs for static
+    /// hosting. Use <see cref="ExportMode.Hybrid"/> when the exported output will still be served by application-aware routing.
+    /// </param>
+    /// <param name="redirectStrategy">
+    /// Strategy used to materialize redirect aliases. <see cref="ExportRedirectStrategy.Html"/> is the generic static-host
+    /// strategy; provider-native strategies can add stricter hosting constraints.
+    /// </param>
+    public ExportContext(
+        string outputPath,
+        string? seedRoutesPath,
+        string baseUrl,
+        ExportMode mode,
+        ExportRedirectStrategy redirectStrategy)
         : this(outputPath, seedRoutesPath, initialSeedRoutes: null, baseUrl, mode, redirectStrategy)
     {
     }
@@ -223,10 +262,6 @@ public class ExportContext
     /// The export mode. <see cref="ExportMode.Cdn"/> is the default and validates plus rewrites exporter-managed URLs for static
     /// hosting. Use <see cref="ExportMode.Hybrid"/> when the exported output will still be served by application-aware routing.
     /// </param>
-    /// <param name="redirectStrategy">
-    /// Strategy used to materialize redirect aliases. <see cref="ExportRedirectStrategy.Html"/> is the default generic
-    /// static-host strategy.
-    /// </param>
     /// <remarks>
     /// This overload is for hosts that can derive seed routes directly from their own routing options. The engine applies
     /// the same normalization and fallback rules to in-memory seeds that it applies to seed-file lines.
@@ -236,8 +271,61 @@ public class ExportContext
         string? seedRoutesPath,
         IEnumerable<string>? initialSeedRoutes,
         string baseUrl,
-        ExportMode mode = ExportMode.Cdn,
-        ExportRedirectStrategy redirectStrategy = ExportRedirectStrategy.Html)
+        ExportMode mode = ExportMode.Cdn)
+        : this(outputPath, seedRoutesPath, initialSeedRoutes, baseUrl, mode, ExportRedirectStrategy.Html)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="ExportContext"/> with in-memory seed routes and a redirect strategy.
+    /// </summary>
+    /// <param name="outputPath">The target directory for export.</param>
+    /// <param name="seedRoutesPath">
+    /// The path to initial seed routes, if any. When provided, this file is used instead of
+    /// <paramref name="initialSeedRoutes"/>.
+    /// </param>
+    /// <param name="initialSeedRoutes">Optional in-memory initial seed routes used when <paramref name="seedRoutesPath"/> is null or blank.</param>
+    /// <param name="baseUrl">The base URL of the site to export.</param>
+    /// <param name="redirectStrategy">Strategy used to materialize redirect aliases.</param>
+    /// <remarks>
+    /// This overload preserves the default <see cref="ExportMode.Cdn"/> mode while letting hosts choose how registered
+    /// aliases become output artifacts or provider redirect rules.
+    /// </remarks>
+    public ExportContext(
+        string outputPath,
+        string? seedRoutesPath,
+        IEnumerable<string>? initialSeedRoutes,
+        string baseUrl,
+        ExportRedirectStrategy redirectStrategy)
+        : this(outputPath, seedRoutesPath, initialSeedRoutes, baseUrl, ExportMode.Cdn, redirectStrategy)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="ExportContext"/> with in-memory seed routes, export mode, and redirect strategy.
+    /// </summary>
+    /// <param name="outputPath">The target directory for export.</param>
+    /// <param name="seedRoutesPath">
+    /// The path to initial seed routes, if any. When provided, this file is used instead of
+    /// <paramref name="initialSeedRoutes"/>.
+    /// </param>
+    /// <param name="initialSeedRoutes">Optional in-memory initial seed routes used when <paramref name="seedRoutesPath"/> is null or blank.</param>
+    /// <param name="baseUrl">The base URL of the site to export.</param>
+    /// <param name="mode">
+    /// The export mode. <see cref="ExportMode.Cdn"/> is the default and validates plus rewrites exporter-managed URLs for static
+    /// hosting. Use <see cref="ExportMode.Hybrid"/> when the exported output will still be served by application-aware routing.
+    /// </param>
+    /// <param name="redirectStrategy">
+    /// Strategy used to materialize redirect aliases. <see cref="ExportRedirectStrategy.Html"/> is the generic static-host
+    /// strategy; provider-native strategies can add stricter hosting constraints.
+    /// </param>
+    public ExportContext(
+        string outputPath,
+        string? seedRoutesPath,
+        IEnumerable<string>? initialSeedRoutes,
+        string baseUrl,
+        ExportMode mode,
+        ExportRedirectStrategy redirectStrategy)
     {
         OutputPath = outputPath;
         SeedRoutesPath = seedRoutesPath;

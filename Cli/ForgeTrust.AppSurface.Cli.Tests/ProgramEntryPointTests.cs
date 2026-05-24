@@ -309,6 +309,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("--mode", result.AllText, StringComparison.Ordinal);
         Assert.Contains("cdn", result.AllText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("--redirects", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("html", result.AllText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("netlify", result.AllText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("--seeds", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);

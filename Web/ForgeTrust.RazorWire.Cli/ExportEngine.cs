@@ -666,7 +666,6 @@ public class ExportEngine
             {
                 if (context.RouteOutcomes.TryGetValue(artifact.AliasRoute, out var nonHtmlStrategyAliasOutcome)
                     && nonHtmlStrategyAliasOutcome.Succeeded
-                    && nonHtmlStrategyAliasOutcome.IsHtml
                     && !nonHtmlStrategyAliasOutcome.IsRedirectAliasArtifact)
                 {
                     AddDiagnostic(
@@ -674,7 +673,7 @@ public class ExportEngine
                         seen,
                         CreateRedirectArtifactDiagnostic(
                             artifact.AliasRoute,
-                            $"AppSurface Docs redirect alias '{artifact.AliasRoute}' was crawled as a normal HTML page body."));
+                            $"AppSurface Docs redirect alias '{artifact.AliasRoute}' conflicts with an exported route at the same published path."));
                 }
 
                 continue;
@@ -772,9 +771,37 @@ public class ExportEngine
         var targetBySerializedAlias = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var artifact in context.RedirectArtifacts)
         {
-            var serializedAlias = SerializeNetlifyRedirectPath(artifact.AliasRoute);
-            var serializedCanonical = SerializeNetlifyRedirectPath(artifact.CanonicalRoute);
-            if (string.Equals(serializedAlias, serializedCanonical, StringComparison.Ordinal))
+            var aliasSerialized = TrySerializeNetlifyRedirectPath(artifact.AliasRoute, out var serializedAlias, out var aliasSerializationError);
+            if (!aliasSerialized)
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        aliasSerializationError ?? $"Netlify redirect route '{artifact.AliasRoute}' cannot be represented in _redirects output."));
+            }
+
+            var canonicalSerialized = TrySerializeNetlifyRedirectPath(artifact.CanonicalRoute, out var serializedCanonical, out var canonicalSerializationError);
+            if (!canonicalSerialized)
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        $"Netlify redirect canonical route '{artifact.CanonicalRoute}' cannot be represented in _redirects output. {canonicalSerializationError}"));
+            }
+
+            if (!aliasSerialized || !canonicalSerialized)
+            {
+                continue;
+            }
+
+            var serializedAliasValue = serializedAlias!;
+            var serializedCanonicalValue = serializedCanonical!;
+
+            if (string.Equals(serializedAliasValue, serializedCanonicalValue, StringComparison.Ordinal))
             {
                 AddDiagnostic(
                     context,
@@ -784,19 +811,19 @@ public class ExportEngine
                         $"Netlify redirect alias '{artifact.AliasRoute}' serializes to the same path as canonical route '{artifact.CanonicalRoute}'."));
             }
 
-            if (targetBySerializedAlias.TryGetValue(serializedAlias, out var existingSerializedCanonical)
-                && !string.Equals(existingSerializedCanonical, serializedCanonical, StringComparison.Ordinal))
+            if (targetBySerializedAlias.TryGetValue(serializedAliasValue, out var existingSerializedCanonical)
+                && !string.Equals(existingSerializedCanonical, serializedCanonicalValue, StringComparison.Ordinal))
             {
                 AddDiagnostic(
                     context,
                     seen,
                     CreateRedirectArtifactDiagnostic(
                         artifact.AliasRoute,
-                        $"Netlify redirect alias '{artifact.AliasRoute}' serializes to '{serializedAlias}', which already targets '{existingSerializedCanonical}'."));
+                        $"Netlify redirect alias '{artifact.AliasRoute}' serializes to '{serializedAliasValue}', which already targets '{existingSerializedCanonical}'."));
             }
             else
             {
-                targetBySerializedAlias[serializedAlias] = serializedCanonical;
+                targetBySerializedAlias[serializedAliasValue] = serializedCanonicalValue;
             }
         }
     }
@@ -886,6 +913,22 @@ public class ExportEngine
 
     private static string SerializeNetlifyRedirectPath(string route)
     {
+        if (!TrySerializeNetlifyRedirectPath(route, out var serialized, out var error))
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        return serialized;
+    }
+
+    private static bool TrySerializeNetlifyRedirectPath(
+        string route,
+        [NotNullWhen(true)] out string? serialized,
+        [NotNullWhen(false)] out string? error)
+    {
+        serialized = null;
+        error = null;
+
         if (!route.StartsWith("/", StringComparison.Ordinal)
             || route.StartsWith("//", StringComparison.Ordinal)
             || route.Contains('?')
@@ -894,27 +937,37 @@ public class ExportEngine
             || route.Contains('\n')
             || route.Contains('\t'))
         {
-            throw new InvalidOperationException($"Redirect route '{route}' cannot be represented in Netlify _redirects output.");
+            error = $"Netlify redirect route '{route}' cannot be represented in _redirects output.";
+            return false;
         }
 
         var segments = route.Split('/');
         var builder = new StringBuilder(route.Length);
-        for (var i = 0; i < segments.Length; i++)
+        try
         {
-            if (i > 0)
+            for (var i = 0; i < segments.Length; i++)
             {
-                builder.Append('/');
-            }
+                if (i > 0)
+                {
+                    builder.Append('/');
+                }
 
-            if (segments[i].Length == 0)
-            {
-                continue;
-            }
+                if (segments[i].Length == 0)
+                {
+                    continue;
+                }
 
-            builder.Append(Uri.EscapeDataString(Uri.UnescapeDataString(segments[i])));
+                builder.Append(Uri.EscapeDataString(Uri.UnescapeDataString(segments[i])));
+            }
+        }
+        catch (UriFormatException ex)
+        {
+            error = $"Netlify redirect route '{route}' cannot be represented in _redirects output: {ex.Message}";
+            return false;
         }
 
-        return builder.ToString();
+        serialized = builder.ToString();
+        return true;
     }
 
     private sealed record NetlifyRedirectRule(string From, string To);
