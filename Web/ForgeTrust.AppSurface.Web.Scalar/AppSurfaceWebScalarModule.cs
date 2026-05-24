@@ -64,13 +64,8 @@ public class AppSurfaceWebScalarModule : IAppSurfaceWebModule
         AppSurfaceApiDocumentationEndpointExposure exposure,
         StartupContext context)
     {
-        return exposure switch
-        {
-            AppSurfaceApiDocumentationEndpointExposure.DevelopmentOnly => context.IsDevelopment,
-            AppSurfaceApiDocumentationEndpointExposure.Always => true,
-            AppSurfaceApiDocumentationEndpointExposure.Never => false,
-            _ => false
-        };
+        return exposure == AppSurfaceApiDocumentationEndpointExposure.Always
+            || (exposure == AppSurfaceApiDocumentationEndpointExposure.DevelopmentOnly && context.IsDevelopment);
     }
 
     /// <summary>
