@@ -103,6 +103,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 
 - RazorWire now has a generated UI design contract for package-owned nodes. The contract separates RazorWire UI from app-authored markup and AppSurface Docs chrome, establishes `data-rw-*` attributes plus `--rw-ui-*` custom properties as the default styling surface, and documents global, form-level, and target-level override expectations for future generated UI.
 - RazorWire README snippets are now source-backed by the MVC sample through a MarkdownSnippets generator, with CI verification and README contract tests guarding quickstart drift.
+- RazorWire streams can now emit same-origin Turbo Drive visit commands with `RazorWireStreamBuilder.Visit(...)`, giving live subscribers a narrow one-shot navigation primitive while keeping retained replay channels reserved for state snapshots.
 
 ### AppSurface Docs product example
 
@@ -130,6 +131,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs now exposes a local-first harvest health UI at `{DocsRootPath}/_health` plus a machine-readable `{DocsRootPath}/_health.json` endpoint, shown by default in Development and configurable independently from sidebar chrome for operator-owned environments.
 - AppSurface Docs now exposes a Development-only route inspector at `{DocsRootPath}/_routes` plus `{DocsRootPath}/_routes.json`, letting maintainers inspect canonical routes, recovery aliases, declared aliases, route diagnostics, and individual path probes without adding maintainer tools to public reader navigation.
 - AppSurface Docs now starts the initial source harvest in the background by default and renders a live RazorWire harvest observatory for cold requests that outlive the first-request wait budget, so readers see redacted progress instead of a hung page while the docs snapshot is assembled.
+- AppSurface Docs harvest completion now publishes retained completion state before a live-only RazorWire visit command, so active readers leave the observatory automatically while late subscribers replay state without inheriting stale navigation.
 - Harvest observability includes deterministic local testing delays, shared startup/request coordination, source-shaped route redirects before observatory fallback, sidebar suppression while harvesting, and safe app-relative return navigation once the snapshot is ready.
 - Stale-while-revalidate memo policies are now available for absolute-expiration entries, allowing AppSurface Docs and future callers to serve bounded stale snapshots while one background refresh revalidates the value.
 - RazorWire streams support opt-in replay for retained state messages, with `rw:stream-source replay="true"` subscribing late readers to the bounded replay buffer before live events.
