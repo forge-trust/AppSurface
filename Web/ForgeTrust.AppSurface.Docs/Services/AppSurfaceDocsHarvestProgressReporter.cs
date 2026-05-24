@@ -1,5 +1,6 @@
 using System.Globalization;
 using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.RazorWire.Bridge;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,6 +14,8 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
     internal const string ChannelName = "appsurfacedocs-harvest";
     private const int MaxActivityCount = 8;
     private const int CompletionDelayMilliseconds = 900;
+    // Resolve per subscriber so a shared harvest channel revisits each user's requested docs URL.
+    private const string CurrentPageVisitUrl = "#";
 
     private readonly IServiceProvider _services;
     private readonly ILogger<AppSurfaceDocsHarvestProgressReporter> _logger;
@@ -267,6 +270,17 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 ChannelName,
                 message,
                 new RazorWireStreamPublishOptions { Replay = true });
+
+            if (snapshot.State == AppSurfaceDocsHarvestRunState.Completed)
+            {
+                var visitMessage = new RazorWireStreamBuilder()
+                    .Visit(CurrentPageVisitUrl, RazorWireVisitAction.Replace)
+                    .Build();
+                await hub.PublishAsync(
+                    ChannelName,
+                    visitMessage,
+                    new RazorWireStreamPublishOptions { Replay = false });
+            }
         }
         catch (Exception ex) when (!IsFatalException(ex))
         {

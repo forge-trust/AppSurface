@@ -192,7 +192,7 @@ Use `StartupMode=Background` for normal hosts, `Blocking` for hosts that must fi
 
 For manual UI testing, set the `Testing*Delay*Milliseconds` knobs to positive values. `TestingPreHarvestDelayMilliseconds` pauses after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` pauses each harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` publishes each harvester's document count one document at a time. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the live observatory easy to inspect locally. Keep them at `0` for production traffic.
 
-The live observatory uses the same redacted diagnostics as harvest health. Do not put secrets, absolute repository paths, or raw exception messages into diagnostic fields that can reach client-visible UI.
+When the first harvest completes, active JavaScript users receive a live-only RazorWire visit command after the retained completion state is published. Late subscribers replay only safe progress state and use the normal continuation link. The live observatory uses the same redacted diagnostics as harvest health; do not put secrets, absolute repository paths, or raw exception messages into diagnostic fields that can reach client-visible UI.
 
 ## Author the first useful page set
 
