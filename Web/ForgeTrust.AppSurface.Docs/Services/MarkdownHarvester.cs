@@ -14,6 +14,7 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 {
     private const string HarvesterType = nameof(MarkdownHarvester);
+    private const string UnsafeTrustMigrationHrefMetadataDiagnosticCode = "unsafe-trust-migration-href";
     private static readonly string[] SidecarExtensions = [".yml", ".yaml"];
     private const int MinOutlineHeadingLevel = 2;
     private const int MaxOutlineHeadingLevel = 3;
@@ -360,7 +361,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 
     IReadOnlyList<DocHarvestDiagnostic> IDocHarvesterDiagnosticProvider.GetHarvestDiagnostics()
     {
-        return _lastDiagnostics;
+        return GetType() == typeof(MarkdownHarvester) ? _lastDiagnostics : [];
     }
 
     private void ReportMetadataDiagnostics(
@@ -370,7 +371,11 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     {
         foreach (var diagnostic in diagnostics)
         {
-            harvestDiagnostics?.Add(CreateMetadataHarvestDiagnostic(sourcePath, diagnostic));
+            if (ShouldExposeMetadataDiagnosticToHarvestHealth(diagnostic))
+            {
+                harvestDiagnostics?.Add(CreateMetadataHarvestDiagnostic(sourcePath, diagnostic));
+            }
+
             _logger.LogWarning(
                 "AppSurface Docs metadata warning {Code} in {SourcePath} at {FieldPath}: {Problem} Cause: {Cause} Fix: {Fix}",
                 diagnostic.Code,
@@ -387,7 +392,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         AppSurfaceDocsMetadataDiagnostic diagnostic)
     {
         return new DocHarvestDiagnostic(
-            NormalizeMetadataDiagnosticCode(diagnostic.Code),
+            DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref,
             DocHarvestDiagnosticSeverity.Warning,
             HarvesterType,
             $"Metadata warning in {sourcePath} at {diagnostic.FieldPath}: {diagnostic.Problem}",
@@ -395,11 +400,9 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             diagnostic.Fix);
     }
 
-    private static string NormalizeMetadataDiagnosticCode(string code)
+    private static bool ShouldExposeMetadataDiagnosticToHarvestHealth(AppSurfaceDocsMetadataDiagnostic diagnostic)
     {
-        return code.Equals("unsafe-trust-migration-href", StringComparison.Ordinal)
-            ? DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref
-            : $"appsurfacedocs.metadata.{code.Replace('-', '_')}";
+        return diagnostic.Code.Equals(UnsafeTrustMigrationHrefMetadataDiagnosticCode, StringComparison.Ordinal);
     }
 
     internal static string? ExtractSummary(string markdown)

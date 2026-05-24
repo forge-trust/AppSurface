@@ -88,11 +88,24 @@ public class MarkdownHarvesterTests : IDisposable
     {
         var harvester = new DerivedMarkdownHarvester(_loggerFake);
         var context = CreateContextWithDefaultPolicy();
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "Guide.md"),
+            """
+            ---
+            trust:
+              migration:
+                href: javascript:alert(1)
+            ---
+            # Guide
+            """);
+        _ = await harvester.HarvestAsync(_testRoot);
 
         var results = await harvester.HarvestAsync(context);
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester).GetHarvestDiagnostics();
 
         Assert.True(harvester.PublicHarvestCalled);
         Assert.Same(DerivedMarkdownHarvester.Result, results);
+        Assert.Empty(diagnostics);
     }
 
     [Fact]
@@ -950,8 +963,10 @@ public class MarkdownHarvesterTests : IDisposable
             """);
 
         var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnosticProvider = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester);
 
         Assert.Equal("Guide", doc.Title);
+        Assert.Empty(diagnosticProvider.GetHarvestDiagnostics());
         AssertWarningLogged("missing-featured-group-pages");
         AssertWarningLogged("Groups without pages cannot resolve any landing rows.");
         AssertWarningLogged("Add pages with at least one path, or remove the empty group.");
