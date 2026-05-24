@@ -163,6 +163,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             mounts,
             docsUrlBuilder.CurrentDocsRootPath,
             docsUrlBuilder.RouteRootPath,
+            docsUrlBuilder.PublicOrigin,
             app.ApplicationServices.GetService<ILogger<AppSurfaceDocsPublishedTreeHandler>>());
         app.Use(
             async (httpContext, next) =>
@@ -224,7 +225,11 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 recommendedVersion.ExactTreePath,
                 provider,
                 manifestCachesByPath);
-            mounts.Add(new AppSurfaceDocsPublishedTreeMount(docsUrlBuilder.DocsEntryRootPath, provider, manifestCache));
+            mounts.Add(new AppSurfaceDocsPublishedTreeMount(
+                docsUrlBuilder.DocsEntryRootPath,
+                provider,
+                manifestCache,
+                recommendedVersion.ExactRootUrl));
         }
 
         return (mounts, providersByPath.Values.ToList());

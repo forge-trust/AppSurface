@@ -670,6 +670,161 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldRewriteOnlyCanonicalHrefToExactRoot_ForDefaultRecommendedAlias()
+    {
+        var tree = CreatePublishedTree("default-recommended-canonical");
+        WriteCanonicalPage(tree, "/docs/guide.html", rel: "alternate\tCANONICAL");
+        var handler = CreateHandler(tree, "/docs", canonicalRootPath: "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        var html = ReadBody(request);
+        Assert.Contains("<link rel=\"alternate\tCANONICAL\" href=\"/docs/v/1.2.3/guide.html\">", html);
+        Assert.Contains("href=\"/docs/guide.html\"", html);
+        Assert.Contains("src=\"/docs/search-client.js\"", html);
+        Assert.Contains("srcset=\"/docs/img/small.png 1x, /docs/img/large.png 2x\"", html);
+        Assert.DoesNotContain("href=\"/docs/v/1.2.3/search.css\"", html);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldSelfCanonicalizeExactMount()
+    {
+        var tree = CreatePublishedTree("exact-canonical");
+        WriteCanonicalPage(tree, "/docs/guide.html");
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3");
+
+        Assert.True(await handler.TryHandleAsync(request));
+
+        Assert.Contains("<link rel=\"canonical\" href=\"/docs/v/1.2.3/guide.html\">", ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldPrefixPathBaseForCanonical_WhenPublicOriginIsUnset()
+    {
+        var tree = CreatePublishedTree("path-base-recommended-canonical");
+        WriteCanonicalPage(tree, "/docs/guide.html");
+        var handler = CreateHandler(tree, "/docs", canonicalRootPath: "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs", pathBase: "/some-base");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        var html = ReadBody(request);
+
+        Assert.Contains("<link rel=\"canonical\" href=\"/some-base/docs/v/1.2.3/guide.html\">", html);
+        Assert.Contains("href=\"/some-base/docs/guide.html\"", html);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldUseRuntimePublicOriginForCanonical_AndSkipPathBase()
+    {
+        var tree = CreatePublishedTree("public-origin-canonical");
+        WriteCanonicalPage(tree, "/docs/guide.html");
+        var handler = CreateHandler(
+            tree,
+            "/docs",
+            canonicalRootPath: "/docs/v/1.2.3",
+            publicOrigin: "https://docs.example.com");
+        var request = CreateContext(HttpMethods.Get, "/docs", pathBase: "/tenant");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        var html = ReadBody(request);
+
+        Assert.Contains("<link rel=\"canonical\" href=\"https://docs.example.com/docs/v/1.2.3/guide.html\">", html);
+        Assert.Contains("href=\"/tenant/docs/guide.html\"", html);
+        Assert.DoesNotContain("https://docs.example.com/docs/guide.html", html);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldPreserveExportedAbsoluteCanonicalOrigin_WhenPublicOriginIsUnset()
+    {
+        var tree = CreatePublishedTree("absolute-exported-canonical");
+        WriteCanonicalPage(tree, "https://export.example/docs/guide.html?view=full#intro");
+        var handler = CreateHandler(tree, "/docs", canonicalRootPath: "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs");
+
+        Assert.True(await handler.TryHandleAsync(request));
+
+        Assert.Contains(
+            "<link rel=\"canonical\" href=\"https://export.example/docs/v/1.2.3/guide.html?view=full#intro\">",
+            ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldReplaceExportedAbsoluteCanonicalOrigin_WhenPublicOriginIsSet()
+    {
+        var tree = CreatePublishedTree("absolute-public-origin-canonical");
+        WriteCanonicalPage(tree, "https://export.example/docs/guide.html?view=full#intro");
+        var handler = CreateHandler(
+            tree,
+            "/docs",
+            canonicalRootPath: "/docs/v/1.2.3",
+            publicOrigin: "https://docs.example.com");
+        var request = CreateContext(HttpMethods.Get, "/docs");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        var html = ReadBody(request);
+
+        Assert.Contains(
+            "<link rel=\"canonical\" href=\"https://docs.example.com/docs/v/1.2.3/guide.html?view=full#intro\">",
+            html);
+        Assert.DoesNotContain("https://export.example", html);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRewriteRecommendedCanonicalForCustomRouteRoot()
+    {
+        var tree = CreatePublishedTree("custom-root-recommended-canonical");
+        WriteCanonicalPage(tree, "/docs/guide.html");
+        var handler = CreateHandler(
+            tree,
+            "/foo/bar",
+            previewRootPath: "/foo/bar/next",
+            routeRootPath: "/foo/bar",
+            canonicalRootPath: "/foo/bar/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/foo/bar");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        var html = ReadBody(request);
+
+        Assert.Contains("<link rel=\"canonical\" href=\"/foo/bar/v/1.2.3/guide.html\">", html);
+        Assert.Contains("href=\"/foo/bar/guide.html\"", html);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRewriteRecommendedCanonicalForRootMount_AndLetExactMountWin()
+    {
+        var aliasTree = CreatePublishedTree("root-alias-canonical");
+        var exactTree = CreatePublishedTree("root-exact-canonical");
+        WriteCanonicalPage(aliasTree, "/docs/guide.html");
+        File.WriteAllText(Path.Join(aliasTree, "search.css"), "body { color: #111; }");
+        File.WriteAllText(Path.Join(exactTree, "search.css"), "body { color: #0ea5e9; }");
+        using var aliasProvider = new PhysicalFileProvider(aliasTree);
+        using var exactProvider = new PhysicalFileProvider(exactTree);
+        var handler = CreateHandler(
+            [
+                new AppSurfaceDocsPublishedTreeMount("/", aliasProvider, canonicalRootPath: "/v/1.2.3"),
+                new AppSurfaceDocsPublishedTreeMount("/v/1.2.3", exactProvider)
+            ],
+            previewRootPath: "/next",
+            routeRootPath: "/");
+        var aliasRequest = CreateContext(HttpMethods.Get, "/");
+        var exactAssetRequest = CreateContext(HttpMethods.Get, "/v/1.2.3/search.css");
+
+        Assert.True(await handler.TryHandleAsync(aliasRequest));
+        var html = ReadBody(aliasRequest);
+        Assert.Contains("<link rel=\"canonical\" href=\"/v/1.2.3/guide.html\">", html);
+        Assert.Contains("href=\"/guide.html\"", html);
+        Assert.Contains("\"docsRootPath\":\"/\"", html);
+        Assert.Contains("\"docsSearchUrl\":\"/search\"", html);
+        Assert.Contains("\"docsSearchIndexUrl\":\"/search-index.json\"", html);
+        Assert.Contains("\"miniSearchUrl\":\"/minisearch.min.js?v=1\"", html);
+        Assert.DoesNotContain("//search", html);
+
+        Assert.True(await handler.TryHandleAsync(exactAssetRequest));
+        Assert.Contains("#0ea5e9", ReadBody(exactAssetRequest));
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldTrimTrailingSlashFromRequestPathBase_WhenRewritingMountedHtmlAndSearchIndex()
     {
         var tree = CreatePublishedTree("path-base-with-trailing-slash");
@@ -741,7 +896,9 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         string treePath,
         string mountRootPath,
         string previewRootPath = "/docs/next",
-        string routeRootPath = DocsUrlBuilder.DocsEntryPath)
+        string routeRootPath = DocsUrlBuilder.DocsEntryPath,
+        string? canonicalRootPath = null,
+        string? publicOrigin = null)
     {
         var provider = new PhysicalFileProvider(treePath, ExclusionFilters.None);
         _disposables.Add(provider);
@@ -751,18 +908,21 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
                 new AppSurfaceDocsPublishedTreeMount(
                     mountRootPath,
                     provider,
-                    new AppSurfaceDocsFrozenRouteManifestCache(provider, treePath))
+                    new AppSurfaceDocsFrozenRouteManifestCache(provider, treePath),
+                    canonicalRootPath)
             ],
             previewRootPath,
-            routeRootPath);
+            routeRootPath,
+            publicOrigin);
     }
 
     private AppSurfaceDocsPublishedTreeHandler CreateHandler(
         IReadOnlyList<AppSurfaceDocsPublishedTreeMount> mounts,
         string previewRootPath = "/docs/next",
-        string routeRootPath = DocsUrlBuilder.DocsEntryPath)
+        string routeRootPath = DocsUrlBuilder.DocsEntryPath,
+        string? publicOrigin = null)
     {
-        return new AppSurfaceDocsPublishedTreeHandler(mounts, previewRootPath, routeRootPath);
+        return new AppSurfaceDocsPublishedTreeHandler(mounts, previewRootPath, routeRootPath, publicOrigin);
     }
 
     private string CreatePublishedTree(string name)
@@ -787,11 +947,32 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
             """);
         File.WriteAllText(Path.Combine(root, "guide", "index.html"), "<!DOCTYPE html><html><body>guide-index</body></html>");
         File.WriteAllText(Path.Combine(root, "folder-only", "index.html"), "<!DOCTYPE html><html><body>folder-only</body></html>");
-        File.WriteAllText(Path.Combine(root, "search.css"), "body { color: #fff; }");
-        File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
-        File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
+        File.WriteAllText(Path.Join(root, "search.css"), "body { color: #fff; }");
+        File.WriteAllText(Path.Join(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
+        File.WriteAllText(Path.Join(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
 
         return root;
+    }
+
+    private static void WriteCanonicalPage(string treePath, string canonicalHref, string rel = "canonical")
+    {
+        File.WriteAllText(
+            Path.Join(treePath, "index.html"),
+            $$"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <link rel="{{rel}}" href="{{canonicalHref}}">
+              <link rel="stylesheet" href="/docs/search.css">
+              <script src="/docs/search-client.js"></script>
+              <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json","miniSearchUrl":"/docs/minisearch.min.js?v=1","docsVersionsUrl":"/docs/versions"};</script>
+            </head>
+            <body>
+              <a href="/docs/guide.html">Guide</a>
+              <img src="/docs/img/logo.png" srcset="/docs/img/small.png 1x, /docs/img/large.png 2x">
+            </body>
+            </html>
+            """);
     }
 
     private static void WriteFrozenManifest(string treePath, string json)
