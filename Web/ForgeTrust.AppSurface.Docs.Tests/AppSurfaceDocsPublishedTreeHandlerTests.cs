@@ -948,8 +948,8 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         File.WriteAllText(Path.Combine(root, "guide", "index.html"), "<!DOCTYPE html><html><body>guide-index</body></html>");
         File.WriteAllText(Path.Combine(root, "folder-only", "index.html"), "<!DOCTYPE html><html><body>folder-only</body></html>");
         File.WriteAllText(Path.Join(root, "search.css"), "body { color: #fff; }");
-        File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
-        File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
+        File.WriteAllText(Path.Join(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
+        File.WriteAllText(Path.Join(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
 
         return root;
     }
@@ -957,7 +957,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     private static void WriteCanonicalPage(string treePath, string canonicalHref, string rel = "canonical")
     {
         File.WriteAllText(
-            Path.Combine(treePath, "index.html"),
+            Path.Join(treePath, "index.html"),
             $$"""
             <!DOCTYPE html>
             <html>
