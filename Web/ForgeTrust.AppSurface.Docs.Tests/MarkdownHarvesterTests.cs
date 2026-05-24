@@ -961,7 +961,7 @@ public class MarkdownHarvesterTests : IDisposable
     public async Task HarvestAsync_ShouldExposeUnsafeTrustMigrationHrefDiagnostics_FromInlineFrontMatter()
     {
         await File.WriteAllTextAsync(
-            Path.Combine(_testRoot, "Guide.md"),
+            Path.Join(_testRoot, Path.GetFileName("Guide.md")),
             """
             ---
             trust:
@@ -988,7 +988,7 @@ public class MarkdownHarvesterTests : IDisposable
     [Fact]
     public async Task HarvestAsync_ShouldExposeUnsafeTrustMigrationHrefDiagnostics_FromSidecarPath()
     {
-        var markdownPath = Path.Combine(_testRoot, "Guide.md");
+        var markdownPath = Path.Join(_testRoot, Path.GetFileName("Guide.md"));
         await File.WriteAllTextAsync(markdownPath, "# Guide");
         await File.WriteAllTextAsync(
             markdownPath + ".yml",
@@ -1010,7 +1010,7 @@ public class MarkdownHarvesterTests : IDisposable
     [Fact]
     public async Task HarvestAsync_ShouldAllowSafeSidecarMigrationHref_WhenInlineHrefIsUnsafe()
     {
-        var markdownPath = Path.Combine(_testRoot, "Guide.md");
+        var markdownPath = Path.Join(_testRoot, Path.GetFileName("Guide.md"));
         await File.WriteAllTextAsync(
             markdownPath,
             """
@@ -1050,7 +1050,7 @@ public class MarkdownHarvesterTests : IDisposable
                 ? Task.FromException<string>(new IOException("boom"))
                 : File.ReadAllTextAsync(path, cancellationToken));
         await File.WriteAllTextAsync(
-            Path.Combine(_testRoot, "Guide.md"),
+            Path.Join(_testRoot, Path.GetFileName("Guide.md")),
             """
             ---
             trust:
