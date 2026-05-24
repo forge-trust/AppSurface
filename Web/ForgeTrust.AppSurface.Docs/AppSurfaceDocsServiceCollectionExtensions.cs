@@ -256,22 +256,31 @@ public static class AppSurfaceDocsServiceCollectionExtensions
 
         if (descriptor.ImplementationInstance is IRazorWireChannelAuthorizer instance)
         {
-            return instance;
+            return FilterBuiltInDenyAllAuthorizer(instance);
         }
 
         if (descriptor.ImplementationFactory is not null)
         {
-            return (IRazorWireChannelAuthorizer)descriptor.ImplementationFactory(provider)!;
+            return FilterBuiltInDenyAllAuthorizer(
+                (IRazorWireChannelAuthorizer)descriptor.ImplementationFactory(provider)!);
         }
 
         if (descriptor.ImplementationType is not null)
         {
-            return (IRazorWireChannelAuthorizer)ActivatorUtilities.CreateInstance(
-                provider,
-                descriptor.ImplementationType);
+            return descriptor.ImplementationType == typeof(DenyAllRazorWireChannelAuthorizer)
+                ? null
+                : (IRazorWireChannelAuthorizer)ActivatorUtilities.CreateInstance(
+                    provider,
+                    descriptor.ImplementationType);
         }
 
         return null;
+    }
+
+    private static IRazorWireChannelAuthorizer? FilterBuiltInDenyAllAuthorizer(
+        IRazorWireChannelAuthorizer authorizer)
+    {
+        return authorizer is DenyAllRazorWireChannelAuthorizer ? null : authorizer;
     }
 
     private static void TryAddMarkdownHarvester(IServiceCollection services)

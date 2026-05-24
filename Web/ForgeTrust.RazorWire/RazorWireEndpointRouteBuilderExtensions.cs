@@ -156,7 +156,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
 
         logger.LogWarning(
             StreamSubscriptionDeniedEventId,
-            "RazorWire stream subscription denied. Environment: {Environment}; AuthorizationMode: {AuthorizationMode}; IsAuthenticated: {IsAuthenticated}; ChannelLength: {ChannelLength}",
+            "RazorWire stream subscription denied. Environment: {Environment}; ConfiguredAuthorizationMode: {ConfiguredAuthorizationMode}; IsAuthenticated: {IsAuthenticated}; ChannelLength: {ChannelLength}",
             environment,
             authorizationMode,
             isAuthenticated,

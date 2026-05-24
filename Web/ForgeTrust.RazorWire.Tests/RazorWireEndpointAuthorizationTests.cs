@@ -103,6 +103,7 @@ public class RazorWireEndpointAuthorizationTests
             loggerProvider.Entries,
             log => log.EventId.Id == 13700 && log.EventId.Name == "StreamSubscriptionDenied");
         Assert.Contains("RazorWire stream subscription denied", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("ConfiguredAuthorizationMode", entry.Message, StringComparison.Ordinal);
         Assert.Contains(nameof(RazorWireStreamAuthorizationMode.DenyAll), entry.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("tenant-secret-42", entry.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("user-123", entry.Message, StringComparison.Ordinal);

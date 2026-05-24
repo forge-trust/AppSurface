@@ -111,7 +111,7 @@ The sample also demonstrates live multi-client updates.
 - `ReactivityController.PublishMessage()` pushes new messages to every connected client.
 - `ReactivityController.BroadcastUserPresenceAsync()` updates the user list and online count across sessions.
 
-RazorWire stream subscriptions deny by default. This sample explicitly sets `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll` in `RazorWireExampleModule.ConfigureServices` because the `reactivity` channel is a public demo channel. Production apps should register `IRazorWireChannelAuthorizer` when channels depend on the current user, tenant, or workflow state.
+RazorWire stream subscriptions are denied by default. This sample explicitly sets `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll` in `RazorWireExampleModule.ConfigureServices` because the `reactivity` channel is a public demo channel. Production apps should register `IRazorWireChannelAuthorizer` when channels depend on the current user, tenant, or workflow state.
 
 ### Registration and Message Publishing
 

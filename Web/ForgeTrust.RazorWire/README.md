@@ -158,7 +158,7 @@ services.AddRazorWire(options =>
 });
 ```
 
-Stream subscriptions deny by default. Choose `AllowAll` only for public/demo streams:
+Stream subscriptions are denied by default. Choose `AllowAll` only for public/demo streams:
 
 ```csharp
 services.AddRazorWire(options =>
