@@ -2,6 +2,7 @@ import {
   createMiniSearchConfiguration,
   createMiniSearchDocument,
   defaultSearchOptions,
+  normalizeCodeLanguage,
   normalizePageTypeAlias,
   normalizeSearchDocument
 } from './search-core';
@@ -33,6 +34,7 @@ declare global {
   const facetDefinitions = [
     { key: 'pageType', label: 'Page Type', kind: 'chips' },
     { key: 'component', label: 'Component', kind: 'select' },
+    { key: 'language', label: 'Language', kind: 'chips' },
     { key: 'audience', label: 'Audience', kind: 'chips' },
     { key: 'status', label: 'Status', kind: 'chips' }
   ];
@@ -82,6 +84,7 @@ declare global {
     q: '',
     pageType: '',
     component: '',
+    language: '',
     audience: '',
     status: '',
     filtersExpanded: false,
@@ -92,6 +95,7 @@ declare global {
     return {
       pageType: [],
       component: [],
+      language: [],
       audience: [],
       status: []
     };
@@ -567,7 +571,16 @@ declare global {
       return '';
     }
 
+    const codeLanguage = normalizeCodeLanguage(normalized);
     const pageTypeAlias = normalizePageTypeAlias(normalized);
+    if (codeLanguage === 'csharp') {
+      return 'C#';
+    }
+
+    if (codeLanguage === 'javascript') {
+      return 'JavaScript';
+    }
+
     if (pageTypeAlias === 'api' || pageTypeAlias === 'api-reference') {
       return 'API Reference';
     }
@@ -628,11 +641,23 @@ declare global {
     return list.sort((a, b) => a.localeCompare(b));
   }
 
+  function normalizeFacetForKey(key, value) {
+    if (key === 'pageType') {
+      return normalizePageTypeAlias(value);
+    }
+
+    if (key === 'language') {
+      return normalizeCodeLanguage(value);
+    }
+
+    return normalizeFacetValue(value);
+  }
+
   function deriveFacetValues(docs) {
     const values = createEmptyFacetValues();
     for (const doc of docs) {
       for (const key of facetKeys) {
-        const value = normalizeFacetValue(doc[key]);
+        const value = normalizeFacetForKey(key, doc[key]);
         if (value) {
           values[key].push(value);
         }
@@ -650,6 +675,7 @@ declare global {
     return {
       pageType: normalizePageTypeAlias(state.pageType),
       component: normalizeFacetValue(state.component),
+      language: normalizeCodeLanguage(state.language),
       audience: normalizeFacetValue(state.audience),
       status: normalizeFacetValue(state.status)
     };
@@ -665,28 +691,24 @@ declare global {
         return true;
       }
 
-      const expected = normalizeFacetValue(filters[key]);
+      const expected = normalizeFacetForKey(key, filters[key]);
       if (!expected) {
         return true;
       }
 
-      const actual = key === 'pageType'
-        ? normalizePageTypeAlias(doc[key])
-        : normalizeFacetValue(doc[key]);
+      const actual = normalizeFacetForKey(key, doc[key]);
       return actual === expected;
     });
   }
 
   function matchesStoredResult(result, filters) {
     return facetKeys.every((key) => {
-      const expected = normalizeFacetValue(filters[key]);
+      const expected = normalizeFacetForKey(key, filters[key]);
       if (!expected) {
         return true;
       }
 
-      const actual = key === 'pageType'
-        ? normalizePageTypeAlias(result?.[key])
-        : normalizeFacetValue(result?.[key]);
+      const actual = normalizeFacetForKey(key, result?.[key]);
       return actual === expected;
     });
   }
@@ -730,6 +752,7 @@ declare global {
       q: normalizeQuery(params.get('q')),
       pageType: normalizeFacetValue(params.get('pageType')),
       component: normalizeFacetValue(params.get('component')),
+      language: normalizeCodeLanguage(params.get('language')),
       audience: normalizeFacetValue(params.get('audience')),
       status: normalizeFacetValue(params.get('status'))
     };
@@ -1026,6 +1049,10 @@ declare global {
       badgeRow.append(pageTypeBadge);
     }
 
+    if (doc.languageLabel || doc.language) {
+      badgeRow.append(createSearchResultBadge(`Language: ${doc.languageLabel || formatFacetValue(doc.language)}`));
+    }
+
     if (doc.component) {
       badgeRow.append(createSearchResultBadge(formatFacetValue(doc.component)));
     }
@@ -1217,9 +1244,7 @@ declare global {
 
         const options = facetValues.map((value) => {
           const count = siblingDocs.filter((doc) => {
-            const actual = facet.key === 'pageType'
-              ? normalizePageTypeAlias(doc[facet.key])
-              : normalizeFacetValue(doc[facet.key]);
+            const actual = normalizeFacetForKey(facet.key, doc[facet.key]);
             return actual === value;
           }).length;
           return {
@@ -2065,7 +2090,7 @@ declare global {
         return;
       }
 
-      setSearchPageState({ pageType: '', component: '', audience: '', status: '' }, 'push');
+      setSearchPageState({ pageType: '', component: '', language: '', audience: '', status: '' }, 'push');
     });
 
     failure.addEventListener('click', (event) => {
@@ -2183,6 +2208,71 @@ declare global {
     bindGlobalSearchShortcuts();
     bindSidebar();
     bindSearchPage();
+    bindHarvestObservatory();
+  }
+
+  let harvestObserver: MutationObserver | null = null;
+  let harvestCompletionNavigationScheduled = false;
+
+  function bindHarvestObservatory() {
+    scheduleHarvestCompletionNavigation();
+    const page = document.getElementById('docs-harvest-page');
+    if (!page) {
+      harvestObserver?.disconnect();
+      harvestObserver = null;
+      harvestCompletionNavigationScheduled = false;
+      return;
+    }
+
+    if (harvestObserver || typeof MutationObserver === 'undefined') {
+      return;
+    }
+
+    harvestObserver = new MutationObserver(() => {
+      if (!document.body.contains(page)) {
+        harvestObserver?.disconnect();
+        harvestObserver = null;
+        harvestCompletionNavigationScheduled = false;
+        return;
+      }
+
+      scheduleHarvestCompletionNavigation();
+    });
+    harvestObserver.observe(page, { childList: true, subtree: true, attributes: true });
+  }
+
+  function scheduleHarvestCompletionNavigation() {
+    const page = document.getElementById('docs-harvest-page');
+    if (!page) {
+      return;
+    }
+
+    const completion = page.querySelector('[data-appsurface-docs-harvest-complete="true"]');
+    if (!completion) {
+      return;
+    }
+
+    if (harvestCompletionNavigationScheduled) {
+      return;
+    }
+
+    harvestCompletionNavigationScheduled = true;
+    const scheduledHref = window.location.href;
+    const configuredDelay = page.getAttribute('data-appsurface-docs-harvest-delay')
+      || completion.getAttribute('data-appsurface-docs-harvest-delay');
+    const delay = Number.parseInt(configuredDelay || '900', 10);
+    harvestObserver?.disconnect();
+    harvestObserver = null;
+    window.setTimeout(() => {
+      const currentPage = document.getElementById('docs-harvest-page');
+      const isComplete = currentPage?.querySelector('[data-appsurface-docs-harvest-complete="true"]');
+      if (window.location.href !== scheduledHref || !currentPage || !isComplete) {
+        harvestCompletionNavigationScheduled = false;
+        return;
+      }
+
+      window.location.reload();
+    }, Number.isFinite(delay) && delay >= 0 ? delay : 900);
   }
 
   installDocsPartialHook();

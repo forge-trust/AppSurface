@@ -1,4 +1,4 @@
-using CliFx.Exceptions;
+using CliFx;
 
 namespace ForgeTrust.RazorWire.Cli.Tests;
 

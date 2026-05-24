@@ -138,6 +138,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var page = Assert.Single(docs, doc => string.Equals(doc.Path, "api/javascript/razorwire", StringComparison.Ordinal));
         Assert.Equal("RazorWire JavaScript API", page.Title);
         Assert.Equal("javascript-api", page.Metadata?.PageType);
+        Assert.Equal("javascript", page.Metadata?.CodeLanguage);
         Assert.Contains("event-razorwire-form-failure", page.Content, StringComparison.Ordinal);
         Assert.Contains("data-appsurfacedocs-symbol-source=\"event-razorwire-form-failure\"", page.Content, StringComparison.Ordinal);
         Assert.Contains(page.Outline!, item => item.Id == "event-razorwire-form-failure" && item.Level == 2);
@@ -152,6 +153,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             "api/javascript/razorwire#event-razorwire-form-failure",
             StringComparison.Ordinal));
         Assert.Equal("javascript-event", eventStub.Metadata?.PageType);
+        Assert.Equal("javascript", eventStub.Metadata?.CodeLanguage);
         Assert.Contains("JavaScript Event", eventStub.Content, StringComparison.Ordinal);
         Assert.Contains("detail.statusCode", eventStub.Content, StringComparison.Ordinal);
         Assert.Contains("form.addEventListener", eventStub.Content, StringComparison.Ordinal);
@@ -740,6 +742,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal("/docs/api/javascript/razorwire#event-razorwire-form-failure", document.Path);
         Assert.Equal("javascript-event", document.PageType);
         Assert.Equal("JavaScript Event", document.PageTypeLabel);
+        Assert.Equal("javascript", document.Language);
+        Assert.Equal("JavaScript", document.LanguageLabel);
         Assert.Contains("detail.statusCode", document.BodyText, StringComparison.Ordinal);
         Assert.Contains("razorwire:form:failure", document.BodyText, StringComparison.OrdinalIgnoreCase);
     }

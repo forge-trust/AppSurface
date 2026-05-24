@@ -15,7 +15,7 @@ public sealed class AppSurfaceDocsSourceRouteRedirectTests
     [InlineData(
         "/docs/guides/from-program-cs-to-module.md.html?view=compact",
         "/docs/guides/from-program-cs-to-module?view=compact")]
-    public async Task SourceShapedMarkdownRoutes_ShouldRedirectToCanonicalDocsRoute(
+    public async Task SourceShapedMarkdownRoutes_ShouldRedirectToCanonicalDocsRoute_AfterInitialHarvestCompletes(
         string requestPath,
         string expectedLocation)
     {
@@ -32,6 +32,8 @@ public sealed class AppSurfaceDocsSourceRouteRedirectTests
                 BaseAddress = new Uri(host.BaseUrl)
             };
 
+            await WaitUntilHealthyAsync(client);
+
             using var response = await client.GetAsync(requestPath);
 
             Assert.Equal(HttpStatusCode.MovedPermanently, response.StatusCode);
@@ -40,6 +42,30 @@ public sealed class AppSurfaceDocsSourceRouteRedirectTests
         finally
         {
             await host.DisposeAsync();
+        }
+    }
+
+    private static async Task WaitUntilHealthyAsync(HttpClient client)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        HttpResponseMessage? lastResponse = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            lastResponse?.Dispose();
+            lastResponse = await client.GetAsync("/docs/_health.json");
+            if (lastResponse.IsSuccessStatusCode)
+            {
+                lastResponse.Dispose();
+                return;
+            }
+
+            await Task.Delay(100);
+        }
+
+        using (lastResponse)
+        {
+            lastResponse?.EnsureSuccessStatusCode();
         }
     }
 }

@@ -1,7 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using CliFx;
-using CliFx.Attributes;
-using CliFx.Exceptions;
+using CliFx.Binding;
 using CliFx.Infrastructure;
 using Microsoft.Extensions.Logging;
 
@@ -11,14 +10,14 @@ namespace ForgeTrust.RazorWire.Cli;
 /// A command for exporting a RazorWire site to a static directory.
 /// </summary>
 [Command("export", Description = "Export a RazorWire site to a static directory.")]
-public class ExportCommand : ICommand
+public partial class ExportCommand : ICommand
 {
     /// <summary>
     /// Gets or sets the path to the directory where the exported site will be written.
     /// Defaults to <c>"dist"</c>.
     /// </summary>
     [CommandOption("output", 'o', Description = "Output directory (default: dist).")]
-    public string OutputPath { get; init; } = "dist";
+    public string OutputPath { get; set; } = "dist";
 
     /// <summary>
     /// Gets or sets an optional path to a plain-text file containing one initial seed route per line.
@@ -32,7 +31,7 @@ public class ExportCommand : ICommand
     /// readable but contains no valid routes, the exporter logs a warning and falls back to the root route.
     /// </remarks>
     [CommandOption("seeds", 'r', Description = "Path to a file containing seed routes.")]
-    public string? SeedRoutesPath { get; init; }
+    public string? SeedRoutesPath { get; set; }
 
     /// <summary>
     /// Gets or sets the export mode that controls whether output is rewritten for static CDN hosting.
@@ -43,44 +42,44 @@ public class ExportCommand : ICommand
     /// routing that can resolve extensionless URLs.
     /// </remarks>
     [CommandOption("mode", 'm', Description = "Export mode: cdn (default) or hybrid.")]
-    public ExportMode Mode { get; init; } = ExportMode.Cdn;
+    public ExportMode Mode { get; set; } = ExportMode.Cdn;
 
     /// <summary>
     /// Gets or sets the base URL of a running application to crawl.
     /// </summary>
     [CommandOption("url", 'u', Description = "Base URL of a running application to crawl.")]
-    public string? BaseUrl { get; init; }
+    public string? BaseUrl { get; set; }
 
     /// <summary>
     /// Gets or sets a path to a .csproj file to run and export.
     /// </summary>
     [CommandOption("project", 'p', Description = "Path to a .csproj to run and export.")]
-    public string? ProjectPath { get; init; }
+    public string? ProjectPath { get; set; }
 
     /// <summary>
     /// Gets or sets a path to a .dll file to run and export.
     /// </summary>
     [CommandOption("dll", 'd', Description = "Path to a .dll to run and export.")]
-    public string? DllPath { get; init; }
+    public string? DllPath { get; set; }
 
     /// <summary>
     /// Gets or sets an optional target framework for project exports, required for multi-target projects.
     /// </summary>
     [CommandOption("framework", 'f', Description = "Target framework (required for multi-target projects).")]
-    public string? Framework { get; init; }
+    public string? Framework { get; set; }
 
     /// <summary>
     /// Gets or sets app arguments forwarded to the launched target app.
     /// Repeat this option for each token.
     /// </summary>
     [CommandOption("app-args", Description = "Repeatable app argument token to pass through to the launched target app.")]
-    public string[] AppArgs { get; init; } = [];
+    public string[] AppArgs { get; set; } = [];
 
     /// <summary>
     /// Gets or sets a value indicating whether project mode should skip build before launch.
     /// </summary>
     [CommandOption("no-build", Description = "Project mode only: skip build before launch.")]
-    public bool NoBuild { get; init; }
+    public bool NoBuild { get; set; }
 
     private readonly ILogger<ExportCommand> _logger;
     private readonly ExportEngine _engine;

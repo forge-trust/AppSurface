@@ -29,13 +29,24 @@ public sealed class MyModule : AppSurfaceCachingModule
 Use memoization for expensive or repeated lookups:
 
 ```csharp
-var result = await memo.GetOrCreateAsync(
-    "docs:index",
+var result = await memo.GetAsync(
     () => LoadDocsAsync(),
-    new CachePolicy());
+    CachePolicy.Absolute(TimeSpan.FromMinutes(5)));
+```
+
+Use stale-while-revalidate for expensive values that should stay responsive after their freshness window expires:
+
+```csharp
+var result = await memo.GetAsync(
+    () => LoadDocsAsync(),
+    CachePolicy.AbsoluteWithStaleWhileRevalidate(
+        freshDuration: TimeSpan.FromMinutes(5),
+        staleDuration: TimeSpan.FromMinutes(5)));
 ```
 
 ## Notes
 
 - The package builds on `Microsoft.Extensions.Caching.Memory`, so it works well for in-process application caching.
+- `CachePolicy.AbsoluteWithStaleWhileRevalidate` returns the stale value immediately during the stale window and starts one background refresh for that cache key. If the background refresh fails, the stale value remains available until the stale window ends.
+- Stale-while-revalidate is supported for absolute-expiration policies. Sliding expiration does not have a stable revalidation moment, so use `CachePolicy.AbsoluteWithStaleWhileRevalidate(...)` or `CachePolicy.Absolute(...).WithStaleWhileRevalidate(...)`.
 - This package is intentionally lightweight and fits best when you want simple, application-level caching rather than a distributed cache abstraction.

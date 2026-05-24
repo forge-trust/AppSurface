@@ -57,7 +57,9 @@ public sealed class DocsUrlBuilder
             SearchIndexRefresh = BuildSearchIndexRefreshUrl(),
             Versions = BuildVersionsUrl(),
             Health = BuildHealthUrl(),
-            HealthJson = BuildHealthJsonUrl()
+            HealthJson = BuildHealthJsonUrl(),
+            RouteInspector = BuildRouteInspectorUrl(),
+            RouteInspectorJson = BuildRouteInspectorJsonUrl()
         };
     }
 
@@ -165,6 +167,24 @@ public sealed class DocsUrlBuilder
     public string BuildHealthJsonUrl()
     {
         return JoinPath(_currentDocsRootPath, "_health.json");
+    }
+
+    /// <summary>
+    /// Builds the current live docs route inspector HTML URL.
+    /// </summary>
+    /// <returns>The app-relative route inspector URL for the current docs surface.</returns>
+    public string BuildRouteInspectorUrl()
+    {
+        return JoinPath(_currentDocsRootPath, "_routes");
+    }
+
+    /// <summary>
+    /// Builds the current live docs route inspector JSON URL.
+    /// </summary>
+    /// <returns>The app-relative machine-readable route inspector URL for the current docs surface.</returns>
+    public string BuildRouteInspectorJsonUrl()
+    {
+        return JoinPath(_currentDocsRootPath, "_routes.json");
     }
 
     /// <summary>
@@ -433,6 +453,8 @@ public sealed class DocsUrlBuilder
                || string.Equals(path, "/search-index.json", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_health", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_health.json", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/_routes", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/_routes.json", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search.css", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search-client.js", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/outline-client.js", StringComparison.OrdinalIgnoreCase)
@@ -544,7 +566,8 @@ public sealed record AppSurfaceDocsRouteReferences
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="AppSurfaceDocsRouteReferences"/> record with all known routes.
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsRouteReferences"/> record with the route set through
+    /// harvest health diagnostics.
     /// </summary>
     /// <param name="home">The current live docs home route.</param>
     /// <param name="search">The current live docs search workspace route.</param>
@@ -561,6 +584,32 @@ public sealed record AppSurfaceDocsRouteReferences
         string versions,
         string health,
         string healthJson)
+        : this(home, search, searchIndex, searchIndexRefresh, versions, health, healthJson, string.Empty, string.Empty)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsRouteReferences"/> record with all known routes.
+    /// </summary>
+    /// <param name="home">The current live docs home route.</param>
+    /// <param name="search">The current live docs search workspace route.</param>
+    /// <param name="searchIndex">The current live docs search-index JSON route.</param>
+    /// <param name="searchIndexRefresh">The authenticated search-index refresh route.</param>
+    /// <param name="versions">The route-family archive route.</param>
+    /// <param name="health">The current live docs harvest health HTML route.</param>
+    /// <param name="healthJson">The current live docs harvest health JSON route.</param>
+    /// <param name="routeInspector">The current live docs route inspector HTML route.</param>
+    /// <param name="routeInspectorJson">The current live docs route inspector JSON route.</param>
+    public AppSurfaceDocsRouteReferences(
+        string home,
+        string search,
+        string searchIndex,
+        string searchIndexRefresh,
+        string versions,
+        string health,
+        string healthJson,
+        string routeInspector,
+        string routeInspectorJson)
     {
         Home = home;
         Search = search;
@@ -569,6 +618,8 @@ public sealed record AppSurfaceDocsRouteReferences
         Versions = versions;
         Health = health;
         HealthJson = healthJson;
+        RouteInspector = routeInspector;
+        RouteInspectorJson = routeInspectorJson;
     }
 
     /// <summary>
@@ -607,6 +658,16 @@ public sealed record AppSurfaceDocsRouteReferences
     public string HealthJson { get; init; } = string.Empty;
 
     /// <summary>
+    /// Gets the current live docs route inspector HTML route.
+    /// </summary>
+    public string RouteInspector { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the current live docs route inspector JSON route.
+    /// </summary>
+    public string RouteInspectorJson { get; init; } = string.Empty;
+
+    /// <summary>
     /// Deconstructs the original route set for callers that used the positional record contract.
     /// </summary>
     /// <param name="home">The current live docs home route.</param>
@@ -629,7 +690,7 @@ public sealed record AppSurfaceDocsRouteReferences
     }
 
     /// <summary>
-    /// Deconstructs all known routes.
+    /// Deconstructs the route set through harvest health diagnostics.
     /// </summary>
     /// <param name="home">The current live docs home route.</param>
     /// <param name="search">The current live docs search workspace route.</param>
@@ -654,5 +715,39 @@ public sealed record AppSurfaceDocsRouteReferences
         versions = Versions;
         health = Health;
         healthJson = HealthJson;
+    }
+
+    /// <summary>
+    /// Deconstructs all known routes including diagnostics routes.
+    /// </summary>
+    /// <param name="home">The current live docs home route.</param>
+    /// <param name="search">The current live docs search workspace route.</param>
+    /// <param name="searchIndex">The current live docs search-index JSON route.</param>
+    /// <param name="searchIndexRefresh">The authenticated search-index refresh route.</param>
+    /// <param name="versions">The route-family archive route.</param>
+    /// <param name="health">The current live docs harvest health HTML route.</param>
+    /// <param name="healthJson">The current live docs harvest health JSON route.</param>
+    /// <param name="routeInspector">The current live docs route inspector HTML route.</param>
+    /// <param name="routeInspectorJson">The current live docs route inspector JSON route.</param>
+    public void Deconstruct(
+        out string home,
+        out string search,
+        out string searchIndex,
+        out string searchIndexRefresh,
+        out string versions,
+        out string health,
+        out string healthJson,
+        out string routeInspector,
+        out string routeInspectorJson)
+    {
+        home = Home;
+        search = Search;
+        searchIndex = SearchIndex;
+        searchIndexRefresh = SearchIndexRefresh;
+        versions = Versions;
+        health = Health;
+        healthJson = HealthJson;
+        routeInspector = RouteInspector;
+        routeInspectorJson = RouteInspectorJson;
     }
 }

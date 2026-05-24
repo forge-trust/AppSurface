@@ -1,8 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using CliFx;
-using CliFx.Attributes;
-using CliFx.Exceptions;
+using CliFx.Binding;
 using CliFx.Infrastructure;
 using CliWrap;
 using ForgeTrust.AppSurface.Core;
@@ -30,7 +29,7 @@ namespace ForgeTrust.AppSurface.Cli;
 /// argument construction to <see cref="AppSurfaceDocsPreviewCommand"/>.
 /// </remarks>
 [Command("docs", Description = "Preview AppSurface Docs for a repository. Related: docs preview, docs export.")]
-internal sealed class DocsCommand : AppSurfaceDocsPreviewCommand
+internal sealed partial class DocsCommand : AppSurfaceDocsPreviewCommand
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="DocsCommand"/> class.
@@ -51,7 +50,7 @@ internal sealed class DocsCommand : AppSurfaceDocsPreviewCommand
 /// <see cref="DocsCommand"/>.
 /// </remarks>
 [Command("docs preview", Description = "Preview AppSurface Docs for a repository.")]
-internal sealed class DocsPreviewCommand : AppSurfaceDocsPreviewCommand
+internal sealed partial class DocsPreviewCommand : AppSurfaceDocsPreviewCommand
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="DocsPreviewCommand"/> class.
@@ -72,7 +71,7 @@ internal sealed class DocsPreviewCommand : AppSurfaceDocsPreviewCommand
 /// validation, and materialization to the RazorWire export engine.
 /// </remarks>
 [Command("docs export", Description = "Export AppSurface Docs for a repository to static files.")]
-internal sealed class DocsExportCommand : AppSurfaceDocsRepositoryCommand, ICommand
+internal sealed partial class DocsExportCommand : AppSurfaceDocsRepositoryCommand, ICommand
 {
     private const string DefaultExportUrl = "http://127.0.0.1:0";
     private const string DefaultOutputPath = "dist/docs";
@@ -102,7 +101,7 @@ internal sealed class DocsExportCommand : AppSurfaceDocsRepositoryCommand, IComm
     /// output stay tied together.
     /// </remarks>
     [CommandOption("output", 'o', Description = "Output directory for exported static docs (default: dist/docs).")]
-    public string OutputPath { get; init; } = DefaultOutputPath;
+    public string OutputPath { get; set; } = DefaultOutputPath;
 
     /// <summary>
     /// Gets the export mode used by the underlying RazorWire exporter.
@@ -112,7 +111,7 @@ internal sealed class DocsExportCommand : AppSurfaceDocsRepositoryCommand, IComm
     /// preserves application-style internal URLs for server-backed deployments.
     /// </remarks>
     [CommandOption("mode", 'm', Description = "Export mode: cdn (default) or hybrid.")]
-    public ExportMode Mode { get; init; } = ExportMode.Cdn;
+    public ExportMode Mode { get; set; } = ExportMode.Cdn;
 
     /// <summary>
     /// Gets the redirect alias materialization strategy used by the underlying RazorWire exporter.
@@ -123,7 +122,7 @@ internal sealed class DocsExportCommand : AppSurfaceDocsRepositoryCommand, IComm
     /// file for Netlify-compatible CDN hosting and is valid only with <see cref="ExportMode.Cdn"/>.
     /// </remarks>
     [CommandOption("redirects", Description = "Redirect strategy: html (default) or netlify.")]
-    public ExportRedirectStrategy RedirectStrategy { get; init; } = ExportRedirectStrategy.Html;
+    public ExportRedirectStrategy RedirectStrategy { get; set; } = ExportRedirectStrategy.Html;
 
     /// <summary>
     /// Gets an optional path to a seed-route file.
@@ -133,7 +132,7 @@ internal sealed class DocsExportCommand : AppSurfaceDocsRepositoryCommand, IComm
     /// omitted, export derives default seeds from the configured docs routing surface.
     /// </remarks>
     [CommandOption("seeds", Description = "Path to a file containing seed routes. Defaults to / and the configured docs root.")]
-    public string? SeedRoutesPath { get; init; }
+    public string? SeedRoutesPath { get; set; }
 
     /// <summary>
     /// Executes the command through the CliFx console integration.
@@ -286,7 +285,7 @@ internal abstract class AppSurfaceDocsPreviewCommand : AppSurfaceDocsRepositoryC
     /// port needs to change.
     /// </remarks>
     [CommandOption("urls", 'u', Description = "URL binding forwarded to the AppSurface Docs host, for example http://127.0.0.1:5189.")]
-    public string? Urls { get; init; }
+    public string? Urls { get; set; }
 
     /// <summary>
     /// Gets the port shortcut forwarded to the AppSurface Docs host.
@@ -296,7 +295,7 @@ internal abstract class AppSurfaceDocsPreviewCommand : AppSurfaceDocsRepositoryC
     /// scheme, or multi-binding scenarios.
     /// </remarks>
     [CommandOption("port", 'p', Description = "Port shortcut forwarded to the AppSurface Docs host.")]
-    public int? Port { get; init; }
+    public int? Port { get; set; }
 
     /// <summary>
     /// Executes the command through the CliFx console integration.
@@ -351,7 +350,7 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     /// package output folder. The value must resolve to an existing directory.
     /// </remarks>
     [CommandOption("repo", 'r', Description = "Repository root to harvest (default: current directory).")]
-    public string RepositoryRoot { get; init; } = ".";
+    public string RepositoryRoot { get; set; } = ".";
 
     /// <summary>
     /// Gets a value indicating whether startup should fail when every configured AppSurface Docs harvester fails.
@@ -361,7 +360,7 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     /// <c>docs export --mode cdn</c>.
     /// </remarks>
     [CommandOption("strict", Description = "Fail startup when every configured AppSurface Docs harvester fails.")]
-    public bool StrictHarvest { get; init; }
+    public bool StrictHarvest { get; set; }
 
     /// <summary>
     /// Gets the route-family root for AppSurface Docs version and archive routes.
@@ -372,7 +371,7 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     /// archive/version routes.
     /// </remarks>
     [CommandOption("route-root", Description = "Route-family root for AppSurface Docs version and archive routes.")]
-    public string? RouteRootPath { get; init; }
+    public string? RouteRootPath { get; set; }
 
     /// <summary>
     /// Gets the live docs root path.
@@ -382,7 +381,7 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     /// /reference/next</c>. Leave unset to use AppSurface Docs defaults.
     /// </remarks>
     [CommandOption("docs-root", Description = "Live docs root path.")]
-    public string? DocsRootPath { get; init; }
+    public string? DocsRootPath { get; set; }
 
     /// <summary>
     /// Gets the public origin used for absolute AppSurface Docs canonical metadata.
@@ -393,7 +392,7 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     /// <c>/docs</c> come from <see cref="RouteRootPath"/> and <see cref="DocsRootPath"/>.
     /// </remarks>
     [CommandOption("public-origin", Description = "Public origin used for absolute AppSurface Docs canonical metadata.")]
-    public string? PublicOrigin { get; init; }
+    public string? PublicOrigin { get; set; }
 
     /// <summary>
     /// Gets the host environment forwarded to the AppSurface Docs standalone host.
@@ -403,7 +402,7 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     /// defaults to <c>Production</c> before starting the in-process host.
     /// </remarks>
     [CommandOption("environment", 'e', Description = "Host environment forwarded to the AppSurface Docs host.")]
-    public string? EnvironmentName { get; init; }
+    public string? EnvironmentName { get; set; }
 
     /// <summary>
     /// Gets the number of seconds to wait for the web host to start before failing fast.
@@ -413,7 +412,7 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     /// rejected before the host starts.
     /// </remarks>
     [CommandOption("startup-timeout-seconds", Description = "Seconds to wait for the AppSurface Docs web host to start before failing fast. Use 0 to disable.")]
-    public double StartupTimeoutSeconds { get; init; } = 10;
+    public double StartupTimeoutSeconds { get; set; } = 10;
 
     /// <summary>
     /// Translates shared CLI options into standalone AppSurface Docs host arguments.
@@ -1730,7 +1729,8 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
 }
 
 /// <summary>
-/// Default AppSurface Docs export configurator that publishes docs route aliases into RazorWire's export graph.
+/// Default AppSurface Docs export configurator that publishes docs route aliases into RazorWire's export graph and
+/// captures the frozen route manifest alongside the static output.
 /// </summary>
 internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsExportContextConfigurator
 {
@@ -1753,6 +1753,11 @@ internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsE
                 context.AddRedirectAlias(alias.LiveUrl, entry.CanonicalLiveUrl);
             }
         }
+
+        await AppSurfaceDocsFrozenRouteManifest.WriteAsync(
+            context.OutputPath,
+            routeManifest,
+            cancellationToken);
     }
 }
 

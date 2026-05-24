@@ -61,7 +61,7 @@ This approach aims to:
 
 ### [Console](./Console/README.md)
 
-- [**ForgeTrust.AppSurface.Console**](./Console/ForgeTrust.AppSurface.Console/README.md) – Helpers for building command line apps with [CliFx](https://github.com/Tyrrrz/CliFx) including a `CriticalService`-based command runner and helpers for configuring services.
+- [**ForgeTrust.AppSurface.Console**](./Console/ForgeTrust.AppSurface.Console/README.md) – Helpers for building command line apps with [CliFx](https://github.com/Tyrrrz/CliFx), source-generated command descriptors, a `CriticalService`-based command runner, and helpers for configuring services.
 
 ### [Web](./Web/README.md)
 
@@ -176,8 +176,8 @@ The [examples](examples/README.md) directory contains sample applications that d
 how to use this project.
 
 - [Console app example](examples/console-app/README.md) – builds a simple command line
-  application using [CliFx](https://github.com/Tyrrrz/CliFx) for command
-  definitions.
+  application using [CliFx](https://github.com/Tyrrrz/CliFx) source-generated command
+  descriptors.
 - [Web app example](examples/web-app/README.md) – shows a minimal ASP.NET Core app that
   composes middleware and endpoints from modules.
 - [Config validation example](examples/config-validation/README.md) – shows scalar

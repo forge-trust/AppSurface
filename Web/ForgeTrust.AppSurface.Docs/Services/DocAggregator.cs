@@ -65,6 +65,8 @@ internal sealed record DocsSearchIndexMetadata(
 /// <param name="Breadcrumbs">Authored breadcrumb labels displayed in result chrome.</param>
 /// <param name="SourcePath">Repository-relative source path retained for provenance and custom integrations.</param>
 /// <param name="EntryPoints">Namespace README entry-point terms projected for richer search consumers.</param>
+/// <param name="Language">Normalized programming language for generated API documentation.</param>
+/// <param name="LanguageLabel">Reader-facing programming language label for generated API documentation.</param>
 internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("path")] string Path,
@@ -93,7 +95,13 @@ internal sealed record DocsSearchIndexDocument(
     [property: JsonPropertyName("sourcePath")] string SourcePath = "",
     [property: JsonPropertyName("entryPoints")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<DocsSearchIndexEntryPoint>? EntryPoints = null);
+    IReadOnlyList<DocsSearchIndexEntryPoint>? EntryPoints = null,
+    [property: JsonPropertyName("language")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Language = null,
+    [property: JsonPropertyName("languageLabel")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? LanguageLabel = null);
 
 /// <summary>
 /// Search projection for one namespace README entry point.
@@ -243,6 +251,8 @@ public class DocAggregator
     private readonly IAppSurfaceDocsHtmlSanitizer _sanitizer;
     private readonly DocsUrlBuilder _docsUrlBuilder;
     private readonly ILogger<DocAggregator> _logger;
+    private readonly AppSurfaceDocsHarvestProgressReporter? _harvestProgress;
+    private readonly AppSurfaceDocsHarvestOptions _harvestOptions;
     private readonly AppSurfaceDocsContributorOptions _contributorOptions;
     private readonly AppSurfaceDocsLocalizationOptions _localizationOptions;
     private readonly AppSurfaceDocsHarvestPathPolicySnapshotFactory _pathPolicySnapshotFactory;
@@ -346,6 +356,10 @@ public class DocAggregator
     /// <param name="utcNow">
     /// Optional clock seam used by tests that need deterministic contributor-freshness budgeting.
     /// </param>
+    /// <param name="harvestProgress">
+    /// Optional progress reporter used by live docs hosts to publish redacted harvest state. <see langword="null"/>
+    /// disables callbacks, which is appropriate for tests or hosts that do not expose the observatory.
+    /// </param>
     internal DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
         AppSurfaceDocsOptions options,
@@ -356,7 +370,8 @@ public class DocAggregator
         Func<string, CancellationToken, Task<DateTimeOffset?>>? resolveGitLastUpdatedUtcAsync,
         TimeSpan? harvesterTimeout = null,
         TimeSpan? contributorFreshnessTimeout = null,
-        Func<DateTimeOffset>? utcNow = null)
+        Func<DateTimeOffset>? utcNow = null,
+        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null)
         : this(
             harvesters,
             options,
@@ -368,7 +383,8 @@ public class DocAggregator
             resolveGitLastUpdatedUtcAsync,
             harvesterTimeout,
             contributorFreshnessTimeout,
-            utcNow)
+            utcNow,
+            harvestProgress)
     {
     }
 
@@ -382,6 +398,10 @@ public class DocAggregator
     /// <param name="sanitizer">The HTML sanitizer applied to rendered docs content.</param>
     /// <param name="docsUrlBuilder">Shared URL builder for the live source-backed docs surface.</param>
     /// <param name="logger">The logger used for harvest and contributor-freshness diagnostics.</param>
+    /// <param name="harvestProgress">
+    /// Optional progress reporter used by live docs hosts to publish redacted harvest state. <see langword="null"/>
+    /// disables callbacks, which is appropriate for tests or hosts that do not expose the observatory.
+    /// </param>
     [ActivatorUtilitiesConstructor]
     public DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
@@ -390,7 +410,8 @@ public class DocAggregator
         IMemo memo,
         IAppSurfaceDocsHtmlSanitizer sanitizer,
         DocsUrlBuilder docsUrlBuilder,
-        ILogger<DocAggregator> logger)
+        ILogger<DocAggregator> logger,
+        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null)
         : this(
             harvesters,
             options,
@@ -399,7 +420,8 @@ public class DocAggregator
             sanitizer,
             docsUrlBuilder,
             logger,
-            resolveGitLastUpdatedUtcAsync: null)
+            null,
+            harvestProgress: harvestProgress)
     {
     }
 
@@ -431,12 +453,21 @@ public class DocAggregator
     /// Optional clock seam used by tests that need deterministic contributor-freshness budgeting. When
     /// <see langword="null" />, the aggregator uses <see cref="DateTimeOffset.UtcNow"/>.
     /// </param>
+    /// <param name="harvestProgress">
+    /// Optional progress reporter used by live docs hosts to publish redacted harvest state. <see langword="null"/>
+    /// disables callbacks, so cache hits and misses produce no live updates.
+    /// </param>
     /// <remarks>
     /// Contributor freshness is resolved during snapshot generation, not during Razor view rendering. Callers that inject
     /// <paramref name="resolveGitLastUpdatedUtcAsync"/> should respect the supplied <see cref="CancellationToken"/>, because
     /// timeout cancellation is treated as "omit Last updated" rather than as a fatal snapshot failure. The timeout budget
     /// is shared across one snapshot generation so slow or wedged git lookups degrade to missing freshness evidence instead
     /// of multiplying the stall across the whole docs corpus.
+    /// When <paramref name="harvestProgress"/> is supplied, callbacks are emitted only while a new snapshot is being built:
+    /// the reporter is notified when the run starts, when each harvester starts, when document counts are known, and once
+    /// with a terminal success or failure snapshot. Memoized cache hits reuse the existing snapshot and do not emit progress.
+    /// Reporter callbacks may run on the caller's async flow or on the coordinator's background warmup task; callers should
+    /// not assume a UI thread or request scope. No further callbacks are expected after the terminal notification for a run.
     /// </remarks>
     internal DocAggregator(
         IEnumerable<IDocHarvester> harvesters,
@@ -449,7 +480,8 @@ public class DocAggregator
         Func<string, CancellationToken, Task<DateTimeOffset?>>? resolveGitLastUpdatedUtcAsync,
         TimeSpan? harvesterTimeout = null,
         TimeSpan? contributorFreshnessTimeout = null,
-        Func<DateTimeOffset>? utcNow = null)
+        Func<DateTimeOffset>? utcNow = null,
+        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null)
     {
         ArgumentNullException.ThrowIfNull(harvesters);
         ArgumentNullException.ThrowIfNull(options);
@@ -464,11 +496,15 @@ public class DocAggregator
         _sanitizer = sanitizer;
         _docsUrlBuilder = docsUrlBuilder;
         _logger = logger;
+        _harvestProgress = harvestProgress;
+        _harvestOptions = options.Harvest ?? new AppSurfaceDocsHarvestOptions();
         _contributorOptions = options.Contributor ?? throw new ArgumentNullException(nameof(options.Contributor));
         _localizationOptions = options.Localization ?? throw new ArgumentNullException(nameof(options.Localization));
         _pathPolicySnapshotFactory = new AppSurfaceDocsHarvestPathPolicySnapshotFactory(options, logger);
         SnapshotCacheDuration = ResolveSnapshotCacheDuration(options);
-        _docsCachePolicy = CachePolicy.Absolute(SnapshotCacheDuration);
+        _docsCachePolicy = CachePolicy.AbsoluteWithStaleWhileRevalidate(
+            SnapshotCacheDuration,
+            SnapshotCacheDuration);
         _harvesterTimeout = ResolveHarvesterTimeout(harvesterTimeout);
         _contributorFreshnessTimeout = contributorFreshnessTimeout ?? ContributorFreshnessTimeout;
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
@@ -775,20 +811,52 @@ public class DocAggregator
         var docsCachePolicy = _docsCachePolicy;
         var utcNow = _utcNow;
         var localizationOptions = _localizationOptions;
+        var harvestProgress = _harvestProgress;
+        var testingPreHarvestDelayMilliseconds = Math.Max(
+            0,
+            _harvestOptions.TestingPreHarvestDelayMilliseconds);
+        var testingDelayPerHarvesterMilliseconds = Math.Max(
+            0,
+            _harvestOptions.TestingDelayPerHarvesterMilliseconds);
+        var testingDelayPerDocumentMilliseconds = Math.Max(
+            0,
+            _harvestOptions.TestingDelayPerDocumentMilliseconds);
 
         return await _memo.GetAsync(
                    _cacheScope,
                    generation,
                    async (_, _, _) =>
                    {
+                       var runId = harvestProgress is null
+                           ? string.Empty
+                           : await harvestProgress.BeginRunAsync(
+                               harvesters.Select(harvester => harvester.GetType().Name).ToArray());
                        var sw = System.Diagnostics.Stopwatch.StartNew();
                        var harvestPathPolicy = _pathPolicySnapshotFactory.Create(repositoryRoot);
                        var harvestContext = new DocHarvestContext(repositoryRoot, harvestPathPolicy);
+                       if (testingPreHarvestDelayMilliseconds > 0)
+                       {
+                           if (harvestProgress is not null)
+                           {
+                               await harvestProgress.ActivityAsync(
+                                   runId,
+                                   $"Waiting {testingPreHarvestDelayMilliseconds} ms before harvesters start.");
+                           }
+
+                           await Task.Delay(
+                               TimeSpan.FromMilliseconds(testingPreHarvestDelayMilliseconds),
+                               CancellationToken.None);
+                       }
+
                        var harvesterResults = await RunHarvestersAsync(
                            harvesters,
                            harvestContext,
                            harvesterTimeout,
-                           logger);
+                           logger,
+                           harvestProgress,
+                           runId,
+                           testingDelayPerHarvesterMilliseconds,
+                           testingDelayPerDocumentMilliseconds);
                        var allNodes = harvesterResults
                            .SelectMany(result => result.Docs)
                            .ToList();
@@ -891,6 +959,10 @@ public class DocAggregator
                            utcNow(),
                            harvestPathPolicy.CreateVcsIgnoreHealthDiagnostics(),
                            logger);
+                       if (harvestProgress is not null)
+                       {
+                           await harvestProgress.CompleteRunAsync(runId, harvestHealth);
+                       }
 
                        sw.Stop();
                        logger.LogInformation(
@@ -919,7 +991,11 @@ public class DocAggregator
         IReadOnlyList<IDocHarvester> harvesters,
         DocHarvestContext context,
         TimeSpan harvesterTimeout,
-        ILogger logger)
+        ILogger logger,
+        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
+        string runId = "",
+        int testingDelayPerHarvesterMilliseconds = 0,
+        int testingDelayPerDocumentMilliseconds = 0)
     {
         if (harvesters.Count == 0)
         {
@@ -927,7 +1003,15 @@ public class DocAggregator
         }
 
         var tasks = harvesters.Select(
-            harvester => RunHarvesterAsync(harvester, context, harvesterTimeout, logger));
+            harvester => RunHarvesterAsync(
+                harvester,
+                context,
+                harvesterTimeout,
+                logger,
+                harvestProgress,
+                runId,
+                testingDelayPerHarvesterMilliseconds,
+                testingDelayPerDocumentMilliseconds));
         return await Task.WhenAll(tasks);
     }
 
@@ -940,19 +1024,46 @@ public class DocAggregator
         IDocHarvester harvester,
         DocHarvestContext context,
         TimeSpan harvesterTimeout,
-        ILogger logger)
+        ILogger logger,
+        AppSurfaceDocsHarvestProgressReporter? harvestProgress = null,
+        string runId = "",
+        int testingDelayPerHarvesterMilliseconds = 0,
+        int testingDelayPerDocumentMilliseconds = 0)
     {
         var harvesterType = harvester.GetType().Name;
         using var timeoutCts = new CancellationTokenSource();
         timeoutCts.CancelAfter(harvesterTimeout);
         try
         {
+            if (harvestProgress is not null)
+            {
+                await harvestProgress.HarvesterStartedAsync(runId, harvesterType);
+            }
+
+            if (testingDelayPerHarvesterMilliseconds > 0)
+            {
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(testingDelayPerHarvesterMilliseconds),
+                    CancellationToken.None);
+            }
+
             var harvestTask = HarvestWithContextAsync(harvester, context, timeoutCts.Token);
             var docs = await harvestTask.WaitAsync(harvesterTimeout) ?? [];
+            await PublishDocumentDelayAsync(
+                harvestProgress,
+                runId,
+                harvesterType,
+                docs.Count,
+                testingDelayPerDocumentMilliseconds);
             var additionalDiagnostics = CollectHarvestDiagnostics(harvester, harvesterType, logger);
             var status = docs.Count == 0
                 ? DocHarvesterHealthStatus.ReturnedEmpty
                 : DocHarvesterHealthStatus.Succeeded;
+            if (harvestProgress is not null)
+            {
+                await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, status, docs.Count);
+            }
+
             return new HarvesterRunResult(harvesterType, status, docs, Diagnostic: null, additionalDiagnostics);
         }
         catch (TimeoutException ex)
@@ -965,7 +1076,13 @@ public class DocAggregator
                 harvesterTimeout.TotalSeconds,
                 context.RepositoryRoot);
 
-            return CreateTimedOutHarvesterRunResult(harvesterType);
+            var result = CreateTimedOutHarvesterRunResult(harvesterType);
+            if (harvestProgress is not null)
+            {
+                await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
+            }
+
+            return result;
         }
         catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
         {
@@ -976,7 +1093,13 @@ public class DocAggregator
                 harvesterTimeout.TotalSeconds,
                 context.RepositoryRoot);
 
-            return CreateTimedOutHarvesterRunResult(harvesterType);
+            var result = CreateTimedOutHarvesterRunResult(harvesterType);
+            if (harvestProgress is not null)
+            {
+                await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
+            }
+
+            return result;
         }
         catch (OperationCanceledException ex)
         {
@@ -986,7 +1109,7 @@ public class DocAggregator
                 harvesterType,
                 context.RepositoryRoot);
 
-            return new HarvesterRunResult(
+            var result = new HarvesterRunResult(
                 harvesterType,
                 DocHarvesterHealthStatus.Canceled,
                 [],
@@ -997,6 +1120,12 @@ public class DocAggregator
                     "An AppSurface Docs harvester canceled.",
                     "The harvester observed cancellation outside AppSurface Docs' timeout budget, so AppSurface Docs skipped its docs for this snapshot.",
                     "Check whether the harvester is observing an external cancellation token or canceling its own work."));
+            if (harvestProgress is not null)
+            {
+                await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
+            }
+
+            return result;
         }
         catch (Exception ex) when (!IsFatalException(ex))
         {
@@ -1006,7 +1135,7 @@ public class DocAggregator
                 harvesterType,
                 context.RepositoryRoot);
 
-            return new HarvesterRunResult(
+            var result = new HarvesterRunResult(
                 harvesterType,
                 DocHarvesterHealthStatus.Failed,
                 [],
@@ -1017,6 +1146,37 @@ public class DocAggregator
                     "An AppSurface Docs harvester failed.",
                     "The harvester threw while scanning the docs repository, so AppSurface Docs skipped its docs for this snapshot.",
                     "Inspect the host logs for exception details, then fix the harvester configuration, repository root, or source content."));
+            if (harvestProgress is not null)
+            {
+                await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
+            }
+
+            return result;
+        }
+    }
+
+    private static async Task PublishDocumentDelayAsync(
+        AppSurfaceDocsHarvestProgressReporter? harvestProgress,
+        string runId,
+        string harvesterType,
+        int docCount,
+        int testingDelayPerDocumentMilliseconds)
+    {
+        if (docCount <= 0 || testingDelayPerDocumentMilliseconds <= 0)
+        {
+            return;
+        }
+
+        for (var currentDocCount = 1; currentDocCount <= docCount; currentDocCount++)
+        {
+            if (harvestProgress is not null)
+            {
+                await harvestProgress.HarvesterDocumentCountUpdatedAsync(runId, harvesterType, currentDocCount);
+            }
+
+            await Task.Delay(
+                TimeSpan.FromMilliseconds(testingDelayPerDocumentMilliseconds),
+                CancellationToken.None);
         }
     }
 
@@ -1860,6 +2020,8 @@ public class DocAggregator
                         .Take(MaxHeadingsPerDocument)
                         .ToList();
                     var pageTypeBadge = DocMetadataPresentation.ResolvePageTypeBadge(d.Metadata?.PageType);
+                    var codeLanguage = DocMetadataPresentation.ResolveCodeLanguageValue(d.Metadata?.CodeLanguage);
+                    var codeLanguageLabel = DocMetadataPresentation.ResolveCodeLanguageLabel(codeLanguage);
                     var hasPublicSection = DocPublicSectionCatalog.TryResolve(d.Metadata?.NavGroup, out var publicSection);
 
                     return new DocsSearchIndexDocument(
@@ -1888,7 +2050,9 @@ public class DocAggregator
                         d.Metadata?.RelatedPages ?? [],
                         d.Metadata?.Breadcrumbs ?? [],
                         d.Path,
-                        entryPoints);
+                        entryPoints,
+                        codeLanguage,
+                        codeLanguageLabel);
                 })
             .Where(r => r is not null)
             .Select(r => r!)

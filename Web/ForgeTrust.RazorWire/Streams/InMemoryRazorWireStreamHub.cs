@@ -8,9 +8,16 @@ namespace ForgeTrust.RazorWire.Streams;
 /// </summary>
 public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
 {
+    private const int ReplayCapacity = 25;
+    private const int MaxReplayChannels = 256;
+
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<ChannelWriter<string>, byte>> _channels = new();
     private readonly ConcurrentDictionary<ChannelReader<string>, ChannelWriter<string>> _readerToWriter = new();
     private readonly ConcurrentDictionary<ChannelWriter<string>, ChannelReader<string>> _writerToReader = new();
+    private readonly ConcurrentDictionary<string, Queue<string>> _replayMessages = new();
+    private readonly ConcurrentDictionary<string, object> _replayLocks = new();
+    private readonly ConcurrentDictionary<string, ReplayTouch> _replayTouched = new();
+    private long _replayTouchSequence;
 
     /// <summary>
     /// Publishes a message to all subscribers of the specified channel. Any subscribers that are closed or unable to accept the message are removed during the process.
@@ -20,34 +27,28 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
     /// <returns>`ValueTask.CompletedTask` on success, or a faulted `ValueTask` containing the exception if publishing failed.</returns>
     public ValueTask PublishAsync(string channel, string message)
     {
+        return PublishAsync(channel, message, options: null);
+    }
+
+    /// <inheritdoc />
+    public ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
+    {
         try
         {
-            if (_channels.TryGetValue(channel, out var subscribersDict))
+            if (options?.Replay == true)
             {
-                var subscribers = subscribersDict.Keys.ToList();
-                var closedSubscribers = subscribers.Where(subscriber => !subscriber.TryWrite(message)).ToList();
-
-                // Cleanup closed subscribers
-                foreach (var closed in closedSubscribers)
+                var gate = _replayLocks.GetOrAdd(channel, _ => new object());
+                lock (gate)
                 {
-                    // Explicitly attempt to complete to trigger any underlying cleanup logic
-                    closed.TryComplete();
-
-                    subscribersDict.TryRemove(closed, out _);
-
-                    // Also remove the bidirectional mappings to prevent leaks
-                    if (_writerToReader.TryRemove(closed, out var reader))
-                    {
-                        _readerToWriter.TryRemove(reader, out _);
-                    }
+                    AddReplayMessageLocked(channel, message);
+                    PublishLiveMessage(channel, message);
                 }
 
-                // Prune empty channels to prevent unbounded memory growth.
-                // We accept the minor race with Subscribe as Subscribe uses GetOrAdd.
-                if (subscribersDict.IsEmpty)
-                {
-                    _channels.TryRemove(channel, out _);
-                }
+                PruneReplayStateIfNeeded();
+            }
+            else
+            {
+                PublishLiveMessage(channel, message);
             }
 
             return ValueTask.CompletedTask;
@@ -66,15 +67,39 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
     /// <returns>A <see cref="ChannelReader{String}"/> that yields messages published to the specified channel until the subscription is removed or the writer is completed.</returns>
     public ChannelReader<string> Subscribe(string channel)
     {
+        return Subscribe(channel, options: null);
+    }
+
+    /// <inheritdoc />
+    public ChannelReader<string> Subscribe(string channel, RazorWireStreamSubscribeOptions? options)
+    {
         var subscriber = Channel.CreateBounded<string>(
             new BoundedChannelOptions(100) { FullMode = BoundedChannelFullMode.DropOldest });
 
         _readerToWriter.TryAdd(subscriber.Reader, subscriber.Writer);
         _writerToReader.TryAdd(subscriber.Writer, subscriber.Reader);
 
-        var subscribers = _channels.GetOrAdd(channel, _ => new ConcurrentDictionary<ChannelWriter<string>, byte>());
-        subscribers.TryAdd(subscriber.Writer, 0);
+        if (options?.Replay == true)
+        {
+            var gate = _replayLocks.GetOrAdd(channel, _ => new object());
+            lock (gate)
+            {
+                var subscribers = _channels.GetOrAdd(
+                    channel,
+                    _ => new ConcurrentDictionary<ChannelWriter<string>, byte>());
+                foreach (var message in GetReplayMessagesLocked(channel))
+                {
+                    subscriber.Writer.TryWrite(message);
+                }
 
+                subscribers.TryAdd(subscriber.Writer, 0);
+            }
+
+            return subscriber.Reader;
+        }
+
+        var liveSubscribers = _channels.GetOrAdd(channel, _ => new ConcurrentDictionary<ChannelWriter<string>, byte>());
+        liveSubscribers.TryAdd(subscriber.Writer, 0);
         return subscriber.Reader;
     }
 
@@ -95,4 +120,80 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
             }
         }
     }
+
+    private void PublishLiveMessage(string channel, string message)
+    {
+        if (!_channels.TryGetValue(channel, out var subscribersDict))
+        {
+            return;
+        }
+
+        var subscribers = subscribersDict.Keys.ToList();
+        var closedSubscribers = subscribers.Where(subscriber => !subscriber.TryWrite(message)).ToList();
+
+        // Cleanup closed subscribers
+        foreach (var closed in closedSubscribers)
+        {
+            // Explicitly attempt to complete to trigger any underlying cleanup logic
+            closed.TryComplete();
+
+            subscribersDict.TryRemove(closed, out _);
+
+            // Also remove the bidirectional mappings to prevent leaks
+            if (_writerToReader.TryRemove(closed, out var reader))
+            {
+                _readerToWriter.TryRemove(reader, out _);
+            }
+        }
+    }
+
+    private void AddReplayMessageLocked(string channel, string message)
+    {
+        var messages = _replayMessages.GetOrAdd(channel, _ => new Queue<string>());
+        messages.Enqueue(message);
+        while (messages.Count > ReplayCapacity)
+        {
+            messages.Dequeue();
+        }
+
+        _replayTouched[channel] = new ReplayTouch(
+            DateTimeOffset.UtcNow,
+            Interlocked.Increment(ref _replayTouchSequence));
+    }
+
+    private IReadOnlyList<string> GetReplayMessagesLocked(string channel)
+    {
+        if (!_replayMessages.TryGetValue(channel, out var messages))
+        {
+            return [];
+        }
+
+        return messages.ToArray();
+    }
+
+    private void PruneReplayStateIfNeeded()
+    {
+        if (_replayMessages.Count <= MaxReplayChannels)
+        {
+            return;
+        }
+
+        foreach (var channel in _replayTouched
+            .OrderBy(item => item.Value.TouchedUtc)
+            .ThenBy(item => item.Value.Sequence)
+            .Select(item => item.Key)
+            .Take(_replayMessages.Count - MaxReplayChannels))
+        {
+            if (_channels.TryGetValue(channel, out var subscribers) && !subscribers.IsEmpty)
+            {
+                continue;
+            }
+
+            _replayMessages.TryRemove(channel, out _);
+            _replayLocks.TryRemove(channel, out _);
+            _replayTouched.TryRemove(channel, out _);
+        }
+    }
+
+    private readonly record struct ReplayTouch(DateTimeOffset TouchedUtc, long Sequence);
 }
