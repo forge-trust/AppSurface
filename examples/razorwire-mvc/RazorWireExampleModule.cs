@@ -14,6 +14,14 @@ public class RazorWireExampleModule : IAppSurfaceWebModule
     /// <summary>
     /// Registers services required by the Razor Wire example module.
     /// </summary>
+    /// <remarks>
+    /// <see cref="ConfigureServices(StartupContext, IServiceCollection)"/> intentionally sets
+    /// <see cref="RazorWireOptions.Streams"/>.<see cref="RazorWireStreamOptions.AuthorizationMode"/> to
+    /// <see cref="RazorWireStreamAuthorizationMode.AllowAll"/> because this application publishes public demo streams.
+    /// Production applications should not copy this setting for user, tenant, or workflow-specific channels; keep the
+    /// default deny behavior and register a custom <see cref="ForgeTrust.RazorWire.Streams.IRazorWireChannelAuthorizer"/>
+    /// when stream access depends on request context.
+    /// </remarks>
     /// <param name="context">The startup context providing environment and configuration for module initialization.</param>
     /// <param name="services">The service collection to which module services are added.</param>
     public void ConfigureServices(StartupContext context, IServiceCollection services)

@@ -244,6 +244,34 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostChannelAuthorizerFactoryReturnsNull_AllowsOnlyVisibleHarvestChannel()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireChannelAuthorizer>(_ => null!);
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.False(await authorizer.CanSubscribeAsync(context, "host-channel"));
+    }
+
+    [Fact]
     public async Task AddAppSurfaceDocs_WhenHostChannelAuthorizerIsFactory_DelegatesHostChannels()
     {
         var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };

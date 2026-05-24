@@ -16,7 +16,22 @@ public static class RazorWireServiceCollectionExtensions
     /// Registers RazorWire options and default RazorWire services, including <see cref="IRazorPartialRenderer"/>, into the provided <see cref="IServiceCollection"/>.
     /// </summary>
     /// <param name="services">The service collection to register RazorWire services into.</param>
-    /// <param name="configure">Optional action to configure <see cref="RazorWireOptions"/>; if null, default options are used.</param>
+    /// <param name="configure">
+    /// Optional action to configure <see cref="RazorWireOptions"/>; if null, default options are used.
+    /// Stream subscriptions are denied by default because
+    /// <see cref="RazorWireStreamAuthorizationMode.DenyAll"/> is the default authorization mode.
+    /// </param>
+    /// <remarks>
+    /// If no custom <see cref="IRazorWireChannelAuthorizer"/> is registered, RazorWire resolves a built-in authorizer
+    /// from <see cref="RazorWireOptions.Streams"/>.<see cref="RazorWireStreamOptions.AuthorizationMode"/>.
+    /// <see cref="RazorWireStreamAuthorizationMode.DenyAll"/> selects
+    /// <see cref="DenyAllRazorWireChannelAuthorizer"/>, while
+    /// <see cref="RazorWireStreamAuthorizationMode.AllowAll"/> selects
+    /// <see cref="AllowAllRazorWireChannelAuthorizer"/>. Register a custom
+    /// <see cref="IRazorWireChannelAuthorizer"/> before or after this method when stream access depends on the current
+    /// request, user, tenant, or workflow. Unknown authorization-mode values throw <see cref="InvalidOperationException"/>
+    /// during authorizer resolution instead of falling back to an unsafe allow path.
+    /// </remarks>
     /// <returns>The same <see cref="IServiceCollection"/> instance with RazorWire registrations added.</returns>
     public static IServiceCollection AddRazorWire(
         this IServiceCollection services,

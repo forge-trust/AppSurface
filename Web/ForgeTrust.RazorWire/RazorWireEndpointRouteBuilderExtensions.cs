@@ -55,7 +55,11 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     var authorizer = context.RequestServices.GetRequiredService<IRazorWireChannelAuthorizer>();
                     if (!await authorizer.CanSubscribeAsync(context, channel))
                     {
-                        LogDeniedSubscription(context, options.Streams.AuthorizationMode, channel);
+                        LogDeniedSubscription(
+                            context,
+                            options.Streams.AuthorizationMode,
+                            authorizer.GetType().FullName ?? authorizer.GetType().Name,
+                            channel);
 
                         context.Response.StatusCode = StatusCodes.Status403Forbidden;
                         if (IsDevelopment(context))
@@ -143,6 +147,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
     private static void LogDeniedSubscription(
         HttpContext context,
         RazorWireStreamAuthorizationMode authorizationMode,
+        string authorizerType,
         string channel)
     {
         var logger = context.RequestServices.GetService<ILoggerFactory>()?.CreateLogger(StreamLoggerCategory);
@@ -156,9 +161,10 @@ public static class RazorWireEndpointRouteBuilderExtensions
 
         logger.LogWarning(
             StreamSubscriptionDeniedEventId,
-            "RazorWire stream subscription denied. Environment: {Environment}; ConfiguredAuthorizationMode: {ConfiguredAuthorizationMode}; IsAuthenticated: {IsAuthenticated}; ChannelLength: {ChannelLength}",
+            "RazorWire stream subscription denied. Environment: {Environment}; ConfiguredAuthorizationMode: {ConfiguredAuthorizationMode}; AuthorizerType: {AuthorizerType}; IsAuthenticated: {IsAuthenticated}; ChannelLength: {ChannelLength}",
             environment,
             authorizationMode,
+            authorizerType,
             isAuthenticated,
             channel.Length);
     }

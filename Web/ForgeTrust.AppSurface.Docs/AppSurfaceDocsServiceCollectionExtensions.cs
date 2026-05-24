@@ -262,7 +262,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         if (descriptor.ImplementationFactory is not null)
         {
             return FilterBuiltInDenyAllAuthorizer(
-                (IRazorWireChannelAuthorizer)descriptor.ImplementationFactory(provider)!);
+                descriptor.ImplementationFactory(provider) as IRazorWireChannelAuthorizer);
         }
 
         if (descriptor.ImplementationType is not null)
@@ -278,7 +278,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     }
 
     private static IRazorWireChannelAuthorizer? FilterBuiltInDenyAllAuthorizer(
-        IRazorWireChannelAuthorizer authorizer)
+        IRazorWireChannelAuthorizer? authorizer)
     {
         return authorizer is DenyAllRazorWireChannelAuthorizer ? null : authorizer;
     }
