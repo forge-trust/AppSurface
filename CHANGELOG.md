@@ -48,6 +48,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs search result rows now expose the whole visible result as one semantic link, making mobile taps easier while preserving keyboard focus, copied links, and open-in-new-tab browser behavior.
 - AppSurface Docs homepage navigation rows now use title-led scan paths with quiet decorative chevron affordances instead of repeated "Open..." labels.
 - RazorWire CLI validation errors now include a concrete next command and `razorwire export --help` hint so failed exports are easier to recover from.
+- RazorWire stream subscriptions now deny by default through `RazorWireOptions.Streams.AuthorizationMode = DenyAll`; apps must opt into `AllowAll` for public/demo streams or register `IRazorWireChannelAuthorizer` for request-aware channel rules.
 - RazorWire CLI export now defaults to CDN-safe output: managed internal links, frames, scripts, stylesheets, images, `<img>` and `<source>` `srcset`, conventional `404.html`, and CSS `url(...)` references rewrite to emitted static artifacts, with `--mode hybrid` available for extensionless server-routed deployments.
 - Tailwind development watch mode now logs a warning, not a startup error, when the standalone CLI is unavailable and the app can continue serving existing CSS.
 - AppSurface Docs search now keeps failure recovery markup out of the active search shell until the index actually fails to load.
@@ -66,6 +67,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface has not cut `v0.1.0` yet, so there is no tagged migration guide today.
 - Before `v0.1.0`, any breaking or behavior-changing update should record provisional guidance in [`releases/unreleased.md`](./releases/unreleased.md) and move finalized steps into the tagged release note once the version ships.
 - Existing `rw-active` forms opt into failed-form request markers and automatic fallback UI by default. Set `options.Forms.EnableFailureUx = false`, `options.Forms.FailureMode = RazorWireFormFailureMode.Manual`, or per-form `data-rw-form-failure="off"` if an app already owns all failure rendering.
+- Existing `rw:stream-source` subscriptions now return `403` until apps configure `RazorWireStreamAuthorizationMode.AllowAll` for public/demo streams or register a custom `IRazorWireChannelAuthorizer`.
 - Existing RazorWire CLI export users who depended on extensionless internal URLs should pass `--mode hybrid`; the default now rewrites exporter-managed URLs for plain static/CDN hosting and fails CDN validation when required frame or asset artifacts cannot be emitted.
 - AppSurface Docs authors using `featured_pages` should migrate to `featured_page_groups`; the old flat field now logs a warning and no longer renders.
 - Code that expected custom AppSurface labels from `IHostEnvironment.ApplicationName` should use `StartupContext.ApplicationName`; host environment application names now remain tied to assembly identity so ASP.NET static web assets continue to resolve.
