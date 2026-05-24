@@ -62,6 +62,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.harvest.all_failed", DocHarvestDiagnosticCodes.AllFailed);
         Assert.Equal("appsurfacedocs.harvest.vcs_ignore_summary", DocHarvestDiagnosticCodes.VcsIgnoreSummary);
         Assert.Equal("appsurfacedocs.harvest.vcs_ignore_warning", DocHarvestDiagnosticCodes.VcsIgnoreWarning);
+        Assert.Equal("appsurfacedocs.metadata.unsafe_trust_migration_href", DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref);
         Assert.Equal("appsurfacedocs.javascript.file_too_large", DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
         Assert.Equal("appsurfacedocs.javascript.parse_failed", DocHarvestDiagnosticCodes.JavaScriptParseFailed);
         Assert.Equal("appsurfacedocs.javascript.missing_include", DocHarvestDiagnosticCodes.JavaScriptMissingInclude);

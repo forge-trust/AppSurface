@@ -11,8 +11,10 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// <summary>
 /// Harvester implementation that scans Markdown source files and converts them into documentation nodes.
 /// </summary>
-public class MarkdownHarvester : IDocHarvester
+public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 {
+    private const string HarvesterType = nameof(MarkdownHarvester);
+    private const string UnsafeTrustMigrationHrefMetadataDiagnosticCode = "unsafe-trust-migration-href";
     private static readonly string[] SidecarExtensions = [".yml", ".yaml"];
     private const int MinOutlineHeadingLevel = 2;
     private const int MaxOutlineHeadingLevel = 3;
@@ -20,6 +22,7 @@ public class MarkdownHarvester : IDocHarvester
     private readonly ILogger<MarkdownHarvester> _logger;
     private readonly Func<string, CancellationToken, Task<string>> _readAllTextAsync;
     private readonly AppSurfaceDocsHarvestPathPolicy _pathPolicy;
+    private IReadOnlyList<DocHarvestDiagnostic> _lastDiagnostics = [];
 
     /// <summary>
     /// Initializes a new instance of <see cref="MarkdownHarvester"/> with the specified logger and configures the Markdown pipeline.
@@ -184,56 +187,64 @@ public class MarkdownHarvester : IDocHarvester
         CancellationToken cancellationToken)
     {
         var nodes = new List<DocNode>();
-        foreach (var file in EnumerateMarkdownSourceFiles(rootPath, pathPolicy, cancellationToken))
+        var diagnostics = new List<DocHarvestDiagnostic>();
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+            foreach (var file in EnumerateMarkdownSourceFiles(rootPath, pathPolicy, cancellationToken))
             {
-                var relativePath = Path.GetRelativePath(rootPath, file).Replace('\\', '/');
-                if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.Markdown))
+                cancellationToken.ThrowIfCancellationRequested();
+                try
                 {
-                    continue;
+                    var relativePath = Path.GetRelativePath(rootPath, file).Replace('\\', '/');
+                    if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.Markdown))
+                    {
+                        continue;
+                    }
+
+                    var content = await _readAllTextAsync(file, cancellationToken);
+                    var (markdownBody, frontMatterResult) = MarkdownFrontMatterParser.ExtractWithDiagnostics(content);
+                    ReportMetadataDiagnostics(relativePath, frontMatterResult.Diagnostics, diagnostics);
+                    var sidecarMetadata = await ReadMetadataSidecarAsync(file, relativePath, cancellationToken, diagnostics);
+                    var explicitMetadata = DocMetadata.Merge(frontMatterResult.Metadata, sidecarMetadata);
+                    var title = Path.GetFileNameWithoutExtension(file);
+
+                    if (title.Equals("README", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parentDir = Path.GetDirectoryName(relativePath);
+                        title = string.IsNullOrEmpty(parentDir) ? "Home" : Path.GetFileName(parentDir);
+                    }
+
+                    var document = Markdown.Parse(markdownBody, _pipeline);
+                    var resolvedTitle = string.IsNullOrWhiteSpace(explicitMetadata?.Title)
+                        ? ResolveImplicitTitle(relativePath, document, title)
+                        : explicitMetadata!.Title!.Trim();
+                    var html = Markdown.ToHtml(document, _pipeline);
+                    var metadata = DocMetadataFactory.CreateMarkdownMetadata(
+                        relativePath,
+                        resolvedTitle,
+                        explicitMetadata,
+                        ExtractSummary(markdownBody),
+                        _logger);
+                    var outline = DocOutlinePolicy.Apply(ExtractOutline(document), metadata);
+
+                    nodes.Add(new DocNode(resolvedTitle, relativePath, html, Metadata: metadata, Outline: outline));
                 }
-
-                var content = await _readAllTextAsync(file, cancellationToken);
-                var (markdownBody, frontMatterResult) = MarkdownFrontMatterParser.ExtractWithDiagnostics(content);
-                LogMetadataDiagnostics(relativePath, frontMatterResult.Diagnostics);
-                var sidecarMetadata = await ReadMetadataSidecarAsync(file, relativePath, cancellationToken);
-                var explicitMetadata = DocMetadata.Merge(frontMatterResult.Metadata, sidecarMetadata);
-                var title = Path.GetFileNameWithoutExtension(file);
-
-                if (title.Equals("README", StringComparison.OrdinalIgnoreCase))
+                catch (OperationCanceledException)
                 {
-                    var parentDir = Path.GetDirectoryName(relativePath);
-                    title = string.IsNullOrEmpty(parentDir) ? "Home" : Path.GetFileName(parentDir);
+                    throw;
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to process markdown file: {File}", file);
+                }
+            }
 
-                var document = Markdown.Parse(markdownBody, _pipeline);
-                var resolvedTitle = string.IsNullOrWhiteSpace(explicitMetadata?.Title)
-                    ? ResolveImplicitTitle(relativePath, document, title)
-                    : explicitMetadata!.Title!.Trim();
-                var html = Markdown.ToHtml(document, _pipeline);
-                var metadata = DocMetadataFactory.CreateMarkdownMetadata(
-                    relativePath,
-                    resolvedTitle,
-                    explicitMetadata,
-                    ExtractSummary(markdownBody),
-                    _logger);
-                var outline = DocOutlinePolicy.Apply(ExtractOutline(document), metadata);
-
-                nodes.Add(new DocNode(resolvedTitle, relativePath, html, Metadata: metadata, Outline: outline));
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to process markdown file: {File}", file);
-            }
+            return nodes;
         }
-
-        return nodes;
+        finally
+        {
+            _lastDiagnostics = diagnostics.ToArray();
+        }
     }
 
     private IEnumerable<string> EnumerateMarkdownSourceFiles(
@@ -275,6 +286,7 @@ public class MarkdownHarvester : IDocHarvester
     /// <param name="markdownFilePath">The absolute Markdown file path.</param>
     /// <param name="relativeMarkdownPath">The Markdown file path relative to the harvest root.</param>
     /// <param name="cancellationToken">A token that can cancel sidecar discovery or file reads.</param>
+    /// <param name="harvestDiagnostics">Optional harvest diagnostic collection that receives sidecar metadata warnings.</param>
     /// <returns>The parsed sidecar metadata, or <c>null</c> when no valid sidecar applies.</returns>
     /// <remarks>
     /// AppSurface Docs supports paired metadata files named <c>{file}.yml</c> and <c>{file}.yaml</c> such as
@@ -285,7 +297,8 @@ public class MarkdownHarvester : IDocHarvester
     internal async Task<DocMetadata?> ReadMetadataSidecarAsync(
         string markdownFilePath,
         string relativeMarkdownPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ICollection<DocHarvestDiagnostic>? harvestDiagnostics = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(markdownFilePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(relativeMarkdownPath);
@@ -316,7 +329,10 @@ public class MarkdownHarvester : IDocHarvester
         {
             var yaml = await _readAllTextAsync(sidecarPath, cancellationToken);
             var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics(yaml);
-            LogMetadataDiagnostics($"{relativeMarkdownPath}{Path.GetExtension(sidecarPath)}", result.Diagnostics);
+            ReportMetadataDiagnostics(
+                $"{relativeMarkdownPath}{Path.GetExtension(sidecarPath)}",
+                result.Diagnostics,
+                harvestDiagnostics);
             return result.Metadata;
         }
         catch (OperationCanceledException)
@@ -343,12 +359,23 @@ public class MarkdownHarvester : IDocHarvester
         }
     }
 
-    private void LogMetadataDiagnostics(
+    IReadOnlyList<DocHarvestDiagnostic> IDocHarvesterDiagnosticProvider.GetHarvestDiagnostics()
+    {
+        return GetType() == typeof(MarkdownHarvester) ? _lastDiagnostics : [];
+    }
+
+    private void ReportMetadataDiagnostics(
         string sourcePath,
-        IReadOnlyList<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+        IReadOnlyList<AppSurfaceDocsMetadataDiagnostic> diagnostics,
+        ICollection<DocHarvestDiagnostic>? harvestDiagnostics)
     {
         foreach (var diagnostic in diagnostics)
         {
+            if (ShouldExposeMetadataDiagnosticToHarvestHealth(diagnostic))
+            {
+                harvestDiagnostics?.Add(CreateMetadataHarvestDiagnostic(sourcePath, diagnostic));
+            }
+
             _logger.LogWarning(
                 "AppSurface Docs metadata warning {Code} in {SourcePath} at {FieldPath}: {Problem} Cause: {Cause} Fix: {Fix}",
                 diagnostic.Code,
@@ -358,6 +385,24 @@ public class MarkdownHarvester : IDocHarvester
                 diagnostic.Cause,
                 diagnostic.Fix);
         }
+    }
+
+    private static DocHarvestDiagnostic CreateMetadataHarvestDiagnostic(
+        string sourcePath,
+        AppSurfaceDocsMetadataDiagnostic diagnostic)
+    {
+        return new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref,
+            DocHarvestDiagnosticSeverity.Warning,
+            HarvesterType,
+            $"Metadata warning in {sourcePath} at {diagnostic.FieldPath}: {diagnostic.Problem}",
+            diagnostic.Cause,
+            diagnostic.Fix);
+    }
+
+    private static bool ShouldExposeMetadataDiagnosticToHarvestHealth(AppSurfaceDocsMetadataDiagnostic diagnostic)
+    {
+        return diagnostic.Code.Equals(UnsafeTrustMigrationHrefMetadataDiagnosticCode, StringComparison.Ordinal);
     }
 
     internal static string? ExtractSummary(string markdown)

@@ -5232,6 +5232,58 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_WithBuiltInMarkdownHarvesterSurfacesMetadataDiagnostics()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-docaggregator-metadata-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(root, "Guide.md"),
+                """
+                ---
+                trust:
+                  migration:
+                    label: Run the upgrade
+                    href: javascript:alert(1)
+                ---
+                # Guide
+                """);
+
+            using var cache = new MemoryCache(new MemoryCacheOptions());
+            var memo = new Memo(cache);
+            var env = A.Fake<IWebHostEnvironment>();
+            A.CallTo(() => env.ContentRootPath).Returns(root);
+            var aggregator = new DocAggregator(
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, NullLoggerFactory.Instance)],
+                new AppSurfaceDocsOptions
+                {
+                    Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = root }
+                },
+                env,
+                memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var docs = await aggregator.GetDocsAsync();
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            var doc = Assert.Single(docs);
+            Assert.Equal("Run the upgrade", doc.Metadata?.Trust?.Migration?.Label);
+            Assert.Null(doc.Metadata?.Trust?.Migration?.Href);
+            var diagnostic = Assert.Single(
+                health.Diagnostics,
+                item => item.Code == DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref);
+            Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+            Assert.Equal(nameof(MarkdownHarvester), diagnostic.HarvesterType);
+            Assert.Contains("Guide.md", diagnostic.Problem, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task GetDocsAsync_WithLegacyCustomHarvesterKeepsPublicHarvestContract()
     {
         var root = Directory.CreateTempSubdirectory("appsurface-docaggregator-custom-").FullName;
