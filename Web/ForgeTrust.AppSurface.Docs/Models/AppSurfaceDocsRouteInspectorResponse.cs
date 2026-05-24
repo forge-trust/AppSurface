@@ -132,8 +132,8 @@ public sealed record AppSurfaceDocsRouteAliasResponse
     /// Gets the alias source category.
     /// </summary>
     /// <remarks>
-    /// Values currently include <c>MarkdownSource</c> for implicit source-shaped recovery aliases and
-    /// <c>DeclaredRedirect</c> for aliases declared by documentation metadata.
+    /// Values currently include <c>MarkdownSource</c> and <c>MarkdownSourceHtml</c> for implicit source-shaped
+    /// recovery aliases, and <c>DeclaredRedirect</c> for aliases declared by documentation metadata.
     /// Consumers should treat unknown values as alias categories from newer servers rather than as parse failures.
     /// </remarks>
     [JsonPropertyName("kind")]
