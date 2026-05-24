@@ -88,6 +88,35 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void AddRedirectAlias_Should_Register_Normalized_Routes()
+    {
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        context.AddRedirectAlias(" /docs/example/README.md/ ", " /docs/example/ ");
+
+        var artifact = Assert.Single(context.RedirectArtifacts);
+        Assert.Equal("/docs/example/README.md", artifact.AliasRoute);
+        Assert.Equal("/docs/example", artifact.CanonicalRoute);
+    }
+
+    [Theory]
+    [InlineData("/docs/example\r", "/docs/example", "aliasRoute")]
+    [InlineData("/docs/example", "/docs/example\t", "canonicalRoute")]
+    public void AddRedirectAlias_Should_Reject_Control_Characters(
+        string aliasRoute,
+        string canonicalRoute,
+        string expectedParamName)
+    {
+        var context = new ExportContext("dist", null, "http://localhost:5000");
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => context.AddRedirectAlias(aliasRoute, canonicalRoute));
+
+        Assert.Equal(expectedParamName, exception.ParamName);
+        Assert.Contains("must not contain newline, carriage return, or tab", exception.Message);
+    }
+
+    [Fact]
     public void ExtractAssets_Should_Find_Css_Urls()
     {
         // Arrange
@@ -914,6 +943,127 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_CdnMode_Should_Write_Netlify_Redirect_Rules_Without_Alias_Html()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/docs/example/README.md.html", "/docs/example");
+            context.AddRedirectAlias("/docs/example/README.md", "/docs/example");
+
+            await _sut.RunAsync(context);
+
+            var canonicalHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "docs", "example.html"));
+            Assert.Contains("""<link rel="canonical" href="/docs/example.html">""", canonicalHtml);
+            Assert.False(File.Exists(Path.Join(tempDir, "docs", "example", "README.md.html")));
+
+            var redirects = await File.ReadAllLinesAsync(Path.Join(tempDir, "_redirects"));
+            Assert.Equal(
+                [
+                    "/docs/example/README.md /docs/example 301!",
+                    "/docs/example/README.md.html /docs/example 301!"
+                ],
+                redirects);
+            Assert.False(context.RouteOutcomes.ContainsKey("/docs/example/README.md"));
+            Assert.False(context.RouteOutcomes.ContainsKey("/docs/example/README.md.html"));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Sort_Dedupe_And_Percent_Encode_Netlify_Redirect_Rules()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/docs/Legacy Space/guide:one*%25", "/docs/example");
+            context.AddRedirectAlias("/docs/alpha/éxample", "/docs/example");
+            context.AddRedirectAlias("/docs/Legacy Space/guide:one*%25", "/docs/example");
+
+            await _sut.RunAsync(context);
+
+            var redirects = await File.ReadAllLinesAsync(Path.Join(tempDir, "_redirects"));
+            Assert.Equal(
+                [
+                    "/docs/Legacy%20Space/guide%3Aone%2A%25 /docs/example 301!",
+                    "/docs/alpha/%C3%A9xample /docs/example 301!"
+                ],
+                redirects);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Preserve_Custom_Roots_In_Netlify_Redirect_Rules()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/reference/next/packages/README.md", "/docs/example");
+            context.AddRedirectAlias("/packages/README.md", "/docs/example");
+
+            await _sut.RunAsync(context);
+
+            var redirects = await File.ReadAllLinesAsync(Path.Join(tempDir, "_redirects"));
+            Assert.Equal(
+                [
+                    "/packages/README.md /docs/example 301!",
+                    "/reference/next/packages/README.md /docs/example 301!"
+                ],
+                redirects);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_CdnMode_Should_Crawl_Registered_Seed_Routes_Before_Redirect_Validation()
     {
         var tempDir = Directory.CreateTempSubdirectory().FullName;
@@ -959,6 +1109,214 @@ public class ExportEngineTests
             var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
             Assert.Equal("/docs/missing/README.md.html", diagnostic.Route);
             Assert.Contains("could not resolve canonical artifact", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Netlify_Redirect_Alias_Targets_Two_Canonicals()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/", "/docs/other"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/docs/legacy", "/docs/example");
+            context.AddRedirectAlias("/docs/legacy", "/docs/other");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(
+                exception.Diagnostics,
+                item => item.Code == "RWEXPORT005"
+                        && item.Message.Contains("targets both '/docs/example' and '/docs/other'", StringComparison.Ordinal));
+            Assert.Equal("/docs/legacy", diagnostic.Route);
+            Assert.Contains("targets both '/docs/example' and '/docs/other'", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Netlify_Redirect_Alias_Serializes_To_Canonical()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/docs/example", "/docs/example");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(
+                exception.Diagnostics,
+                item => item.Code == "RWEXPORT005"
+                        && item.Message.Contains("serializes to the same path as canonical route", StringComparison.Ordinal));
+            Assert.Equal("/docs/example", diagnostic.Route);
+            Assert.Contains("serializes to the same path as canonical route", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Netlify_Redirect_Alias_Serialized_Path_Targets_Two_Canonicals()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/", "/docs/other"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/docs/legacy guide", "/docs/example");
+            context.AddRedirectAlias("/docs/legacy%20guide", "/docs/other");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
+            Assert.Equal("/docs/legacy%20guide", diagnostic.Route);
+            Assert.Contains("serializes to '/docs/legacy%20guide'", diagnostic.Message);
+            Assert.Contains("already targets '/docs/example'", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Netlify_Redirects_File_Would_Overwrite_Exported_Artifact()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new RedirectsFileCollisionHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/", "/_redirects"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/docs/example/README.md", "/docs/example");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
+            Assert.Equal("/_redirects", diagnostic.Route);
+            Assert.Contains("would overwrite the artifact for exported route '/_redirects'", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Fail_When_Netlify_Alias_Route_Is_Redirects_File()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/_redirects", "/docs/example");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
+            Assert.Equal("/_redirects", diagnostic.Route);
+            Assert.Contains("reserves the root '_redirects' file", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_Should_Fail_When_Netlify_Redirect_Strategy_Is_Selected()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new DocsRedirectArtifactHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Netlify);
+            context.AddRedirectAlias("/docs/example/README.md", "/docs/example");
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT005");
+            Assert.Equal("/_redirects", diagnostic.Route);
+            Assert.Contains("require CDN export mode", diagnostic.Message);
         }
         finally
         {
@@ -2408,6 +2766,30 @@ public class ExportEngineTests
             if (_aliasReturnsBody && path == "/docs/example/README.md.html")
             {
                 return Html("<html><body><h1>Stale alias body</h1></body></html>");
+            }
+
+            return Text(string.Empty, "text/plain", HttpStatusCode.NotFound);
+        }
+    }
+
+    private sealed class RedirectsFileCollisionHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""<html><body><a href="/docs/example">Example</a></body></html>""");
+            }
+
+            if (path == "/docs/example")
+            {
+                return Html("<html><body><h1>Example</h1></body></html>");
+            }
+
+            if (path == "/_redirects")
+            {
+                return Text("/old /new 301!", "text/plain");
             }
 
             return Text(string.Empty, "text/plain", HttpStatusCode.NotFound);

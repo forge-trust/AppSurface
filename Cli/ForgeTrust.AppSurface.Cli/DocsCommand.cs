@@ -115,6 +115,17 @@ internal sealed class DocsExportCommand : AppSurfaceDocsRepositoryCommand, IComm
     public ExportMode Mode { get; init; } = ExportMode.Cdn;
 
     /// <summary>
+    /// Gets the redirect alias materialization strategy used by the underlying RazorWire exporter.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ExportRedirectStrategy.Html"/> is the default and works on GitHub Pages and generic static hosts by
+    /// writing alias HTML fallback files. <see cref="ExportRedirectStrategy.Netlify"/> writes a root <c>_redirects</c>
+    /// file for Netlify-compatible CDN hosting and is valid only with <see cref="ExportMode.Cdn"/>.
+    /// </remarks>
+    [CommandOption("redirects", Description = "Redirect strategy: html (default) or netlify.")]
+    public ExportRedirectStrategy RedirectStrategy { get; init; } = ExportRedirectStrategy.Html;
+
+    /// <summary>
     /// Gets an optional path to a seed-route file.
     /// </summary>
     /// <remarks>
@@ -178,6 +189,11 @@ internal sealed class DocsExportCommand : AppSurfaceDocsRepositoryCommand, IComm
             throw new CommandException("The --output value must point to an export directory.");
         }
 
+        if (Mode == ExportMode.Hybrid && RedirectStrategy == ExportRedirectStrategy.Netlify)
+        {
+            throw new CommandException("The --redirects netlify strategy requires --mode cdn because Netlify rules point at publish-root static routes.");
+        }
+
         var outputPath = Path.GetFullPath(OutputPath);
         if (File.Exists(outputPath))
         {
@@ -208,6 +224,7 @@ internal sealed class DocsExportCommand : AppSurfaceDocsRepositoryCommand, IComm
             seedRoutesPath,
             initialSeedRoutes,
             Mode,
+            RedirectStrategy,
             DefaultExportUrl);
     }
 
@@ -565,6 +582,7 @@ internal readonly record struct AppSurfaceDocsHostArgs(
 /// <param name="SeedRoutesPath">Optional absolute seed-route file path.</param>
 /// <param name="InitialSeedRoutes">Optional in-memory seed routes used when <paramref name="SeedRoutesPath"/> is null.</param>
 /// <param name="Mode">RazorWire static export mode.</param>
+/// <param name="RedirectStrategy">Redirect alias materialization strategy.</param>
 /// <param name="RequestedBaseUrl">Loopback URL passed to Kestrel. The default uses port 0 so the OS chooses a free port.</param>
 internal readonly record struct AppSurfaceDocsExportArgs(
     AppSurfaceDocsHostArgs HostArgs,
@@ -572,6 +590,7 @@ internal readonly record struct AppSurfaceDocsExportArgs(
     string? SeedRoutesPath,
     IReadOnlyList<string>? InitialSeedRoutes,
     ExportMode Mode,
+    ExportRedirectStrategy RedirectStrategy,
     string RequestedBaseUrl);
 
 /// <summary>
@@ -1440,7 +1459,8 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
                 args.SeedRoutesPath,
                 args.InitialSeedRoutes,
                 baseUrl,
-                args.Mode);
+                args.Mode,
+                args.RedirectStrategy);
 
             await _contextConfigurator.ConfigureAsync(host, context, cancellationToken);
 
@@ -1730,7 +1750,7 @@ internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsE
 
             foreach (var alias in entry.RecoveryAliases.Concat(entry.DeclaredAliases))
             {
-                context.AddRedirectArtifact(alias.LiveUrl, entry.CanonicalLiveUrl);
+                context.AddRedirectAlias(alias.LiveUrl, entry.CanonicalLiveUrl);
             }
         }
     }

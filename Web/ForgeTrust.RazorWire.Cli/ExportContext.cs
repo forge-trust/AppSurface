@@ -60,6 +60,18 @@ public class ExportContext
     public ExportMode Mode { get; }
 
     /// <summary>
+    /// Gets the strategy used to materialize registered redirect aliases.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ExportRedirectStrategy.Html"/> is the default for generic static hosts and writes tiny alias HTML
+    /// files after canonical pages are materialized. <see cref="ExportRedirectStrategy.Netlify"/> writes one root
+    /// <c>_redirects</c> file with exact provider rules and is intended for CDN exports published to Netlify or a
+    /// compatible CDN. Netlify validation operates on the serialized provider rule paths, so duplicate exact rules are
+    /// de-duplicated while self-redirects and same-source/different-target rules fail before files are written.
+    /// </remarks>
+    public ExportRedirectStrategy RedirectStrategy { get; }
+
+    /// <summary>
     /// Gets the set of URLs that have already been visited during the crawl.
     /// </summary>
     public HashSet<string> Visited { get; } = new();
@@ -105,29 +117,50 @@ public class ExportContext
     internal Dictionary<string, string> PartialArtifactUrls { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Gets redirect fallback artifacts registered by host-specific exporters.
+    /// Gets redirect aliases registered by host-specific exporters.
     /// </summary>
     internal List<ExportRedirectArtifact> RedirectArtifacts { get; } = [];
 
     /// <summary>
-    /// Registers a route whose static output should be a tiny redirect artifact to an already-exported canonical route.
+    /// Registers a route alias that should redirect to an already-exported canonical route.
     /// </summary>
-    /// <param name="aliasRoute">Root-relative alias route that should write the redirect artifact.</param>
+    /// <param name="aliasRoute">Root-relative alias route that should redirect.</param>
     /// <param name="canonicalRoute">Root-relative canonical route that owns the real exported page body.</param>
     /// <remarks>
     /// This API is intended for hosts that know route aliases before crawling starts. The export engine validates registered
-    /// aliases in every export mode so collisions and missing canonical artifacts fail early. CDN mode then writes normal
-    /// HTML/CSS bodies first, followed by redirect artifacts, so source-shaped aliases do not become duplicate public pages.
+    /// aliases before materialization so collisions and missing canonical artifacts fail early. The selected
+    /// <see cref="RedirectStrategy"/> controls whether aliases become HTML fallback artifacts or provider redirect rules, so
+    /// source-shaped aliases do not become duplicate public pages.
     /// </remarks>
     /// <exception cref="ArgumentException">
-    /// Thrown when either route is blank, is not root-relative, is protocol-relative, or contains a query string or fragment.
+    /// Thrown when either route is blank, is not root-relative, is protocol-relative, contains a query string or fragment,
+    /// or contains newline, carriage return, or tab characters.
     /// </exception>
-    public void AddRedirectArtifact(string aliasRoute, string canonicalRoute)
+    public void AddRedirectAlias(string aliasRoute, string canonicalRoute)
     {
         RedirectArtifacts.Add(
             new ExportRedirectArtifact(
                 NormalizeRedirectArtifactRoute(aliasRoute, nameof(aliasRoute)),
                 NormalizeRedirectArtifactRoute(canonicalRoute, nameof(canonicalRoute))));
+    }
+
+    /// <summary>
+    /// Registers a route whose static output should redirect to an already-exported canonical route.
+    /// </summary>
+    /// <param name="aliasRoute">Root-relative alias route that should redirect.</param>
+    /// <param name="canonicalRoute">Root-relative canonical route that owns the real exported page body.</param>
+    /// <remarks>
+    /// This compatibility wrapper preserves the original artifact-oriented API name. New host integrations should call
+    /// <see cref="AddRedirectAlias"/> so code describes the route relationship instead of the selected materialization
+    /// strategy.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// Thrown when either route is blank, is not root-relative, is protocol-relative, contains a query string or fragment,
+    /// or contains newline, carriage return, or tab characters.
+    /// </exception>
+    public void AddRedirectArtifact(string aliasRoute, string canonicalRoute)
+    {
+        AddRedirectAlias(aliasRoute, canonicalRoute);
     }
 
     /// <summary>
@@ -156,6 +189,10 @@ public class ExportContext
     /// The export mode. <see cref="ExportMode.Cdn"/> is the default and validates plus rewrites exporter-managed URLs for static
     /// hosting. Use <see cref="ExportMode.Hybrid"/> when the exported output will still be served by application-aware routing.
     /// </param>
+    /// <param name="redirectStrategy">
+    /// Strategy used to materialize redirect aliases. <see cref="ExportRedirectStrategy.Html"/> is the default generic
+    /// static-host strategy.
+    /// </param>
     /// <remarks>
     /// The context tracks crawl state across a staged pipeline: seed routes are scheduled first, references discovered from fetched
     /// markup and CSS can enqueue more managed routes, and CDN validation runs only after the artifact map is complete. Unmanaged URLs
@@ -165,8 +202,9 @@ public class ExportContext
         string outputPath,
         string? seedRoutesPath,
         string baseUrl,
-        ExportMode mode = ExportMode.Cdn)
-        : this(outputPath, seedRoutesPath, initialSeedRoutes: null, baseUrl, mode)
+        ExportMode mode = ExportMode.Cdn,
+        ExportRedirectStrategy redirectStrategy = ExportRedirectStrategy.Html)
+        : this(outputPath, seedRoutesPath, initialSeedRoutes: null, baseUrl, mode, redirectStrategy)
     {
     }
 
@@ -185,6 +223,10 @@ public class ExportContext
     /// The export mode. <see cref="ExportMode.Cdn"/> is the default and validates plus rewrites exporter-managed URLs for static
     /// hosting. Use <see cref="ExportMode.Hybrid"/> when the exported output will still be served by application-aware routing.
     /// </param>
+    /// <param name="redirectStrategy">
+    /// Strategy used to materialize redirect aliases. <see cref="ExportRedirectStrategy.Html"/> is the default generic
+    /// static-host strategy.
+    /// </param>
     /// <remarks>
     /// This overload is for hosts that can derive seed routes directly from their own routing options. The engine applies
     /// the same normalization and fallback rules to in-memory seeds that it applies to seed-file lines.
@@ -194,28 +236,35 @@ public class ExportContext
         string? seedRoutesPath,
         IEnumerable<string>? initialSeedRoutes,
         string baseUrl,
-        ExportMode mode = ExportMode.Cdn)
+        ExportMode mode = ExportMode.Cdn,
+        ExportRedirectStrategy redirectStrategy = ExportRedirectStrategy.Html)
     {
         OutputPath = outputPath;
         SeedRoutesPath = seedRoutesPath;
         InitialSeedRoutes = initialSeedRoutes?.ToArray() ?? [];
         BaseUrl = baseUrl.TrimEnd('/');
         Mode = mode;
+        RedirectStrategy = redirectStrategy;
     }
 
     private static string NormalizeRedirectArtifactRoute(string route, string paramName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(route, paramName);
+        if (route.Contains('\r') || route.Contains('\n') || route.Contains('\t'))
+        {
+            throw new ArgumentException("Redirect alias routes must not contain newline, carriage return, or tab characters.", paramName);
+        }
+
         var normalized = route.Trim().Replace('\\', '/');
         if (!normalized.StartsWith("/", StringComparison.Ordinal)
             || normalized.StartsWith("//", StringComparison.Ordinal))
         {
-            throw new ArgumentException("Redirect artifact routes must be root-relative and not protocol-relative.", paramName);
+            throw new ArgumentException("Redirect alias routes must be root-relative and not protocol-relative.", paramName);
         }
 
         if (normalized.Contains('?') || normalized.Contains('#'))
         {
-            throw new ArgumentException("Redirect artifact routes must not contain query strings or fragments.", paramName);
+            throw new ArgumentException("Redirect alias routes must not contain query strings or fragments.", paramName);
         }
 
         return normalized.Length == 1 ? normalized : normalized.TrimEnd('/');

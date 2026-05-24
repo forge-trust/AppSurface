@@ -51,6 +51,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--public-origin", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--startup-timeout-seconds", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--redirects", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
     }
@@ -307,6 +308,8 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("dist/docs", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--mode", result.AllText, StringComparison.Ordinal);
         Assert.Contains("cdn", result.AllText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--redirects", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("netlify", result.AllText, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("--seeds", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--port", result.AllText, StringComparison.Ordinal);
@@ -330,6 +333,7 @@ public sealed class ProgramEntryPointTests
         var args = runner.Args.GetValueOrDefault();
         Assert.Equal(Path.GetFullPath("dist/docs"), args.OutputPath);
         Assert.Equal(ExportMode.Cdn, args.Mode);
+        Assert.Equal(ExportRedirectStrategy.Html, args.RedirectStrategy);
         Assert.Null(args.SeedRoutesPath);
         Assert.Equal(["/", "/docs"], args.InitialSeedRoutes);
         Assert.Equal("http://127.0.0.1:0", args.RequestedBaseUrl);
@@ -356,6 +360,7 @@ public sealed class ProgramEntryPointTests
                 "-r", repository.Path,
                 "--output", output.Path,
                 "--mode", "hybrid",
+                "--redirects", "html",
                 "--seeds", seedFile,
                 "--strict",
                 "--route-root", "/reference",
@@ -371,6 +376,7 @@ public sealed class ProgramEntryPointTests
         var args = runner.Args.GetValueOrDefault();
         Assert.Equal(output.Path, args.OutputPath);
         Assert.Equal(ExportMode.Hybrid, args.Mode);
+        Assert.Equal(ExportRedirectStrategy.Html, args.RedirectStrategy);
         Assert.Equal(seedFile, args.SeedRoutesPath);
         Assert.Null(args.InitialSeedRoutes);
         Assert.Equal("http://127.0.0.1:0", args.RequestedBaseUrl);
@@ -386,6 +392,52 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("--AppSurfaceDocs:Routing:PublicOrigin", args.HostArgs.Args);
         Assert.Contains("https://forge-trust.com", args.HostArgs.Args);
         Assert.Equal(TimeSpan.FromSeconds(2), args.HostArgs.StartupTimeout);
+    }
+
+    [Fact]
+    public async Task DocsExportCommand_Should_Forward_Netlify_Redirect_Strategy()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        var runner = new CapturingAppSurfaceDocsExportRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "export", "--repo", repository.Path, "--redirects", "netlify"],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(runner.Args);
+        Assert.Equal(ExportRedirectStrategy.Netlify, runner.Args.GetValueOrDefault().RedirectStrategy);
+    }
+
+    [Fact]
+    public async Task DocsExportCommand_Should_Reject_Hybrid_Netlify_Redirect_Strategy()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        var runner = new CapturingAppSurfaceDocsExportRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "export", "--repo", repository.Path, "--mode", "hybrid", "--redirects", "netlify"],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("--redirects netlify", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--mode cdn", result.AllText, StringComparison.Ordinal);
+        Assert.Null(runner.Args);
+    }
+
+    [Fact]
+    public async Task DocsExportCommand_Should_Reject_Unknown_Redirect_Strategy()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        var runner = new CapturingAppSurfaceDocsExportRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "export", "--repo", repository.Path, "--redirects", "cloud"],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("cloud", result.AllText, StringComparison.Ordinal);
+        Assert.Null(runner.Args);
     }
 
     [Fact]
@@ -590,12 +642,19 @@ public sealed class ProgramEntryPointTests
             exporter,
             hostStarter);
 
-        await runner.ExportAsync(CreateExportArgs(repository.Path, output.Path, startupTimeout: null), CancellationToken.None);
+        await runner.ExportAsync(
+            CreateExportArgs(
+                repository.Path,
+                output.Path,
+                startupTimeout: null,
+                redirectStrategy: ExportRedirectStrategy.Netlify),
+            CancellationToken.None);
 
         Assert.NotNull(exporter.Context);
         Assert.Equal("http://127.0.0.1:61234", exporter.Context.BaseUrl);
         Assert.Equal(output.Path, exporter.Context.OutputPath);
         Assert.Equal(["/"], exporter.Context.InitialSeedRoutes);
+        Assert.Equal(ExportRedirectStrategy.Netlify, exporter.Context.RedirectStrategy);
         Assert.Equal("Production", hostStarter.EnvironmentName);
         Assert.False(hostStarter.StartupToken.CanBeCanceled);
         Assert.True(host.StopCalled);
@@ -660,8 +719,11 @@ public sealed class ProgramEntryPointTests
                 repository.Path,
                 output.Path,
                 TimeSpan.FromSeconds(10),
-                "--AppSurfaceDocs:Routing:PublicOrigin",
-                "https://forge-trust.com"),
+                additionalHostArgs:
+                [
+                    "--AppSurfaceDocs:Routing:PublicOrigin",
+                    "https://forge-trust.com"
+                ]),
             CancellationToken.None);
 
         Assert.True(exporter.Inspected);
@@ -1562,6 +1624,7 @@ public sealed class ProgramEntryPointTests
             SeedRoutesPath: null,
             InitialSeedRoutes: ["/"],
             ExportMode.Cdn,
+            ExportRedirectStrategy.Html,
             "http://127.0.0.1:0");
 
         var ex = await Assert.ThrowsAsync<OperationCanceledException>(
@@ -1598,6 +1661,7 @@ public sealed class ProgramEntryPointTests
             SeedRoutesPath: null,
             InitialSeedRoutes: ["/"],
             ExportMode.Cdn,
+            ExportRedirectStrategy.Html,
             "http://127.0.0.1:0");
 
         var exportTask = runner.ExportAsync(exportArgs, CancellationToken.None);
@@ -1766,6 +1830,7 @@ public sealed class ProgramEntryPointTests
         string repositoryPath,
         string outputPath,
         TimeSpan? startupTimeout,
+        ExportRedirectStrategy redirectStrategy = ExportRedirectStrategy.Html,
         params string[] additionalHostArgs)
     {
         var args = new List<string>
@@ -1789,6 +1854,7 @@ public sealed class ProgramEntryPointTests
             SeedRoutesPath: null,
             InitialSeedRoutes: ["/"],
             ExportMode.Cdn,
+            redirectStrategy,
             "http://127.0.0.1:0");
     }
 

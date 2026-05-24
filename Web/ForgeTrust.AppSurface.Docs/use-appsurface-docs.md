@@ -211,6 +211,17 @@ aliases:
 ---
 ```
 
+Use `aliases` for search and discovery text. Use `redirect_aliases` only when an old browser URL route should redirect to the page's canonical route:
+
+```yaml
+canonical_slug: troubleshooting/search
+redirect_aliases:
+  - old/search-help
+  - old/search-help.md.html
+```
+
+`redirect_aliases` values are docs-root-relative routes, not Netlify `_redirects` syntax. Leave out query strings, fragments, host names, splats, placeholders, and status codes. Static export uses HTML alias files by default for generic hosts; use `appsurface docs export --mode cdn --redirects netlify` when publishing to Netlify-compatible CDN hosts. For Netlify export, avoid defining two aliases that differ only by percent encoding unless they point to the same canonical page.
+
 For namespace API pages, keep the intro as normal Markdown and put the namespace target plus entry-point metadata in the sidecar:
 
 ```yaml
@@ -311,6 +322,7 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Configure `AppSurfaceDocs:Localization` and `translation_key` metadata before adding translated files at scale.
 - Verify `/docs`, `/docs/search`, and `/docs/search-index.json`. The search page is server-rendered and should still expose starter query URLs plus browse links before the client index loads; a blocked or missing index must degrade to those links, not to a blank page.
 - For custom docs roots, path bases, or static exports, inspect the generated `search.html` and confirm its search index URL plus fallback anchors point at the mounted root.
+- For static exports with redirect aliases, use the default HTML strategy for GitHub Pages and generic static hosts, or `--mode cdn --redirects netlify` for Netlify-compatible providers. Do not hand-author `_redirects` in the export output.
 - For package maintainers changing built-in Docs browser assets, run `pnpm --dir Web run assets:build` and `pnpm --dir Web run assets:verify` before building or exporting docs. AppSurface Docs embeds `wwwroot/docs/search-client.js` and `wwwroot/docs/minisearch.min.js`, so stale generated assets can otherwise ship inside the package assembly.
 - Run the standalone host or export pipeline in CI before publishing a public docs surface.
 
