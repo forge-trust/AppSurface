@@ -2956,6 +2956,394 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task RouteInspectorJson_ShouldReturnManifestAndProbeAlias()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns(
+                [
+                    new DocNode("Package", "packages/README.md", "<p>Package</p>"),
+                    new DocNode(
+                        "Intro",
+                        "docs/intro.md",
+                        "<p>Intro</p>",
+                        Metadata: new DocMetadata
+                        {
+                            CanonicalSlug = "start-here/intro",
+                            RedirectAliases = ["legacy/intro"]
+                        })
+                ]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("packages/README.md"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+            var serialized = JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            using var document = JsonDocument.Parse(serialized);
+
+            Assert.Equal("no-store, no-cache", controller.Response.Headers.CacheControl.ToString());
+            Assert.NotNull(response.Probe);
+            Assert.Equal("AliasRedirect", response.Probe.Kind);
+            Assert.Equal("packages/README.md", response.Probe.NormalizedPath);
+            Assert.Equal("packages", response.Probe.CanonicalRoutePath);
+            Assert.Equal("/docs/packages", response.Probe.CanonicalLiveUrl);
+            Assert.Contains(response.Entries, entry => entry.SourcePath == "packages/README.md" && entry.CanonicalRoutePath == "packages");
+            var intro = Assert.Single(response.Entries, entry => entry.SourcePath == "docs/intro.md");
+            Assert.Contains(intro.DeclaredAliases, alias => alias.RoutePath == "legacy/intro" && alias.Kind == "DeclaredRedirect");
+            Assert.True(document.RootElement.TryGetProperty("probe", out var probe));
+            Assert.Equal("AliasRedirect", probe.GetProperty("kind").GetString());
+            Assert.False(document.RootElement.TryGetProperty("Probe", out _));
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldProbeAppRelativePath_WithPathBase()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        controller.Request.PathBase = "/preview";
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/preview/docs/packages"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("Canonical", response.Probe.Kind);
+            Assert.Equal("packages", response.Probe.NormalizedPath);
+            Assert.Equal("/docs/packages", response.Probe.CanonicalLiveUrl);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldReturnInvalidProbe_ForPathBaseOnlyPath()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        controller.Request.PathBase = "/preview";
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/preview"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("InvalidInput", response.Probe.Kind);
+            Assert.Contains("active docs root", response.Probe.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldProbeAppRelativePath_WhenDocsRootIsRootMounted()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Routing = new AppSurfaceDocsRoutingOptions
+            {
+                DocsRootPath = "/"
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/packages"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("Canonical", response.Probe.Kind);
+            Assert.Equal("packages", response.Probe.NormalizedPath);
+            Assert.Equal("/packages", response.Probe.CanonicalLiveUrl);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldReturnInvalidProbe_ForOutsideAppRelativePath()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/other/packages"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("InvalidInput", response.Probe.Kind);
+            Assert.Null(response.Probe.NormalizedPath);
+            Assert.Contains("active docs root", response.Probe.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldReturnManifestWithoutProbe_WhenPathIsOmitted()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson());
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.Null(response.Probe);
+            Assert.Single(response.Entries);
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("https://example.com/docs/packages")]
+    [InlineData("//example.com/docs/packages")]
+    [InlineData("?path=packages")]
+    [InlineData("guides/../secret")]
+    [InlineData("guides\\..\\secret")]
+    public async Task RouteInspectorJson_ShouldReturnInvalidProbe_ForUnsafeInputs(string path)
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson(path));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("InvalidInput", response.Probe.Kind);
+            Assert.Null(response.Probe.NormalizedPath);
+            Assert.False(string.IsNullOrWhiteSpace(response.Probe.Message));
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldProbeDocsRootAsHomeRoute()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Home", "README.md", "<p>Home</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/docs"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("Canonical", response.Probe.Kind);
+            Assert.Equal(string.Empty, response.Probe.NormalizedPath);
+            Assert.Equal("/docs", response.Probe.CanonicalLiveUrl);
+        }
+    }
+
+    [Theory]
+    [InlineData("_routes", "ReservedRoute")]
+    [InlineData("missing/page", "NotFound")]
+    [InlineData("Namespaces/Foo", "InternalSourceMatch")]
+    public async Task RouteInspectorJson_ShouldDescribeReservedMissingAndInternalRouteKinds(string path, string expectedKind)
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("API", "Namespaces/Foo", "<p>API</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson(path));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal(expectedKind, response.Probe.Kind);
+            Assert.False(string.IsNullOrWhiteSpace(response.Probe.Message));
+            if (expectedKind is "ReservedRoute" or "NotFound")
+            {
+                Assert.Null(response.Probe.CanonicalRoutePath);
+                Assert.Null(response.Probe.CanonicalLiveUrl);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorJson_ShouldStripQueryAndFragment_FromProbePath()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Package", "packages/README.md", "<p>Package</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<JsonResult>(await controller.RouteInspectorJson("/docs/packages?utm=1#top"));
+            var response = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Value);
+
+            Assert.NotNull(response.Probe);
+            Assert.Equal("Canonical", response.Probe.Kind);
+            Assert.Equal("packages", response.Probe.NormalizedPath);
+        }
+    }
+
+    [Theory]
+    [InlineData((int)DocRouteResolutionKind.CollisionLoser, "This path belongs to a document that lost canonical route ownership.")]
+    [InlineData(999, "The route result is not recognized by this AppSurface Docs version.")]
+    public void RouteProbeResponse_ShouldDescribeUncommonResolutionKinds(
+        int kindValue,
+        string expectedMessage)
+    {
+        var kind = (DocRouteResolutionKind)kindValue;
+        var response = AppSurfaceDocsRouteProbeResponse.FromResolution(
+            "input",
+            "normalized",
+            new DocRouteResolution(kind, "source.md", "source"),
+            new DocsUrlBuilder(new AppSurfaceDocsOptions()));
+
+        Assert.Equal(kind.ToString(), response.Kind);
+        Assert.Equal(expectedMessage, response.Message);
+        Assert.Equal("/docs/source", response.CanonicalLiveUrl);
+    }
+
+    [Theory]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, "Development", true)]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, "Production", false)]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.Always, "Production", true)]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.Never, "Development", false)]
+    [InlineData((AppSurfaceDocsHarvestHealthExposure)999, "Development", false)]
+    public void AppSurfaceDocsDiagnosticsVisibility_ShouldResolveExposure(
+        AppSurfaceDocsHarvestHealthExposure exposure,
+        string environmentName,
+        bool expected)
+    {
+        var environment = A.Fake<IHostEnvironment>();
+        A.CallTo(() => environment.EnvironmentName).Returns(environmentName);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = exposure
+            }
+        };
+
+        var exposed = AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(options, environment);
+
+        Assert.Equal(expected, exposed);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsDiagnosticsVisibility_ShouldDefaultToDevelopmentOnly_WhenDiagnosticsOptionsAreNull()
+    {
+        var environment = A.Fake<IHostEnvironment>();
+        A.CallTo(() => environment.EnvironmentName).Returns(Environments.Development);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = null!
+        };
+
+        var exposed = AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(options, environment);
+
+        Assert.True(exposed);
+    }
+
+    [Fact]
+    public async Task RouteInspector_ShouldRenderViewWithManifest()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start.md", "<p>First steps.</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester);
+        using (memo)
+        using (cache)
+        {
+            var result = Assert.IsType<ViewResult>(await controller.RouteInspector("guides/start.md"));
+            var model = Assert.IsType<AppSurfaceDocsRouteInspectorResponse>(result.Model);
+
+            Assert.Equal("RouteInspector", result.ViewName);
+            Assert.Equal("AliasRedirect", model.Probe?.Kind);
+            Assert.Single(model.Entries);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorActions_ShouldReturnNotFound_InProductionByDefault()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start.md", "<p>First steps.</p>")]);
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), harvester, Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var htmlResult = await controller.RouteInspector();
+            var jsonResult = await controller.RouteInspectorJson();
+
+            Assert.IsType<NotFoundResult>(htmlResult);
+            Assert.IsType<NotFoundResult>(jsonResult);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorActions_ShouldReturnNotFound_InDevelopmentWhenExplicitlyDisabled()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start.md", "<p>First steps.</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Never
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester, Environments.Development);
+        using (memo)
+        using (cache)
+        {
+            var htmlResult = await controller.RouteInspector();
+            var jsonResult = await controller.RouteInspectorJson();
+
+            Assert.IsType<NotFoundResult>(htmlResult);
+            Assert.IsType<NotFoundResult>(jsonResult);
+        }
+    }
+
+    [Fact]
+    public async Task RouteInspectorActions_ShouldAllowRoutes_InProductionWhenExplicitlyEnabled()
+    {
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([new DocNode("Getting Started", "guides/start.md", "<p>First steps.</p>")]);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester, Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var htmlResult = await controller.RouteInspector();
+            var jsonResult = await controller.RouteInspectorJson();
+
+            Assert.IsType<ViewResult>(htmlResult);
+            Assert.IsType<JsonResult>(jsonResult);
+        }
+    }
+
+    [Fact]
     public async Task SearchIndex_ShouldRefreshCache_WhenAuthenticatedRefreshRequested()
     {
         var docs = new List<DocNode>

@@ -509,6 +509,73 @@ public class DocsController : Controller
     }
 
     /// <summary>
+    /// Displays the human-facing route inspector for the current live docs surface.
+    /// </summary>
+    /// <param name="path">
+    /// Optional path to probe. Values are trimmed, may be docs-root-relative or app-relative, may include the active
+    /// <see cref="HttpRequest.PathBase"/>, and have any query string or fragment stripped before route lookup. Absolute
+    /// URLs, protocol-relative URLs, paths outside the active docs root, empty post-strip values, and <c>.</c> or
+    /// <c>..</c> path segments produce an invalid-input probe instead of route lookup.
+    /// </param>
+    /// <returns>
+    /// A no-store route inspector page when diagnostics are exposed for the current environment; otherwise
+    /// <see cref="NotFoundResult"/>. The page uses <see cref="BuildRouteInspectorResponseAsync(string?)"/> for the same
+    /// manifest and optional probe shape as the JSON endpoint.
+    /// </returns>
+    /// <remarks>
+    /// Use this endpoint for interactive maintainer inspection. It is intentionally separate from reader navigation and
+    /// is hidden by <see cref="AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(AppSurfaceDocsOptions, IHostEnvironment)"/>
+    /// when the current environment or explicit diagnostics settings do not expose route diagnostics.
+    /// </remarks>
+    [HttpGet]
+    public async Task<IActionResult> RouteInspector([FromQuery(Name = "path")] string? path = null)
+    {
+        if (!AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(_options, _environment))
+        {
+            return NotFound();
+        }
+
+        SetNoStoreCacheControl();
+        var response = await BuildRouteInspectorResponseAsync(path);
+        ViewData["Title"] = "Route Inspector";
+
+        return View("RouteInspector", response);
+    }
+
+    /// <summary>
+    /// Returns machine-readable route identity for the current live docs surface.
+    /// </summary>
+    /// <param name="path">
+    /// Optional path to probe. Values are trimmed, may be docs-root-relative or app-relative, may include the active
+    /// <see cref="HttpRequest.PathBase"/>, and have any query string or fragment stripped before route lookup. Absolute
+    /// URLs, protocol-relative URLs, paths outside the active docs root, empty post-strip values, and <c>.</c> or
+    /// <c>..</c> path segments produce an invalid-input probe in the JSON response.
+    /// </param>
+    /// <returns>
+    /// A no-store JSON route inspector response when diagnostics are exposed for the current environment; otherwise
+    /// <see cref="NotFoundResult"/>.
+    /// </returns>
+    /// <remarks>
+    /// Use this endpoint for scripts, tests, and maintainer tools that need the
+    /// <see cref="AppSurfaceDocsRouteInspectorResponse"/> wire contract produced by
+    /// <see cref="BuildRouteInspectorResponseAsync(string?)"/>. Use <see cref="RouteInspector(string?)"/> instead when a
+    /// human needs the compact HTML probing surface.
+    /// </remarks>
+    [HttpGet]
+    public async Task<IActionResult> RouteInspectorJson([FromQuery(Name = "path")] string? path = null)
+    {
+        if (!AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(_options, _environment))
+        {
+            return NotFound();
+        }
+
+        SetNoStoreCacheControl();
+        var response = await BuildRouteInspectorResponseAsync(path);
+
+        return new JsonResult(response);
+    }
+
+    /// <summary>
     /// Determines whether the search index cache should be refreshed based on the presence of a "refresh" query parameter.
     /// </summary>
     /// <param name="query">The collection of query parameters from the HTTP request.</param>
@@ -538,6 +605,137 @@ public class DocsController : Controller
     {
         var health = await _aggregator.GetHarvestHealthAsync(HttpContext.RequestAborted);
         return AppSurfaceDocsHarvestHealthResponse.FromSnapshot(health);
+    }
+
+    private async Task<AppSurfaceDocsRouteInspectorResponse> BuildRouteInspectorResponseAsync(string? path)
+    {
+        AppSurfaceDocsRouteProbeResponse? probe = null;
+        if (path is not null || Request.Query.ContainsKey("path"))
+        {
+            var input = path ?? string.Empty;
+            if (TryNormalizeRouteInspectorProbePath(
+                    input,
+                    Request.PathBase.Value,
+                    _docsUrlBuilder.CurrentDocsRootPath,
+                    out var normalizedPath,
+                    out var invalidMessage))
+            {
+                var resolution = await _aggregator.ResolvePublicRouteAsync(normalizedPath, HttpContext.RequestAborted);
+                probe = AppSurfaceDocsRouteProbeResponse.FromResolution(input, normalizedPath, resolution, _docsUrlBuilder);
+            }
+            else
+            {
+                probe = AppSurfaceDocsRouteProbeResponse.Invalid(input, invalidMessage);
+            }
+        }
+
+        var manifest = await _aggregator.GetRouteManifestAsync(HttpContext.RequestAborted);
+        return AppSurfaceDocsRouteInspectorResponse.FromManifest(manifest, probe);
+    }
+
+    private static bool TryNormalizeRouteInspectorProbePath(
+        string input,
+        string? requestPathBase,
+        string docsRootPath,
+        out string normalizedPath,
+        out string invalidMessage)
+    {
+        normalizedPath = string.Empty;
+        invalidMessage = string.Empty;
+
+        var trimmed = input.Trim();
+        if (trimmed.Length == 0)
+        {
+            invalidMessage = "Enter a route path to probe.";
+            return false;
+        }
+
+        if (trimmed.StartsWith("//", StringComparison.Ordinal)
+            || trimmed.Contains("://", StringComparison.Ordinal))
+        {
+            invalidMessage = "Route probes must be docs-root-relative or app-relative paths, not absolute URLs.";
+            return false;
+        }
+
+        var queryIndex = trimmed.IndexOfAny(['?', '#']);
+        if (queryIndex >= 0)
+        {
+            trimmed = trimmed[..queryIndex].Trim();
+        }
+
+        if (trimmed.Length == 0)
+        {
+            invalidMessage = "Route probes must include a path before any query string or fragment.";
+            return false;
+        }
+
+        trimmed = trimmed.Replace('\\', '/');
+
+        var withoutPathBase = TrimAppRelativePrefix(trimmed, requestPathBase);
+        var candidate = withoutPathBase;
+        if (candidate.StartsWith("/", StringComparison.Ordinal)
+            && !TryTrimDocsRoot(candidate, docsRootPath, out candidate))
+        {
+            invalidMessage = $"App-relative route probes must start with the active docs root '{docsRootPath}'.";
+            return false;
+        }
+
+        candidate = candidate.Trim().Trim('/');
+        if (candidate.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Any(static segment => segment is "." or ".."))
+        {
+            invalidMessage = "Route probes cannot contain '.' or '..' path segments.";
+            return false;
+        }
+
+        normalizedPath = candidate;
+        return true;
+    }
+
+    private static string TrimAppRelativePrefix(string value, string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix) || prefix == "/")
+        {
+            return value;
+        }
+
+        var normalizedPrefix = "/" + prefix.Trim().Trim('/');
+        if (value.Equals(normalizedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return "/";
+        }
+
+        return value.StartsWith(normalizedPrefix + "/", StringComparison.OrdinalIgnoreCase)
+            ? value[normalizedPrefix.Length..]
+            : value;
+    }
+
+    private static bool TryTrimDocsRoot(string value, string docsRootPath, out string routePath)
+    {
+        var normalizedRoot = string.IsNullOrWhiteSpace(docsRootPath)
+            ? "/docs"
+            : "/" + docsRootPath.Trim().Trim('/');
+
+        if (normalizedRoot == "/")
+        {
+            routePath = value.TrimStart('/');
+            return true;
+        }
+
+        if (value.Equals(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            routePath = string.Empty;
+            return true;
+        }
+
+        if (value.StartsWith(normalizedRoot + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            routePath = value[normalizedRoot.Length..].TrimStart('/');
+            return true;
+        }
+
+        routePath = string.Empty;
+        return false;
     }
 
     private async Task<IActionResult?> TryRenderHarvestingIfInitialHarvestPendingAsync()

@@ -313,7 +313,7 @@ Pitfalls:
 - Do not rely on file-level progress counts in v1. The current stream reports harvester-level progress and aggregate document counts.
 - Do not use `StartupMode=Disabled` for hosts where first navigation latency matters; that preserves the old lazy-harvest behavior.
 
-### Operator Health Routes
+### Operator Diagnostics Routes
 
 AppSurface Docs reserves a redacted operator health page at `{DocsRootPath}/_health` and a machine-readable JSON endpoint at `{DocsRootPath}/_health.json` ahead of the docs catch-all route. Both endpoints return health responses by default only when the host environment is `Development`; otherwise they return `404`. Non-development hosts must opt in with `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always`.
 
@@ -343,6 +343,30 @@ The sidebar health entry follows `AppSurfaceDocs:Harvest:Health:ShowChrome`, whi
 
 Allowed exposure values are `DevelopmentOnly`, `Always`, and `Never`. If you set `ExposeRoutes=Always`, the reserved health endpoints become an operator surface in that environment. Protect them with host-owned authentication, authorization, or network controls when they are reachable by untrusted users.
 
+AppSurface Docs also reserves a route inspector at `{DocsRootPath}/_routes` and a machine-readable JSON endpoint at `{DocsRootPath}/_routes.json`. The inspector shows the public route manifest for the current cached docs snapshot: canonical browser URLs, source-shaped Markdown recovery aliases, declared redirect aliases, and route diagnostics. Add `?path=` to either endpoint to probe a source path, public route, or app-relative docs URL and see whether it resolves directly, redirects through an alias, is hidden, is reserved, or is invalid input.
+
+Route inspector exposure is configured separately from harvest health:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Diagnostics": {
+      "ExposeRouteInspector": "DevelopmentOnly"
+    }
+  }
+}
+```
+
+`AppSurfaceDocs:Diagnostics:ExposeRouteInspector` accepts `DevelopmentOnly`, `Always`, and `Never`. The default is `DevelopmentOnly`, which makes the inspector available to local development hosts without adding maintainer tooling to public reader navigation. Set it to `Always` only for operator-owned environments that have host-level protection. Set it to `Never` when a development or preview host should reserve the route names but return `404`.
+
+The JSON response uses the camelCase wire form of `AppSurfaceDocsRouteInspectorResponse`:
+
+- `probe`: optional resolution details for the requested `path`.
+- `entries`: the exposed public route manifest entries.
+- `diagnostics`: route diagnostics copied from the manifest.
+
+The probe normalizer accepts repository-style paths such as `packages/README.md`, public docs routes such as `/docs/packages`, and app-relative paths that include the current `PathBase`. It rejects absolute URLs, protocol-relative URLs, paths outside the configured docs root, and `.` or `..` segments before lookup.
+
 ### Pitfalls
 
 - Do not parse logs to infer harvest health. Use `GetHarvestHealthAsync()` and diagnostic codes.
@@ -350,6 +374,8 @@ Allowed exposure values are `DevelopmentOnly`, `Always`, and `Never`. If you set
 - Do not expect raw exception details in public diagnostics. Use host logs for stack traces and exception messages.
 - Do not assume the health routes are ASP.NET Core `IHealthCheck` endpoints. They report documentation harvest health, not whole-application liveness.
 - Do not set `ExposeRoutes=Always` on a public host without host-owned protection.
+- Do not treat the route inspector as reader navigation or export content. It is an operator diagnostic surface and remains hidden outside Development unless explicitly exposed.
+- Do not pass untrusted absolute URLs to `?path=`. The inspector rejects them instead of following or normalizing them.
 
 ### Strict Startup Failure
 
@@ -589,9 +615,10 @@ var home = routes.Home;
 var search = routes.Search;
 var searchIndexRefresh = routes.SearchIndexRefresh;
 var healthJson = routes.HealthJson;
+var routeInspectorJson = routes.RouteInspectorJson;
 ```
 
-`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, and `HealthJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
+`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
 The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; keep `Routes.SearchIndexRefresh` for authenticated operator refresh flows.
 
@@ -608,7 +635,7 @@ Default route behavior:
 - Generated API docs and other non-Markdown docs keep the existing `.html` route shape, such as `{DocsRootPath}/Namespaces/ForgeTrust.AppSurface.Web.html`.
 - Fragments stay fragments. A harvested source path like `guides/intro.md#setup` publishes as `{DocsRootPath}/guides/intro#setup`.
 
-AppSurface Docs reserves document routes that belong to chrome, health, search, sections, versions, and assets. The reserved set includes the docs home, `search`, `search-index.json`, `_health`, `_health.json`, `search.css`, `search-client.js`, `outline-client.js`, `minisearch.min.js`, `versions`, and the `sections/` and `v/` route prefixes. Docs that resolve to reserved routes remain internally available for source lookup, but they are not public document winners and emit route diagnostics.
+AppSurface Docs reserves document routes that belong to chrome, diagnostics, health, search, sections, versions, and assets. The reserved set includes the docs home, `search`, `search-index.json`, `_health`, `_health.json`, `_routes`, `_routes.json`, `search.css`, `search-client.js`, `outline-client.js`, `minisearch.min.js`, `versions`, and the `sections/` and `v/` route prefixes. Docs that resolve to reserved routes remain internally available for source lookup, but they are not public document winners and emit route diagnostics.
 
 Markdown route segments are normalized deterministically: Unicode is folded where possible, non-spacing marks are removed, ASCII letters are lower-cased, dots are preserved, and unsafe separators become hyphens. When that conversion is lossy, AppSurface Docs emits `DocLossySlugNormalization` so authors can decide whether to set an explicit route.
 
@@ -824,6 +851,12 @@ static web assets.
   - Controls whether the built-in sidebar shows health status chrome.
   - This is independent from `ExposeRoutes` so machine-readable checks and visible docs chrome can be configured separately.
   - If routes are hidden for the current environment, the sidebar renders status-only chrome without an `href`.
+- `AppSurfaceDocs:Diagnostics:ExposeRouteInspector`
+  - Defaults to `DevelopmentOnly`.
+  - Controls whether `{DocsRootPath}/_routes` and `{DocsRootPath}/_routes.json` return the route inspector and manifest responses.
+  - AppSurface Docs always reserves the endpoint patterns before the docs catch-all route so route-inspector URLs do not fall through to document lookup.
+  - `Always` exposes route-manifest diagnostics in non-development environments; protect the endpoints at the host boundary when they are publicly reachable.
+  - `Never` keeps the reserved endpoints returning `404`, including in development.
 - `AppSurfaceDocs:Harvest:Paths:IncludeGlobs`
   - Defaults to an empty array, which means every built-in harvester starts from its normal candidate set.
   - When nonempty, this is the global source boundary for all built-in harvesters. Markdown, C#, and JavaScript source-specific includes can narrow it but cannot bypass it.

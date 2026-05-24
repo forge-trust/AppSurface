@@ -212,6 +212,33 @@ public sealed class DocRouteIdentityCatalogTests
         Assert.Contains("literal-route.md", diagnostic.Cause, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("_routes")]
+    [InlineData("_routes.json")]
+    public void Create_ShouldReserveRouteInspectorRoutesAndRejectAliases(string requestedRoute)
+    {
+        var catalog = CreateCatalog(
+            new DocNode(
+                "Inspector",
+                "inspector.md",
+                "<p>Inspector</p>",
+                Metadata: new DocMetadata
+                {
+                    RedirectAliases = [requestedRoute]
+                }));
+
+        var route = catalog.ResolvePublicRoute(requestedRoute);
+        var manifest = catalog.BuildRouteManifest();
+
+        Assert.Equal(DocRouteResolutionKind.ReservedRoute, route.Kind);
+        var entry = Assert.Single(manifest.Entries, entry => entry.SourcePath == "inspector.md");
+        Assert.DoesNotContain(entry.DeclaredAliases, alias => alias.RoutePath == requestedRoute);
+        Assert.Contains(
+            catalog.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.DocInvalidRedirectAlias
+                          && diagnostic.Problem.Contains(requestedRoute, StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public void Create_ShouldPreserveLiteralRedirectAliasRouteShape()
     {

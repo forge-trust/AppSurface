@@ -73,6 +73,11 @@ public sealed class AppSurfaceDocsOptions
     public AppSurfaceDocsHarvestOptions Harvest { get; set; } = new();
 
     /// <summary>
+    /// Gets diagnostics settings for maintainer-facing AppSurface Docs inspection surfaces.
+    /// </summary>
+    public AppSurfaceDocsDiagnosticsOptions Diagnostics { get; set; } = new();
+
+    /// <summary>
     /// Gets bundle-mode settings used by future bundle-backed runtime loading.
     /// </summary>
     public AppSurfaceDocsBundleOptions Bundle { get; set; } = new();
@@ -554,6 +559,24 @@ public enum AppSurfaceDocsHarvestHealthExposure
 }
 
 /// <summary>
+/// Maintainer diagnostics settings for AppSurface Docs.
+/// </summary>
+/// <remarks>
+/// Diagnostics surfaces expose route and harvest state intended for local development and trusted operators. The default
+/// keeps route-inspector responses available in Development only. Setting <see cref="ExposeRouteInspector"/> to
+/// <see cref="AppSurfaceDocsHarvestHealthExposure.Always"/> does not add authentication or authorization; production
+/// hosts must protect the route at the host, reverse proxy, or network layer when route identity is sensitive.
+/// </remarks>
+public sealed class AppSurfaceDocsDiagnosticsOptions
+{
+    /// <summary>
+    /// Gets or sets when AppSurface Docs should return route-inspector responses from <c>{DocsRootPath}/_routes</c>
+    /// and <c>{DocsRootPath}/_routes.json</c>.
+    /// </summary>
+    public AppSurfaceDocsHarvestHealthExposure ExposeRouteInspector { get; set; } = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly;
+}
+
+/// <summary>
 /// Bundle-mode configuration for AppSurface Docs.
 /// </summary>
 public sealed class AppSurfaceDocsBundleOptions
@@ -942,6 +965,7 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         var source = options.Source;
         var identity = options.Identity;
         var harvest = options.Harvest;
+        var diagnostics = options.Diagnostics;
         var bundle = options.Bundle;
         var sidebar = options.Sidebar;
         var contributor = options.Contributor;
@@ -1138,6 +1162,15 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         if (bundle is null)
         {
             failures.Add("AppSurfaceDocs:Bundle must not be null.");
+        }
+
+        if (diagnostics is null)
+        {
+            failures.Add("AppSurfaceDocs:Diagnostics must not be null.");
+        }
+        else if (!Enum.IsDefined(diagnostics.ExposeRouteInspector))
+        {
+            failures.Add($"Unsupported AppSurface Docs route inspector exposure mode '{diagnostics.ExposeRouteInspector}'.");
         }
 
         if (sidebar is null)
@@ -1716,6 +1749,8 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                    || trimmed.Equals("search-index.json", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_health", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_health.json", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("_routes", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("_routes.json", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("sections", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("versions", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("v", StringComparison.OrdinalIgnoreCase)

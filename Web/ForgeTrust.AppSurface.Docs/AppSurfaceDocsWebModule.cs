@@ -322,16 +322,21 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// decide what <c>/</c> and <c>/favicon.ico</c> mean.
     /// </para>
     /// <para>
-    /// The operator-facing harvest health route patterns are always registered before the catch-all docs route so
-    /// <c>{DocsRootPath}/_health</c> and <c>{DocsRootPath}/_health.json</c> remain reserved operator paths rather than
-    /// falling through to document lookup. The route named <c>appsurfacedocs_harvest_health</c> maps the current docs root
-    /// health pattern from <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
+    /// The operator-facing diagnostics route patterns are always registered before the catch-all docs route so
+    /// <c>{DocsRootPath}/_health</c>, <c>{DocsRootPath}/_health.json</c>, <c>{DocsRootPath}/_routes</c>, and
+    /// <c>{DocsRootPath}/_routes.json</c> remain reserved operator paths rather than falling through to document lookup.
+    /// The route named <c>appsurfacedocs_harvest_health</c> maps the current docs root health pattern from
+    /// <see cref="DocsUrlBuilder.BuildHealthUrl"/> to <c>DocsController.HarvestHealth</c>, and
     /// <c>appsurfacedocs_harvest_health_json</c> maps <see cref="DocsUrlBuilder.BuildHealthJsonUrl"/> to
-    /// <c>DocsController.HarvestHealthJson</c>. The controller actions still gate responses with
+    /// <c>DocsController.HarvestHealthJson</c>. Route inspector routes map
+    /// <see cref="DocsUrlBuilder.BuildRouteInspectorUrl"/> and <see cref="DocsUrlBuilder.BuildRouteInspectorJsonUrl"/>
+    /// to <c>DocsController.RouteInspector</c> and <c>DocsController.RouteInspectorJson</c>. The controller actions still gate
+    /// responses with their exposure options: harvest health uses
     /// <see cref="AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(AppSurfaceDocsOptions, IHostEnvironment)"/>: by default
     /// they return health only in Development, while production hosts must opt in with
-    /// <see cref="AppSurfaceDocsHarvestHealthOptions.ExposeRoutes"/>. These routes are intended for local and operator
-    /// verification, not as unauthenticated public reader navigation.
+    /// <see cref="AppSurfaceDocsHarvestHealthOptions.ExposeRoutes"/>; route inspector uses
+    /// <see cref="AppSurfaceDocsDiagnosticsOptions.ExposeRouteInspector"/>. These routes are intended for local and
+    /// operator verification, not as unauthenticated public reader navigation.
     /// </para>
     /// </remarks>
     /// <param name="context">Startup context for the application and environment.</param>
@@ -418,6 +423,8 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var currentSearchIndexPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexUrl());
         var currentHealthPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthUrl());
         var currentHealthJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthJsonUrl());
+        var currentRouteInspectorPattern = TrimLeadingSlash(docsUrlBuilder.BuildRouteInspectorUrl());
+        var currentRouteInspectorJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildRouteInspectorJsonUrl());
         var currentSectionPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "sections/{sectionSlug}"));
         var currentDetailsPattern = TrimLeadingSlash(DocsUrlBuilder.JoinPath(docsUrlBuilder.CurrentDocsRootPath, "{*path}"));
 
@@ -470,6 +477,24 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             {
                 controller = "Docs",
                 action = "HarvestHealthJson"
+            });
+
+        endpoints.MapControllerRoute(
+            name: "appsurfacedocs_route_inspector",
+            pattern: currentRouteInspectorPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "RouteInspector"
+            });
+
+        endpoints.MapControllerRoute(
+            name: "appsurfacedocs_route_inspector_json",
+            pattern: currentRouteInspectorJsonPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "RouteInspectorJson"
             });
 
         endpoints.MapControllerRoute(
