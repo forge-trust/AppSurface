@@ -566,8 +566,13 @@ public sealed record DocTrustMetadata
     public string? ChangeScope { get; init; }
 
     /// <summary>
-    /// Gets an optional link to migration or upgrade guidance.
+    /// Gets an optional safe browser-facing link to migration or upgrade guidance.
     /// </summary>
+    /// <remarks>
+    /// Markdown metadata normalization treats blank hrefs as absent and rejects nonblank values whose scheme is not relative,
+    /// root-relative, fragment-only, <c>http</c>, or <c>https</c>. Rejected hrefs are omitted and reported through harvest
+    /// diagnostics with <see cref="DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref"/>.
+    /// </remarks>
     public DocTrustLink? Migration { get; init; }
 
     /// <summary>
@@ -618,6 +623,12 @@ public sealed record DocTrustLink
     /// <summary>
     /// Gets the browser-facing destination URL.
     /// </summary>
+    /// <remarks>
+    /// For trust migration links authored in Markdown front matter or paired sidecar metadata, AppSurface Docs accepts
+    /// relative URLs, root-relative URLs, fragment links, and absolute <c>http</c> or <c>https</c> URLs. Blank hrefs are
+    /// treated as missing; executable, protocol-relative, control-character, and other absolute-scheme hrefs are rejected
+    /// before the trust bar renders.
+    /// </remarks>
     public string? Href { get; init; }
 
     internal static DocTrustLink? Merge(DocTrustLink? primary, DocTrustLink? fallback)
@@ -969,6 +980,11 @@ public static class DocHarvestDiagnosticCodes
     /// AppSurface Docs could not read or normalize part of the repository-owned Git ignore policy.
     /// </summary>
     public const string VcsIgnoreWarning = "appsurfacedocs.harvest.vcs_ignore_warning";
+
+    /// <summary>
+    /// Markdown trust metadata contained a migration href that could execute script or otherwise escape the safe link policy.
+    /// </summary>
+    public const string MetadataUnsafeTrustMigrationHref = "appsurfacedocs.metadata.unsafe_trust_migration_href";
 
     /// <summary>
     /// A JavaScript source file matched the configured include set but exceeded the configured parse size limit.

@@ -999,6 +999,76 @@ public sealed class MarkdownFrontMatterParserTests
         Assert.Empty(metadata.Trust.Sources!);
     }
 
+    [Theory]
+    [InlineData("/docs/releases/upgrade-policy")]
+    [InlineData("docs/releases/upgrade-policy")]
+    [InlineData("../releases/upgrade-policy")]
+    [InlineData("#migration")]
+    [InlineData("https://example.com/docs/upgrade")]
+    [InlineData("http://example.com/docs/upgrade")]
+    public void ExtractWithDiagnostics_ShouldAllowSafeTrustMigrationHrefs(string href)
+    {
+        var markdown = $$"""
+            ---
+            trust:
+              migration:
+                label: Read the upgrade policy
+                href: '{{href}}'
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Equal(href, result.Metadata?.Trust?.Migration?.Href);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Theory]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("data:text/html;base64,PGgxPkJvb208L2gxPg==")]
+    [InlineData("mailto:security@example.com")]
+    [InlineData("//evil.example/docs")]
+    [InlineData("\\\\evil.example\\docs")]
+    public void ExtractWithDiagnostics_ShouldRejectUnsafeTrustMigrationHrefs_AndReportDiagnostic(string href)
+    {
+        var markdown = $$"""
+            ---
+            trust:
+              migration:
+                label: Read the upgrade policy
+                href: '{{href}}'
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata?.Trust?.Migration?.Href);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("unsafe-trust-migration-href", diagnostic.Code);
+        Assert.Equal("trust.migration.href", diagnostic.FieldPath);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldRejectControlCharacterTrustMigrationHref()
+    {
+        var markdown = """
+            ---
+            trust:
+              migration:
+                label: Read the upgrade policy
+                href: "java\u0001script:alert(1)"
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata?.Trust?.Migration?.Href);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "unsafe-trust-migration-href");
+    }
+
     [Fact]
     public void Extract_ShouldParseContributorMetadata()
     {
@@ -1066,6 +1136,39 @@ public sealed class MarkdownFrontMatterParserTests
         Assert.NotNull(metadata?.Trust);
         Assert.Equal("Unreleased", metadata!.Trust!.Status);
         Assert.Null(metadata.Trust.Migration);
+    }
+
+    [Fact]
+    public void ExtractWithDiagnostics_ShouldTreatBlankTrustMigrationHrefAsAbsentWithoutDiagnostic()
+    {
+        var markdown = """
+            ---
+            trust:
+              migration:
+                href: "   "
+            ---
+            # Hello
+            """;
+
+        var (_, result) = MarkdownFrontMatterParser.ExtractWithDiagnostics(markdown);
+
+        Assert.Null(result.Metadata?.Trust);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsMetadataHrefPolicy_ShouldDistinguishAbsentAllowedAndRejectedValues()
+    {
+        var absent = AppSurfaceDocsMetadataHrefPolicy.NormalizeTrustMigrationHref("   ");
+        var allowed = AppSurfaceDocsMetadataHrefPolicy.NormalizeTrustMigrationHref(" /docs/releases ");
+        var rejected = AppSurfaceDocsMetadataHrefPolicy.NormalizeTrustMigrationHref("javascript:alert(1)");
+
+        Assert.Equal(AppSurfaceDocsMetadataHrefPolicyState.Absent, absent.State);
+        Assert.Null(absent.Href);
+        Assert.Equal(AppSurfaceDocsMetadataHrefPolicyState.Allowed, allowed.State);
+        Assert.Equal("/docs/releases", allowed.Href);
+        Assert.Equal(AppSurfaceDocsMetadataHrefPolicyState.Rejected, rejected.State);
+        Assert.Equal("javascript:alert(1)", rejected.Href);
     }
 
     [Fact]

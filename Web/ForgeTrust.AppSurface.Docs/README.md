@@ -251,6 +251,7 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.HarvesterFailed` (`appsurfacedocs.harvest.harvester_failed`)
 - `DocHarvestDiagnosticCodes.NoHarvesters` (`appsurfacedocs.harvest.no_harvesters`)
 - `DocHarvestDiagnosticCodes.AllFailed` (`appsurfacedocs.harvest.all_failed`)
+- `DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref` (`appsurfacedocs.metadata.unsafe_trust_migration_href`)
 - `DocHarvestDiagnosticCodes.DocReservedRouteCollision` (`appsurfacedocs.routes.reserved_collision`)
 - `DocHarvestDiagnosticCodes.DocRouteCollision` (`appsurfacedocs.routes.doc_collision`)
 - `DocHarvestDiagnosticCodes.DocRedirectAliasCollision` (`appsurfacedocs.routes.redirect_alias_collision`)
@@ -1395,6 +1396,9 @@ AppSurface Docs rewrites links inside harvested Markdown so authors can use sour
 - Link to an already public docs route only when the target is a harvested doc, such as `/docs/releases/unreleased`, `/docs/next/releases/unreleased`, or a custom-root equivalent like `/foo/bar/releases/unreleased`.
 - Use ordinary site URLs, such as `/privacy.html` or `../status.html`, for non-doc pages. AppSurface Docs leaves those links untouched.
 - Use browser-facing URLs for metadata fields that render plain anchors without content rewriting, such as `trust.migration.href`.
+  `trust.migration.href` accepts relative URLs, root-relative URLs, fragment links, and absolute `http` or `https` URLs.
+  Blank values are treated as absent. Nonblank executable schemes such as `javascript:` or `data:`, protocol-relative URLs
+  such as `//example.com`, control-character values, and other absolute schemes are rejected before rendering.
 
 ### Catalog-backed rewriting
 
@@ -1648,7 +1652,8 @@ trust:
 - `summary` is the short trust statement shown beside the status.
 - `freshness` explains how current the page is and how stable readers should assume it is.
 - `change_scope` calls out which surfaces the note covers.
-- `migration` is an optional label plus browser-facing `href` to the adoption guidance.
+- `migration` is an optional label plus browser-facing `href` to the adoption guidance. Blank hrefs are absent; unsafe
+  nonblank hrefs are omitted and reported as `DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref`.
 - `archive` explains where the durable tagged record or long-term home lives.
 - `sources` is an optional list of provenance notes or upstream artifacts.
 
@@ -1656,11 +1661,15 @@ trust:
 
 - Inline front matter and sidecar YAML both use the same nested `trust` schema.
 - Inline metadata wins over sidecar metadata field by field.
+- An unsafe inline `migration.href` is treated as absent, not as a tombstone, so a safe sidecar `migration.href` can still
+  render while the inline source reports a diagnostic.
 - Explicit empty lists such as `sources: []` are authoritative and suppress fallback lists.
 
 ### Pitfalls
 
 - Use a browser-facing `href` for `migration`, not a source path, because the trust bar renders a plain link without path rewriting.
+- Do not use `javascript:`, `data:`, `mailto:`, protocol-relative, or other non-http absolute schemes for `migration.href`;
+  AppSurface Docs drops those hrefs and keeps harvesting the page so the warning appears in logs and harvest health.
 - Keep private maintainer-only runbooks outside harvested docs. Hidden pages are removed from nav and search, but they are still public if linked directly.
 - Do not turn the trust bar into marketing chrome. It should answer status, safety, and provenance questions quickly.
 
