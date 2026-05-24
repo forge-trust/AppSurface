@@ -43,9 +43,12 @@ internal static class AppSurfaceDocsMetadataHrefPolicy
                 : AppSurfaceDocsMetadataHrefPolicyResult.Rejected(normalized);
         }
 
-        return HasSchemeLikePrefix(normalized)
-            ? AppSurfaceDocsMetadataHrefPolicyResult.Rejected(normalized)
-            : AppSurfaceDocsMetadataHrefPolicyResult.Allowed(normalized);
+        if (HasSchemeLikePrefix(normalized))
+        {
+            return AppSurfaceDocsMetadataHrefPolicyResult.Rejected(normalized);
+        }
+
+        return AppSurfaceDocsMetadataHrefPolicyResult.Allowed(normalized);
     }
 
     private static bool ContainsControlCharacter(string value)

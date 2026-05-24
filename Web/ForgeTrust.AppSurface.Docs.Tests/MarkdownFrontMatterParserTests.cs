@@ -1172,6 +1172,24 @@ public sealed class MarkdownFrontMatterParserTests
     }
 
     [Fact]
+    public void AppSurfaceDocsMetadataHrefPolicy_ShouldAllowRelativeHrefWithoutDelimiter()
+    {
+        var result = AppSurfaceDocsMetadataHrefPolicy.NormalizeTrustMigrationHref("upgrade-policy");
+
+        Assert.Equal(AppSurfaceDocsMetadataHrefPolicyState.Allowed, result.State);
+        Assert.Equal("upgrade-policy", result.Href);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsMetadataHrefPolicy_ShouldRejectMalformedSchemeLikeHref()
+    {
+        var result = AppSurfaceDocsMetadataHrefPolicy.NormalizeTrustMigrationHref("bad scheme:upgrade-policy");
+
+        Assert.Equal(AppSurfaceDocsMetadataHrefPolicyState.Rejected, result.State);
+        Assert.Equal("bad scheme:upgrade-policy", result.Href);
+    }
+
+    [Fact]
     public void Extract_ShouldReturnOriginalMarkdown_WhenFrontMatterIsInvalid()
     {
         var markdown = """
