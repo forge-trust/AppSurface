@@ -3218,18 +3218,33 @@ public class DocAggregatorTests : IDisposable
         Assert.DoesNotContain(
             firstHealth.Diagnostics.SelectMany(diagnostic => new[] { diagnostic.Problem, diagnostic.Cause, diagnostic.Fix }),
             value => value.Contains("Harvester boom", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(1, CountLogCalls(_loggerFake, LogLevel.Critical, "All AppSurface Docs harvesters failed"));
+        Assert.Equal(1, CountLogCalls(_loggerFake, LogLevel.Critical, "All strict AppSurface Docs harvesters failed"));
 
         aggregator.InvalidateCache();
         _ = await aggregator.GetHarvestHealthAsync();
 
-        Assert.Equal(2, CountLogCalls(_loggerFake, LogLevel.Critical, "All AppSurface Docs harvesters failed"));
+        Assert.Equal(2, CountLogCalls(_loggerFake, LogLevel.Critical, "All strict AppSurface Docs harvesters failed"));
     }
 
     [Fact]
     public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenTimeoutTokenCancelsWork()
     {
         var harvester = new DelayingHarvester();
+        var aggregator = CreateHarvestHealthAggregator([harvester], harvesterTimeout: TimeSpan.FromMilliseconds(10));
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        var harvesterHealth = Assert.Single(health.Harvesters);
+        Assert.Equal(DocHarvesterHealthStatus.TimedOut, harvesterHealth.Status);
+        Assert.Equal(DocHarvestDiagnosticCodes.HarvesterTimedOut, harvesterHealth.Diagnostic?.Code);
+        Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.AllFailed);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenHarvesterObservesTimeoutTokenFirst()
+    {
+        var harvester = new BlockingUntilCanceledHarvester();
         var aggregator = CreateHarvestHealthAggregator([harvester], harvesterTimeout: TimeSpan.FromMilliseconds(10));
 
         var health = await aggregator.GetHarvestHealthAsync();
@@ -5059,6 +5074,23 @@ public class DocAggregatorTests : IDisposable
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return [];
+        }
+    }
+
+    private sealed class BlockingUntilCanceledHarvester : IDocHarvester
+    {
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(1);
+            while (!cancellationToken.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+            {
+                System.Threading.Thread.Sleep(1);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<IReadOnlyList<DocNode>>([]);
         }
     }
 

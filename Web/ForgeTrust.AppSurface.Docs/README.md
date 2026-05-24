@@ -30,7 +30,7 @@ Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `
 
 - `AppSurfaceDocsWebModule` for wiring the docs UI into an AppSurface web host
 - `AddAppSurfaceDocs()` for typed options binding and core service registration
-- `DocAggregator` plus the built-in Markdown, C# API, and opt-in JavaScript public API harvesters, including structured harvest health diagnostics
+- `DocAggregator` plus the built-in Markdown, C# API, and annotation-first JavaScript public API harvesters, including structured harvest health diagnostics
 - A live harvest observatory that starts the first source-backed harvest during startup, streams real-time RazorWire progress, and keeps first navigation informative instead of appearing hung
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by AppSurface Docs consumers
 - `DocsUrlBuilder` plus the MVC surface used by AppSurface Docs consumers so the live docs root, search shell, and archive routes stay in one shared contract
@@ -216,7 +216,7 @@ The returned `DocHarvestHealthSnapshot` includes:
 - `Status`: the aggregate `DocHarvestHealthStatus`.
 - `GeneratedUtc`: the timestamp for the cached snapshot generation.
 - `RepositoryRoot`: the resolved source root passed to harvesters. Treat this as server-only operational data; redact or omit it before forwarding harvest health to client-visible UI or public APIs.
-- `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for active harvesters that participated in the snapshot. Disabled optional harvesters, such as the JavaScript harvester when `AppSurfaceDocs:Harvest:JavaScript:Enabled=false`, are omitted from these totals.
+- `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for active harvesters that participated in strict aggregate health. Disabled optional harvesters, such as the JavaScript harvester when `AppSurfaceDocs:Harvest:JavaScript:Enabled=false`, are omitted. Default broad JavaScript discovery can still appear in `Harvesters` and diagnostics while staying out of these strict totals unless `StrictHealth=true` or JavaScript `IncludeGlobs` are configured.
 - `TotalDocs`: the number of documentation nodes in the final cached docs snapshot after AppSurface Docs post-processing.
 - `Harvesters`: one `DocHarvesterHealth` entry per active harvester, including its concrete type name, `DocHarvesterHealthStatus`, raw returned doc count, and optional diagnostic.
 - `Diagnostics`: structured `DocHarvestDiagnostic` entries for harvester-level and aggregate states. AppSurface Docs-created snapshots never expose raw exception messages in diagnostics; exception details stay in host logs.
@@ -888,15 +888,21 @@ static web assets.
   - Defaults mirror the global path option shape, but apply only to C# API-reference candidates.
   - `CSharpExampleSource` is only a C# default group. Markdown example READMEs stay eligible unless excluded by other policy.
 - `AppSurfaceDocs:Harvest:JavaScript:Enabled`
-  - Defaults to `false`.
-  - Turns on the JavaScript public API harvester. Enabling it without at least one JavaScript include glob is invalid because AppSurface Docs never crawls all repository JavaScript implicitly.
+  - Defaults to `true`.
+  - Set to `false` to opt out of JavaScript public API harvesting entirely.
+  - When enabled, AppSurface Docs scans policy-approved `.js` files for explicit public doclets. Unannotated JavaScript is ignored.
 - `AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Include globs default to an empty list; exclude globs default to `**/*.min.js`; default-exclusion controls mirror the global path option shape.
-  - Start with one authored runtime file, such as `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js`, before expanding to a directory.
+  - Use include globs as an optional narrowing or performance boundary, such as `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js`.
   - Global path rules apply first, then JavaScript-specific includes, default exclusions, and excludes refine the candidate set.
 - `AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag`
   - Defaults to `true`.
   - Requires harvested doclets to carry `@public`. `@internal`, `@private`, and `@ignore` always exclude a doclet.
+  - Broad default discovery always requires `@public`, even when this is `false`; the compatibility escape applies only when JavaScript include globs are explicitly configured.
+- `AppSurfaceDocs:Harvest:JavaScript:StrictHealth`
+  - Defaults to `false`.
+  - Keeps broad default JavaScript discovery best-effort for aggregate health: empty results, parse/read diagnostics, and timeouts remain visible but do not mask or cause Markdown/C# strict failures.
+  - JavaScript participates in strict aggregate health when this is `true` or JavaScript `IncludeGlobs` is nonempty.
 - `AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes`
   - Defaults to `262144`.
   - Files above this limit are skipped with a structured harvest diagnostic so generated bundles do not dominate docs snapshot time.
@@ -959,14 +965,13 @@ static web assets.
 
 ### JavaScript public API harvesting
 
-JavaScript harvesting is for intentional browser runtime contracts: custom events, globals, small public helpers, constants, and typedefs that application authors need to consume. It is disabled by default because most repositories contain browser assets, generated bundles, and internal glue that should not become public documentation merely because it exists.
+JavaScript harvesting is for intentional browser runtime contracts: custom events, globals, small public helpers, constants, typedefs, attributes, config fields, module mount contracts, CSS custom properties, and CSS hooks that application authors need to consume. It is enabled by default, but it is annotation-first: AppSurface Docs publishes only supported public doclets and ignores unannotated JavaScript.
 
 ```json
 {
   "AppSurfaceDocs": {
     "Harvest": {
       "JavaScript": {
-        "Enabled": true,
         "IncludeGlobs": [
           "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js"
         ]
@@ -976,7 +981,7 @@ JavaScript harvesting is for intentional browser runtime contracts: custom event
 }
 ```
 
-The v1 harvester parses configured `.js` files with Acornima and reads JSDoc-shaped block comments. It renders group pages such as `api/javascript/razorwire`, adds fragment-addressable search stubs for each item, and uses `@namespace` or `@module` as the group name. Without an explicit group, `window.RazorWire` groups under `RazorWire`; otherwise the source file name is used.
+The v1 harvester parses policy-approved `.js` files with Acornima and reads JSDoc-shaped block comments. It parses modules first and falls back to script parsing for classic browser runtimes. It renders group pages such as `api/javascript/razorwire`, adds fragment-addressable search stubs for each item, and uses `@namespace` or `@module` as the group name. Without an explicit group, `window.RazorWire` groups under `RazorWire`; otherwise the source file name is used.
 
 Supported public shapes:
 
@@ -986,8 +991,13 @@ Supported public shapes:
 - attached `window.Name = ...` or `window["Name"] = ...` doclets
 - standalone `@event event:name` doclets
 - standalone `@typedef {Type} Name` doclets
+- standalone `@attribute name` doclets for package-owned HTML or `data-*` attributes
+- standalone `@config name` doclets for runtime configuration fields
+- standalone `@moduleContract name` doclets for mount/import contracts
+- standalone `@cssCustomProperty --name` doclets for public CSS variables
+- standalone `@cssHook selector` doclets for stable styling hooks paired with `@hookKind`
 
-Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, detail payload fields through `@property detail.name`, and an `@example`. Use `@detail none` only when the event deliberately carries no payload.
+Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
 
 ```js
 /**
@@ -1008,11 +1018,25 @@ Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`,
  */
 ```
 
+Browser-contract doclets should carry enough fields for readers to use them without reading source. Attributes need `@target` and `@type`; config fields need `@type` and `@source`; module contracts need `@signature` and `@target`; CSS custom properties need `@target` and `@syntax`; CSS hooks need `@hookKind`, `@target`, and `@stability`.
+
+```js
+/**
+ * Stable generated error block selector.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-form-error-generated="true"]
+ * @hookKind data-attribute
+ * @target generated form failure UI
+ * @stability stable
+ */
+```
+
 Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially.
 
 Pitfalls:
 
-- Do not enable JavaScript harvesting with a broad `**/*.js` include on a production repo. Start with the narrow runtime file whose public events or globals you want to publish.
+- Do not add broad `**/*.js` include globs just to turn JavaScript harvesting on. It is already on; include globs are for narrowing default discovery.
 - Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.

@@ -33,19 +33,19 @@ public sealed record AppSurfaceDocsHarvestHealthResponse
     public AppSurfaceDocsHarvestHealthVerification Verification { get; init; } = new();
 
     /// <summary>
-    /// Gets the number of active harvesters that participated in the snapshot.
+    /// Gets the number of active harvesters that participated in strict aggregate health for the snapshot.
     /// </summary>
     [JsonPropertyName("totalHarvesters")]
     public int TotalHarvesters { get; init; }
 
     /// <summary>
-    /// Gets the number of harvesters that completed with docs or a valid empty result.
+    /// Gets the number of strict-health harvesters that completed with docs or a valid empty result.
     /// </summary>
     [JsonPropertyName("successfulHarvesters")]
     public int SuccessfulHarvesters { get; init; }
 
     /// <summary>
-    /// Gets the number of harvesters that failed, timed out, or canceled.
+    /// Gets the number of strict-health harvesters that failed, timed out, or canceled.
     /// </summary>
     [JsonPropertyName("failedHarvesters")]
     public int FailedHarvesters { get; init; }
