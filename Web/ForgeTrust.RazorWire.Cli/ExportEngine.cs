@@ -450,7 +450,7 @@ public class ExportEngine
             return;
         }
 
-        var redirectsPath = Path.Combine(context.OutputPath, "_redirects");
+        var redirectsPath = Path.Join(context.OutputPath, "_redirects");
         EnsureDirectoryExists(redirectsPath);
         var body = string.Join(
             Environment.NewLine,
@@ -748,7 +748,7 @@ public class ExportEngine
                     "Netlify redirect rules require CDN export mode because they point at publish-root static routes."));
         }
 
-        var redirectsPath = Path.Combine(context.OutputPath, "_redirects");
+        var redirectsPath = Path.Join(context.OutputPath, "_redirects");
         if (routeByArtifactPath.TryGetValue(redirectsPath, out var existingRoute))
         {
             AddDiagnostic(
