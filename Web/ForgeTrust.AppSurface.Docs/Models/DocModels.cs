@@ -779,22 +779,22 @@ public record DocNode(
 public enum DocHarvestHealthStatus
 {
     /// <summary>
-    /// At least one active harvester returned documentation and no harvester failed.
+    /// At least one documentation node was produced and no strict-health harvester failed.
     /// </summary>
     Healthy = 0,
 
     /// <summary>
-    /// Harvesting completed without failed harvesters, but no documentation nodes were produced.
+    /// Harvesting completed without failed strict-health harvesters, but no documentation nodes were produced.
     /// </summary>
     Empty = 1,
 
     /// <summary>
-    /// At least one harvester completed successfully while at least one other harvester failed, timed out, or canceled.
+    /// At least one strict-health harvester completed successfully while at least one other strict-health harvester failed, timed out, or canceled.
     /// </summary>
     Degraded = 2,
 
     /// <summary>
-    /// Every active harvester failed, timed out, or canceled.
+    /// Every strict-health harvester failed, timed out, or canceled.
     /// </summary>
     Failed = 3
 }
@@ -873,9 +873,9 @@ public enum DocHarvestDiagnosticSeverity
 /// Repository root passed to active harvesters. Treat this as server-only operational data because it can contain
 /// sensitive or environment-specific filesystem paths; redact or omit it before sending snapshots to clients.
 /// </param>
-/// <param name="TotalHarvesters">Number of active harvesters that participated in the snapshot.</param>
-/// <param name="SuccessfulHarvesters">Number of active harvesters that completed with either docs or a valid empty result.</param>
-/// <param name="FailedHarvesters">Number of active harvesters that failed, timed out, or canceled.</param>
+/// <param name="TotalHarvesters">Number of active harvesters that participated in strict aggregate health for the snapshot.</param>
+/// <param name="SuccessfulHarvesters">Number of strict-health harvesters that completed with either docs or a valid empty result.</param>
+/// <param name="FailedHarvesters">Number of strict-health harvesters that failed, timed out, or canceled.</param>
 /// <param name="TotalDocs">Number of documentation nodes published by the final cached docs snapshot.</param>
 /// <param name="Harvesters">Per-harvester health entries. Never <see langword="null" /> in AppSurface Docs-created snapshots.</param>
 /// <param name="Diagnostics">Structured diagnostics for failed, degraded, or noteworthy states. Never <see langword="null" /> in AppSurface Docs-created snapshots.</param>
@@ -956,7 +956,7 @@ public static class DocHarvestDiagnosticCodes
     public const string NoHarvesters = "appsurfacedocs.harvest.no_harvesters";
 
     /// <summary>
-    /// Every active harvester failed, timed out, or canceled for the snapshot.
+    /// Every strict-health harvester failed, timed out, or canceled for the snapshot.
     /// </summary>
     public const string AllFailed = "appsurfacedocs.harvest.all_failed";
 

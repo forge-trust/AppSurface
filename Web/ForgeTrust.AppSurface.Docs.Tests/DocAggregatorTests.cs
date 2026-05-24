@@ -3218,12 +3218,12 @@ public class DocAggregatorTests : IDisposable
         Assert.DoesNotContain(
             firstHealth.Diagnostics.SelectMany(diagnostic => new[] { diagnostic.Problem, diagnostic.Cause, diagnostic.Fix }),
             value => value.Contains("Harvester boom", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(1, CountLogCalls(_loggerFake, LogLevel.Critical, "All AppSurface Docs harvesters failed"));
+        Assert.Equal(1, CountLogCalls(_loggerFake, LogLevel.Critical, "All strict AppSurface Docs harvesters failed"));
 
         aggregator.InvalidateCache();
         _ = await aggregator.GetHarvestHealthAsync();
 
-        Assert.Equal(2, CountLogCalls(_loggerFake, LogLevel.Critical, "All AppSurface Docs harvesters failed"));
+        Assert.Equal(2, CountLogCalls(_loggerFake, LogLevel.Critical, "All strict AppSurface Docs harvesters failed"));
     }
 
     [Fact]

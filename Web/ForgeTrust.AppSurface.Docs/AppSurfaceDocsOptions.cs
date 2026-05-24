@@ -363,7 +363,8 @@ public sealed class AppSurfaceDocsSourceOptions
 /// transient problem. Enable <see cref="FailOnFailure"/> in CI or export hosts that should fail closed when every
 /// active harvester fails, times out, or cancels. Use <see cref="Paths"/>, <see cref="Markdown"/>, and
 /// <see cref="CSharp"/> to define the repository-relative public documentation boundary shared by runtime hosts,
-/// export flows, and hygiene checks.
+/// export flows, and hygiene checks. JavaScript discovery is enabled by default and remains annotation-first; use
+/// <see cref="JavaScript"/> for JavaScript opt-out, narrowing, and strict-health behavior.
 /// </remarks>
 public sealed class AppSurfaceDocsHarvestOptions
 {
@@ -1126,12 +1127,6 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                     failures.Add("AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes must be greater than zero.");
                 }
 
-                if (harvest.JavaScript.Enabled
-                    && (harvest.JavaScript.IncludeGlobs is null
-                        || !harvest.JavaScript.IncludeGlobs.Any(static include => !string.IsNullOrWhiteSpace(include))))
-                {
-                    failures.Add("AppSurface Docs JavaScript harvesting requires at least one AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs glob when enabled.");
-                }
             }
         }
 

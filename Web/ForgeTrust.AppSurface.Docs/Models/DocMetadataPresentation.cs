@@ -104,6 +104,11 @@ public static class DocMetadataPresentation
             "javascript-constant" => ("JavaScript Constant", "api-reference", normalizedValue),
             "javascript-global" => ("JavaScript Global", "api-reference", normalizedValue),
             "javascript-typedef" => ("JavaScript Typedef", "api-reference", normalizedValue),
+            "javascript-attribute" => ("JavaScript Attribute", "api-reference", normalizedValue),
+            "javascript-config" => ("JavaScript Config Field", "api-reference", normalizedValue),
+            "javascript-module-contract" => ("JavaScript Module Contract", "api-reference", normalizedValue),
+            "javascript-css-custom-property" => ("JavaScript CSS Custom Property", "api-reference", normalizedValue),
+            "javascript-css-hook" => ("JavaScript CSS Hook", "api-reference", normalizedValue),
             "release" or "release-note" or "release-notes" => ("Release", "release", "release"),
             _ => (BuildFallbackLabel(normalizedValue), "neutral", normalizedValue)
         };

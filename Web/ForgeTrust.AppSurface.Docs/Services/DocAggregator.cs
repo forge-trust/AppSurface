@@ -305,7 +305,8 @@ public class DocAggregator
         DocHarvesterHealthStatus Status,
         IReadOnlyList<DocNode> Docs,
         DocHarvestDiagnostic? Diagnostic,
-        IReadOnlyList<DocHarvestDiagnostic>? AdditionalDiagnostics = null);
+        IReadOnlyList<DocHarvestDiagnostic>? AdditionalDiagnostics = null,
+        bool ParticipatesInStrictHealth = true);
 
     /// <summary>
     /// Initializes a new instance of <see cref="DocAggregator"/> with the provided dependencies and determines the repository root.
@@ -1056,15 +1057,27 @@ public class DocAggregator
                 docs.Count,
                 testingDelayPerDocumentMilliseconds);
             var additionalDiagnostics = CollectHarvestDiagnostics(harvester, harvesterType, logger);
-            var status = docs.Count == 0
-                ? DocHarvesterHealthStatus.ReturnedEmpty
-                : DocHarvesterHealthStatus.Succeeded;
+            var blockingDiagnostic = FindStrictBlockingDiagnostic(harvester, additionalDiagnostics);
+            var supplementalDiagnostics = blockingDiagnostic is null
+                ? additionalDiagnostics
+                : additionalDiagnostics.Where(diagnostic => !ReferenceEquals(diagnostic, blockingDiagnostic)).ToArray();
+            var status = blockingDiagnostic is not null
+                ? DocHarvesterHealthStatus.Failed
+                : docs.Count == 0
+                    ? DocHarvesterHealthStatus.ReturnedEmpty
+                    : DocHarvesterHealthStatus.Succeeded;
             if (harvestProgress is not null)
             {
                 await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, status, docs.Count);
             }
 
-            return new HarvesterRunResult(harvesterType, status, docs, Diagnostic: null, additionalDiagnostics);
+            return new HarvesterRunResult(
+                harvesterType,
+                status,
+                docs,
+                blockingDiagnostic,
+                supplementalDiagnostics,
+                ParticipatesInStrictHealth: ParticipatesInStrictHealth(harvester));
         }
         catch (TimeoutException ex)
         {
@@ -1076,7 +1089,7 @@ public class DocAggregator
                 harvesterTimeout.TotalSeconds,
                 context.RepositoryRoot);
 
-            var result = CreateTimedOutHarvesterRunResult(harvesterType);
+            var result = CreateTimedOutHarvesterRunResult(harvesterType, ParticipatesInStrictHealth(harvester));
             if (harvestProgress is not null)
             {
                 await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
@@ -1093,7 +1106,7 @@ public class DocAggregator
                 harvesterTimeout.TotalSeconds,
                 context.RepositoryRoot);
 
-            var result = CreateTimedOutHarvesterRunResult(harvesterType);
+            var result = CreateTimedOutHarvesterRunResult(harvesterType, ParticipatesInStrictHealth(harvester));
             if (harvestProgress is not null)
             {
                 await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
@@ -1119,7 +1132,8 @@ public class DocAggregator
                     harvesterType,
                     "An AppSurface Docs harvester canceled.",
                     "The harvester observed cancellation outside AppSurface Docs' timeout budget, so AppSurface Docs skipped its docs for this snapshot.",
-                    "Check whether the harvester is observing an external cancellation token or canceling its own work."));
+                    "Check whether the harvester is observing an external cancellation token or canceling its own work."),
+                ParticipatesInStrictHealth: ParticipatesInStrictHealth(harvester));
             if (harvestProgress is not null)
             {
                 await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
@@ -1145,7 +1159,8 @@ public class DocAggregator
                     harvesterType,
                     "An AppSurface Docs harvester failed.",
                     "The harvester threw while scanning the docs repository, so AppSurface Docs skipped its docs for this snapshot.",
-                    "Inspect the host logs for exception details, then fix the harvester configuration, repository root, or source content."));
+                    "Inspect the host logs for exception details, then fix the harvester configuration, repository root, or source content."),
+                ParticipatesInStrictHealth: ParticipatesInStrictHealth(harvester));
             if (harvestProgress is not null)
             {
                 await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, result.Status, result.Docs.Count);
@@ -1178,6 +1193,28 @@ public class DocAggregator
                 TimeSpan.FromMilliseconds(testingDelayPerDocumentMilliseconds),
                 CancellationToken.None);
         }
+    }
+
+    private static bool ParticipatesInStrictHealth(IDocHarvester harvester)
+    {
+        return harvester is not IDocHarvesterHealthParticipation participation
+               || participation.ParticipatesInStrictHealth;
+    }
+
+    private static DocHarvestDiagnostic? FindStrictBlockingDiagnostic(
+        IDocHarvester harvester,
+        IReadOnlyList<DocHarvestDiagnostic> diagnostics)
+    {
+        if (!ParticipatesInStrictHealth(harvester) || harvester is not JavaScriptDocHarvester)
+        {
+            return null;
+        }
+
+        return diagnostics.FirstOrDefault(static diagnostic => diagnostic.Code is
+            DocHarvestDiagnosticCodes.JavaScriptFileTooLarge
+            or DocHarvestDiagnosticCodes.JavaScriptParseFailed
+            or DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape
+            or DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
     }
 
     private static Task<IReadOnlyList<DocNode>> HarvestWithContextAsync(
@@ -1238,7 +1275,9 @@ public class DocAggregator
             or InvalidProgramException;
     }
 
-    private static HarvesterRunResult CreateTimedOutHarvesterRunResult(string harvesterType)
+    private static HarvesterRunResult CreateTimedOutHarvesterRunResult(
+        string harvesterType,
+        bool participatesInStrictHealth)
     {
         return new HarvesterRunResult(
             harvesterType,
@@ -1250,7 +1289,8 @@ public class DocAggregator
                 harvesterType,
                 "An AppSurface Docs harvester timed out.",
                 "The harvester did not complete within the per-harvester timeout budget, so AppSurface Docs skipped its docs for this snapshot.",
-                "Check the harvester for slow filesystem access, long-running parsing, or unobserved cancellation."));
+                "Check the harvester for slow filesystem access, long-running parsing, or unobserved cancellation."),
+            ParticipatesInStrictHealth: participatesInStrictHealth);
     }
 
     private static DocHarvestHealthSnapshot BuildHarvestHealthSnapshot(
@@ -1304,9 +1344,12 @@ public class DocAggregator
                     "Register at least one IDocHarvester if this host should publish source-backed documentation."));
         }
 
-        var successfulHarvesters = harvesters.Count(harvester => IsNonFailure(harvester.Status));
-        var failedHarvesters = harvesters.Length - successfulHarvesters;
-        var status = ResolveHarvestHealthStatus(harvesters.Length, successfulHarvesters, failedHarvesters, totalDocs);
+        var strictHarvesterResults = harvesterResults
+            .Where(result => result.ParticipatesInStrictHealth)
+            .ToArray();
+        var successfulHarvesters = strictHarvesterResults.Count(result => IsNonFailure(result.Status));
+        var failedHarvesters = strictHarvesterResults.Length - successfulHarvesters;
+        var status = ResolveHarvestHealthStatus(strictHarvesterResults.Length, successfulHarvesters, failedHarvesters, totalDocs);
 
         if (status == DocHarvestHealthStatus.Failed)
         {
@@ -1314,23 +1357,23 @@ public class DocAggregator
                 DocHarvestDiagnosticCodes.AllFailed,
                 DocHarvestDiagnosticSeverity.Critical,
                 HarvesterType: null,
-                "All AppSurface Docs harvesters failed.",
-                "Every active harvester failed, timed out, or canceled, so AppSurface Docs could not produce a trustworthy docs corpus.",
+                "All strict AppSurface Docs harvesters failed.",
+                "Every harvester that participates in strict aggregate health failed, timed out, or canceled, so AppSurface Docs could not produce a trustworthy docs corpus.",
                 "Inspect the preceding harvester logs, fix the failing source or configuration, and refresh the AppSurface Docs cache.");
             diagnostics.Add(aggregateDiagnostic);
 
             logger.LogCritical(
-                "All AppSurface Docs harvesters failed at {RepositoryRoot}. {FailedHarvesters}/{TotalHarvesters} harvesters produced no usable docs.",
+                "All strict AppSurface Docs harvesters failed at {RepositoryRoot}. {FailedHarvesters}/{TotalHarvesters} strict-health harvesters produced no usable docs.",
                 repositoryRoot,
                 failedHarvesters,
-                harvesters.Length);
+                strictHarvesterResults.Length);
         }
 
         return new DocHarvestHealthSnapshot(
             status,
             generatedUtc,
             repositoryRoot,
-            harvesters.Length,
+            strictHarvesterResults.Length,
             successfulHarvesters,
             failedHarvesters,
             totalDocs,
