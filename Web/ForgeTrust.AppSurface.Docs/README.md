@@ -22,6 +22,8 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 
 Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands.
 
+Redirect aliases default to HTML fallback materialization. Omit `--redirects`, or pass `--redirects html`, for GitHub Pages and generic static hosts. Pass `--mode cdn --redirects netlify` for Netlify-compatible CDN publishing; export writes one root `_redirects` file with exact site-local `301!` rules and does not write alias HTML files. Netlify export validates the encoded provider rule paths, so self-redirects and same-source aliases that point at different canonical routes fail before files are written. Do not hand-author `_redirects` in the export output because the exporter reserves that file for validated redirect rules.
+
 `--strict` and `--mode cdn` check different things. `--strict` fails host startup when every active harvester fails. `--mode cdn` validates the emitted static artifact and preserves RazorWire `RWEXPORT00x` diagnostics for missing or unrewritable managed URLs.
 
 Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `--project`, or `--dll`. Use `appsurface docs export` when AppSurface owns the AppSurface Docs repository host.
@@ -30,7 +32,7 @@ Use `razorwire export` for arbitrary RazorWire applications that need `--url`, `
 
 - `AppSurfaceDocsWebModule` for wiring the docs UI into an AppSurface web host
 - `AddAppSurfaceDocs()` for typed options binding and core service registration
-- `DocAggregator` plus the built-in Markdown, C# API, and opt-in JavaScript public API harvesters, including structured harvest health diagnostics
+- `DocAggregator` plus the built-in Markdown, C# API, and annotation-first JavaScript public API harvesters, including structured harvest health diagnostics
 - A live harvest observatory that starts the first source-backed harvest during startup, streams real-time RazorWire progress, and keeps first navigation informative instead of appearing hung
 - Search UI assets, page-local outline behavior, and the `/docs` MVC surface used by AppSurface Docs consumers
 - `DocsUrlBuilder` plus the MVC surface used by AppSurface Docs consumers so the live docs root, search shell, and archive routes stay in one shared contract
@@ -216,7 +218,7 @@ The returned `DocHarvestHealthSnapshot` includes:
 - `Status`: the aggregate `DocHarvestHealthStatus`.
 - `GeneratedUtc`: the timestamp for the cached snapshot generation.
 - `RepositoryRoot`: the resolved source root passed to harvesters. Treat this as server-only operational data; redact or omit it before forwarding harvest health to client-visible UI or public APIs.
-- `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for active harvesters that participated in the snapshot. Disabled optional harvesters, such as the JavaScript harvester when `AppSurfaceDocs:Harvest:JavaScript:Enabled=false`, are omitted from these totals.
+- `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for active harvesters that participated in strict aggregate health. Disabled optional harvesters, such as the JavaScript harvester when `AppSurfaceDocs:Harvest:JavaScript:Enabled=false`, are omitted. Default broad JavaScript discovery can still appear in `Harvesters` and diagnostics while staying out of these strict totals unless `StrictHealth=true` or JavaScript `IncludeGlobs` are configured.
 - `TotalDocs`: the number of documentation nodes in the final cached docs snapshot after AppSurface Docs post-processing.
 - `Harvesters`: one `DocHarvesterHealth` entry per active harvester, including its concrete type name, `DocHarvesterHealthStatus`, raw returned doc count, and optional diagnostic.
 - `Diagnostics`: structured `DocHarvestDiagnostic` entries for harvester-level and aggregate states. AppSurface Docs-created snapshots never expose raw exception messages in diagnostics; exception details stay in host logs.
@@ -660,11 +662,11 @@ redirect_aliases:
   - start-here/appsurface-evaluator.md.html
 ```
 
-`canonical_slug` and `redirect_aliases` are docs-root-relative route paths. Do not include a query string, fragment, leading docs root, or host name. Canonical slugs use the same deterministic segment normalization as source-derived Markdown routes. Redirect aliases preserve their literal authored route text after separator cleanup, so legacy URLs such as `Old_Path/Guide.md.html` keep their existing shape instead of being slugified. Aliases redirect permanently to the public canonical route and preserve the request query string. Public Markdown source paths such as `/docs/foo.md` and `/docs/foo.md.html` also redirect to the clean route so GitHub-style copy-pasted links recover automatically. Use `redirect_aliases` for non-source legacy URLs, renamed pages, and old route shapes that are not already implied by the source path. Declared aliases that try to shadow another public Markdown source path are ignored with a `DocRedirectAliasCollision` diagnostic so copy-pasted source URLs keep pointing at their owning page.
+`canonical_slug` and `redirect_aliases` are docs-root-relative route paths. Do not include a query string, fragment, leading docs root, host name, or provider syntax such as Netlify splats, placeholders, query conditions, or forced-status suffixes. Canonical slugs use the same deterministic segment normalization as source-derived Markdown routes. Redirect aliases preserve their literal authored route text after separator cleanup, so legacy URLs such as `Old_Path/Guide.md.html` keep their existing shape instead of being slugified. Aliases redirect permanently to the public canonical route and preserve the request query string. Public Markdown source paths such as `/docs/foo.md` and `/docs/foo.md.html` also redirect to the clean route so GitHub-style copy-pasted links recover automatically. Use `redirect_aliases` for non-source legacy URLs, renamed pages, and old route shapes that are not already implied by the source path. Declared aliases that try to shadow another public Markdown source path are ignored with a `DocRedirectAliasCollision` diagnostic so copy-pasted source URLs keep pointing at their owning page. Use `aliases` metadata for search/discovery terms; use `redirect_aliases` only for old browser URL routes that should redirect. When publishing with `--redirects netlify`, two aliases that differ only by percent encoding must resolve to the same canonical route or export fails.
 
 The cached route identity catalog also exposes a route manifest for exporters. Each manifest entry contains the public canonical live URL, source-shaped Markdown recovery aliases such as `/docs/foo.md` and `/docs/foo.md.html`, declared redirect aliases, and route diagnostics from the final public route catalog. Static AppSurface Docs export consumes that manifest after the snapshot is fully aggregated, so namespace README merging, collision handling, and reserved-route filtering have already selected the same public winners that the live controller serves. When a source-shaped recovery alias would shadow another public route, AppSurface Docs omits that alias from the manifest and emits `DocImplicitRecoveryAliasCollision`.
 
-Static export writes redirect alias artifacts for manifest aliases instead of copying page bodies to every legacy path. The alias file points at the canonical artifact with a canonical link and meta refresh, while the canonical page keeps the real content. This preserves recoverability for source-shaped URLs pasted from the repository without creating duplicate SEO surfaces or letting stale alias pages drift away from the clean route.
+Static export materializes manifest aliases instead of copying page bodies to every legacy path. The default HTML strategy writes alias files that point at the canonical artifact with a canonical link and meta refresh, while the canonical page keeps the real content. The Netlify strategy writes exact `_redirects` rules from the live alias route to the live canonical route. Both strategies preserve recoverability for source-shaped URLs pasted from the repository without creating duplicate SEO surfaces or letting stale alias pages drift away from the clean route.
 
 ### Localization foundation
 
@@ -892,15 +894,21 @@ static web assets.
   - Defaults mirror the global path option shape, but apply only to C# API-reference candidates.
   - `CSharpExampleSource` is only a C# default group. Markdown example READMEs stay eligible unless excluded by other policy.
 - `AppSurfaceDocs:Harvest:JavaScript:Enabled`
-  - Defaults to `false`.
-  - Turns on the JavaScript public API harvester. Enabling it without at least one JavaScript include glob is invalid because AppSurface Docs never crawls all repository JavaScript implicitly.
+  - Defaults to `true`.
+  - Set to `false` to opt out of JavaScript public API harvesting entirely.
+  - When enabled, AppSurface Docs scans policy-approved `.js` files for explicit public doclets. Unannotated JavaScript is ignored.
 - `AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Include globs default to an empty list; exclude globs default to `**/*.min.js`; default-exclusion controls mirror the global path option shape.
-  - Start with one authored runtime file, such as `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js`, before expanding to a directory.
+  - Use include globs as an optional narrowing or performance boundary, such as `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js`.
   - Global path rules apply first, then JavaScript-specific includes, default exclusions, and excludes refine the candidate set.
 - `AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag`
   - Defaults to `true`.
   - Requires harvested doclets to carry `@public`. `@internal`, `@private`, and `@ignore` always exclude a doclet.
+  - Broad default discovery always requires `@public`, even when this is `false`; the compatibility escape applies only when JavaScript include globs are explicitly configured.
+- `AppSurfaceDocs:Harvest:JavaScript:StrictHealth`
+  - Defaults to `false`.
+  - Keeps broad default JavaScript discovery best-effort for aggregate health: empty results, parse/read diagnostics, and timeouts remain visible but do not mask or cause Markdown/C# strict failures.
+  - JavaScript participates in strict aggregate health when this is `true` or JavaScript `IncludeGlobs` is nonempty.
 - `AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes`
   - Defaults to `262144`.
   - Files above this limit are skipped with a structured harvest diagnostic so generated bundles do not dominate docs snapshot time.
@@ -963,14 +971,13 @@ static web assets.
 
 ### JavaScript public API harvesting
 
-JavaScript harvesting is for intentional browser runtime contracts: custom events, globals, small public helpers, constants, and typedefs that application authors need to consume. It is disabled by default because most repositories contain browser assets, generated bundles, and internal glue that should not become public documentation merely because it exists.
+JavaScript harvesting is for intentional browser runtime contracts: custom events, globals, small public helpers, constants, typedefs, attributes, config fields, module mount contracts, CSS custom properties, and CSS hooks that application authors need to consume. It is enabled by default, but it is annotation-first: AppSurface Docs publishes only supported public doclets and ignores unannotated JavaScript.
 
 ```json
 {
   "AppSurfaceDocs": {
     "Harvest": {
       "JavaScript": {
-        "Enabled": true,
         "IncludeGlobs": [
           "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js"
         ]
@@ -980,7 +987,7 @@ JavaScript harvesting is for intentional browser runtime contracts: custom event
 }
 ```
 
-The v1 harvester parses configured `.js` files with Acornima and reads JSDoc-shaped block comments. It renders group pages such as `api/javascript/razorwire`, adds fragment-addressable search stubs for each item, and uses `@namespace` or `@module` as the group name. Without an explicit group, `window.RazorWire` groups under `RazorWire`; otherwise the source file name is used.
+The v1 harvester parses policy-approved `.js` files with Acornima and reads JSDoc-shaped block comments. It parses modules first and falls back to script parsing for classic browser runtimes. It renders group pages such as `api/javascript/razorwire`, adds fragment-addressable search stubs for each item, and uses `@namespace` or `@module` as the group name. Without an explicit group, `window.RazorWire` groups under `RazorWire`; otherwise the source file name is used.
 
 Supported public shapes:
 
@@ -990,8 +997,13 @@ Supported public shapes:
 - attached `window.Name = ...` or `window["Name"] = ...` doclets
 - standalone `@event event:name` doclets
 - standalone `@typedef {Type} Name` doclets
+- standalone `@attribute name` doclets for package-owned HTML or `data-*` attributes
+- standalone `@config name` doclets for runtime configuration fields
+- standalone `@moduleContract name` doclets for mount/import contracts
+- standalone `@cssCustomProperty --name` doclets for public CSS variables
+- standalone `@cssHook selector` doclets for stable styling hooks paired with `@hookKind`
 
-Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, detail payload fields through `@property detail.name`, and an `@example`. Use `@detail none` only when the event deliberately carries no payload.
+Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
 
 ```js
 /**
@@ -1012,11 +1024,25 @@ Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`,
  */
 ```
 
+Browser-contract doclets should carry enough fields for readers to use them without reading source. Attributes need `@target` and `@type`; config fields need `@type` and `@source`; module contracts need `@signature` and `@target`; CSS custom properties need `@target` and `@syntax`; CSS hooks need `@hookKind`, `@target`, and `@stability`.
+
+```js
+/**
+ * Stable generated error block selector.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-form-error-generated="true"]
+ * @hookKind data-attribute
+ * @target generated form failure UI
+ * @stability stable
+ */
+```
+
 Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially.
 
 Pitfalls:
 
-- Do not enable JavaScript harvesting with a broad `**/*.js` include on a production repo. Start with the narrow runtime file whose public events or globals you want to publish.
+- Do not add broad `**/*.js` include globs just to turn JavaScript harvesting on. It is already on; include globs are for narrowing default discovery.
 - Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
@@ -1452,7 +1478,7 @@ This means a link is rewritten only when the target exists in the harvested docs
 - Do not rely on file extensions alone. A `.md`, `.cs`, or `.html` suffix does not make a link an AppSurface Docs target unless the target was harvested.
 - If a doc link is not rewritten, first confirm the target file is included by the active harvester and not excluded by directory policy.
 - Public docs-surface links are safe for exported docs, but source-relative Markdown links are usually easier to keep portable in GitHub and editor previews.
-- Details pages emit a canonical link for the clean public route. In CDN export mode, RazorWire rewrites app-relative canonical links to the emitted static artifact URL, such as `/docs/guides/intro.html`, so exported pages and redirect alias artifacts agree on the same static canonical destination.
+- Details pages emit a canonical link for the clean public route. In CDN export mode, RazorWire rewrites app-relative canonical links to the emitted static artifact URL, such as `/docs/guides/intro.html`, so exported pages and HTML redirect alias artifacts agree on the same static canonical destination. Netlify `_redirects` rules still use the live alias and canonical routes because provider redirects run before static artifact lookup.
 - Set `AppSurfaceDocs:Routing:PublicOrigin` before export when the crawl happens on loopback but the artifact will publish under a public origin. Otherwise canonical links stay app-relative instead of naming the production host.
 
 ## Landing Curation

@@ -796,8 +796,8 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         var aliasTree = CreatePublishedTree("root-alias-canonical");
         var exactTree = CreatePublishedTree("root-exact-canonical");
         WriteCanonicalPage(aliasTree, "/docs/guide.html");
-        File.WriteAllText(Path.Combine(aliasTree, "search.css"), "body { color: #111; }");
-        File.WriteAllText(Path.Combine(exactTree, "search.css"), "body { color: #0ea5e9; }");
+        File.WriteAllText(Path.Join(aliasTree, "search.css"), "body { color: #111; }");
+        File.WriteAllText(Path.Join(exactTree, "search.css"), "body { color: #0ea5e9; }");
         using var aliasProvider = new PhysicalFileProvider(aliasTree);
         using var exactProvider = new PhysicalFileProvider(exactTree);
         var handler = CreateHandler(
@@ -947,7 +947,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
             """);
         File.WriteAllText(Path.Combine(root, "guide", "index.html"), "<!DOCTYPE html><html><body>guide-index</body></html>");
         File.WriteAllText(Path.Combine(root, "folder-only", "index.html"), "<!DOCTYPE html><html><body>folder-only</body></html>");
-        File.WriteAllText(Path.Combine(root, "search.css"), "body { color: #fff; }");
+        File.WriteAllText(Path.Join(root, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
         File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
 

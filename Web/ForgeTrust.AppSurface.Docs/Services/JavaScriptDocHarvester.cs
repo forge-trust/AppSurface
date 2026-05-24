@@ -11,16 +11,15 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
-/// Harvests intentionally public JavaScript API doclets from configured plain <c>.js</c> source files.
+/// Harvests intentionally public JavaScript API doclets from policy-approved plain <c>.js</c> source files.
 /// </summary>
 /// <remarks>
-/// The harvester is disabled by default through <see cref="AppSurfaceDocsJavaScriptHarvestOptions.Enabled"/> and scans only
-/// repository-relative paths matched by <see cref="AppSurfaceDocsJavaScriptHarvestOptions.IncludeGlobs"/>. V1 is deliberately
-/// strict: it reads JSDoc-shaped block comments, requires <c>@public</c> by default, treats <c>@internal</c>,
-/// <c>@private</c>, and <c>@ignore</c> as hard exclusions, and renders only functions, constants, globals, standalone
-/// events, and standalone typedefs. Unsupported public shapes become harvest diagnostics instead of partial docs.
+/// The harvester is enabled by default through <see cref="AppSurfaceDocsJavaScriptHarvestOptions.Enabled"/> and scans
+/// repository-relative JavaScript candidates that pass the shared harvest path policy. V1 is deliberately strict: broad
+/// discovery requires <c>@public</c>, treats <c>@internal</c>, <c>@private</c>, and <c>@ignore</c> as hard exclusions,
+/// and turns unsupported public shapes into harvest diagnostics instead of partial docs.
 /// </remarks>
-public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider, IDocHarvesterActivation
+public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider, IDocHarvesterActivation, IDocHarvesterHealthParticipation
 {
     private const string HarvesterType = nameof(JavaScriptDocHarvester);
     private static readonly Regex UnsafeSlugCharacterRegex = new("[^a-z0-9]+", RegexOptions.Compiled | RegexOptions.NonBacktracking);
@@ -62,7 +61,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     }
 
     /// <summary>
-    /// Scans configured JavaScript files under the repository root and returns generated AppSurface Docs API nodes.
+    /// Scans policy-approved JavaScript files under the repository root and returns generated AppSurface Docs API nodes.
     /// </summary>
     /// <param name="rootPath">The repository root used to resolve include and exclude globs.</param>
     /// <param name="cancellationToken">An optional token to observe while reading and parsing files.</param>
@@ -110,19 +109,10 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 return [];
             }
 
-            if (!HasUsableIncludeGlobs(javaScriptOptions.IncludeGlobs))
-            {
-                diagnostics.Add(CreateDiagnostic(
-                    DocHarvestDiagnosticCodes.JavaScriptMissingInclude,
-                    DocHarvestDiagnosticSeverity.Warning,
-                    "JavaScript harvesting is enabled without include globs.",
-                    "AppSurface Docs does not perform implicit repository-wide JavaScript crawling, so no JavaScript files were scanned.",
-                    "Configure at least one AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs glob for the public runtime files that should be documented."));
-                return [];
-            }
-
+            var includePatterns = NormalizeIncludePatterns(javaScriptOptions.IncludeGlobs ?? []).ToArray();
+            var requirePublicTag = ShouldRequirePublicTag(javaScriptOptions, includePatterns);
             var harvestedItems = new List<JavaScriptApiItem>();
-            foreach (var filePath in EnumerateJavaScriptFiles(rootPath, javaScriptOptions, pathPolicy, cancellationToken))
+            foreach (var filePath in EnumerateJavaScriptFiles(rootPath, includePatterns, pathPolicy, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -147,7 +137,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     }
 
                     var source = await File.ReadAllTextAsync(filePath, cancellationToken);
-                    harvestedItems.AddRange(ParseFile(source, relativePath, javaScriptOptions, diagnostics));
+                    if (requirePublicTag && !source.Contains("@public", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    harvestedItems.AddRange(ParseFile(source, relativePath, javaScriptOptions, requirePublicTag, diagnostics));
                 }
                 catch (ParseErrorException ex)
                 {
@@ -188,6 +183,16 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     bool IDocHarvesterActivation.IsEnabled => _options.Harvest?.JavaScript?.Enabled == true;
 
+    bool IDocHarvesterHealthParticipation.ParticipatesInStrictHealth
+    {
+        get
+        {
+            var javaScriptOptions = _options.Harvest?.JavaScript ?? new AppSurfaceDocsJavaScriptHarvestOptions();
+            var includePatterns = NormalizeIncludePatterns(javaScriptOptions.IncludeGlobs ?? []);
+            return javaScriptOptions.StrictHealth || HasUsableIncludeGlobs(includePatterns);
+        }
+    }
+
     IReadOnlyList<DocHarvestDiagnostic> IDocHarvesterDiagnosticProvider.GetHarvestDiagnostics()
     {
         return _lastDiagnostics;
@@ -197,16 +202,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string source,
         string relativePath,
         AppSurfaceDocsJavaScriptHarvestOptions options,
+        bool requirePublicTag,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var comments = new List<Comment>();
-        var parser = new Parser(new ParserOptions
-        {
-            EcmaVersion = EcmaVersion.Latest,
-            OnComment = (in Comment comment) => comments.Add(comment)
-        });
-
-        var script = parser.ParseScript(source);
+        var script = ParseJavaScriptProgram(source, comments);
         var attachedCommentStarts = new HashSet<int>();
         var items = new List<JavaScriptApiItem>();
 
@@ -214,6 +214,36 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         {
             switch (statement)
             {
+                case ExportNamedDeclaration { Declaration: FunctionDeclaration functionDeclaration } exportNamedDeclaration:
+                    AddAttachedItem(
+                        comments,
+                        attachedCommentStarts,
+                        items,
+                        source,
+                        relativePath,
+                        exportNamedDeclaration,
+                        functionDeclaration,
+                        functionDeclaration.Id?.Name,
+                        JavaScriptApiKind.Function,
+                        options,
+                        requirePublicTag,
+                        diagnostics);
+                    break;
+
+                case ExportNamedDeclaration { Declaration: VariableDeclaration variableDeclaration } exportNamedDeclaration:
+                    AddVariableDeclarationItems(
+                        comments,
+                        attachedCommentStarts,
+                        items,
+                        source,
+                        relativePath,
+                        exportNamedDeclaration,
+                        variableDeclaration,
+                        options,
+                        requirePublicTag,
+                        diagnostics);
+                    break;
+
                 case FunctionDeclaration functionDeclaration:
                     AddAttachedItem(
                         comments,
@@ -226,29 +256,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         functionDeclaration.Id?.Name,
                         JavaScriptApiKind.Function,
                         options,
+                        requirePublicTag,
                         diagnostics);
                     break;
 
                 case VariableDeclaration variableDeclaration:
-                    if (variableDeclaration.Declarations.Count != 1)
-                    {
-                        AddUnsupportedAttachedItem(
-                            comments,
-                            attachedCommentStarts,
-                            source,
-                            relativePath,
-                            variableDeclaration,
-                            "Multiple JavaScript declarators cannot share one public doclet in v1.",
-                            diagnostics);
-                        break;
-                    }
-
-                    var declarator = variableDeclaration.Declarations[0];
-                    var name = declarator.Id is Identifier identifier ? identifier.Name : null;
-                    var kind = declarator.Init is ArrowFunctionExpression or FunctionExpression
-                        ? JavaScriptApiKind.Function
-                        : JavaScriptApiKind.Constant;
-                    AddAttachedItem(
+                    AddVariableDeclarationItems(
                         comments,
                         attachedCommentStarts,
                         items,
@@ -256,11 +269,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         relativePath,
                         variableDeclaration,
                         variableDeclaration,
-                        name,
-                        kind,
                         options,
+                        requirePublicTag,
                         diagnostics);
-
                     break;
 
                 case ExpressionStatement expressionStatement
@@ -279,6 +290,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                             memberPath,
                             JavaScriptApiKind.Global,
                             options,
+                            requirePublicTag,
                             diagnostics);
                     }
                     else if (memberPath.StartsWith("module.exports", StringComparison.Ordinal))
@@ -315,12 +327,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 continue;
             }
 
-            AddStandaloneItem(comment, items, source, relativePath, options, diagnostics);
+            AddStandaloneItem(comment, items, source, relativePath, requirePublicTag, diagnostics);
         }
 
-        foreach (var item in items.Where(static item => item.Kind == JavaScriptApiKind.Event))
+        foreach (var item in items)
         {
-            AddEventCompletenessDiagnostics(item, diagnostics);
+            AddCompletenessDiagnostics(item, diagnostics);
         }
 
         return items;
@@ -339,6 +351,28 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
+    private static Node ParseJavaScriptProgram(string source, List<Comment> comments)
+    {
+        try
+        {
+            return CreateParser(comments).ParseModule(source);
+        }
+        catch (ParseErrorException)
+        {
+            comments.Clear();
+            return CreateParser(comments).ParseScript(source);
+        }
+    }
+
+    private static Parser CreateParser(List<Comment> comments)
+    {
+        return new Parser(new ParserOptions
+        {
+            EcmaVersion = EcmaVersion.Latest,
+            OnComment = (in Comment comment) => comments.Add(comment)
+        });
+    }
+
     private static void AddAttachedItem(
         IReadOnlyList<Comment> comments,
         ISet<int> attachedCommentStarts,
@@ -350,6 +384,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string? name,
         JavaScriptApiKind kind,
         AppSurfaceDocsJavaScriptHarvestOptions options,
+        bool requirePublicTag,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var comment = FindLeadingBlockComment(comments, attachmentNode, source);
@@ -358,18 +393,18 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return;
         }
 
-        if (attachedCommentStarts.Contains(comment.Value.Start))
-        {
-            return;
-        }
-
         var doclet = ParseDoclet(GetCommentText(source, comment.Value));
-        if (!ShouldIncludeDoclet(doclet, options))
+        if (HasStandaloneContractTag(doclet))
         {
             return;
         }
 
-        attachedCommentStarts.Add(comment.Value.Start);
+        if (!ShouldIncludeDoclet(doclet, requirePublicTag))
+        {
+            return;
+        }
+
+        if (!attachedCommentStarts.Add(comment.Value.Start)) return;
         if (string.IsNullOrWhiteSpace(name))
         {
             diagnostics.Add(MalformedDoclet(relativePath, comment.Value.Location.Start.Line, "A public JavaScript doclet was attached to an unnamed declaration."));
@@ -377,6 +412,51 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         items.Add(CreateApiItem(name, kind, doclet, relativePath, provenanceNode.Location.Start.Line));
+    }
+
+    private static void AddVariableDeclarationItems(
+        IReadOnlyList<Comment> comments,
+        ISet<int> attachedCommentStarts,
+        ICollection<JavaScriptApiItem> items,
+        string source,
+        string relativePath,
+        Node attachmentNode,
+        VariableDeclaration variableDeclaration,
+        AppSurfaceDocsJavaScriptHarvestOptions options,
+        bool requirePublicTag,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        if (variableDeclaration.Declarations.Count != 1)
+        {
+            AddUnsupportedAttachedItem(
+                comments,
+                attachedCommentStarts,
+                source,
+                relativePath,
+                attachmentNode,
+                "Multiple JavaScript declarators cannot share one public doclet in v1.",
+                diagnostics);
+            return;
+        }
+
+        var declarator = variableDeclaration.Declarations[0];
+        var name = declarator.Id is Identifier identifier ? identifier.Name : null;
+        var kind = declarator.Init is ArrowFunctionExpression or FunctionExpression
+            ? JavaScriptApiKind.Function
+            : JavaScriptApiKind.Constant;
+        AddAttachedItem(
+            comments,
+            attachedCommentStarts,
+            items,
+            source,
+            relativePath,
+            attachmentNode,
+            variableDeclaration,
+            name,
+            kind,
+            options,
+            requirePublicTag,
+            diagnostics);
     }
 
     private static void AddUnsupportedAttachedItem(
@@ -400,7 +480,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return;
         }
 
-        if (doclet.HasTag("event") || doclet.HasTag("typedef"))
+        if (HasStandaloneContractTag(doclet))
         {
             return;
         }
@@ -419,7 +499,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         ICollection<JavaScriptApiItem> items,
         string source,
         string relativePath,
-        AppSurfaceDocsJavaScriptHarvestOptions options,
+        bool requirePublicTag,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         if (comment.Kind != CommentKind.Block)
@@ -428,32 +508,25 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         var doclet = ParseDoclet(GetCommentText(source, comment));
-        if (!ShouldIncludeDoclet(doclet, options))
+        if (!ShouldIncludeDoclet(doclet, requirePublicTag))
         {
             return;
         }
 
-        if (doclet.TryGetTagValue("event") is { } eventName && !string.IsNullOrWhiteSpace(eventName))
+        if (TryGetStandaloneContract(doclet, out var kind, out var name))
         {
-            items.Add(CreateApiItem(eventName, JavaScriptApiKind.Event, doclet, relativePath, comment.Location.Start.Line));
+            if (!ValidateStandaloneContractName(kind, name, doclet, relativePath, comment.Location.Start.Line, diagnostics))
+            {
+                return;
+            }
+
+            items.Add(CreateApiItem(name, kind, doclet, relativePath, comment.Location.Start.Line));
             return;
         }
 
-        if (doclet.HasTag("event"))
+        if (TryGetMalformedStandaloneContractCause(doclet) is { } malformedCause)
         {
-            diagnostics.Add(MalformedDoclet(relativePath, comment.Location.Start.Line, "A public JavaScript event doclet is missing an event name."));
-            return;
-        }
-
-        if (TryGetTypedefName(doclet) is { } typedefName)
-        {
-            items.Add(CreateApiItem(typedefName, JavaScriptApiKind.Typedef, doclet, relativePath, comment.Location.Start.Line));
-            return;
-        }
-
-        if (doclet.HasTag("typedef"))
-        {
-            diagnostics.Add(MalformedDoclet(relativePath, comment.Location.Start.Line, "A public JavaScript typedef doclet is missing a typedef name."));
+            diagnostics.Add(MalformedDoclet(relativePath, comment.Location.Start.Line, malformedCause));
             return;
         }
 
@@ -462,7 +535,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             diagnostics.Add(MalformedDoclet(
                 relativePath,
                 comment.Location.Start.Line,
-                "A standalone public JavaScript doclet must use a supported v1 kind such as @event or @typedef."));
+                "A standalone public JavaScript doclet must use a supported v1 kind such as @event, @typedef, @attribute, @config, @moduleContract, @cssCustomProperty, or @cssHook."));
         }
     }
 
@@ -492,6 +565,15 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             doclet.TryGetTagValue("returns") ?? doclet.TryGetTagValue("return"),
             doclet.TryGetTagValue("target"),
             doclet.TryGetTagValue("firesWhen"),
+            doclet.TryGetTagValue("type"),
+            doclet.TryGetTagValue("default"),
+            doclet.TryGetTagValue("values"),
+            doclet.TryGetTagValue("source"),
+            doclet.TryGetTagValue("signature"),
+            doclet.TryGetTagValue("syntax"),
+            doclet.TryGetTagValue("inherits"),
+            doclet.TryGetTagValue("hookKind"),
+            doclet.TryGetTagValue("stability"),
             ParseBooleanTag(doclet.TryGetTagValue("bubbles")),
             ParseBooleanTag(doclet.TryGetTagValue("cancelable")),
             IsDetailNone(doclet),
@@ -499,6 +581,182 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             doclet.TryGetTagValue("deprecated"),
             relativePath,
             startLine);
+    }
+
+    private static bool HasStandaloneContractTag(JavaScriptDoclet doclet)
+    {
+        return doclet.HasTag("event")
+               || doclet.HasTag("typedef")
+               || doclet.HasTag("attribute")
+               || doclet.HasTag("config")
+               || doclet.HasTag("moduleContract")
+               || doclet.HasTag("cssCustomProperty")
+               || doclet.HasTag("cssHook");
+    }
+
+    private static bool TryGetStandaloneContract(JavaScriptDoclet doclet, out JavaScriptApiKind kind, out string name)
+    {
+        if (TryGetTagName(doclet, "event") is { } eventName)
+        {
+            kind = JavaScriptApiKind.Event;
+            name = eventName;
+            return true;
+        }
+
+        if (TryGetTypedefName(doclet) is { } typedefName)
+        {
+            kind = JavaScriptApiKind.Typedef;
+            name = typedefName;
+            return true;
+        }
+
+        if (TryGetTagName(doclet, "attribute") is { } attributeName)
+        {
+            kind = JavaScriptApiKind.Attribute;
+            name = attributeName;
+            return true;
+        }
+
+        if (TryGetTagName(doclet, "config") is { } configName)
+        {
+            kind = JavaScriptApiKind.Config;
+            name = configName;
+            return true;
+        }
+
+        if (TryGetTagName(doclet, "moduleContract") is { } moduleContractName)
+        {
+            kind = JavaScriptApiKind.ModuleContract;
+            name = moduleContractName;
+            return true;
+        }
+
+        if (TryGetTagName(doclet, "cssCustomProperty") is { } cssCustomPropertyName)
+        {
+            kind = JavaScriptApiKind.CssCustomProperty;
+            name = cssCustomPropertyName;
+            return true;
+        }
+
+        if (TryGetTagName(doclet, "cssHook") is { } cssHookName)
+        {
+            kind = JavaScriptApiKind.CssHook;
+            name = cssHookName;
+            return true;
+        }
+
+        kind = default;
+        name = string.Empty;
+        return false;
+    }
+
+    private static string? TryGetTagName(JavaScriptDoclet doclet, string tagName)
+    {
+        var value = doclet.TryGetTagValue(tagName);
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
+    }
+
+    private static string? TryGetMalformedStandaloneContractCause(JavaScriptDoclet doclet)
+    {
+        if (doclet.HasTag("event"))
+        {
+            return "A public JavaScript event doclet is missing an event name.";
+        }
+
+        if (doclet.HasTag("typedef"))
+        {
+            return "A public JavaScript typedef doclet is missing a typedef name.";
+        }
+
+        if (doclet.HasTag("attribute"))
+        {
+            return "A public JavaScript attribute doclet is missing an attribute name.";
+        }
+
+        if (doclet.HasTag("config"))
+        {
+            return "A public JavaScript config doclet is missing a config field name.";
+        }
+
+        if (doclet.HasTag("moduleContract"))
+        {
+            return "A public JavaScript module contract doclet is missing a contract name.";
+        }
+
+        if (doclet.HasTag("cssCustomProperty"))
+        {
+            return "A public JavaScript CSS custom property doclet is missing a custom property name.";
+        }
+
+        if (doclet.HasTag("cssHook"))
+        {
+            return "A public JavaScript CSS hook doclet is missing a selector.";
+        }
+
+        return null;
+    }
+
+    private static bool ValidateStandaloneContractName(
+        JavaScriptApiKind kind,
+        string name,
+        JavaScriptDoclet doclet,
+        string relativePath,
+        int line,
+        ICollection<DocHarvestDiagnostic> diagnostics)
+    {
+        if (kind == JavaScriptApiKind.CssCustomProperty && !name.StartsWith("--", StringComparison.Ordinal))
+        {
+            diagnostics.Add(MalformedDoclet(
+                relativePath,
+                line,
+                "A public JavaScript CSS custom property doclet name must start with '--'."));
+            return false;
+        }
+
+        if (kind == JavaScriptApiKind.CssHook && !IsValidCssHook(name, doclet))
+        {
+            diagnostics.Add(MalformedDoclet(
+                relativePath,
+                line,
+                "A public JavaScript CSS hook doclet must use a supported @hookKind and a narrow selector value."));
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsValidCssHook(string selector, JavaScriptDoclet doclet)
+    {
+        var hookKind = doclet.TryGetTagValue("hookKind")?.Trim();
+        if (string.IsNullOrWhiteSpace(hookKind))
+        {
+            return false;
+        }
+
+        return hookKind.ToLowerInvariant() switch
+        {
+            "class" => Regex.IsMatch(selector, @"^\.[A-Za-z_][A-Za-z0-9_-]*$", RegexOptions.CultureInvariant),
+            "data-attribute" => Regex.IsMatch(
+                selector,
+                @"^\[data-[A-Za-z0-9_-]+(?:=(?:""[^""]+""|'[^']+'|[^\]\s]+))?\]$",
+                RegexOptions.CultureInvariant),
+            "part" => Regex.IsMatch(selector, @"^::part\([A-Za-z_][A-Za-z0-9_-]*\)$", RegexOptions.CultureInvariant),
+            "state" => Regex.IsMatch(selector, @"^:state\([A-Za-z_][A-Za-z0-9_-]*\)$", RegexOptions.CultureInvariant),
+            "selector" => IsStableNarrowSelector(selector, doclet),
+            _ => false
+        };
+    }
+
+    private static bool IsStableNarrowSelector(string selector, JavaScriptDoclet doclet)
+    {
+        return doclet.TryGetTagValue("stability")?.Equals("stable", StringComparison.OrdinalIgnoreCase) == true
+               && !selector.Contains(',', StringComparison.Ordinal)
+               && !selector.Any(char.IsWhiteSpace)
+               && !selector.Contains('>', StringComparison.Ordinal)
+               && !selector.Contains('+', StringComparison.Ordinal)
+               && !selector.Contains('~', StringComparison.Ordinal);
     }
 
     private static void AssignStableAnchors(
@@ -537,29 +795,47 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
-    private static void AddEventCompletenessDiagnostics(
+    private static void AddCompletenessDiagnostics(
         JavaScriptApiItem item,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(item.Target))
+        switch (item.Kind)
         {
-            missing.Add("@target");
-        }
+            case JavaScriptApiKind.Event:
+                AddMissing(missing, item.Target, "@target");
+                AddMissing(missing, item.FiresWhen, "@firesWhen");
+                if (!item.DetailNone && item.Properties.Count == 0)
+                {
+                    missing.Add("@property detail.* or @detail none");
+                }
 
-        if (string.IsNullOrWhiteSpace(item.FiresWhen))
-        {
-            missing.Add("@firesWhen");
-        }
+                break;
 
-        if (string.IsNullOrWhiteSpace(item.Example))
-        {
-            missing.Add("@example");
-        }
+            case JavaScriptApiKind.Attribute:
+                AddMissing(missing, item.Target, "@target");
+                AddMissing(missing, item.Type, "@type");
+                break;
 
-        if (!item.DetailNone && item.Properties.Count == 0)
-        {
-            missing.Add("@property detail.* or @detail none");
+            case JavaScriptApiKind.Config:
+                AddMissing(missing, item.Type, "@type");
+                AddMissing(missing, item.Source, "@source");
+                break;
+
+            case JavaScriptApiKind.ModuleContract:
+                AddMissing(missing, item.Signature, "@signature");
+                AddMissing(missing, item.Target, "@target");
+                break;
+
+            case JavaScriptApiKind.CssCustomProperty:
+                AddMissing(missing, item.Target, "@target");
+                AddMissing(missing, item.Syntax, "@syntax");
+                break;
+
+            case JavaScriptApiKind.CssHook:
+                AddMissing(missing, item.Target, "@target");
+                AddMissing(missing, item.Stability, "@stability");
+                break;
         }
 
         if (missing.Count == 0)
@@ -570,9 +846,17 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         diagnostics.Add(CreateDiagnostic(
             DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet,
             DocHarvestDiagnosticSeverity.Warning,
-            $"JavaScript event '{item.Name}' is missing recommended public contract fields.",
-            "The event will render, but readers may not know where it fires, when it fires, what payload it carries, or how to consume it.",
-            "Add " + string.Join(", ", missing) + " to the public event doclet."));
+            $"{GetKindLabel(item.Kind)} '{item.Name}' is missing public contract fields.",
+            "The item will render, but readers may not know enough about the public browser contract to consume it confidently.",
+            "Add " + string.Join(", ", missing) + " to the public JavaScript doclet."));
+    }
+
+    private static void AddMissing(ICollection<string> missing, string? value, string tagName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            missing.Add(tagName);
+        }
     }
 
     private static IReadOnlyList<DocNode> BuildDocNodes(IReadOnlyList<JavaScriptApiItem> items)
@@ -755,7 +1039,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         AppendSignature(builder, item);
-        AppendEventMetadata(builder, item);
+        AppendContractMetadata(builder, item);
         AppendMembers(builder, "Parameters", item.Parameters);
         AppendMembers(builder, item.Kind == JavaScriptApiKind.Event ? "Detail fields" : "Properties", item.Properties);
         if (!string.IsNullOrWhiteSpace(item.Returns))
@@ -776,25 +1060,41 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static void AppendSignature(StringBuilder builder, JavaScriptApiItem item)
     {
-        var signature = item.Kind == JavaScriptApiKind.Function
-            ? $"{item.Name}({string.Join(", ", item.Parameters.Select(parameter => parameter.Name))})"
-            : item.Name;
+        var signature = item.Kind switch
+        {
+            JavaScriptApiKind.Function => $"{item.Name}({string.Join(", ", item.Parameters.Select(parameter => parameter.Name))})",
+            JavaScriptApiKind.ModuleContract when !string.IsNullOrWhiteSpace(item.Signature) => item.Signature,
+            _ => item.Name
+        };
 
         builder.Append("<pre><code class=\"language-js\">");
         builder.Append(WebUtility.HtmlEncode(signature));
         builder.Append("</code></pre>");
     }
 
-    private static void AppendEventMetadata(StringBuilder builder, JavaScriptApiItem item)
+    private static void AppendContractMetadata(StringBuilder builder, JavaScriptApiItem item)
     {
-        if (item.Kind != JavaScriptApiKind.Event)
+        if (!HasContractMetadata(item))
         {
             return;
         }
 
         builder.Append("<ul>");
         AppendListItem(builder, "Target", item.Target);
-        AppendListItem(builder, "Fires when", item.FiresWhen);
+        AppendListItem(builder, "Type", item.Type);
+        AppendListItem(builder, "Default", item.DefaultValue);
+        AppendListItem(builder, "Values", item.Values);
+        AppendListItem(builder, "Source", item.Source);
+        AppendListItem(builder, "Signature", item.Signature);
+        AppendListItem(builder, "Syntax", item.Syntax);
+        AppendListItem(builder, "Inherits", item.Inherits);
+        AppendListItem(builder, "Hook kind", item.HookKind);
+        AppendListItem(builder, "Stability", item.Stability);
+        if (item.Kind == JavaScriptApiKind.Event)
+        {
+            AppendListItem(builder, "Fires when", item.FiresWhen);
+        }
+
         AppendListItem(builder, "Bubbles", item.Bubbles?.ToString().ToLowerInvariant());
         AppendListItem(builder, "Cancelable", item.Cancelable?.ToString().ToLowerInvariant());
         if (item.DetailNone)
@@ -803,6 +1103,24 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         builder.Append("</ul>");
+    }
+
+    private static bool HasContractMetadata(JavaScriptApiItem item)
+    {
+        return !string.IsNullOrWhiteSpace(item.Target)
+               || !string.IsNullOrWhiteSpace(item.Type)
+               || !string.IsNullOrWhiteSpace(item.DefaultValue)
+               || !string.IsNullOrWhiteSpace(item.Values)
+               || !string.IsNullOrWhiteSpace(item.Source)
+               || !string.IsNullOrWhiteSpace(item.Signature)
+               || !string.IsNullOrWhiteSpace(item.Syntax)
+               || !string.IsNullOrWhiteSpace(item.Inherits)
+               || !string.IsNullOrWhiteSpace(item.HookKind)
+               || !string.IsNullOrWhiteSpace(item.Stability)
+               || !string.IsNullOrWhiteSpace(item.FiresWhen)
+               || !string.IsNullOrWhiteSpace(item.Bubbles)
+               || !string.IsNullOrWhiteSpace(item.Cancelable)
+               || item.DetailNone;
     }
 
     private static void AppendMembers(StringBuilder builder, string heading, IReadOnlyList<JavaScriptMember> members)
@@ -872,12 +1190,53 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private IEnumerable<string> EnumerateJavaScriptFiles(
         string rootPath,
-        AppSurfaceDocsJavaScriptHarvestOptions options,
+        IReadOnlyList<string> includePatterns,
         IHarvestPathPolicy pathPolicy,
         CancellationToken cancellationToken)
     {
         var fullRoot = Path.GetFullPath(rootPath);
-        var includePatterns = NormalizeIncludePatterns(options.IncludeGlobs ?? []).ToArray();
+        if (includePatterns.Count == 0)
+        {
+            var globalIncludePatterns = NormalizeIncludePatterns(_options.Harvest?.Paths?.IncludeGlobs ?? []).ToArray();
+            if (globalIncludePatterns.Length > 0)
+            {
+                foreach (var file in EnumerateJavaScriptFilesForIncludePatterns(
+                             fullRoot,
+                             globalIncludePatterns,
+                             pathPolicy,
+                             cancellationToken))
+                {
+                    yield return file;
+                }
+
+                yield break;
+            }
+
+            foreach (var file in pathPolicy.EnumerateCandidateFiles(
+                         fullRoot,
+                         AppSurfaceDocsHarvestSourceKind.JavaScript,
+                         "*.js",
+                         cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return file;
+            }
+
+            yield break;
+        }
+
+        foreach (var file in EnumerateJavaScriptFilesForIncludePatterns(fullRoot, includePatterns, pathPolicy, cancellationToken))
+        {
+            yield return file;
+        }
+    }
+
+    private IEnumerable<string> EnumerateJavaScriptFilesForIncludePatterns(
+        string fullRoot,
+        IReadOnlyList<string> includePatterns,
+        IHarvestPathPolicy pathPolicy,
+        CancellationToken cancellationToken)
+    {
         var includeMatcher = new AppSurfaceDocsHarvestPathMatcher(includePatterns);
         var yielded = new HashSet<string>(PathComparer);
         foreach (var includeRoot in ResolveIncludeRoots(fullRoot, includePatterns))
@@ -1120,14 +1479,21 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return null;
     }
 
-    private static bool ShouldIncludeDoclet(JavaScriptDoclet doclet, AppSurfaceDocsJavaScriptHarvestOptions options)
+    private static bool ShouldIncludeDoclet(JavaScriptDoclet doclet, bool requirePublicTag)
     {
         if (IsHardExcluded(doclet))
         {
             return false;
         }
 
-        return options.RequirePublicTag ? HasPublicSignal(doclet) : doclet.HasAnyTag;
+        return requirePublicTag ? HasPublicSignal(doclet) : doclet.HasAnyTag;
+    }
+
+    private static bool ShouldRequirePublicTag(
+        AppSurfaceDocsJavaScriptHarvestOptions options,
+        IEnumerable<string> normalizedIncludePatterns)
+    {
+        return options.RequirePublicTag || !HasUsableIncludeGlobs(normalizedIncludePatterns);
     }
 
     private static bool HasPublicSignal(JavaScriptDoclet doclet)
@@ -1349,12 +1715,25 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static string BuildAnchorPrefix(JavaScriptApiKind kind)
     {
-        return kind.ToString().ToLowerInvariant();
+        return kind switch
+        {
+            JavaScriptApiKind.ModuleContract => "module-contract",
+            JavaScriptApiKind.CssCustomProperty => "css-custom-property",
+            JavaScriptApiKind.CssHook => "css-hook",
+            _ => kind.ToString().ToLowerInvariant()
+        };
     }
 
     private static string GetKindLabel(JavaScriptApiKind kind)
     {
-        return $"JavaScript {kind}";
+        return kind switch
+        {
+            JavaScriptApiKind.ModuleContract => "JavaScript Module Contract",
+            JavaScriptApiKind.CssCustomProperty => "JavaScript CSS Custom Property",
+            JavaScriptApiKind.CssHook => "JavaScript CSS Hook",
+            JavaScriptApiKind.Config => "JavaScript Config Field",
+            _ => $"JavaScript {kind}"
+        };
     }
 
     private static string GetPageType(JavaScriptApiKind kind)
@@ -1388,7 +1767,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         Constant,
         Global,
         Event,
-        Typedef
+        Typedef,
+        Attribute,
+        Config,
+        ModuleContract,
+        CssCustomProperty,
+        CssHook
     }
 
     private sealed record JavaScriptDoclet(
@@ -1463,6 +1847,15 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string? Returns,
         string? Target,
         string? FiresWhen,
+        string? Type,
+        string? DefaultValue,
+        string? Values,
+        string? Source,
+        string? Signature,
+        string? Syntax,
+        string? Inherits,
+        string? HookKind,
+        string? Stability,
         string? Bubbles,
         string? Cancelable,
         bool DetailNone,

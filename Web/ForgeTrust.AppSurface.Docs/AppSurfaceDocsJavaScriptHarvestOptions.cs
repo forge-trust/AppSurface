@@ -1,15 +1,15 @@
 namespace ForgeTrust.AppSurface.Docs;
 
 /// <summary>
-/// JavaScript public API harvest path policy and parser settings.
+/// JavaScript public API harvest path policy, parser, and strict-health settings.
 /// </summary>
 /// <remarks>
-/// JavaScript harvesting is disabled by default and requires at least one source-specific
-/// <see cref="IncludeGlobs"/> entry when enabled. That explicit boundary prevents AppSurface Docs from crawling every
-/// authored browser asset in a repository. Global <see cref="AppSurfaceDocsHarvestOptions.Paths"/> rules apply first,
-/// then these source-specific include, exclude, and default-exclusion settings refine the JavaScript candidate set.
-/// The parser requires explicit <c>@public</c> doclets by default, and tags such as <c>@internal</c>,
-/// <c>@private</c>, and <c>@ignore</c> always exclude a doclet from the generated public API surface.
+/// JavaScript harvesting is enabled by default and scans policy-approved <c>.js</c> files for explicit
+/// <c>@public</c> browser-contract doclets. Unannotated JavaScript is ignored. Global
+/// <see cref="AppSurfaceDocsHarvestOptions.Paths"/> rules apply first, then these source-specific include, exclude, and
+/// default-exclusion settings refine the JavaScript candidate set. <see cref="IncludeGlobs"/> is an optional narrowing
+/// boundary, not an enable switch. Tags such as <c>@internal</c>, <c>@private</c>, and <c>@ignore</c> always exclude a
+/// doclet from the generated public API surface.
 /// </remarks>
 public sealed class AppSurfaceDocsJavaScriptHarvestOptions
 {
@@ -26,7 +26,7 @@ public sealed class AppSurfaceDocsJavaScriptHarvestOptions
     /// <summary>
     /// Gets or sets a value indicating whether JavaScript public API harvesting is enabled.
     /// </summary>
-    public bool Enabled { get; set; }
+    public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// Gets or sets JavaScript-specific repository-relative include globs.
@@ -57,7 +57,22 @@ public sealed class AppSurfaceDocsJavaScriptHarvestOptions
     /// <summary>
     /// Gets or sets a value indicating whether supported doclets must include <c>@public</c>.
     /// </summary>
+    /// <remarks>
+    /// Broad default discovery always requires <c>@public</c>, even when this setting is <see langword="false" />. The
+    /// compatibility escape applies only when <see cref="IncludeGlobs"/> contains at least one explicit JavaScript source
+    /// boundary.
+    /// </remarks>
     public bool RequirePublicTag { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether default JavaScript discovery should participate in strict aggregate harvest health.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="false" />, which makes broad JavaScript discovery best-effort: empty results, parse
+    /// failures, read failures, and timeouts produce diagnostics but do not mask or cause strict Markdown/C# harvest
+    /// outcomes. JavaScript always participates in strict health when <see cref="IncludeGlobs"/> is nonempty.
+    /// </remarks>
+    public bool StrictHealth { get; set; }
 
     /// <summary>
     /// Gets or sets the largest JavaScript file, in bytes, that the harvester will parse.

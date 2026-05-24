@@ -26,14 +26,14 @@ Poor fits:
 AppSurface Docs has three moving parts:
 
 1. **A host** that runs `AppSurfaceDocsWebModule` or the standalone AppSurface Docs app.
-2. **A source repository** that contains Markdown pages, package READMEs, examples, and C# source.
+2. **A source repository** that contains Markdown pages, package READMEs, examples, C# source, and annotated JavaScript browser contracts.
 3. **Metadata** that tells AppSurface Docs how to group, feature, search, and explain those pages.
 
 The result is a docs surface with:
 
 - section-first navigation such as Start Here, Examples, Releases, Troubleshooting, and API Reference
 - source-derived C# API pages
-- opt-in source-derived JavaScript public API pages for browser events and globals
+- annotation-first JavaScript public API pages for browser events, globals, attributes, config, module contracts, and CSS hooks
 - a search index that includes titles, summaries, headings, aliases, keywords, and page types
 - optional trust bars for release notes, policies, and provenance-heavy pages
 - optional `Source of truth` links back to the exact files readers should inspect or edit
@@ -109,7 +109,7 @@ Leave `Identity:Wordmark` unset for a plain-text docs title. The built-in sideba
 
 ## Define the public source boundary
 
-Before pointing AppSurface Docs at a large repository, decide which paths are meant to be public. The safest production shape is a small global include list, then optional Markdown and C# refinements:
+Before pointing AppSurface Docs at a large repository, decide which paths are meant to be public. The safest production shape is a small global include list, then optional Markdown, C#, and JavaScript refinements:
 
 ```json
 {
@@ -120,7 +120,8 @@ Before pointing AppSurface Docs at a large repository, decide which paths are me
           "README.md",
           "LICENSE",
           "docs/**/*.md",
-          "src/**/*.cs"
+          "src/**/*.cs",
+          "src/**/*.js"
         ],
         "ExcludeGlobs": [
           "docs/drafts/**",
@@ -138,13 +139,18 @@ Before pointing AppSurface Docs at a large repository, decide which paths are me
         "IncludeGlobs": [
           "src/**/*.cs"
         ]
+      },
+      "JavaScript": {
+        "IncludeGlobs": [
+          "src/browser/**/*.js"
+        ]
       }
     }
   }
 }
 ```
 
-Use repository-relative globs with `/` separators. AppSurface Docs rejects rooted paths, URI-shaped patterns, query strings, fragments, and `..` segments during startup validation. Empty includes mean the built-in harvester defaults are used; nonempty global includes become the outer boundary for both Markdown and C#.
+Use repository-relative globs with `/` separators. AppSurface Docs rejects rooted paths, URI-shaped patterns, query strings, fragments, and `..` segments during startup validation. Empty includes mean the built-in harvester defaults are used; nonempty global includes become the outer boundary for Markdown, C#, and JavaScript.
 
 The package also keeps protective defaults for build output, hidden directories, test projects, and C# source under `examples`. These defaults prevent common accidental publication without requiring every host to write the same excludes. If a default is too broad, use `DefaultExclusions:AllowGlobs` for narrow exceptions or `DefaultExclusions:DisabledGroups` when the entire group is intentionally public. Use the named group IDs, not numeric enum values; ordinals fail startup validation. Allows are group-aware, so a path inside `.github/bin` needs an allow for both `HiddenDirectories` and `BuildOutput` unless one group is disabled.
 
@@ -235,6 +241,17 @@ aliases:
 ---
 ```
 
+Use `aliases` for search and discovery text. Use `redirect_aliases` only when an old browser URL route should redirect to the page's canonical route:
+
+```yaml
+canonical_slug: troubleshooting/search
+redirect_aliases:
+  - old/search-help
+  - old/search-help.md.html
+```
+
+`redirect_aliases` values are docs-root-relative routes, not Netlify `_redirects` syntax. Leave out query strings, fragments, host names, splats, placeholders, and status codes. Static export uses HTML alias files by default for generic hosts; use `appsurface docs export --mode cdn --redirects netlify` when publishing to Netlify-compatible CDN hosts. For Netlify export, avoid defining two aliases that differ only by percent encoding unless they point to the same canonical page.
+
 For namespace API pages, keep the intro as normal Markdown and put the namespace target plus entry-point metadata in the sidecar:
 
 ```yaml
@@ -281,7 +298,7 @@ The important part is that curation stays authored content. If the product story
 Once the first pages render, improve the docs in layers:
 
 1. Add XML docs to public C# APIs so generated reference pages are useful.
-2. Add narrow JavaScript harvesting for intentional browser contracts such as public custom events or globals.
+2. Add explicit `@public` JavaScript doclets for intentional browser contracts such as custom events, data attributes, runtime config, island module contracts, and CSS hooks.
 3. Add `summary`, `page_type`, `nav_group`, `aliases`, and `keywords` metadata to high-traffic pages.
 4. Add troubleshooting pages for the first support questions people ask.
 5. Add release notes and trust metadata when adoption depends on upgrade confidence.
@@ -329,12 +346,13 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Configure `AppSurfaceDocs:Source:RepositoryRoot` for the repository to harvest.
 - Configure `AppSurfaceDocs:Harvest:Paths` so only intentional public source paths are eligible.
 - Keep `AppSurfaceDocs:Mode` set to `Source` unless a later bundle-hosting slice changes that contract.
-- If browser runtime contracts matter, enable `AppSurfaceDocs:Harvest:JavaScript` with one or more narrow `IncludeGlobs` entries and explicit `@public` doclets.
+- If browser runtime contracts matter, add explicit `@public` JavaScript doclets. JavaScript harvesting is enabled by default; use `AppSurfaceDocs:Harvest:JavaScript:Enabled=false` only to opt out, and use `IncludeGlobs` only to narrow scanning.
 - Add sidecar metadata for repository and package README files.
 - Feature the first consumer paths through `featured_page_groups`.
 - Configure `AppSurfaceDocs:Localization` and `translation_key` metadata before adding translated files at scale.
 - Verify `/docs`, `/docs/search`, and `/docs/search-index.json`. The search page is server-rendered and should still expose starter query URLs plus browse links before the client index loads; a blocked or missing index must degrade to those links, not to a blank page.
 - For custom docs roots, path bases, or static exports, inspect the generated `search.html` and confirm its search index URL plus fallback anchors point at the mounted root.
+- For static exports with redirect aliases, use the default HTML strategy for GitHub Pages and generic static hosts, or `--mode cdn --redirects netlify` for Netlify-compatible providers. Do not hand-author `_redirects` in the export output.
 - For package maintainers changing built-in Docs browser assets, run `pnpm --dir Web run assets:build` and `pnpm --dir Web run assets:verify` before building or exporting docs. AppSurface Docs embeds `wwwroot/docs/search-client.js` and `wwwroot/docs/minisearch.min.js`, so stale generated assets can otherwise ship inside the package assembly.
 - Run the standalone host or export pipeline in CI before publishing a public docs surface.
 
