@@ -73,6 +73,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 
 - Strongly typed config wrappers now validate resolved object values with DataAnnotations during startup, including defaults, and report operator-friendly `ConfigurationValidationException` failures without echoing attempted values.
 - Configuration audits can now produce a source-aware report for discovered wrappers and explicitly registered keys, showing provider order, file and environment provenance, defaults, validation diagnostics, and redacted display-safe values.
+- Configuration audits now omit non-sensitive collection parent display values instead of serializing collection contents, preventing nested fields such as passwords, tokens, secrets, and API keys from leaking through raw collection dumps while preserving redaction for sensitive keys and source metadata.
 - Nested config validation can now opt into Microsoft Options `[ValidateObjectMembers]` and `[ValidateEnumeratedItems]` markers while AppSurface owns traversal, path formatting, and cycle protection.
 - Scalar config wrappers can now validate resolved primitive values directly with `ConfigValueNotEmpty`, `ConfigValueRange`, and `ConfigValueMinLength` attributes, while wrapper-specific scalar rules can override `ValidateValue`.
 - Config wrappers can now opt into required resolved presence with `ConfigKeyRequired`, so startup fails when no provider value and no default are available while defaults and supplied zero values still count as present.
