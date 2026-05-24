@@ -3242,6 +3242,21 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenHarvesterObservesTimeoutTokenFirst()
+    {
+        var harvester = new BlockingUntilCanceledHarvester();
+        var aggregator = CreateHarvestHealthAggregator([harvester], harvesterTimeout: TimeSpan.FromMilliseconds(10));
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        var harvesterHealth = Assert.Single(health.Harvesters);
+        Assert.Equal(DocHarvesterHealthStatus.TimedOut, harvesterHealth.Status);
+        Assert.Equal(DocHarvestDiagnosticCodes.HarvesterTimedOut, harvesterHealth.Diagnostic?.Code);
+        Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.AllFailed);
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenHarvesterIgnoresCancellation()
     {
         var harvester = new NonCancelingHarvester();
@@ -5059,6 +5074,23 @@ public class DocAggregatorTests : IDisposable
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return [];
+        }
+    }
+
+    private sealed class BlockingUntilCanceledHarvester : IDocHarvester
+    {
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(1);
+            while (!cancellationToken.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+            {
+                System.Threading.Thread.Sleep(1);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<IReadOnlyList<DocNode>>([]);
         }
     }
 

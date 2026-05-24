@@ -383,11 +383,6 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return;
         }
 
-        if (attachedCommentStarts.Contains(comment.Value.Start))
-        {
-            return;
-        }
-
         var doclet = ParseDoclet(GetCommentText(source, comment.Value));
         if (HasStandaloneContractTag(doclet))
         {
@@ -399,7 +394,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return;
         }
 
-        attachedCommentStarts.Add(comment.Value.Start);
+        if (!attachedCommentStarts.Add(comment.Value.Start)) return;
         if (string.IsNullOrWhiteSpace(name))
         {
             diagnostics.Add(MalformedDoclet(relativePath, comment.Value.Location.Start.Line, "A public JavaScript doclet was attached to an unnamed declaration."));

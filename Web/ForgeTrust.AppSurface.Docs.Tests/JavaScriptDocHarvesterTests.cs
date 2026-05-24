@@ -273,6 +273,93 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Empty(GetDiagnostics(harvester));
     }
 
+    [Theory]
+    [InlineData("@attribute", "A public JavaScript attribute doclet is missing an attribute name.")]
+    [InlineData("@config", "A public JavaScript config doclet is missing a config field name.")]
+    [InlineData("@moduleContract", "A public JavaScript module contract doclet is missing a contract name.")]
+    [InlineData("@cssCustomProperty", "A public JavaScript CSS custom property doclet is missing a custom property name.")]
+    [InlineData("@cssHook", "A public JavaScript CSS hook doclet is missing a selector.")]
+    public async Task HarvestAsync_ShouldDiagnoseMalformedBrowserContractDoclets(string tag, string expectedCause)
+    {
+        await WriteAsync(
+            "src/browser-contracts.js",
+            $$"""
+            /**
+             * Malformed browser contract.
+             * @public
+             * @namespace RazorWire
+             * {{tag}}
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/browser-contracts.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        Assert.Contains(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
+                          && diagnostic.Cause == expectedCause);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldValidateCssHookKinds()
+    {
+        await WriteAsync(
+            "src/browser-contracts.js",
+            """
+            /**
+             * Stable part selector.
+             * @public
+             * @namespace RazorWire
+             * @cssHook ::part(error)
+             * @hookKind part
+             * @target generated form failure UI
+             * @stability stable
+             */
+
+            /**
+             * Stable state selector.
+             * @public
+             * @namespace RazorWire
+             * @cssHook :state(invalid)
+             * @hookKind state
+             * @target generated form failure UI
+             * @stability stable
+             */
+
+            /**
+             * Missing hook kind.
+             * @public
+             * @namespace RazorWire
+             * @cssHook .missing-kind
+             * @target generated form failure UI
+             * @stability stable
+             */
+
+            /**
+             * Unknown hook kind.
+             * @public
+             * @namespace RazorWire
+             * @cssHook .unknown-kind
+             * @hookKind unknown
+             * @target generated form failure UI
+             * @stability stable
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/browser-contracts.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#css-hook-part-error", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#css-hook-state-invalid", StringComparison.Ordinal));
+        Assert.Equal(
+            2,
+            GetDiagnostics(harvester).Count(
+                diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet
+                              && diagnostic.Cause == "A public JavaScript CSS hook doclet must use a supported @hookKind and a narrow selector value."));
+    }
+
     [Fact]
     public async Task HarvestAsync_ShouldInferWindowGlobalGroupWhenNamespaceIsOmitted()
     {
@@ -378,6 +465,54 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var docs = await harvester.HarvestAsync(_testRoot);
 
         Assert.Contains(docs, doc => doc.Path.EndsWith("#function-mount", StringComparison.Ordinal));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldHarvestExportedVariableDeclarations()
+    {
+        await WriteAsync(
+            "src/module.js",
+            """
+            /**
+             * Mounts a hydrated island.
+             * @public
+             * @namespace RazorWire
+             * @param {HTMLElement} root - Island root.
+             */
+            export const mount = (root) => root;
+            """);
+        var harvester = CreateHarvester(new AppSurfaceDocsOptions());
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#function-mount", StringComparison.Ordinal));
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldTreatAttachedBrowserContractDocletsAsStandaloneOnly()
+    {
+        await WriteAsync(
+            "src/contract.js",
+            """
+            /**
+             * Form submission started.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:form:submit-start
+             * @target form
+             * @firesWhen a form starts submitting.
+             * @detail none
+             */
+            function internalSubmitStartMarker() {}
+            """);
+        var harvester = CreateHarvester(new AppSurfaceDocsOptions());
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-form-submit-start", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => doc.Path.EndsWith("#function-internalsubmitstartmarker", StringComparison.Ordinal));
         Assert.Empty(GetDiagnostics(harvester));
     }
 
