@@ -1029,6 +1029,77 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldTreatPublicTagPrefilterCaseInsensitively()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Event with a mixed-case public marker.
+             * @Public
+             * @event razorwire:mixed-case-public
+             * @target document
+             * @firesWhen broad discovery sees a case-insensitive public marker.
+             * @detail none
+             */
+            """);
+        var harvester = CreateHarvester(new AppSurfaceDocsOptions());
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-mixed-case-public", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRequirePublicTagWhenIncludeGlobsNormalizeEmpty()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Event without a public marker.
+             * @event razorwire:invalid-include-loose
+             * @target document
+             * @firesWhen an invalid include glob should not disable broad-discovery safety.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("../invalid.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(docs);
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldUseGlobalIncludeRootsForBroadDiscovery()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event inside the global include boundary.
+             * @public
+             * @event razorwire:global-include
+             * @target document
+             * @firesWhen broad discovery honors global include roots.
+             * @detail none
+             */
+            """);
+        var options = new AppSurfaceDocsOptions();
+        options.Harvest.Paths.IncludeGlobs = ["src/**"];
+        var harvester = CreateHarvester(options);
+        var context = new DocHarvestContext(_testRoot, new ThrowingCandidateEnumerationPathPolicy());
+
+        var docs = await harvester.HarvestAsync(context);
+
+        Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-global-include", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldRenderOptionalEventMetadataAndMatchWildcardGlobs()
     {
         await WriteAsync(
@@ -1149,7 +1220,32 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal(0, health.FailedHarvesters);
         Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
             && item.Status == DocHarvesterHealthStatus.ReturnedEmpty);
-        Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptParseFailed);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldKeepInvalidJavaScriptIncludeGlobsOutOfStrictHealth()
+    {
+        await WriteAsync("src/malformed.js", "/**\n * Broken public source.\n * @public\n */\nfunction broken( {");
+        var options = CreateEnabledOptions("../invalid.js");
+        options.Source.RepositoryRoot = _testRoot;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Healthy, health.Status);
+        Assert.Equal(1, health.TotalHarvesters);
+        Assert.Equal(1, health.SuccessfulHarvesters);
+        Assert.Equal(0, health.FailedHarvesters);
+        Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+            && item.Status == DocHarvesterHealthStatus.ReturnedEmpty);
     }
 
     [Fact]
@@ -1250,6 +1346,48 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     private static IReadOnlyList<DocHarvestDiagnostic> GetDiagnostics(JavaScriptDocHarvester harvester)
     {
         return ((IDocHarvesterDiagnosticProvider)harvester).GetHarvestDiagnostics();
+    }
+
+    private sealed class ThrowingCandidateEnumerationPathPolicy : IHarvestPathPolicy
+    {
+        public AppSurfaceDocsHarvestPathDecision Evaluate(
+            string relativePath,
+            AppSurfaceDocsHarvestSourceKind sourceKind)
+        {
+            var included = ShouldIncludeFilePath(relativePath, sourceKind);
+            return new AppSurfaceDocsHarvestPathDecision(
+                included,
+                relativePath,
+                sourceKind,
+                included
+                    ? AppSurfaceDocsHarvestPathDecisionCode.IncludedByGlobalInclude
+                    : AppSurfaceDocsHarvestPathDecisionCode.ExcludedByGlobalIncludeMiss,
+                [],
+                []);
+        }
+
+        public bool ShouldIncludeFilePath(
+            string relativePath,
+            AppSurfaceDocsHarvestSourceKind sourceKind)
+        {
+            return relativePath.StartsWith("src/", StringComparison.Ordinal);
+        }
+
+        public bool ShouldPruneDirectory(
+            string relativeDirectory,
+            AppSurfaceDocsHarvestSourceKind sourceKind)
+        {
+            return false;
+        }
+
+        public IEnumerable<string> EnumerateCandidateFiles(
+            string rootPath,
+            AppSurfaceDocsHarvestSourceKind sourceKind,
+            string searchPattern,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("Broad JavaScript discovery should use configured global include roots.");
+        }
     }
 
     private async Task WriteAsync(string relativePath, string content)

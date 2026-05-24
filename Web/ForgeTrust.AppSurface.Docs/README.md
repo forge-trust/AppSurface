@@ -964,7 +964,7 @@ Supported public shapes:
 - standalone `@cssCustomProperty --name` doclets for public CSS variables
 - standalone `@cssHook selector` doclets for stable styling hooks paired with `@hookKind`
 
-Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, detail payload fields through `@property detail.name`, and an `@example`. Use `@detail none` only when the event deliberately carries no payload.
+Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
 
 ```js
 /**

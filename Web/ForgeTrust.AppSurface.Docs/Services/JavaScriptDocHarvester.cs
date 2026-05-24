@@ -109,8 +109,10 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 return [];
             }
 
+            var includePatterns = NormalizeIncludePatterns(javaScriptOptions.IncludeGlobs ?? []).ToArray();
+            var requirePublicTag = ShouldRequirePublicTag(javaScriptOptions, includePatterns);
             var harvestedItems = new List<JavaScriptApiItem>();
-            foreach (var filePath in EnumerateJavaScriptFiles(rootPath, javaScriptOptions, pathPolicy, cancellationToken))
+            foreach (var filePath in EnumerateJavaScriptFiles(rootPath, includePatterns, pathPolicy, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -135,12 +137,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     }
 
                     var source = await File.ReadAllTextAsync(filePath, cancellationToken);
-                    if (ShouldRequirePublicTag(javaScriptOptions) && !source.Contains("@public", StringComparison.Ordinal))
+                    if (requirePublicTag && !source.Contains("@public", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
 
-                    harvestedItems.AddRange(ParseFile(source, relativePath, javaScriptOptions, diagnostics));
+                    harvestedItems.AddRange(ParseFile(source, relativePath, javaScriptOptions, requirePublicTag, diagnostics));
                 }
                 catch (ParseErrorException ex)
                 {
@@ -186,7 +188,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         get
         {
             var javaScriptOptions = _options.Harvest?.JavaScript ?? new AppSurfaceDocsJavaScriptHarvestOptions();
-            return javaScriptOptions.StrictHealth || HasUsableIncludeGlobs(javaScriptOptions.IncludeGlobs);
+            var includePatterns = NormalizeIncludePatterns(javaScriptOptions.IncludeGlobs ?? []);
+            return javaScriptOptions.StrictHealth || HasUsableIncludeGlobs(includePatterns);
         }
     }
 
@@ -199,6 +202,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string source,
         string relativePath,
         AppSurfaceDocsJavaScriptHarvestOptions options,
+        bool requirePublicTag,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var comments = new List<Comment>();
@@ -222,6 +226,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         functionDeclaration.Id?.Name,
                         JavaScriptApiKind.Function,
                         options,
+                        requirePublicTag,
                         diagnostics);
                     break;
 
@@ -235,6 +240,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         exportNamedDeclaration,
                         variableDeclaration,
                         options,
+                        requirePublicTag,
                         diagnostics);
                     break;
 
@@ -250,6 +256,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         functionDeclaration.Id?.Name,
                         JavaScriptApiKind.Function,
                         options,
+                        requirePublicTag,
                         diagnostics);
                     break;
 
@@ -263,6 +270,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                         variableDeclaration,
                         variableDeclaration,
                         options,
+                        requirePublicTag,
                         diagnostics);
                     break;
 
@@ -282,6 +290,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                             memberPath,
                             JavaScriptApiKind.Global,
                             options,
+                            requirePublicTag,
                             diagnostics);
                     }
                     else if (memberPath.StartsWith("module.exports", StringComparison.Ordinal))
@@ -318,7 +327,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 continue;
             }
 
-            AddStandaloneItem(comment, items, source, relativePath, options, diagnostics);
+            AddStandaloneItem(comment, items, source, relativePath, requirePublicTag, diagnostics);
         }
 
         foreach (var item in items)
@@ -375,6 +384,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string? name,
         JavaScriptApiKind kind,
         AppSurfaceDocsJavaScriptHarvestOptions options,
+        bool requirePublicTag,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var comment = FindLeadingBlockComment(comments, attachmentNode, source);
@@ -389,7 +399,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return;
         }
 
-        if (!ShouldIncludeDoclet(doclet, options))
+        if (!ShouldIncludeDoclet(doclet, requirePublicTag))
         {
             return;
         }
@@ -413,6 +423,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         Node attachmentNode,
         VariableDeclaration variableDeclaration,
         AppSurfaceDocsJavaScriptHarvestOptions options,
+        bool requirePublicTag,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         if (variableDeclaration.Declarations.Count != 1)
@@ -444,6 +455,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             name,
             kind,
             options,
+            requirePublicTag,
             diagnostics);
     }
 
@@ -487,7 +499,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         ICollection<JavaScriptApiItem> items,
         string source,
         string relativePath,
-        AppSurfaceDocsJavaScriptHarvestOptions options,
+        bool requirePublicTag,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         if (comment.Kind != CommentKind.Block)
@@ -496,7 +508,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         var doclet = ParseDoclet(GetCommentText(source, comment));
-        if (!ShouldIncludeDoclet(doclet, options))
+        if (!ShouldIncludeDoclet(doclet, requirePublicTag))
         {
             return;
         }
@@ -1178,14 +1190,28 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private IEnumerable<string> EnumerateJavaScriptFiles(
         string rootPath,
-        AppSurfaceDocsJavaScriptHarvestOptions options,
+        IReadOnlyList<string> includePatterns,
         IHarvestPathPolicy pathPolicy,
         CancellationToken cancellationToken)
     {
         var fullRoot = Path.GetFullPath(rootPath);
-        var includePatterns = NormalizeIncludePatterns(options.IncludeGlobs ?? []).ToArray();
-        if (includePatterns.Length == 0)
+        if (includePatterns.Count == 0)
         {
+            var globalIncludePatterns = NormalizeIncludePatterns(_options.Harvest?.Paths?.IncludeGlobs ?? []).ToArray();
+            if (globalIncludePatterns.Length > 0)
+            {
+                foreach (var file in EnumerateJavaScriptFilesForIncludePatterns(
+                             fullRoot,
+                             globalIncludePatterns,
+                             pathPolicy,
+                             cancellationToken))
+                {
+                    yield return file;
+                }
+
+                yield break;
+            }
+
             foreach (var file in pathPolicy.EnumerateCandidateFiles(
                          fullRoot,
                          AppSurfaceDocsHarvestSourceKind.JavaScript,
@@ -1199,6 +1225,18 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             yield break;
         }
 
+        foreach (var file in EnumerateJavaScriptFilesForIncludePatterns(fullRoot, includePatterns, pathPolicy, cancellationToken))
+        {
+            yield return file;
+        }
+    }
+
+    private IEnumerable<string> EnumerateJavaScriptFilesForIncludePatterns(
+        string fullRoot,
+        IReadOnlyList<string> includePatterns,
+        IHarvestPathPolicy pathPolicy,
+        CancellationToken cancellationToken)
+    {
         var includeMatcher = new AppSurfaceDocsHarvestPathMatcher(includePatterns);
         var yielded = new HashSet<string>(PathComparer);
         foreach (var includeRoot in ResolveIncludeRoots(fullRoot, includePatterns))
@@ -1441,19 +1479,21 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return null;
     }
 
-    private static bool ShouldIncludeDoclet(JavaScriptDoclet doclet, AppSurfaceDocsJavaScriptHarvestOptions options)
+    private static bool ShouldIncludeDoclet(JavaScriptDoclet doclet, bool requirePublicTag)
     {
         if (IsHardExcluded(doclet))
         {
             return false;
         }
 
-        return ShouldRequirePublicTag(options) ? HasPublicSignal(doclet) : doclet.HasAnyTag;
+        return requirePublicTag ? HasPublicSignal(doclet) : doclet.HasAnyTag;
     }
 
-    private static bool ShouldRequirePublicTag(AppSurfaceDocsJavaScriptHarvestOptions options)
+    private static bool ShouldRequirePublicTag(
+        AppSurfaceDocsJavaScriptHarvestOptions options,
+        IEnumerable<string> normalizedIncludePatterns)
     {
-        return options.RequirePublicTag || !HasUsableIncludeGlobs(options.IncludeGlobs);
+        return options.RequirePublicTag || !HasUsableIncludeGlobs(normalizedIncludePatterns);
     }
 
     private static bool HasPublicSignal(JavaScriptDoclet doclet)
