@@ -1513,7 +1513,7 @@ public class AppSurfaceDocsViewsTests
 
         Assert.Contains("NotFound", html);
         Assert.Contains("No route identity matched this path.", html);
-        Assert.Contains("1 route entries", html);
+        Assert.Contains("1 route entry", html);
         Assert.Contains(">None</span>", html);
         Assert.DoesNotContain("route-diagnostics-heading", html);
         Assert.DoesNotContain("Canonical:", html);

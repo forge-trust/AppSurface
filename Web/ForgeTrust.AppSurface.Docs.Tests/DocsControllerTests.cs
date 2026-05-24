@@ -3110,6 +3110,7 @@ public class DocsControllerTests : IDisposable
     [InlineData("//example.com/docs/packages")]
     [InlineData("?path=packages")]
     [InlineData("guides/../secret")]
+    [InlineData("guides\\..\\secret")]
     public async Task RouteInspectorJson_ShouldReturnInvalidProbe_ForUnsafeInputs(string path)
     {
         var harvester = A.Fake<IDocHarvester>();

@@ -9,6 +9,7 @@
         "InvalidInput" or "NotFound" => "border-rose-400/40 bg-rose-950/40 text-rose-100",
         _ => "border-slate-600 bg-slate-900/70 text-slate-100"
     };
+    var routeEntryLabel = Model.Entries.Count == 1 ? "route entry" : "route entries";
 }
 
 <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
@@ -69,7 +70,7 @@
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
                 <h2 id="routes-heading" class="text-xl font-semibold text-white">Canonical Routes</h2>
-                <p class="mt-1 text-sm text-slate-400">@Model.Entries.Count route entries in this snapshot.</p>
+                <p class="mt-1 text-sm text-slate-400">@Model.Entries.Count @routeEntryLabel in this snapshot.</p>
             </div>
         </div>
         <div class="mt-4 overflow-x-auto rounded-lg border border-[#1b2a43]">

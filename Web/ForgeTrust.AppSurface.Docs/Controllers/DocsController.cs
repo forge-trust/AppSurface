@@ -669,6 +669,8 @@ public class DocsController : Controller
             return false;
         }
 
+        trimmed = trimmed.Replace('\\', '/');
+
         var withoutPathBase = TrimAppRelativePrefix(trimmed, requestPathBase);
         var candidate = withoutPathBase;
         if (candidate.StartsWith("/", StringComparison.Ordinal)
