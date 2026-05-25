@@ -18,23 +18,51 @@ public sealed class ConfigAuditCollectionTraversalAttribute : Attribute
     /// <summary>
     /// Gets or sets the maximum nested collection depth traversed for the attributed wrapper.
     /// </summary>
+    /// <remarks>
+    /// The default is <see cref="ConfigAuditEntryOptions.DefaultMaxCollectionDepth"/>. Values must be greater than
+    /// or equal to <c>0</c>; invalid values are reported by audit diagnostics and replaced with the safe default for
+    /// traversal.
+    /// </remarks>
     public int MaxCollectionDepth { get; set; } = ConfigAuditEntryOptions.DefaultMaxCollectionDepth;
 
     /// <summary>
     /// Gets or sets the maximum number of elements reported from any one traversed collection.
     /// </summary>
+    /// <remarks>
+    /// The default is <see cref="ConfigAuditEntryOptions.DefaultMaxCollectionElements"/>. Values must be greater than
+    /// or equal to <c>0</c>; invalid values are reported by audit diagnostics and replaced with the safe default for
+    /// traversal.
+    /// </remarks>
     public int MaxCollectionElements { get; set; } = ConfigAuditEntryOptions.DefaultMaxCollectionElements;
 
     /// <summary>
     /// Gets or sets the maximum number of child nodes created for the attributed entry before traversal stops.
     /// </summary>
+    /// <remarks>
+    /// The default is <see cref="ConfigAuditEntryOptions.DefaultMaxReportNodes"/>. Values must be greater than or
+    /// equal to <c>1</c>; invalid values are reported by audit diagnostics and replaced with the safe default for
+    /// traversal.
+    /// </remarks>
     public int MaxReportNodes { get; set; } = ConfigAuditEntryOptions.DefaultMaxReportNodes;
 
     /// <summary>
     /// Gets or sets a value indicating whether non-sensitive dictionary keys may appear as element labels.
     /// </summary>
+    /// <remarks>
+    /// The default is <see langword="true"/>. Sensitive-looking dictionary keys are redacted even when this property
+    /// allows key labels to be displayed.
+    /// </remarks>
     public bool DisplayDictionaryKeys { get; set; } = true;
 
+    /// <summary>
+    /// Converts the attribute values into immutable audit entry options.
+    /// </summary>
+    /// <remarks>
+    /// The returned options enable collection traversal, copy attribute values as-is, and mark every option as
+    /// assigned with <see cref="ConfigAuditEntryOptionAssignments.All"/>. Marking every option assigned lets the
+    /// wrapper attribute provide a complete wrapper-level policy while still allowing explicitly assigned manual
+    /// registration options, including default-valued assignments, to override individual properties later.
+    /// </remarks>
     internal ConfigAuditEntryOptions ToOptions() =>
         new(
             traverseCollectionElements: true,

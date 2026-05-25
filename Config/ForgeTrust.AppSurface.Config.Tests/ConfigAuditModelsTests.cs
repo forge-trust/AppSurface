@@ -59,18 +59,26 @@ public class ConfigAuditModelsTests
     {
         var wrapperOptions = new ConfigAuditCollectionTraversalAttribute
         {
+            MaxCollectionDepth = 9,
             MaxCollectionElements = 7,
+            MaxReportNodes = 11,
             DisplayDictionaryKeys = false
         }.ToOptions();
         var builder = new ConfigAuditEntryOptionsBuilder
         {
+            TraverseCollectionElements = false,
+            MaxCollectionDepth = 4,
+            MaxCollectionElements = 128,
+            MaxReportNodes = 4096,
             DisplayDictionaryKeys = true
         };
 
         var merged = wrapperOptions.ApplyAssignedOverrides(builder.ToOptions());
 
-        Assert.True(merged.TraverseCollectionElements);
-        Assert.Equal(7, merged.MaxCollectionElements);
+        Assert.False(merged.TraverseCollectionElements);
+        Assert.Equal(4, merged.MaxCollectionDepth);
+        Assert.Equal(128, merged.MaxCollectionElements);
+        Assert.Equal(4096, merged.MaxReportNodes);
         Assert.True(merged.DisplayDictionaryKeys);
     }
 

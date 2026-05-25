@@ -99,6 +99,14 @@ public sealed class ConfigAuditEntryOptions
     {
     }
 
+    /// <summary>
+    /// Initializes a new immutable snapshot from an existing options object.
+    /// </summary>
+    /// <remarks>
+    /// This constructor copies option values and assignment flags at the time it is called. Later mutations to the
+    /// source reference cannot affect the snapshot used by <see cref="ConfigAuditKnownEntry"/> or audit reporting.
+    /// </remarks>
+    /// <param name="source">The options to copy, or <see langword="null"/> to keep safe defaults.</param>
     internal ConfigAuditEntryOptions(ConfigAuditEntryOptions? source)
     {
         if (source == null)
@@ -114,6 +122,20 @@ public sealed class ConfigAuditEntryOptions
         AssignedOptions = source.AssignedOptions;
     }
 
+    /// <summary>
+    /// Initializes a new immutable options snapshot with explicit values and assignment flags.
+    /// </summary>
+    /// <remarks>
+    /// The values are stored as provided so callers can preserve invalid wrapper or manual inputs until validation
+    /// emits diagnostics. The assignment flags are part of the merge contract: they describe which properties were
+    /// intentionally assigned, not whether those values differ from defaults.
+    /// </remarks>
+    /// <param name="traverseCollectionElements">Whether collection elements should be traversed.</param>
+    /// <param name="maxCollectionDepth">The maximum nested collection depth.</param>
+    /// <param name="maxCollectionElements">The maximum number of elements per collection.</param>
+    /// <param name="maxReportNodes">The maximum number of child nodes reported for the entry.</param>
+    /// <param name="displayDictionaryKeys">Whether non-sensitive dictionary keys may be displayed.</param>
+    /// <param name="assignedOptions">The properties intentionally assigned by the source.</param>
     internal ConfigAuditEntryOptions(
         bool traverseCollectionElements,
         int maxCollectionDepth,
@@ -195,14 +217,15 @@ public sealed class ConfigAuditEntryOptions
         }
     }
 
+    /// <summary>
+    /// Gets the option properties that were intentionally assigned by the source registration.
+    /// </summary>
+    /// <remarks>
+    /// Assignment tracking is independent from value comparison. For example, manually assigning
+    /// <see cref="MaxCollectionDepth"/> to its default value still sets the corresponding flag and therefore
+    /// overrides a wrapper attribute's custom depth during duplicate-registration merging.
+    /// </remarks>
     internal ConfigAuditEntryOptionAssignments AssignedOptions { get; init; }
-
-    internal bool HasDefaultValues =>
-        !TraverseCollectionElements
-        && MaxCollectionDepth == DefaultMaxCollectionDepth
-        && MaxCollectionElements == DefaultMaxCollectionElements
-        && MaxReportNodes == DefaultMaxReportNodes
-        && DisplayDictionaryKeys;
 
     internal IReadOnlyList<ConfigAuditDiagnostic> Validate(string key)
     {
@@ -225,6 +248,14 @@ public sealed class ConfigAuditEntryOptions
         return diagnostics;
     }
 
+    /// <summary>
+    /// Returns options with invalid traversal limits replaced by safe defaults.
+    /// </summary>
+    /// <remarks>
+    /// Normalization preserves <see cref="TraverseCollectionElements"/>, <see cref="DisplayDictionaryKeys"/>, and
+    /// <see cref="AssignedOptions"/>. It is intended for report generation after diagnostics have captured invalid
+    /// inputs; it should not be used as a signal that an option was unassigned.
+    /// </remarks>
     internal ConfigAuditEntryOptions Normalize() =>
         Validate("unused").Count == 0
             ? new ConfigAuditEntryOptions(this)
@@ -236,6 +267,17 @@ public sealed class ConfigAuditEntryOptions
                 DisplayDictionaryKeys,
                 AssignedOptions);
 
+    /// <summary>
+    /// Applies explicitly assigned option values from a later registration over this options snapshot.
+    /// </summary>
+    /// <remarks>
+    /// Merging happens per property. A property in <paramref name="overrides"/> wins only when its assignment flag is
+    /// present, and it wins even when the overriding value equals the default. This preserves duplicate-registration
+    /// precedence where wrapper-discovered options provide a complete policy, while manual provider options can
+    /// intentionally reset any individual setting back to a default value.
+    /// </remarks>
+    /// <param name="overrides">The options whose assigned properties should override this snapshot.</param>
+    /// <returns>A new options snapshot containing merged values and the union of assignment flags.</returns>
     internal ConfigAuditEntryOptions ApplyAssignedOverrides(ConfigAuditEntryOptions overrides)
     {
         ArgumentNullException.ThrowIfNull(overrides);
@@ -359,8 +401,23 @@ public sealed class ConfigAuditEntryOptionsBuilder
         }
     }
 
+    /// <summary>
+    /// Gets the option properties that were assigned through this builder.
+    /// </summary>
+    /// <remarks>
+    /// The builder tracks setter calls rather than non-default values so duplicate-registration merging can
+    /// distinguish "caller left the wrapper value alone" from "caller explicitly reset this option to its default."
+    /// </remarks>
     internal ConfigAuditEntryOptionAssignments AssignedOptions { get; private set; }
 
+    /// <summary>
+    /// Creates an immutable options snapshot from the current builder state.
+    /// </summary>
+    /// <remarks>
+    /// The returned options copy current values and assignment flags. Later builder mutations do not affect the
+    /// returned options, which is important because registrations are snapshotted before reports are built or
+    /// serialized.
+    /// </remarks>
     internal ConfigAuditEntryOptions ToOptions() =>
         new(
             TraverseCollectionElements,
@@ -371,15 +428,49 @@ public sealed class ConfigAuditEntryOptionsBuilder
             AssignedOptions);
 }
 
+/// <summary>
+/// Tracks which audit entry options were intentionally assigned by a wrapper attribute or manual registration.
+/// </summary>
+/// <remarks>
+/// These flags control duplicate-registration precedence. They are not a serialization format and should not be
+/// inferred from option values, because default-valued assignments are meaningful overrides.
+/// </remarks>
 [Flags]
 internal enum ConfigAuditEntryOptionAssignments
 {
+    /// <summary>
+    /// No options were explicitly assigned.
+    /// </summary>
     None = 0,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.TraverseCollectionElements"/> was explicitly assigned.
+    /// </summary>
     TraverseCollectionElements = 1 << 0,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.MaxCollectionDepth"/> was explicitly assigned.
+    /// </summary>
     MaxCollectionDepth = 1 << 1,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.MaxCollectionElements"/> was explicitly assigned.
+    /// </summary>
     MaxCollectionElements = 1 << 2,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.MaxReportNodes"/> was explicitly assigned.
+    /// </summary>
     MaxReportNodes = 1 << 3,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.DisplayDictionaryKeys"/> was explicitly assigned.
+    /// </summary>
     DisplayDictionaryKeys = 1 << 4,
+
+    /// <summary>
+    /// Every audit entry option was explicitly assigned.
+    /// </summary>
     All = TraverseCollectionElements | MaxCollectionDepth | MaxCollectionElements | MaxReportNodes | DisplayDictionaryKeys
 }
 
