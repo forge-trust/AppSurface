@@ -13,8 +13,8 @@ namespace ForgeTrust.AppSurface.Docs.ViewComponents;
 /// </summary>
 /// <remarks>
 /// The component returns a <see cref="DocSidebarViewModel"/> whose <see cref="DocSidebarViewModel.Sections"/> contain
-/// normalized public section links and whose <see cref="DocSidebarViewModel.HarvestHealth"/> is populated only when
-/// harvest health chrome is visible for the configured options and host environment.
+/// normalized public section links and whose <see cref="DocSidebarViewModel.Diagnostics"/> is populated only when
+/// maintainer diagnostics chrome is visible for the configured options and host environment.
 /// </remarks>
 public class SidebarViewComponent : ViewComponent
 {
@@ -80,26 +80,23 @@ public class SidebarViewComponent : ViewComponent
     }
 
     /// <summary>
-    /// Retrieves the normalized public sections and optional harvest health chrome, then shapes them into the sidebar
+    /// Retrieves the normalized public sections and optional diagnostics chrome, then shapes them into the sidebar
     /// display model.
     /// </summary>
     /// <remarks>
     /// <see cref="InvokeAsync"/> returns a <see cref="DocSidebarViewModel"/> whose sections come from normalized public
-    /// section snapshots and whose <see cref="DocSidebarViewModel.HarvestHealth"/> value is resolved by
-    /// <see cref="ResolveHarvestHealthAsync"/>. Harvest health is controlled by
-    /// <see cref="AppSurfaceDocsHarvestHealthVisibility"/> and may be <c>null</c> when chrome is hidden. When present, it
-    /// contains a <see cref="DocSidebarHarvestHealthViewModel.Status"/>,
-    /// <see cref="DocSidebarHarvestHealthViewModel.Ok"/>, and an optional
-    /// <see cref="DocSidebarHarvestHealthViewModel.Href"/>. The href is omitted when chrome is visible but health
-    /// routes are not exposed. Health resolution uses <see cref="DocAggregator.GetHarvestHealthAsync(CancellationToken)"/>,
-    /// links with <see cref="DocsUrlBuilder.BuildHealthUrl"/>, and observes the current request's aborted token.
+    /// section snapshots and whose <see cref="DocSidebarViewModel.Diagnostics"/> value is resolved by
+    /// <see cref="ResolveDiagnosticsAsync"/>. Diagnostics chrome is controlled separately from route responses: chrome
+    /// exposure decides whether the sidebar may advertise a tool, while route exposure decides whether the row receives
+    /// an href. Health resolution uses <see cref="DocAggregator.GetHarvestHealthAsync(CancellationToken)"/> only when
+    /// health chrome is visible; route-inspector links remain independent of health lookup success.
     /// </remarks>
-    /// <returns>A view result containing the section-first sidebar view model and optional harvest health chrome.</returns>
+    /// <returns>A view result containing the section-first sidebar view model and optional diagnostics chrome.</returns>
     public async Task<IViewComponentResult> InvokeAsync()
     {
         var sections = await _aggregator.GetPublicSectionsAsync();
         var currentContext = await ResolveCurrentContextAsync();
-        var harvestHealth = await ResolveHarvestHealthAsync();
+        var diagnostics = await ResolveDiagnosticsAsync();
         var sidebarSections = sections
             .Select(
                 snapshot => new DocSidebarSectionViewModel
@@ -118,41 +115,110 @@ public class SidebarViewComponent : ViewComponent
                 })
             .ToList();
 
-        return View(new DocSidebarViewModel { Sections = sidebarSections, HarvestHealth = harvestHealth });
+        return View(
+            new DocSidebarViewModel
+            {
+                Sections = sidebarSections,
+                Diagnostics = diagnostics.Model,
+                HarvestHealth = diagnostics.HarvestHealth
+            });
     }
 
     /// <summary>
-    /// Resolves the optional harvest health chrome view model for the current sidebar request.
+    /// Resolves optional diagnostics chrome for the current sidebar request.
     /// </summary>
     /// <remarks>
-    /// Returns <c>null</c> when <see cref="AppSurfaceDocsHarvestHealthVisibility.ShouldShowChrome(AppSurfaceDocsOptions, IHostEnvironment)"/>
-    /// hides chrome. Otherwise it reads the current harvest snapshot through
-    /// <see cref="DocAggregator.GetHarvestHealthAsync(CancellationToken)"/>, maps the status and verification result,
-    /// and supplies an href from <see cref="DocsUrlBuilder.BuildHealthUrl"/> only when
-    /// <see cref="AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(AppSurfaceDocsOptions, IHostEnvironment)"/> exposes the
-    /// operator route. The aggregation wait respects <see cref="HttpContext.RequestAborted"/> when a view context is
-    /// available.
+    /// Returns an empty resolution when neither health nor route-inspector chrome is visible. When one source is visible,
+    /// the returned model includes only the rows whose chrome policy and route policy allow them. A health row can be
+    /// status-only when health chrome is visible but routes are hidden.
     /// </remarks>
-    /// <returns>The sidebar harvest health view model, or <c>null</c> when chrome is hidden.</returns>
-    private async Task<DocSidebarHarvestHealthViewModel?> ResolveHarvestHealthAsync()
+    /// <returns>The diagnostics sidebar resolution for the current request.</returns>
+    private async Task<SidebarDiagnosticsResolution> ResolveDiagnosticsAsync()
     {
-        if (!AppSurfaceDocsHarvestHealthVisibility.ShouldShowChrome(_options, _environment))
+        var showHealthChrome = AppSurfaceDocsHarvestHealthVisibility.ShouldShowChrome(_options, _environment);
+        var exposeHealthRoutes = AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment);
+        var showDiagnosticsChrome = AppSurfaceDocsDiagnosticsVisibility.ShouldShowChrome(_options, _environment);
+        var exposeRouteInspector = AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(_options, _environment);
+        DocSidebarHarvestHealthViewModel? legacyHealth = null;
+        DocSidebarDiagnosticsStatusViewModel? status = null;
+        List<DocSidebarDiagnosticsToolViewModel> tools = [];
+
+        if (showHealthChrome)
         {
-            return null;
+            var requestAborted = ViewContext?.HttpContext?.RequestAborted ?? CancellationToken.None;
+            try
+            {
+                var health = await _aggregator.GetHarvestHealthAsync(requestAborted);
+                var healthHref = exposeHealthRoutes ? _docsUrlBuilder.BuildHealthUrl() : null;
+                var healthJsonHref = exposeHealthRoutes ? _docsUrlBuilder.BuildHealthJsonUrl() : null;
+                var healthOk = AppSurfaceDocsHarvestHealthResponse.IsOk(health.Status);
+
+                legacyHealth = new DocSidebarHarvestHealthViewModel
+                {
+                    Status = health.Status.ToString(),
+                    Ok = healthOk,
+                    Href = healthHref
+                };
+                status = new DocSidebarDiagnosticsStatusViewModel
+                {
+                    Label = health.Status.ToString(),
+                    Ok = healthOk
+                };
+                tools.Add(
+                    new DocSidebarDiagnosticsToolViewModel
+                    {
+                        Label = "Harvest health",
+                        Href = healthHref,
+                        Summary = $"Harvest {health.Status}",
+                        JsonAction = string.IsNullOrWhiteSpace(healthJsonHref)
+                            ? null
+                            : new DocSidebarDiagnosticsActionViewModel
+                            {
+                                Label = "Health JSON",
+                                Href = healthJsonHref
+                            }
+                    });
+            }
+            catch (Exception) when (!requestAborted.IsCancellationRequested)
+            {
+                status = new DocSidebarDiagnosticsStatusViewModel { Label = "Health unavailable", Ok = false };
+                tools.Add(
+                    new DocSidebarDiagnosticsToolViewModel
+                    {
+                        Label = "Harvest health",
+                        Summary = "Health unavailable"
+                    });
+            }
         }
 
-        var requestAborted = ViewContext?.HttpContext?.RequestAborted ?? CancellationToken.None;
-        var health = await _aggregator.GetHarvestHealthAsync(requestAborted);
-        var href = AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment)
-            ? _docsUrlBuilder.BuildHealthUrl()
-            : null;
-
-        return new DocSidebarHarvestHealthViewModel
+        if (showDiagnosticsChrome && exposeRouteInspector)
         {
-            Status = health.Status.ToString(),
-            Ok = AppSurfaceDocsHarvestHealthResponse.IsOk(health.Status),
-            Href = href
-        };
+            tools.Add(
+                new DocSidebarDiagnosticsToolViewModel
+                {
+                    Label = "Route inspector",
+                    Href = _docsUrlBuilder.BuildRouteInspectorUrl(),
+                    Summary = "Route manifest",
+                    JsonAction = new DocSidebarDiagnosticsActionViewModel
+                    {
+                        Label = "Routes JSON",
+                        Href = _docsUrlBuilder.BuildRouteInspectorJsonUrl()
+                    }
+                });
+        }
+
+        if (status is null && tools.Count == 0)
+        {
+            return new SidebarDiagnosticsResolution(null, legacyHealth);
+        }
+
+        return new SidebarDiagnosticsResolution(
+            new DocSidebarDiagnosticsViewModel
+            {
+                Status = status,
+                Tools = tools
+            },
+            legacyHealth);
     }
 
     private async Task<(DocPublicSection? Section, string? CurrentHref)> ResolveCurrentContextAsync()
@@ -230,4 +296,8 @@ public class SidebarViewComponent : ViewComponent
 
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
+
+    private sealed record SidebarDiagnosticsResolution(
+        DocSidebarDiagnosticsViewModel? Model,
+        DocSidebarHarvestHealthViewModel? HarvestHealth);
 }

@@ -3241,6 +3241,32 @@ public class DocsControllerTests : IDisposable
         Assert.Equal(expected, exposed);
     }
 
+    [Theory]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, "Development", true)]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, "Production", false)]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.Always, "Production", true)]
+    [InlineData(AppSurfaceDocsHarvestHealthExposure.Never, "Development", false)]
+    [InlineData((AppSurfaceDocsHarvestHealthExposure)999, "Development", false)]
+    public void AppSurfaceDocsDiagnosticsVisibility_ShouldResolveChromeExposure(
+        AppSurfaceDocsHarvestHealthExposure exposure,
+        string environmentName,
+        bool expected)
+    {
+        var environment = A.Fake<IHostEnvironment>();
+        A.CallTo(() => environment.EnvironmentName).Returns(environmentName);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ShowChrome = exposure
+            }
+        };
+
+        var exposed = AppSurfaceDocsDiagnosticsVisibility.ShouldShowChrome(options, environment);
+
+        Assert.Equal(expected, exposed);
+    }
+
     [Fact]
     public void AppSurfaceDocsDiagnosticsVisibility_ShouldDefaultToDevelopmentOnly_WhenDiagnosticsOptionsAreNull()
     {
@@ -3252,8 +3278,10 @@ public class DocsControllerTests : IDisposable
         };
 
         var exposed = AppSurfaceDocsDiagnosticsVisibility.IsRouteInspectorExposed(options, environment);
+        var chrome = AppSurfaceDocsDiagnosticsVisibility.ShouldShowChrome(options, environment);
 
         Assert.True(exposed);
+        Assert.True(chrome);
     }
 
     [Fact]

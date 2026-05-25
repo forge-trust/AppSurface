@@ -1551,9 +1551,103 @@ public sealed record DocSidebarViewModel
     public IReadOnlyList<DocSidebarSectionViewModel> Sections { get; init; } = [];
 
     /// <summary>
-    /// Gets the harvest health sidebar entry when the current host should show health chrome.
+    /// Gets the maintainer diagnostics disclosure when the current host should show diagnostics chrome.
     /// </summary>
+    public DocSidebarDiagnosticsViewModel? Diagnostics { get; init; }
+
+    /// <summary>
+    /// Gets the legacy harvest health sidebar entry when the current host should show health chrome.
+    /// </summary>
+    /// <remarks>
+    /// Prefer <see cref="Diagnostics"/> for built-in sidebar rendering. This property remains available for callers that
+    /// inspect the component model directly and need the pre-diagnostics health status shape.
+    /// </remarks>
     public DocSidebarHarvestHealthViewModel? HarvestHealth { get; init; }
+}
+
+/// <summary>
+/// View model for the AppSurface Docs maintainer diagnostics sidebar disclosure.
+/// </summary>
+/// <remarks>
+/// Diagnostics chrome is a maintainer affordance, not public reader navigation. The model links only to routes that are
+/// exposed for the current environment and options; hidden routes can still produce status-only rows when their chrome
+/// is visible. JSON destinations stay secondary to the human HTML diagnostics pages.
+/// </remarks>
+public sealed record DocSidebarDiagnosticsViewModel
+{
+    /// <summary>
+    /// Gets the disclosure label shown in the sidebar.
+    /// </summary>
+    public string Label { get; init; } = "Diagnostics";
+
+    /// <summary>
+    /// Gets the optional harvest status badge shown beside the disclosure label.
+    /// </summary>
+    public DocSidebarDiagnosticsStatusViewModel? Status { get; init; }
+
+    /// <summary>
+    /// Gets the maintainer tools currently available from the diagnostics disclosure.
+    /// </summary>
+    public IReadOnlyList<DocSidebarDiagnosticsToolViewModel> Tools { get; init; } = [];
+}
+
+/// <summary>
+/// View model for the diagnostics disclosure status badge.
+/// </summary>
+public sealed record DocSidebarDiagnosticsStatusViewModel
+{
+    /// <summary>
+    /// Gets the status text shown in the compact badge.
+    /// </summary>
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets a value indicating whether the status should pass local or CI verification.
+    /// </summary>
+    public bool Ok { get; init; }
+}
+
+/// <summary>
+/// View model for one maintainer diagnostics destination in the sidebar disclosure.
+/// </summary>
+public sealed record DocSidebarDiagnosticsToolViewModel
+{
+    /// <summary>
+    /// Gets the human-readable tool label.
+    /// </summary>
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the app-relative HTML destination when the tool route is exposed; otherwise <see langword="null"/> for a
+    /// status-only row.
+    /// </summary>
+    public string? Href { get; init; }
+
+    /// <summary>
+    /// Gets optional supporting text for the tool row.
+    /// </summary>
+    public string? Summary { get; init; }
+
+    /// <summary>
+    /// Gets the optional secondary JSON action for automation-oriented diagnostics.
+    /// </summary>
+    public DocSidebarDiagnosticsActionViewModel? JsonAction { get; init; }
+}
+
+/// <summary>
+/// View model for a secondary diagnostics action.
+/// </summary>
+public sealed record DocSidebarDiagnosticsActionViewModel
+{
+    /// <summary>
+    /// Gets the accessible action label.
+    /// </summary>
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the app-relative action destination.
+    /// </summary>
+    public string Href { get; init; } = string.Empty;
 }
 
 /// <summary>

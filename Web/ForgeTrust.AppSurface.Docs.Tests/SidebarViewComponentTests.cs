@@ -100,6 +100,15 @@ public sealed class SidebarViewComponentTests
             Assert.Equal("Healthy", model.HarvestHealth.Status);
             Assert.True(model.HarvestHealth.Ok);
             Assert.Equal("/docs/_health", model.HarvestHealth.Href);
+            Assert.NotNull(model.Diagnostics);
+            Assert.Equal("Healthy", model.Diagnostics.Status?.Label);
+            Assert.Equal(
+                new[] { "Harvest health", "Route inspector" },
+                model.Diagnostics.Tools.Select(tool => tool.Label).ToArray());
+            Assert.Equal("/docs/_health", model.Diagnostics.Tools[0].Href);
+            Assert.Equal("/docs/_health.json", model.Diagnostics.Tools[0].JsonAction?.Href);
+            Assert.Equal("/docs/_routes", model.Diagnostics.Tools[1].Href);
+            Assert.Equal("/docs/_routes.json", model.Diagnostics.Tools[1].JsonAction?.Href);
         }
     }
 
@@ -117,6 +126,7 @@ public sealed class SidebarViewComponentTests
             var model = await GetModelAsync(component);
 
             Assert.Null(model.HarvestHealth);
+            Assert.Null(model.Diagnostics);
         }
     }
 
@@ -142,6 +152,8 @@ public sealed class SidebarViewComponentTests
 
             Assert.NotNull(model.HarvestHealth);
             Assert.Equal("/docs/_health", model.HarvestHealth.Href);
+            Assert.NotNull(model.Diagnostics);
+            Assert.Contains(model.Diagnostics.Tools, tool => tool.Label == "Harvest health");
         }
     }
 
@@ -164,6 +176,8 @@ public sealed class SidebarViewComponentTests
 
             Assert.NotNull(model.HarvestHealth);
             Assert.Equal("/docs/_health", model.HarvestHealth.Href);
+            Assert.NotNull(model.Diagnostics);
+            Assert.Contains(model.Diagnostics.Tools, tool => tool.Label == "Route inspector");
         }
     }
 
@@ -192,6 +206,10 @@ public sealed class SidebarViewComponentTests
             var model = await GetModelAsync(component);
 
             Assert.Null(model.HarvestHealth);
+            Assert.NotNull(model.Diagnostics);
+            var diagnostics = model.Diagnostics!;
+            var tool = Assert.Single(diagnostics.Tools);
+            Assert.Equal("Route inspector", tool.Label);
         }
     }
 
@@ -222,6 +240,123 @@ public sealed class SidebarViewComponentTests
 
             Assert.NotNull(model.HarvestHealth);
             Assert.Null(model.HarvestHealth.Href);
+            Assert.NotNull(model.Diagnostics);
+            var diagnostics = model.Diagnostics!;
+            var tool = Assert.Single(diagnostics.Tools);
+            Assert.Equal("Harvest health", tool.Label);
+            Assert.Null(tool.Href);
+            Assert.Null(tool.JsonAction);
+        }
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldShowOnlyRouteInspectorChrome_WhenProductionRouteInspectorIsExplicitlyExposed()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Never,
+                    ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never
+                }
+            },
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always,
+                ShowChrome = AppSurfaceDocsHarvestHealthExposure.Always
+            }
+        };
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Quickstart", "guides/start.md", "Start Here")
+            ],
+            options,
+            Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            Assert.Null(model.HarvestHealth);
+            Assert.NotNull(model.Diagnostics);
+            var diagnostics = model.Diagnostics!;
+            Assert.Null(diagnostics.Status);
+            var tool = Assert.Single(diagnostics.Tools);
+            Assert.Equal("Route inspector", tool.Label);
+            Assert.Equal("/docs/_routes", tool.Href);
+            Assert.Equal("Routes JSON", tool.JsonAction?.Label);
+            Assert.Equal("/docs/_routes.json", tool.JsonAction?.Href);
+        }
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldHideRouteInspectorChrome_WhenRouteIsExposedButChromeIsHidden()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Never,
+                    ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never
+                }
+            },
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always,
+                ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never
+            }
+        };
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Quickstart", "guides/start.md", "Start Here")
+            ],
+            options,
+            Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            Assert.Null(model.HarvestHealth);
+            Assert.Null(model.Diagnostics);
+        }
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldHideRouteInspectorRow_WhenChromeIsVisibleButRouteIsHidden()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Never,
+                    ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never
+                }
+            },
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Never,
+                ShowChrome = AppSurfaceDocsHarvestHealthExposure.Always
+            }
+        };
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Quickstart", "guides/start.md", "Start Here")
+            ],
+            options,
+            Environments.Production);
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            Assert.Null(model.Diagnostics);
         }
     }
 

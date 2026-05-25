@@ -1268,16 +1268,43 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
-    public async Task SidebarView_ShouldRenderHarvestHealthLink_WhenModelProvidesHealth()
+    public async Task SidebarView_ShouldRenderDiagnosticsDisclosure_WhenModelProvidesDiagnostics()
     {
         using var services = CreateServiceProvider(CreateDocs());
         var model = new DocSidebarViewModel
         {
-            HarvestHealth = new DocSidebarHarvestHealthViewModel
+            Diagnostics = new DocSidebarDiagnosticsViewModel
             {
-                Status = "Degraded",
-                Ok = false,
-                Href = "/docs/_health"
+                Status = new DocSidebarDiagnosticsStatusViewModel
+                {
+                    Label = "Degraded",
+                    Ok = false
+                },
+                Tools =
+                [
+                    new DocSidebarDiagnosticsToolViewModel
+                    {
+                        Label = "Harvest health",
+                        Href = "/docs/_health",
+                        Summary = "Harvest Degraded",
+                        JsonAction = new DocSidebarDiagnosticsActionViewModel
+                        {
+                            Label = "Health JSON",
+                            Href = "/docs/_health.json"
+                        }
+                    },
+                    new DocSidebarDiagnosticsToolViewModel
+                    {
+                        Label = "Route inspector",
+                        Href = "/docs/_routes",
+                        Summary = "Route manifest",
+                        JsonAction = new DocSidebarDiagnosticsActionViewModel
+                        {
+                            Label = "Routes JSON",
+                            Href = "/docs/_routes.json"
+                        }
+                    }
+                ]
             }
         };
 
@@ -1287,23 +1314,40 @@ public class AppSurfaceDocsViewsTests
             model,
             pathBase: "/some-base");
 
+        Assert.Contains("data-docs-diagnostics-chrome=\"true\"", html);
+        Assert.Contains("<summary", html);
+        Assert.Contains("<ul", html);
         Assert.Contains("href=\"/some-base/docs/_health\"", html);
+        Assert.Contains("href=\"/some-base/docs/_health.json\"", html);
+        Assert.Contains("href=\"/some-base/docs/_routes\"", html);
+        Assert.Contains("href=\"/some-base/docs/_routes.json\"", html);
         Assert.Contains("Harvest Degraded", html);
-        Assert.Contains("Health", html);
+        Assert.Contains("Health JSON", html);
+        Assert.Contains("Routes JSON", html);
         Assert.Contains("text-rose-200", html);
     }
 
     [Fact]
-    public async Task SidebarView_ShouldRenderHarvestHealthStatusWithoutLink_WhenHealthHrefIsHidden()
+    public async Task SidebarView_ShouldRenderDiagnosticsStatusWithoutLink_WhenHealthHrefIsHidden()
     {
         using var services = CreateServiceProvider(CreateDocs());
         var model = new DocSidebarViewModel
         {
-            HarvestHealth = new DocSidebarHarvestHealthViewModel
+            Diagnostics = new DocSidebarDiagnosticsViewModel
             {
-                Status = "StatusOnly",
-                Ok = true,
-                Href = null
+                Status = new DocSidebarDiagnosticsStatusViewModel
+                {
+                    Label = "StatusOnly",
+                    Ok = true
+                },
+                Tools =
+                [
+                    new DocSidebarDiagnosticsToolViewModel
+                    {
+                        Label = "Harvest health",
+                        Summary = "Harvest StatusOnly"
+                    }
+                ]
             }
         };
 
@@ -1316,10 +1360,10 @@ public class AppSurfaceDocsViewsTests
         var statusElement = document.QuerySelectorAll("span")
             .FirstOrDefault(element => element.TextContent.Contains("Harvest StatusOnly", StringComparison.Ordinal));
         Assert.NotNull(statusElement);
-        Assert.NotNull(FindAncestor(statusElement, "div"));
+        Assert.NotNull(FindAncestor(statusElement, "li"));
         Assert.Null(FindAncestor(statusElement, "a"));
         Assert.Contains("Harvest StatusOnly", html);
-        Assert.Contains("Health", html);
+        Assert.Contains("Harvest health", html);
         Assert.Contains("text-emerald-200", html);
     }
 

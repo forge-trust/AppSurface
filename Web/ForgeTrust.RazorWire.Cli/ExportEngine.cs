@@ -20,6 +20,7 @@ public class ExportEngine
 
     // Compiled Regexes for performance
     private const string ExportIgnoreAttributeName = "data-rw-export-ignore";
+    private const string AppSurfaceDocsDiagnosticsChromeAttributeName = "data-docs-diagnostics-chrome";
     private static readonly HashSet<string> SourceNavigationAnchorExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".cs",
@@ -43,6 +44,10 @@ public class ExportEngine
     private static readonly Regex ExportIgnoreAttributeRegex = new(
         @"\s" + ExportIgnoreAttributeName + @"(?:\s*=\s*(?:""[^""]*""|'[^']*'|[^\s>]+))?(?=\s|/?>)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex AppSurfaceDocsDiagnosticsChromeRegex = new(
+        @"<(?<tag>[a-z][a-z0-9:-]*)\b(?=[^>]*\s" + AppSurfaceDocsDiagnosticsChromeAttributeName + @"(?:\s*=\s*(?:""true""|'true'|true))?(?=\s|/?>))[^>]*>.*?</\k<tag>>",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
 
     private static readonly Regex TurboFrameSrcRegex = new(
         @"<turbo-frame[^>]*\ssrc\s*=\s*(['""])(.*?)\1",
@@ -212,7 +217,7 @@ public class ExportEngine
 
             if (isHtml)
             {
-                var html = await response.Content.ReadAsStringAsync(cancellationToken);
+                var html = StripAppSurfaceDocsDiagnosticsChrome(await response.Content.ReadAsStringAsync(cancellationToken));
                 var docContentFrame = ExtractDocContentFrame(html);
                 context.RouteOutcomes[route] = context.Mode == ExportMode.Cdn
                     ? ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, html)
@@ -527,6 +532,7 @@ public class ExportEngine
         bool rewriteManagedReferences,
         CancellationToken cancellationToken)
     {
+        body = StripAppSurfaceDocsDiagnosticsChrome(body);
         var docContentFrame = ExtractDocContentFrame(body);
         var isDocsPage = IsDocsExportPage(route, body, docContentFrame);
         var htmlForWrite = isDocsPage
@@ -541,6 +547,28 @@ public class ExportEngine
             filePath,
             ExtractDocContentFrame(htmlForWrite),
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes AppSurface Docs maintainer diagnostics chrome from export HTML before link discovery or artifact writes.
+    /// </summary>
+    /// <remarks>
+    /// AppSurface Docs diagnostics links are useful in live maintainer hosts but must not become reader-facing static
+    /// artifacts. The marker is owned by the AppSurface Docs sidebar view and allows the generic RazorWire exporter to
+    /// suppress the whole diagnostics disclosure even when exporting from a URL source whose host has diagnostics chrome
+    /// enabled.
+    /// </remarks>
+    /// <param name="html">The fetched or staged HTML document.</param>
+    /// <returns>The HTML with marked AppSurface Docs diagnostics chrome removed.</returns>
+    internal static string StripAppSurfaceDocsDiagnosticsChrome(string html)
+    {
+        if (string.IsNullOrEmpty(html)
+            || !html.Contains(AppSurfaceDocsDiagnosticsChromeAttributeName, StringComparison.OrdinalIgnoreCase))
+        {
+            return html;
+        }
+
+        return AppSurfaceDocsDiagnosticsChromeRegex.Replace(html, string.Empty);
     }
 
     private async Task WriteCssRouteAsync(

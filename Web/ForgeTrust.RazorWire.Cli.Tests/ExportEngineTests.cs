@@ -2086,6 +2086,33 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void StripAppSurfaceDocsDiagnosticsChrome_ShouldRemoveMarkedDiagnosticsDisclosure()
+    {
+        var html = """
+            <html>
+              <body>
+                <nav>
+                  <details data-docs-diagnostics-chrome="true">
+                    <summary>Diagnostics</summary>
+                    <a href="/docs/_health">Harvest health</a>
+                    <a href="/docs/%5Froutes">Encoded routes</a>
+                  </details>
+                  <a href="/docs/start">Start</a>
+                </nav>
+              </body>
+            </html>
+            """;
+
+        var stripped = ExportEngine.StripAppSurfaceDocsDiagnosticsChrome(html);
+        var decoded = Uri.UnescapeDataString(stripped);
+
+        Assert.DoesNotContain("Diagnostics", stripped, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("_health", decoded, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("_routes", decoded, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("href=\"/docs/start\"", stripped);
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Export_Docs_Partial_Fragments()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -2095,7 +2122,8 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DocsPartialHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            var handler = new DocsPartialHandler();
+            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
@@ -2129,6 +2157,19 @@ public class ExportEngineTests
             var nextPartialHtml = await File.ReadAllTextAsync(nextPartialPath);
             Assert.Contains("<turbo-frame id=\"doc-content\">", nextPartialHtml);
             Assert.Contains("<article>Next doc</article>", nextPartialHtml);
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_health", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_routes", StringComparison.OrdinalIgnoreCase));
+
+            foreach (var artifactPath in Directory.EnumerateFiles(tempDir, "*", SearchOption.AllDirectories)
+                         .Where(path => path.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+                                        || path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                                        || path.EndsWith(".js", StringComparison.OrdinalIgnoreCase)))
+            {
+                var artifact = Uri.UnescapeDataString(await File.ReadAllTextAsync(artifactPath));
+                Assert.DoesNotContain("Diagnostics", artifact, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("_health", artifact, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("_routes", artifact, StringComparison.OrdinalIgnoreCase);
+            }
         }
         finally
         {
@@ -2667,15 +2708,25 @@ public class ExportEngineTests
 
     private sealed class DocsPartialHandler : HttpMessageHandler
     {
+        public List<string> RequestPaths { get; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri?.AbsolutePath ?? "/";
+            RequestPaths.Add(path);
             if (path == "/docs")
             {
                 var html = """
                     <html>
                       <body>
                         <main>Docs landing page</main>
+                        <details data-docs-diagnostics-chrome="true">
+                          <summary>Diagnostics</summary>
+                          <a href="/docs/_health">Harvest health</a>
+                          <a href="/docs/_health.json">Health JSON</a>
+                          <a href="/docs/_routes">Route inspector</a>
+                          <a href="/docs/_routes.json">Routes JSON</a>
+                        </details>
                         <a href="/docs/start">Start</a>
                       </body>
                     </html>
@@ -2695,6 +2746,11 @@ public class ExportEngineTests
                           <article>Start doc</article>
                           <turbo-frame id="nested-frame"><p>Nested doc frame</p></turbo-frame>
                         </turbo-frame>
+                        <details data-docs-diagnostics-chrome="true">
+                          <summary>Diagnostics</summary>
+                          <a href="/docs/_health">Harvest health</a>
+                          <a href="/docs/%5Froutes">Encoded routes</a>
+                        </details>
                         <a href="/docs/next">Next</a>
                       </body>
                     </html>
