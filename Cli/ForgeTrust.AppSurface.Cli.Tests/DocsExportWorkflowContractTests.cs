@@ -33,11 +33,8 @@ public sealed class DocsExportWorkflowContractTests
         var verifyStep = FindStep(steps, "Verify AppSurface Docs harvest health");
         var verifyEnv = GetMapping(verifyStep, "env");
         Assert.Equal(
-            "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js",
+            "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js",
             GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"));
-        Assert.Equal(
-            "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.islands.js",
-            GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__1"));
         var verifyRun = GetScalar(verifyStep, "run");
         Assert.Contains("docs verify-health", verifyRun, StringComparison.Ordinal);
         Assert.Contains("--repo .", verifyRun, StringComparison.Ordinal);
@@ -61,6 +58,9 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal(
             "/branding/appsurface-site-icon.svg",
             GetScalar(exportEnv, "AppSurfaceDocs__Identity__Favicon__SvgPath"));
+        Assert.Equal(
+            GetScalar(exportEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"),
+            GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"));
 
         var exportRun = GetScalar(exportStep, "run");
         Assert.Contains("printf '%s\\n' '/' '/docs' > \"$RUNNER_TEMP/appsurface-docs-seeds.txt\"", exportRun, StringComparison.Ordinal);

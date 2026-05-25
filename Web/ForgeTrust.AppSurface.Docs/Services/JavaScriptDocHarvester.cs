@@ -867,7 +867,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 : DocHarvestDiagnosticSeverity.Warning,
             $"{GetKindLabel(item.Kind)} '{item.Name}' is missing public contract fields.",
             "The item will render, but readers may not know enough about the public browser contract to consume it confidently.",
-            "Add " + string.Join(", ", missing) + " to the public JavaScript doclet."));
+            BuildCompletenessFix(missing)));
     }
 
     private static void AddMissing(ICollection<string> missing, string? value, string tagName)
@@ -876,6 +876,29 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         {
             missing.Add(tagName);
         }
+    }
+
+    private static string BuildCompletenessFix(IReadOnlyCollection<string> missing)
+    {
+        var additions = missing
+            .Where(item => !item.StartsWith("remove ", StringComparison.Ordinal))
+            .ToArray();
+        var removals = missing
+            .Where(item => item.StartsWith("remove ", StringComparison.Ordinal))
+            .Select(item => item["remove ".Length..])
+            .ToArray();
+        var clauses = new List<string>();
+        if (additions.Length > 0)
+        {
+            clauses.Add("Add " + string.Join(", ", additions) + " to the public JavaScript doclet.");
+        }
+
+        foreach (var removal in removals)
+        {
+            clauses.Add("Remove " + removal + " from the public JavaScript doclet.");
+        }
+
+        return string.Join(" ", clauses);
     }
 
     /// <summary>

@@ -222,7 +222,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var diagnostic = Assert.Single(
             GetDiagnostics(harvester),
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
-        Assert.Contains("remove @detail none or detail.* properties", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("Remove @detail none or detail.* properties", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add remove", diagnostic.Fix, StringComparison.Ordinal);
     }
 
     [Fact]

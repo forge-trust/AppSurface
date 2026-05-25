@@ -135,8 +135,7 @@ jobs:
 
       - name: Verify AppSurface Docs harvest health
         env:
-          AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js
-          AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__1: Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.islands.js
+          AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js
         run: |
           dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
             docs verify-health \
