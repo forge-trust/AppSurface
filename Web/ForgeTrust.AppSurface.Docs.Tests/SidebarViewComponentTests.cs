@@ -337,6 +337,59 @@ public sealed class SidebarViewComponentTests
     }
 
     [Fact]
+    public async Task InvokeAsync_ShouldUseNoneCancellationToken_WhenViewContextHasNoHttpContext()
+    {
+        CancellationToken observedToken = new(canceled: true);
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Always,
+                    ShowChrome = AppSurfaceDocsHarvestHealthExposure.Always
+                }
+            }
+        };
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Quickstart", "guides/start.md", "Start Here")
+            ],
+            options,
+            Environments.Production,
+            token =>
+            {
+                observedToken = token;
+                return Task.FromResult(
+                    new DocHarvestHealthSnapshot(
+                        DocHarvestHealthStatus.Healthy,
+                        DateTimeOffset.UtcNow,
+                        Path.GetTempPath(),
+                        TotalHarvesters: 1,
+                        SuccessfulHarvesters: 1,
+                        FailedHarvesters: 0,
+                        TotalDocs: 1,
+                        Harvesters: [],
+                        Diagnostics: []));
+            });
+        component.ViewComponentContext = new ViewComponentContext
+        {
+            ViewContext = new ViewContext
+            {
+                HttpContext = null!
+            }
+        };
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            Assert.NotNull(model.Diagnostics);
+            Assert.Equal(CancellationToken.None, observedToken);
+        }
+    }
+
+    [Fact]
     public async Task InvokeAsync_ShouldHideRouteInspectorChrome_WhenRouteIsExposedButChromeIsHidden()
     {
         var options = new AppSurfaceDocsOptions

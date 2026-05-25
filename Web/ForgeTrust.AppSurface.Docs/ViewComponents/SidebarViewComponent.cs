@@ -180,7 +180,7 @@ public class SidebarViewComponent : ViewComponent
 
         if (showHealthChrome)
         {
-            var requestAborted = ViewContext?.HttpContext?.RequestAborted ?? CancellationToken.None;
+            var requestAborted = ResolveRequestAborted();
             try
             {
                 var health = await _getHarvestHealthAsync(requestAborted);
@@ -254,6 +254,16 @@ public class SidebarViewComponent : ViewComponent
                 Tools = tools
             },
             legacyHealth);
+    }
+
+    private CancellationToken ResolveRequestAborted()
+    {
+        if (ViewContext.HttpContext is not { } httpContext)
+        {
+            return CancellationToken.None;
+        }
+
+        return httpContext.RequestAborted;
     }
 
     private async Task<(DocPublicSection? Section, string? CurrentHref)> ResolveCurrentContextAsync()
