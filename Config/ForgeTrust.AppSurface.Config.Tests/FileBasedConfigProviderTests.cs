@@ -852,6 +852,18 @@ public class FileBasedConfigProviderTests
     }
 
     [Fact]
+    public void SourceLocationMap_HandlesCrWhitespaceAndPropertyAtLineStart()
+    {
+        var map = ConfigFileSourceLocationMap.Create(Encoding.UTF8.GetBytes("{\r\"Port\": 5\r}"));
+
+        var location = map.GetLocation("Port");
+
+        Assert.NotNull(location);
+        Assert.Equal(2, location.LineNumber);
+        Assert.Equal(1, location.ByteColumnNumber);
+    }
+
+    [Fact]
     public void SourceLocationMap_KeepsCaseInsensitiveAmbiguityAfterLaterExactDuplicate()
     {
         var map = ConfigFileSourceLocationMap.Create(Encoding.UTF8.GetBytes(

@@ -1,5 +1,4 @@
-﻿using System.Diagnostics.CodeAnalysis;
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Hosting;
@@ -603,12 +602,7 @@ internal sealed class ConfigFileSourceLocationMap
                 return;
             }
 
-            if (reader.TokenType != JsonTokenType.PropertyName)
-            {
-                ThrowExpectedObjectProperty();
-            }
-
-            var propertyName = reader.GetString() ?? string.Empty;
+            var propertyName = reader.GetString()!;
             var path = string.IsNullOrEmpty(parentPath) ? propertyName : $"{parentPath}.{propertyName}";
             var unsupportedPath = suppressLocations || propertyName.Contains('.', StringComparison.Ordinal);
             if (unsupportedPath)
@@ -625,10 +619,7 @@ internal sealed class ConfigFileSourceLocationMap
                     ambiguousPaths);
             }
 
-            if (!reader.Read())
-            {
-                ThrowExpectedPropertyValue();
-            }
+            reader.Read();
 
             if (reader.TokenType == JsonTokenType.StartObject)
             {
@@ -640,16 +631,6 @@ internal sealed class ConfigFileSourceLocationMap
             }
         }
     }
-
-    [DoesNotReturn]
-    [ExcludeFromCodeCoverage(Justification = "Utf8JsonReader normally rejects malformed object content before this defensive mapper guard.")]
-    private static void ThrowExpectedObjectProperty() =>
-        throw new JsonException("Expected a JSON object property.");
-
-    [DoesNotReturn]
-    [ExcludeFromCodeCoverage(Justification = "Utf8JsonReader normally rejects missing property values before this defensive mapper guard.")]
-    private static void ThrowExpectedPropertyValue() =>
-        throw new JsonException("Expected a JSON property value.");
 
     private static void RecordLocation(
         string path,
