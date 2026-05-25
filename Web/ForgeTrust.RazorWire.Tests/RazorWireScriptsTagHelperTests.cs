@@ -100,6 +100,8 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("VerifyRazorWireGeneratedAssetsBeforePack", project, StringComparison.Ordinal);
         Assert.Contains("assets:razorwire:verify", project, StringComparison.Ordinal);
         Assert.Contains("RWPACK001", project, StringComparison.Ordinal);
+        Assert.Contains("""<Content Remove="assets\**\*" />""", project, StringComparison.Ordinal);
+        Assert.Contains("""<None Remove="assets\**\*" />""", project, StringComparison.Ordinal);
     }
 
     [Fact]
