@@ -173,6 +173,11 @@ public class ConfigAuditReporterTests
         public string Second = "second";
     }
 
+    private readonly struct StructShape
+    {
+        public string Name { get; init; }
+    }
+
     private sealed class NamedEndpoint
     {
         public string? Name { get; set; }
@@ -648,6 +653,7 @@ public class ConfigAuditReporterTests
                     },
                     ["PropertyBudget.Shape"] = new PropertyBudgetShape(),
                     ["FieldBudget.Shape"] = new FieldBudgetShape(),
+                    ["Struct.Shape"] = new StructShape { Name = "value-type" },
                     ["Unsupported.Default"] = new ThrowingEnumerable(),
                     ["Unsupported.Items"] = new ThrowingEnumerable(),
                     ["Matrix.Items"] = new int[1, 1]
@@ -730,6 +736,7 @@ public class ConfigAuditReporterTests
         services.AddConfigAuditKey<FieldBudgetShape>(
             "FieldBudget.Shape",
             options => options.MaxReportNodes = 1);
+        services.AddConfigAuditKey<StructShape>("Struct.Shape");
         services.AddConfigAuditKey<ThrowingEnumerable>("Unsupported.Default");
         services.AddConfigAuditKey<ThrowingEnumerable>(
             "Unsupported.Items",
@@ -794,6 +801,9 @@ public class ConfigAuditReporterTests
         Assert.Single(fieldBudget.Children);
         Assert.Contains(fieldBudget.Diagnostics, diagnostic => diagnostic.Code == "config-audit-report-node-limit");
 
+        var structShape = AssertEntry(report, "Struct.Shape", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal("value-type", structShape.Children.Single(child => child.Key == "Struct.Shape.Name").DisplayValue);
+
         Assert.Empty(AssertEntry(report, "Unsupported.Default", ConfigAuditEntryState.Resolved, null).Children);
         Assert.Contains(
             AssertEntry(report, "Unsupported.Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
@@ -801,6 +811,34 @@ public class ConfigAuditReporterTests
         Assert.Contains(
             AssertEntry(report, "Matrix.Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-audit-collection-kind-unsupported");
+    }
+
+    [Fact]
+    public void GetReport_ReportsInheritedSourceForRedactedDictionaryKeysWithoutProviderSources()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new NoSourceProvider(
+                "Map.Values",
+                new Dictionary<string, string>
+                {
+                    ["password"] = "secret"
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Map.Values",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Map.Values", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+
+        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-source-inherited");
     }
 
     [Fact]

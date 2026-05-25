@@ -63,6 +63,27 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigAuditEntryOptions_NormalizePreservesValidOptions()
+    {
+        var options = new ConfigAuditEntryOptions
+        {
+            TraverseCollectionElements = true,
+            MaxCollectionDepth = 2,
+            MaxCollectionElements = 3,
+            MaxReportNodes = 4,
+            DisplayDictionaryKeys = false
+        };
+
+        var normalized = options.Normalize();
+
+        Assert.True(normalized.TraverseCollectionElements);
+        Assert.Equal(2, normalized.MaxCollectionDepth);
+        Assert.Equal(3, normalized.MaxCollectionElements);
+        Assert.Equal(4, normalized.MaxReportNodes);
+        Assert.False(normalized.DisplayDictionaryKeys);
+    }
+
+    [Fact]
     public void ConfigAuditDictionaryLabelSet_ReusesLabelsForDuplicateRawKeys()
     {
         var labels = new ConfigAuditDictionaryLabelSet();
@@ -73,6 +94,94 @@ public class ConfigAuditModelsTests
 
         Assert.Equal(first, duplicate);
         Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void ConfigAuditPath_SeparatesDisplayLabelsFromSourceSegments()
+    {
+        var labels = new ConfigAuditDictionaryLabelSet();
+        var root = ConfigAuditPath.Root("Root");
+
+        var safe = root.AppendDictionaryKey("tenant-1", new ConfigAuditEntryOptions(), labels);
+        var empty = root.AppendDictionaryKey(null, new ConfigAuditEntryOptions(), labels);
+        var inherited = empty.AppendDictionaryKey("safe", new ConfigAuditEntryOptions(), labels);
+
+        Assert.Equal("Root[\"tenant-1\"]", safe.DisplayPath);
+        Assert.Equal("Root.tenant-1", safe.SourcePath);
+        Assert.False(safe.RequiresInheritedSource);
+
+        Assert.Equal("Root[\"\"]", empty.DisplayPath);
+        Assert.Equal("Root", empty.SourcePath);
+        Assert.True(empty.RequiresInheritedSource);
+
+        Assert.Equal("Root.safe", inherited.SourcePath);
+        Assert.True(inherited.RequiresInheritedSource);
+    }
+
+    [Fact]
+    public void ConfigAuditTextRenderer_OrdersMixedElementsAndFormatsUnknownProviders()
+    {
+        var renderer = new ConfigAuditTextRenderer();
+        var report = new ConfigAuditReport
+        {
+            Environment = "Production",
+            GeneratedAt = DateTimeOffset.UnixEpoch,
+            Redaction = new ConfigAuditRedaction
+            {
+                Enabled = true,
+                Placeholder = "[redacted]"
+            },
+            Entries =
+            [
+                new ConfigAuditEntry
+                {
+                    Key = "Root",
+                    State = ConfigAuditEntryState.Resolved,
+                    Sources =
+                    [
+                        new ConfigAuditSourceRecord
+                        {
+                            Kind = ConfigAuditSourceKind.Provider,
+                            Role = ConfigAuditSourceRole.Base
+                        }
+                    ],
+                    Children =
+                    [
+                        new ConfigAuditEntry
+                        {
+                            Key = "Root[\"name\"]",
+                            State = ConfigAuditEntryState.Resolved,
+                            Element = new ConfigAuditElementIdentity
+                            {
+                                Kind = ConfigAuditElementKind.DictionaryItem,
+                                KeyLabel = "name"
+                            }
+                        },
+                        new ConfigAuditEntry
+                        {
+                            Key = "Root[0]",
+                            State = ConfigAuditEntryState.Resolved,
+                            Element = new ConfigAuditElementIdentity
+                            {
+                                Kind = ConfigAuditElementKind.ArrayItem,
+                                Index = 0
+                            }
+                        },
+                        new ConfigAuditEntry
+                        {
+                            Key = "Root.Plain",
+                            State = ConfigAuditEntryState.Resolved
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var rendered = renderer.Render(report);
+
+        Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root[\"name\"]", StringComparison.Ordinal));
+        Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root.Plain", StringComparison.Ordinal));
+        Assert.Contains("Provider", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
