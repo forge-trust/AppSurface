@@ -238,11 +238,15 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              */
             """);
         var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
         options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
         var harvester = CreateHarvester(options);
 
         _ = await harvester.HarvestAsync(_testRoot);
 
+        Assert.Contains(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
         Assert.DoesNotContain(
             GetDiagnostics(harvester),
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
