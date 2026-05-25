@@ -98,21 +98,72 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         Assert.Contains(messages, message => message.Contains("data-appsurface-docs-harvest-complete=\"true\"", StringComparison.Ordinal));
     }
 
-    private static DocHarvestHealthSnapshot CreateHealth()
+    [Fact]
+    public async Task ProgressReporter_ShouldPublishCompletionVisitOnlyOnce()
     {
+        var hub = new RecordingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        var visitMessages = hub.Published
+            .Where(item => item.Message.Contains("action=\"rw-visit\"", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Single(visitMessages);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldReplayFailedTerminalStateWithoutVisit()
+    {
+        var hub = new InMemoryRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.CompleteRunAsync(runId, CreateHealth(DocHarvestHealthStatus.Failed));
+
+        var replay = hub.Subscribe(
+            AppSurfaceDocsHarvestProgressReporter.ChannelName,
+            new RazorWireStreamSubscribeOptions { Replay = true });
+        var messages = new List<string>();
+        while (replay.TryRead(out var message))
+        {
+            messages.Add(message);
+        }
+
+        Assert.NotEmpty(messages);
+        Assert.All(messages, message => Assert.DoesNotContain("action=\"rw-visit\"", message, StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("Needs attention", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("Harvest finished with diagnostics", StringComparison.Ordinal));
+    }
+
+    private static DocHarvestHealthSnapshot CreateHealth(DocHarvestHealthStatus status = DocHarvestHealthStatus.Healthy)
+    {
+        var failed = status == DocHarvestHealthStatus.Failed;
         return new DocHarvestHealthSnapshot(
-            DocHarvestHealthStatus.Healthy,
+            status,
             DateTimeOffset.UtcNow,
             "/tmp/repo",
             TotalHarvesters: 1,
-            SuccessfulHarvesters: 1,
-            FailedHarvesters: 0,
-            TotalDocs: 1,
+            SuccessfulHarvesters: failed ? 0 : 1,
+            FailedHarvesters: failed ? 1 : 0,
+            TotalDocs: failed ? 0 : 1,
             [
                 new DocHarvesterHealth(
                     nameof(MarkdownHarvester),
-                    DocHarvesterHealthStatus.Succeeded,
-                    DocCount: 1,
+                    failed ? DocHarvesterHealthStatus.Failed : DocHarvesterHealthStatus.Succeeded,
+                    DocCount: failed ? 0 : 1,
                     Diagnostic: null)
             ],
             Diagnostics: []);

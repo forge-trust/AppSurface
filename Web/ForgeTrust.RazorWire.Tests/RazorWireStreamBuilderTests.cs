@@ -245,6 +245,7 @@ public class RazorWireStreamBuilderTests
             .ReplaceComponent("target-15", "Widget", new { Id = 7 })
             .UpdateComponent("target-16", "Widget", new { Id = 8 })
             .Remove("target-17")
+            .Visit("/docs/complete", RazorWireVisitAction.Replace)
             .BuildResult();
 
         await result.ExecuteResultAsync(actionContext.ActionContext);
@@ -252,7 +253,7 @@ public class RazorWireStreamBuilderTests
 
         // Assert
         Assert.Equal("text/vnd.turbo-stream.html", actionContext.ActionContext.HttpContext.Response.ContentType);
-        Assert.Equal(17, Regex.Matches(rendered, "<turbo-stream").Count);
+        Assert.Equal(18, Regex.Matches(rendered, "<turbo-stream").Count);
         var expectedTargets = new[]
         {
             "target-1",
@@ -283,6 +284,10 @@ public class RazorWireStreamBuilderTests
             previousIndex = index;
         }
 
+        var visitIndex = rendered.IndexOf("action=\"rw-visit\"", StringComparison.Ordinal);
+        Assert.True(visitIndex > previousIndex, "Expected visit action to render after queued target actions.");
+        Assert.Contains("url=\"/docs/complete\"", rendered, StringComparison.Ordinal);
+        Assert.Contains("visit-action=\"replace\"", rendered, StringComparison.Ordinal);
         Assert.Equal(4, viewComponentHelper.TypedInvocationCount);
         Assert.Equal(4, viewComponentHelper.NamedInvocationCount);
     }

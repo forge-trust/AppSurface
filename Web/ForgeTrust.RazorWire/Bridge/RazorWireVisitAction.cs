@@ -13,10 +13,10 @@ public enum RazorWireVisitAction
     /// <summary>
     /// Pushes a new history entry for the visited URL, matching Turbo Drive's default <c>advance</c> action.
     /// </summary>
-    Advance,
+    Advance = 0,
 
     /// <summary>
     /// Replaces the current history entry with the visited URL, matching Turbo Drive's <c>replace</c> action.
     /// </summary>
-    Replace
+    Replace = 1
 }

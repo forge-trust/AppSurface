@@ -188,6 +188,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         ArgumentNullException.ThrowIfNull(health);
 
         AppSurfaceDocsHarvestProgressSnapshot snapshot;
+        var publishCompletionVisit = false;
         lock (_gate)
         {
             if (!string.Equals(_snapshot.RunId, runId, StringComparison.Ordinal))
@@ -195,6 +196,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 return;
             }
 
+            var previousState = _snapshot.State;
             snapshot = _snapshot with
             {
                 State = health.Status == DocHarvestHealthStatus.Failed
@@ -213,9 +215,11 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 Activity = AddActivity(_snapshot.Activity, $"Harvest completed with {health.TotalDocs.ToString(CultureInfo.InvariantCulture)} docs.")
             };
             _snapshot = snapshot;
+            publishCompletionVisit = previousState != AppSurfaceDocsHarvestRunState.Completed
+                                     && snapshot.State == AppSurfaceDocsHarvestRunState.Completed;
         }
 
-        await PublishAsync(snapshot);
+        await PublishAsync(snapshot, publishCompletionVisit);
     }
 
     private async ValueTask UpdateHarvesterAsync(string runId, string harvesterType, string status, int docCount, string activity)
@@ -253,7 +257,9 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
         await PublishAsync(snapshot);
     }
 
-    private async ValueTask PublishAsync(AppSurfaceDocsHarvestProgressSnapshot snapshot)
+    private async ValueTask PublishAsync(
+        AppSurfaceDocsHarvestProgressSnapshot snapshot,
+        bool publishCompletionVisit = false)
     {
         var hub = _services.GetService<IRazorWireStreamHub>();
         if (hub is null)
@@ -271,7 +277,7 @@ public sealed class AppSurfaceDocsHarvestProgressReporter
                 message,
                 new RazorWireStreamPublishOptions { Replay = true });
 
-            if (snapshot.State == AppSurfaceDocsHarvestRunState.Completed)
+            if (publishCompletionVisit)
             {
                 var visitMessage = new RazorWireStreamBuilder()
                     .Visit(CurrentPageVisitUrl, RazorWireVisitAction.Replace)
