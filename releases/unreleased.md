@@ -57,6 +57,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - RazorWire CLI users who still want extensionless, server-routed export output should pass `--mode hybrid`. The default `cdn` mode is for plain static hosts and CDNs, not S3-specific infrastructure.
 - PackageIndex now has a real `--help`/`-h` surface that exits successfully, describes its commands and options, and reports unknown commands before printing usage.
 - AppSurface docs preview now defaults to the Development host environment when no `--environment` is supplied, so local `appsurface docs` runs with no configured endpoint use the deterministic per-workspace localhost port instead of falling through to Kestrel's port `5000` default.
+- AppSurface-owned OpenAPI and Scalar endpoints now use production exposure gates. OpenAPI and Scalar remain zero-configuration in Development, but non-development hosts must opt in with `AppSurfaceWebOpenApi:ExposeEndpoint=Always` and, for Scalar, `AppSurfaceWebScalar:ExposeEndpoint=Always`. Scalar also requires the AppSurface-owned OpenAPI endpoint to be exposed and never maps OpenAPI on its own.
 
 ### Core diagnostics
 
@@ -207,6 +208,7 @@ There is no tagged migration guide yet because AppSurface has not cut `v0.1.0`. 
 - AppSurface Docs authors should migrate flat `featured_pages` metadata to `featured_page_groups`. The old field is ignored and logs a warning; each group needs at least `label` or `intent`, plus a `pages` list containing the existing `question`, `path`, `supporting_copy`, and `order` entries.
 - Code that previously read `IHostEnvironment.ApplicationName` to recover a custom AppSurface display label should read `StartupContext.ApplicationName` instead. `IHostEnvironment.ApplicationName` now stays aligned with the host entry-assembly identity used for static web asset discovery unless `StartupContext.OverrideEntryPointAssembly` explicitly selects a different manifest identity. `StartupContext.EntryPointAssembly` still defaults to the root module assembly for command/controller/component discovery, so existing cross-assembly scanning behavior remains stable.
 - Web apps with custom conventional 404 views should change `@model ForgeTrust.AppSurface.Web.NotFoundPageModel` to `@model ForgeTrust.AppSurface.Web.BrowserStatusPageModel`. The old 404-only options API names have moved to `BrowserStatusPage*` names before `v0.1.0`; conventional production `500` exception pages now ship as the opt-in fix for issue #224.
+- Web apps that intentionally exposed AppSurface-owned OpenAPI or Scalar routes outside Development should set `AppSurfaceWebOpenApi:ExposeEndpoint=Always` and, when using Scalar, `AppSurfaceWebScalar:ExposeEndpoint=Always`. The new setting only controls endpoint mapping; apps still need host-owned authorization, private networking, or reverse-proxy protection for public environments.
 
 ## Proof artifacts
 

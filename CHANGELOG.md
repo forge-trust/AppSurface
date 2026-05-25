@@ -40,6 +40,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface now ships GitHub issue templates for bug reports and documentation feedback.
 - AppSurface Config now supports first-class scalar value validation on `Config<T>` and `ConfigStruct<T>` wrappers with `ConfigValueNotEmpty`, `ConfigValueRange`, `ConfigValueMinLength`, and a `ValidateValue` override for custom rules.
 - AppSurface Web CORS options now expose `AllowedHeaders` and `AllowedMethods` so applications can define explicit production preflight contracts without replacing the framework-managed policy.
+- AppSurface Web OpenAPI and Scalar modules now expose API documentation endpoints only in Development by default, with explicit `Always` and `Never` options for hosts that need production exposure or stricter local hiding.
 
 ### Changed
 
@@ -73,6 +74,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs authors using `featured_pages` should migrate to `featured_page_groups`; the old flat field now logs a warning and no longer renders.
 - Code that expected custom AppSurface labels from `IHostEnvironment.ApplicationName` should use `StartupContext.ApplicationName`; host environment application names now remain tied to assembly identity so ASP.NET static web assets continue to resolve.
 - Web apps with custom conventional 404 overrides should replace `NotFoundPageModel` with `BrowserStatusPageModel`. The old `ConventionalNotFoundPageMode`, `NotFoundPageMode`, `UseConventionalNotFoundPage()`, and `DisableNotFoundPage()` API names have moved to the `BrowserStatusPage*` naming surface before the first public tag.
+- Web apps that intentionally expose AppSurface-owned OpenAPI or Scalar routes outside Development should configure `AppSurfaceWebOpenApi:ExposeEndpoint=Always` and, for Scalar, `AppSurfaceWebScalar:ExposeEndpoint=Always`. Endpoint exposure does not add authentication or authorization.
 - AppSurface Docs hosts that need operational status for source-backed docs should call `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` and diagnostic codes instead of scraping warning or critical log messages.
 - AppSurface Docs hosts with expensive or side-effecting harvesters can set `AppSurfaceDocs:Harvest:StartupMode` to `Disabled` or adjust `InitialRequestWaitBudgetMilliseconds`; the `Testing*DelayMilliseconds` options are intended only for local and automated observatory testing.
 

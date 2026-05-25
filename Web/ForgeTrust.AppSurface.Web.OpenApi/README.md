@@ -7,7 +7,7 @@ This package provides a modular integration for OpenAPI (Swagger) document gener
 The `AppSurfaceWebOpenApiModule` simplifies the configuration of OpenAPI by:
 - Registering the necessary services via `AddOpenApi`.
 - Configuring the `EndpointsApiExplorer`.
-- Automatically mapping the OpenAPI documentation endpoints.
+- Mapping the OpenAPI documentation endpoint when endpoint exposure options allow it.
 - Providing default document and operation transformers to clean up and brand the generated documentation based on the `StartupContext`.
 
 ## Release Guidance
@@ -33,7 +33,39 @@ public class MyModule : IAppSurfaceWebModule
 ## Features
 
 - **Document Transformation**: Automatically updates the API title and tags based on the application name defined in the `StartupContext`.
-- **Automatic Endpoint Mapping**: Calls `endpoints.MapOpenApi()` for you during the endpoint configuration phase.
+- **Controlled Endpoint Mapping**: Calls `endpoints.MapOpenApi()` during endpoint configuration only when `AppSurfaceWebOpenApiOptions.ExposeEndpoint` allows the active environment.
+- **Production-Safe Default**: Maps `/openapi/{documentName}.json` in Development and hides it in non-development environments unless the host opts in.
+
+## Endpoint Exposure
+
+`AppSurfaceWebOpenApiOptions` binds from the `AppSurfaceWebOpenApi` configuration section.
+
+```json
+{
+  "AppSurfaceWebOpenApi": {
+    "ExposeEndpoint": "DevelopmentOnly"
+  }
+}
+```
+
+`ExposeEndpoint` uses `AppSurfaceApiDocumentationEndpointExposure`:
+
+- `DevelopmentOnly` (`0`): maps the OpenAPI endpoint only when `StartupContext.IsDevelopment` is `true`. This is the default.
+- `Always` (`1`): maps the endpoint in every environment.
+- `Never` (`2`): never maps the endpoint, including in Development.
+
+Use `Always` only when the host intentionally exposes API metadata and protects it with host-owned controls such as authorization, private networking, or a reverse proxy policy. AppSurface only decides whether to map the endpoint; it does not add authentication or authorization.
+
+Code-first configuration is also supported:
+
+```csharp
+services.Configure<AppSurfaceWebOpenApiOptions>(options =>
+{
+    options.ExposeEndpoint = AppSurfaceApiDocumentationEndpointExposure.Always;
+});
+```
+
+Invalid enum values fail options validation at startup when the options are read.
 
 ---
 [📂 Back to Web List](../README.md) | [🏠 Back to Root](../../README.md)
