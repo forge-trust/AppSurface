@@ -1575,6 +1575,135 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void FileProviderEnumeration_ReturnsNullRawValueForUnsupportedJsonScalar()
+    {
+        var source = new ConfigAuditSourceRecord
+        {
+            Kind = ConfigAuditSourceKind.File,
+            ProviderName = nameof(FileBasedConfigProvider),
+            ProviderPriority = 100,
+            ConfigPath = "Timestamp",
+            AppliedToPath = "Timestamp",
+            Role = ConfigAuditSourceRole.Base
+        };
+        var snapshot = new ConfigFileProviderSnapshot(
+            new Dictionary<string, JsonNode>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Staging"] = new JsonObject
+                {
+                    ["Timestamp"] = JsonValue.Create(new DateTimeOffset(2026, 5, 25, 12, 0, 0, TimeSpan.Zero))
+                }
+            },
+            new Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Staging"] = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Timestamp"] = source
+                }
+            },
+            []);
+        var provider = new FileBasedConfigProvider(snapshot);
+
+        var discoveredKey = Assert.Single(((IConfigAuditKeyEnumerator)provider).EnumerateKeys("Staging"));
+
+        Assert.Equal("Timestamp", discoveredKey.Key);
+        Assert.Equal(ConfigAuditDiscoveredValueKind.Scalar, discoveredKey.ValueKind);
+        Assert.Null(discoveredKey.RawValue);
+        Assert.Empty(discoveredKey.Diagnostics);
+    }
+
+    [Fact]
+    public void FileProviderDiagnostics_SkipPathlessDiagnosticsForUnrelatedKeys()
+    {
+        var snapshot = new ConfigFileProviderSnapshot(
+            new Dictionary<string, JsonNode>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Staging"] = new JsonObject
+                {
+                    ["Known"] = "value"
+                }
+            },
+            new Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>>(StringComparer.OrdinalIgnoreCase),
+            [
+                new ConfigFileProviderDiagnostic(
+                    "Staging",
+                    new ConfigAuditDiagnostic
+                    {
+                        Severity = ConfigAuditDiagnosticSeverity.Info,
+                        Code = "unrelated",
+                        Key = "Other",
+                        Message = "Unrelated diagnostic."
+                    }),
+                new ConfigFileProviderDiagnostic(
+                    "Staging",
+                    new ConfigAuditDiagnostic
+                    {
+                        Severity = ConfigAuditDiagnosticSeverity.Info,
+                        Code = "unrelated-path",
+                        ConfigPath = "Other.Path",
+                        Message = "Unrelated path diagnostic."
+                    })
+            ]);
+        var provider = new FileBasedConfigProvider(snapshot);
+
+        var resolution = ((IConfigDiagnosticProvider)provider).Resolve(
+            "Staging",
+            "Known",
+            typeof(string),
+            ConfigAuditSourceRole.Base);
+
+        Assert.Equal("value", resolution.Value);
+        Assert.Empty(resolution.Diagnostics);
+    }
+
+    [Fact]
+    public void FileProviderDiagnostics_AttachDescendantPathDiagnostics()
+    {
+        var snapshot = new ConfigFileProviderSnapshot(
+            new Dictionary<string, JsonNode>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Staging"] = new JsonObject
+                {
+                    ["Known"] = new JsonObject
+                    {
+                        ["Child"] = "value"
+                    }
+                }
+            },
+            new Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>>(StringComparer.OrdinalIgnoreCase),
+            [
+                new ConfigFileProviderDiagnostic(
+                    "Staging",
+                    new ConfigAuditDiagnostic
+                    {
+                        Severity = ConfigAuditDiagnosticSeverity.Info,
+                        Code = "exact-path",
+                        ConfigPath = "Known",
+                        Message = "Exact path diagnostic."
+                    }),
+                new ConfigFileProviderDiagnostic(
+                    "Staging",
+                    new ConfigAuditDiagnostic
+                    {
+                        Severity = ConfigAuditDiagnosticSeverity.Info,
+                        Code = "descendant-path",
+                        ConfigPath = "Known.Child",
+                        Message = "Descendant diagnostic."
+                    })
+            ]);
+        var provider = new FileBasedConfigProvider(snapshot);
+
+        var resolution = ((IConfigDiagnosticProvider)provider).Resolve(
+            "Staging",
+            "Known",
+            typeof(Dictionary<string, string>),
+            ConfigAuditSourceRole.Base);
+
+        Assert.Contains(resolution.Diagnostics, diagnostic => diagnostic.Code == "exact-path");
+        Assert.Contains(resolution.Diagnostics, diagnostic => diagnostic.Code == "descendant-path");
+    }
+
+    [Fact]
     public void GetReport_ConvertsDiscoveredEnumerationExceptionsToDiagnostics()
     {
         var services = new ServiceCollection();
