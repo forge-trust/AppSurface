@@ -825,6 +825,90 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldPreserveAppRelativeCanonicalSuffixes()
+    {
+        var tree = CreatePublishedTree("canonical-with-suffix");
+        WriteCanonicalPage(tree, "/docs/guide.html?view=full#intro");
+        var handler = CreateHandler(tree, "/docs", canonicalRootPath: "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs");
+
+        Assert.True(await handler.TryHandleAsync(request));
+
+        Assert.Contains(
+            "<link rel=\"canonical\" href=\"/docs/v/1.2.3/guide.html?view=full#intro\">",
+            ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldPreserveCanonicalHref_WhenValueCannotBeMappedToDocs()
+    {
+        var tree = CreatePublishedTree("unsupported-canonical-hrefs");
+        File.WriteAllText(
+            Path.Join(tree, "index.html"),
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <link rel="canonical" href="/external/page.html?view=full#intro">
+              <link rel="canonical" href="https://export.example/external/page.html?view=full#intro">
+              <link rel="canonical" href="guide.html">
+            </head>
+            <body>
+              <a href="/docs/guide.html">Guide</a>
+            </body>
+            </html>
+            """);
+        var handler = CreateHandler(tree, "/docs", canonicalRootPath: "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        var html = ReadBody(request);
+
+        Assert.Contains("<link rel=\"canonical\" href=\"/external/page.html?view=full#intro\">", html);
+        Assert.Contains("<link rel=\"canonical\" href=\"https://export.example/external/page.html?view=full#intro\">", html);
+        Assert.Contains("<link rel=\"canonical\" href=\"guide.html\">", html);
+        Assert.Contains("href=\"/docs/guide.html\"", html);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldTreatNonCanonicalRelLinksAsNormalMountedAssets()
+    {
+        var tree = CreatePublishedTree("non-canonical-rel-link");
+        File.WriteAllText(
+            Path.Join(tree, "index.html"),
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <link rel="alternate" href="/docs/search.css">
+              <link href="/docs/no-rel.css">
+            </head>
+            <body>
+              <a href="/docs/guide.html">Guide</a>
+            </body>
+            </html>
+            """);
+        var handler = CreateHandler(tree, "/docs", canonicalRootPath: "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs", pathBase: "/tenant");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        var html = ReadBody(request);
+
+        Assert.Contains("<link rel=\"alternate\" href=\"/tenant/docs/search.css\">", html);
+        Assert.Contains("<link href=\"/tenant/docs/no-rel.css\">", html);
+        Assert.DoesNotContain("/docs/v/1.2.3/search.css", html);
+    }
+
+    [Fact]
+    public void PublishedTreeMount_ShouldThrow_WhenFileProviderIsNull()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceDocsPublishedTreeMount("/docs", null!));
+
+        Assert.Equal("fileProvider", exception.ParamName);
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldTrimTrailingSlashFromRequestPathBase_WhenRewritingMountedHtmlAndSearchIndex()
     {
         var tree = CreatePublishedTree("path-base-with-trailing-slash");
