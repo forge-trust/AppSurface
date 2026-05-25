@@ -264,7 +264,7 @@ internal sealed class ConfigAuditValueTraverser
             {
                 childValue = property.GetValue(value);
             }
-            catch
+            catch (Exception ex) when (IsPropertyReadException(ex))
             {
                 continue;
             }
@@ -475,6 +475,12 @@ internal sealed class ConfigAuditValueTraverser
         || entry.Sources.Any(source => source.Role == ConfigAuditSourceRole.Patch)
         || entry.Children.Any(IsPartiallyResolved);
 
+    private static bool IsPropertyReadException(Exception ex) =>
+        ex is TargetInvocationException
+            or TargetParameterCountException
+            or MethodAccessException
+            or ArgumentException;
+
     private static bool ShouldTrack(object value)
     {
         var type = value.GetType();
@@ -492,7 +498,10 @@ internal sealed class ConfigAuditValueTraverser
             return false;
         }
 
-        var countProperty = interfaceType.GetProperty(nameof(IReadOnlyCollection<object>.Count));
+        var countProperty = interfaceType.GetInterfaces()
+            .Append(interfaceType)
+            .FirstOrDefault(type => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>))
+            ?.GetProperty(nameof(IReadOnlyCollection<object>.Count));
         var itemProperty = interfaceType.GetProperty("Item");
         if (countProperty == null || itemProperty == null)
         {

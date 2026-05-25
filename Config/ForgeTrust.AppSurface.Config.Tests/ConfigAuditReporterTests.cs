@@ -146,6 +146,19 @@ public class ConfigAuditReporterTests
         public string Secret { get; set; } = "nested-secret-from-collection";
     }
 
+    private sealed class ReadOnlyValues : IReadOnlyList<string>
+    {
+        private readonly string[] _values = ["first", "second"];
+
+        public string this[int index] => _values[index];
+
+        public int Count => _values.Length;
+
+        public IEnumerator<string> GetEnumerator() => ((IEnumerable<string>)_values).GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private sealed class NamedEndpoint
     {
         public string? Name { get; set; }
@@ -426,13 +439,13 @@ public class ConfigAuditReporterTests
     [Fact]
     public void GetReport_TraversesOptInListElementsWithExactFileSources()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
 
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.Production.json"),
+                Path.Join(tempDir, "appsettings.Production.json"),
                 """
                 {
                   "Services": [
@@ -592,12 +605,40 @@ public class ConfigAuditReporterTests
             new DictionaryConfigProvider(
                 new Dictionary<string, object?>
                 {
+                    ["Array.Default"] = new[] { "opaque" },
+                    ["Array.Items"] = new[] { "one", "two" },
+                    ["Array.Deep"] = new[] { new[] { "too-deep" } },
+                    ["ReadOnly.Default"] = new ReadOnlyValues(),
+                    ["ReadOnly.Items"] = new ReadOnlyValues(),
                     ["Limited.Items"] = new List<int> { 1, 2, 3 },
                     ["Budget.Items"] = new List<int> { 1, 2, 3 },
                     ["Deep.Items"] = new List<object> { new List<string> { "too-deep" } },
+                    ["Dictionary.Deep"] = new Dictionary<string, object>
+                    {
+                        ["inner"] = new Dictionary<string, string>
+                        {
+                            ["child"] = "too-deep"
+                        }
+                    },
+                    ["Unsupported.Default"] = new ThrowingEnumerable(),
                     ["Unsupported.Items"] = new ThrowingEnumerable(),
                     ["Matrix.Items"] = new int[1, 1]
                 }));
+        services.AddConfigAuditKey<string[]>("Array.Default");
+        services.AddConfigAuditKey<string[]>(
+            "Array.Items",
+            options => options.TraverseCollectionElements = true);
+        services.AddConfigAuditKey<string[][]>(
+            "Array.Deep",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxCollectionDepth = 1;
+            });
+        services.AddConfigAuditKey<ReadOnlyValues>("ReadOnly.Default");
+        services.AddConfigAuditKey<ReadOnlyValues>(
+            "ReadOnly.Items",
+            options => options.TraverseCollectionElements = true);
         services.AddConfigAuditKey<List<int>>(
             "Limited.Items",
             options =>
@@ -619,6 +660,14 @@ public class ConfigAuditReporterTests
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionDepth = 1;
             });
+        services.AddConfigAuditKey<Dictionary<string, object>>(
+            "Dictionary.Deep",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxCollectionDepth = 1;
+            });
+        services.AddConfigAuditKey<ThrowingEnumerable>("Unsupported.Default");
         services.AddConfigAuditKey<ThrowingEnumerable>(
             "Unsupported.Items",
             options => options.TraverseCollectionElements = true);
@@ -629,6 +678,19 @@ public class ConfigAuditReporterTests
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
+
+        Assert.Empty(AssertEntry(report, "Array.Default", ConfigAuditEntryState.Resolved, null).Children);
+        var array = AssertEntry(report, "Array.Items", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal(["Array.Items[0]", "Array.Items[1]"], array.Children.Select(child => child.Key));
+        Assert.All(array.Children, child => Assert.Equal(ConfigAuditElementKind.ArrayItem, child.Element?.Kind));
+
+        var arrayDeep = AssertEntry(report, "Array.Deep", ConfigAuditEntryState.Resolved, null);
+        Assert.Contains(arrayDeep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
+
+        Assert.Empty(AssertEntry(report, "ReadOnly.Default", ConfigAuditEntryState.Resolved, null).Children);
+        var readOnly = AssertEntry(report, "ReadOnly.Items", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal(["first", "second"], readOnly.Children.Select(child => child.DisplayValue));
+        Assert.All(readOnly.Children, child => Assert.Equal(ConfigAuditElementKind.ListItem, child.Element?.Kind));
 
         var limited = AssertEntry(report, "Limited.Items", ConfigAuditEntryState.Resolved, null);
         Assert.Equal(2, limited.Children.Count);
@@ -641,6 +703,10 @@ public class ConfigAuditReporterTests
         var deep = AssertEntry(report, "Deep.Items", ConfigAuditEntryState.Resolved, null);
         Assert.Contains(deep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
 
+        var dictionaryDeep = AssertEntry(report, "Dictionary.Deep", ConfigAuditEntryState.Resolved, null);
+        Assert.Contains(dictionaryDeep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
+
+        Assert.Empty(AssertEntry(report, "Unsupported.Default", ConfigAuditEntryState.Resolved, null).Children);
         Assert.Contains(
             AssertEntry(report, "Unsupported.Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-audit-collection-kind-unsupported");
@@ -692,6 +758,8 @@ public class ConfigAuditReporterTests
             options =>
             {
                 options.TraverseCollectionElements = true;
+                options.MaxCollectionDepth = -1;
+                options.MaxCollectionElements = -1;
                 options.MaxReportNodes = 0;
             });
 
@@ -701,7 +769,7 @@ public class ConfigAuditReporterTests
 
         var entry = AssertEntry(report, "Invalid.Options", ConfigAuditEntryState.Resolved, null);
         Assert.Equal(2, entry.Children.Count);
-        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-options-invalid");
+        Assert.Equal(3, entry.Diagnostics.Count(diagnostic => diagnostic.Code == "config-audit-options-invalid"));
     }
 
     [Fact]

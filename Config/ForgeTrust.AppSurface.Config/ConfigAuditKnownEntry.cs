@@ -133,7 +133,7 @@ public sealed class ConfigAuditEntryOptions
     public bool DisplayDictionaryKeys { get; set; } = true;
 
     internal bool HasDefaultValues =>
-        TraverseCollectionElements == false
+        !TraverseCollectionElements
         && MaxCollectionDepth == DefaultMaxCollectionDepth
         && MaxCollectionElements == DefaultMaxCollectionElements
         && MaxReportNodes == DefaultMaxReportNodes
