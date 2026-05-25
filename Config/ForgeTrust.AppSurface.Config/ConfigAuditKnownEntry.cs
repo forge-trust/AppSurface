@@ -197,15 +197,6 @@ public sealed class ConfigAuditEntryOptionsBuilder
     {
     }
 
-    internal ConfigAuditEntryOptionsBuilder(ConfigAuditEntryOptions source)
-    {
-        TraverseCollectionElements = source.TraverseCollectionElements;
-        MaxCollectionDepth = source.MaxCollectionDepth;
-        MaxCollectionElements = source.MaxCollectionElements;
-        MaxReportNodes = source.MaxReportNodes;
-        DisplayDictionaryKeys = source.DisplayDictionaryKeys;
-    }
-
     /// <summary>
     /// Gets or sets a value indicating whether arrays, lists, and dictionaries should emit child element entries.
     /// </summary>
