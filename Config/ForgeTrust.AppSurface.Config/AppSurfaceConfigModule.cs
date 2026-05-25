@@ -24,7 +24,8 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
     /// audit reporter, redactor, and file-location provider, then appends a
     /// <see cref="StartupContext.CustomRegistrations"/> callback. That callback scans dependency, entry, and
     /// root-module assemblies for concrete <see cref="IConfig"/> implementations and registers each as a singleton
-    /// initialized from <see cref="IConfigManager"/> and <see cref="IEnvironmentProvider"/>.
+    /// initialized from <see cref="IConfigManager"/> and <see cref="IEnvironmentProvider"/>. Wrappers decorated with
+    /// <see cref="ConfigAuditCollectionTraversalAttribute"/> also contribute audit traversal options for their key.
     /// </remarks>
     /// <param name="context">Startup context that supplies assemblies, dependency modules, and the custom registration log.</param>
     /// <param name="services">Service collection that receives the default configuration services.</param>
@@ -32,6 +33,7 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
     {
         services.AddSingleton<IConfigManager, DefaultConfigManager>();
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddSingleton<ConfigDiagnosticsCommandRunner>();
         services.AddSingleton<ConfigAuditRedactor>();
         services.AddSingleton<ConfigAuditTextRenderer>();
         services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();
@@ -79,10 +81,13 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
 
                     return instance;
                 });
+            var auditOptions = type.GetCustomAttribute<ConfigAuditCollectionTraversalAttribute>(inherit: true)
+                ?.ToOptions();
             services.AddSingleton(new ConfigAuditKnownEntry(
                 ConfigKeyAttribute.GetKeyPath(type),
                 type,
-                GetConfigValueType(type)));
+                GetConfigValueType(type),
+                auditOptions));
         }
     }
 

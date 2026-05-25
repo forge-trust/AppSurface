@@ -6,6 +6,7 @@
     <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
     <ImplicitUsings>enable</ImplicitUsings>
     <StaticWebAssetBasePath>_content/$(AssemblyName)</StaticWebAssetBasePath>
+    <VerifyRazorWireGeneratedAssetsBeforePack Condition="'$(VerifyRazorWireGeneratedAssetsBeforePack)' == ''">true</VerifyRazorWireGeneratedAssetsBeforePack>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,6 +16,11 @@
 
   <ItemGroup>
     <ProjectReference Include="../ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Remove="assets\**\*" />
+    <None Remove="assets\**\*" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,5 +38,17 @@
       <_Parameter1>DynamicProxyGenAssembly2</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
+
+  <Target Name="VerifyRazorWireGeneratedAssetsForPack"
+          BeforeTargets="GenerateNuspec"
+          Condition="'$(VerifyRazorWireGeneratedAssetsBeforePack)' != 'false'">
+    <Message Importance="High" Text="Verifying RazorWire generated browser assets before pack." />
+    <Exec Command="pnpm --dir &quot;$(MSBuildProjectDirectory)/..&quot; run assets:razorwire:verify"
+          IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="_RazorWireGeneratedAssetsVerifyExitCode" />
+    </Exec>
+    <Error Condition="'$(_RazorWireGeneratedAssetsVerifyExitCode)' != '0'"
+           Text="RWPACK001 RazorWire generated browser assets failed pack verification. Problem: pack would embed stale or unverifiable wwwroot runtime assets. Cause: TypeScript source changed, pnpm dependencies are missing, or the verify script failed. Fix: run `pnpm --dir Web install --frozen-lockfile` if needed, then `pnpm --dir Web run assets:razorwire:build` and `pnpm --dir Web run assets:razorwire:verify`. Emergency bypass only: `/p:VerifyRazorWireGeneratedAssetsBeforePack=false`. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md." />
+  </Target>
 
 </Project>

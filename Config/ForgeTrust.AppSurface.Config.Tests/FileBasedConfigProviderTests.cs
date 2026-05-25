@@ -9,24 +9,24 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void GetValue_MergesFilesByEnvironmentAndPriority()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
 
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """{"Feature":{"Enabled":false,"Name":"Prod"}}""");
             File.WriteAllText(
-                Path.Combine(tempDir, "config_extra.json"),
+                Path.Join(tempDir, "config_extra.json"),
                 """{"Feature":{"Extra":"ProdExtra"}}""");
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.Development.json"),
+                Path.Join(tempDir, "appsettings.Development.json"),
                 """{"Feature":{"Name":"Dev"}}""");
             File.WriteAllText(
-                Path.Combine(tempDir, "config_extra.Development.json"),
+                Path.Join(tempDir, "config_extra.Development.json"),
                 """{"Feature":{"Enabled":true,"Extra":"Value"}}""");
-            File.WriteAllText(Path.Combine(tempDir, "config_bad.json"), "{not json}");
+            File.WriteAllText(Path.Join(tempDir, "config_bad.json"), "{not json}");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
             var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
@@ -58,7 +58,7 @@ public class FileBasedConfigProviderTests
         var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
 
         A.CallTo(() => locationProvider.Directory)
-            .Returns(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+            .Returns(CreateTempDirectoryPath());
 
         var provider = new FileBasedConfigProvider(locationProvider, logger);
 
@@ -68,12 +68,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void GetValue_ReusesCachedConfigurationAfterInitialization()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var configPath = Path.Combine(tempDir, "appsettings.json");
+            var configPath = Path.Join(tempDir, "appsettings.json");
             File.WriteAllText(configPath, """{"Feature":{"Enabled":true}}""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
@@ -101,24 +101,24 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void GetValue_IgnoresInvalidJsonContent()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
 
         try
         {
             // Valid file
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """{"Feature":{"Enabled":true}}""");
 
             // Invalid JSON
             File.WriteAllText(
-                Path.Combine(tempDir, "config_broken.json"),
+                Path.Join(tempDir, "config_broken.json"),
                 """{"Feature": { "Enabled": } }"""); // Syntax error
 
             // Non-object root
             File.WriteAllText(
-                Path.Combine(tempDir, "config_array.json"),
+                Path.Join(tempDir, "config_array.json"),
                 """[1, 2, 3]""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
@@ -143,17 +143,17 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void GetValue_IgnoresNullValuesInMerge()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
 
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """{"Feature":{"Enabled":true}}""");
 
             File.WriteAllText(
-                Path.Combine(tempDir, "config_override.json"),
+                Path.Join(tempDir, "config_override.json"),
                 """{"Feature":{"Enabled":null}}""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
@@ -178,13 +178,13 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void GetValue_ReturnsDefaultOnDeserializationFailure()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
 
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """{"Feature":{"Count":"NotANumber"}}""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
@@ -210,19 +210,19 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Initialize_ParsesEnvironmentFromVariousFilePatterns()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
 
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.Staging.json"),
+                Path.Join(tempDir, "appsettings.Staging.json"),
                 """{"Env":"Staging"}""");
             File.WriteAllText(
-                Path.Combine(tempDir, "config_Feature.Development.json"),
+                Path.Join(tempDir, "config_Feature.Development.json"),
                 """{"Env":"Dev"}""");
             File.WriteAllText(
-                Path.Combine(tempDir, "config_Base.json"),
+                Path.Join(tempDir, "config_Base.json"),
                 """{"Env":"Base"}""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
@@ -248,13 +248,13 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void GetValue_BindsNestedObjects()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
 
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """
                 {
                   "App": {
@@ -290,13 +290,13 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void GetValue_ReturnsDeepClonedObjects()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
 
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """{"List":["a","b"]}""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
@@ -341,13 +341,13 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Merge_OverwritesNonObjectWithObject()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), """{"Key": "string"}""");
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.Production.json"), """{"Key": {"Nested": 1}}""");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), """{"Key": "string"}""");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.Production.json"), """{"Key": {"Nested": 1}}""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
             var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
@@ -369,12 +369,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void GetValue_ReturnsNullWhenTrailingKeyInNonObject()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), """{"Key": [1, 2]}""");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), """{"Key": [1, 2]}""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
             var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
@@ -397,7 +397,7 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Initialize_HandlesEmptyFile()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
@@ -405,7 +405,7 @@ public class FileBasedConfigProviderTests
             A.CallTo(() => locationProvider.Directory).Returns(tempDir);
             var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
 
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), "");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), "");
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
             var result = provider.GetValue<string>("Production", "Key");
@@ -424,7 +424,7 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Initialize_HandlesWhitespaceFile()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
@@ -432,7 +432,7 @@ public class FileBasedConfigProviderTests
             A.CallTo(() => locationProvider.Directory).Returns(tempDir);
             var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
 
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), "   ");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), "   ");
 
             var provider = new FileBasedConfigProvider(locationProvider, logger);
             var result = provider.GetValue<string>("Production", "Key");
@@ -451,12 +451,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Initialize_MergesMultipleFilesForSameEnvironment()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), "{\"Key1\": \"Value1\"}");
-            File.WriteAllText(Path.Combine(tempDir, "config_extra.json"), "{\"Key2\": \"Value2\"}");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), "{\"Key1\": \"Value1\"}");
+            File.WriteAllText(Path.Join(tempDir, "config_extra.json"), "{\"Key2\": \"Value2\"}");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
             A.CallTo(() => locationProvider.Directory).Returns(tempDir);
@@ -476,12 +476,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Initialize_ListMerge_UsesReplaceSemantics()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), """{"Items":["a","b"]}""");
-            File.WriteAllText(Path.Combine(tempDir, "config_override.json"), """{"Items":["override"]}""");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), """{"Items":["a","b"]}""");
+            File.WriteAllText(Path.Join(tempDir, "config_override.json"), """{"Items":["override"]}""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
             A.CallTo(() => locationProvider.Directory).Returns(tempDir);
@@ -529,11 +529,11 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_ReportsConversionDiagnosticsForFileValues()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), """{"Feature":{"Count":"not-a-number"}}""");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), """{"Feature":{"Count":"not-a-number"}}""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
             A.CallTo(() => locationProvider.Directory).Returns(tempDir);
@@ -557,12 +557,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Initialize_RemovesDescendantOriginsWhenParentIsReplacedByScalar()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), """{"Shape":{"Nested":"base"}}""");
-            File.WriteAllText(Path.Combine(tempDir, "config_override.json"), """{"Shape":"scalar"}""");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), """{"Shape":{"Nested":"base"}}""");
+            File.WriteAllText(Path.Join(tempDir, "config_override.json"), """{"Shape":"scalar"}""");
 
             var locationProvider = A.Fake<IConfigFileLocationProvider>();
             A.CallTo(() => locationProvider.Directory).Returns(tempDir);
@@ -585,12 +585,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_AttachesLocationsForScalarAndObjectFileValues()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """
                 {
                   "Feature": {
@@ -616,12 +616,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_AttachesCollectionParentLocationWithoutArrayDescendantOrigins()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """
                 {
                   "Items": [
@@ -650,12 +650,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_SuppressesLocationForCaseInsensitivePathCollisions()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """
                 {
                   "Feature": {
@@ -682,11 +682,11 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_TreatsDottedJsonPropertyNamesAsUnsupportedPaths()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), """{"Feature.Enabled":true}""");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), """{"Feature.Enabled":true}""");
 
             var provider = CreateProvider(tempDir);
 
@@ -704,12 +704,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_SuppressesLocationWhenDottedLiteralCollidesWithNestedPath()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """
                 {
                   "Feature": {
@@ -736,12 +736,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_SuppressesDescendantLocationWhenDottedLiteralObjectCollidesWithNestedPath()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """
                 {
                   "Feature": {
@@ -772,12 +772,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_UsesByteColumnsForBomCrLfAndNonAsciiContent()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
             const string json = "{\r\n  \"é\": 1,\r\n  \"Port\": 5\r\n}";
-            var path = Path.Combine(tempDir, "appsettings.json");
+            var path = Path.Join(tempDir, "appsettings.json");
             File.WriteAllBytes(path, [0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes(json)]);
 
             var provider = CreateProvider(tempDir);
@@ -795,12 +795,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_ReportsByteColumnAfterNonAsciiCharactersOnSameLine()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
             const string json = """{"é":1,"Port":5}""";
-            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), json);
+            File.WriteAllText(Path.Join(tempDir, "appsettings.json"), json);
 
             var expectedColumn = Encoding.UTF8.GetByteCount(json[..json.IndexOf("\"Port\"", StringComparison.Ordinal)]) + 1;
             var provider = CreateProvider(tempDir);
@@ -866,12 +866,12 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_UsesOverrideLocationWhenParentIsReplaced()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
             File.WriteAllText(
-                Path.Combine(tempDir, "appsettings.json"),
+                Path.Join(tempDir, "appsettings.json"),
                 """
                 {
                   "Shape": {
@@ -880,7 +880,7 @@ public class FileBasedConfigProviderTests
                 }
                 """);
             File.WriteAllText(
-                Path.Combine(tempDir, "config_override.json"),
+                Path.Join(tempDir, "config_override.json"),
                 """
                 {
                   "Shape": "scalar"
@@ -905,11 +905,11 @@ public class FileBasedConfigProviderTests
     [Fact]
     public void Resolve_ReusesCachedLocationsAfterSnapshotInitialization()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = CreateTempDirectoryPath();
         Directory.CreateDirectory(tempDir);
         try
         {
-            var configPath = Path.Combine(tempDir, "appsettings.json");
+            var configPath = Path.Join(tempDir, "appsettings.json");
             File.WriteAllText(
                 configPath,
                 """
@@ -949,6 +949,9 @@ public class FileBasedConfigProviderTests
         var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
         return new FileBasedConfigProvider(locationProvider, logger);
     }
+
+    private static string CreateTempDirectoryPath() =>
+        Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
 
     private static ConfigValueResolution Resolve(FileBasedConfigProvider provider, string key, Type valueType) =>
         ((IConfigDiagnosticProvider)provider)

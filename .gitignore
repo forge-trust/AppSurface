@@ -89,3 +89,4 @@ junit.xml
 
 # Generated assets
 **/*.gen.css
+Web/ForgeTrust.RazorWire/assets/.test-build/
