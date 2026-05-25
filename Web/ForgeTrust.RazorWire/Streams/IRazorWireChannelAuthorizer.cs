@@ -20,10 +20,11 @@ public interface IRazorWireChannelAuthorizer
 /// Provides a built-in implementation of <see cref="IRazorWireChannelAuthorizer"/> that denies all subscriptions.
 /// </summary>
 /// <remarks>
-/// This is RazorWire's safe default when no app-specific authorizer is registered. Use
-/// <see cref="AllowAllRazorWireChannelAuthorizer"/> or
-/// <see cref="ForgeTrust.RazorWire.RazorWireStreamOptions.AuthorizationMode"/> only for public/demo streams, and register a custom
-/// <see cref="IRazorWireChannelAuthorizer"/> for user, tenant, or workflow-specific channels.
+/// This is RazorWire's safe default when no app-specific authorizer is registered. Keep
+/// <see cref="ForgeTrust.RazorWire.RazorWireStreamAuthorizationMode.DenyAll"/> for production defaults, set
+/// <see cref="ForgeTrust.RazorWire.RazorWireStreamOptions.AuthorizationMode"/> to
+/// <see cref="ForgeTrust.RazorWire.RazorWireStreamAuthorizationMode.AllowAll"/> only for public/demo streams, and register a
+/// custom <see cref="IRazorWireChannelAuthorizer"/> for user, tenant, or workflow-specific channels.
 /// </remarks>
 public sealed class DenyAllRazorWireChannelAuthorizer : IRazorWireChannelAuthorizer
 {
