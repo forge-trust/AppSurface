@@ -22,7 +22,7 @@ public interface IRazorWireChannelAuthorizer
 /// <remarks>
 /// This is RazorWire's safe default when no app-specific authorizer is registered. Use
 /// <see cref="AllowAllRazorWireChannelAuthorizer"/> or
-/// <see cref="RazorWireStreamOptions.AuthorizationMode"/> only for public/demo streams, and register a custom
+/// <see cref="ForgeTrust.RazorWire.RazorWireStreamOptions.AuthorizationMode"/> only for public/demo streams, and register a custom
 /// <see cref="IRazorWireChannelAuthorizer"/> for user, tenant, or workflow-specific channels.
 /// </remarks>
 public sealed class DenyAllRazorWireChannelAuthorizer : IRazorWireChannelAuthorizer

@@ -103,7 +103,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 
 - RazorWire now has a generated UI design contract for package-owned nodes. The contract separates RazorWire UI from app-authored markup and AppSurface Docs chrome, establishes `data-rw-*` attributes plus `--rw-ui-*` custom properties as the default styling surface, and documents global, form-level, and target-level override expectations for future generated UI.
 - RazorWire README snippets are now source-backed by the MVC sample through a MarkdownSnippets generator, with CI verification and README contract tests guarding quickstart drift.
-- RazorWire stream subscriptions are now denied by default through `RazorWireOptions.Streams.AuthorizationMode = DenyAll`, with an explicit `AllowAll` mode for public/demo streams and `IRazorWireChannelAuthorizer` preserved as the request-aware extension point for user, tenant, and workflow-specific channels.
+- RazorWire stream subscriptions are now denied by default through `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.DenyAll`, with an explicit `RazorWireStreamAuthorizationMode.AllowAll` mode for public/demo streams and `IRazorWireChannelAuthorizer` preserved as the request-aware extension point for user, tenant, and workflow-specific channels.
 
 ### AppSurface Docs product example
 
