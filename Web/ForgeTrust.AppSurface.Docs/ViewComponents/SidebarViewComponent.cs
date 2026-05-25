@@ -22,6 +22,7 @@ public class SidebarViewComponent : ViewComponent
     private readonly AppSurfaceDocsOptions _options;
     private readonly DocsUrlBuilder _docsUrlBuilder;
     private readonly IWebHostEnvironment _environment;
+    private readonly Func<CancellationToken, Task<DocHarvestHealthSnapshot>> _getHarvestHealthAsync;
     private readonly string[] _namespacePrefixes;
 
     /// <summary>
@@ -61,6 +62,31 @@ public class SidebarViewComponent : ViewComponent
         AppSurfaceDocsOptions options,
         DocsUrlBuilder docsUrlBuilder,
         IWebHostEnvironment environment)
+        : this(aggregator, options, docsUrlBuilder, environment, CreateHarvestHealthLookup(aggregator))
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SidebarViewComponent"/> class with an explicit harvest health lookup
+    /// delegate.
+    /// </summary>
+    /// <remarks>
+    /// This overload exists as a focused test seam for diagnostics fallback behavior. Production hosts should use the
+    /// dependency-injection constructor so health status comes directly from <see cref="DocAggregator"/>. The delegate
+    /// must preserve the same cancellation semantics as <see cref="DocAggregator.GetHarvestHealthAsync(CancellationToken)"/>
+    /// when a test needs to verify request-aborted behavior.
+    /// </remarks>
+    /// <param name="aggregator">The documentation aggregator used to retrieve document nodes.</param>
+    /// <param name="options">Typed AppSurface Docs options used for optional namespace prefix simplification settings.</param>
+    /// <param name="docsUrlBuilder">Shared URL builder for the live source-backed docs surface.</param>
+    /// <param name="environment">Host environment used for development-default health chrome visibility.</param>
+    /// <param name="getHarvestHealthAsync">Delegate used to resolve diagnostics health status.</param>
+    internal SidebarViewComponent(
+        DocAggregator aggregator,
+        AppSurfaceDocsOptions options,
+        DocsUrlBuilder docsUrlBuilder,
+        IWebHostEnvironment environment,
+        Func<CancellationToken, Task<DocHarvestHealthSnapshot>> getHarvestHealthAsync)
     {
         ArgumentNullException.ThrowIfNull(aggregator);
         ArgumentNullException.ThrowIfNull(options);
@@ -68,15 +94,24 @@ public class SidebarViewComponent : ViewComponent
         ArgumentNullException.ThrowIfNull(options.Sidebar.NamespacePrefixes);
         ArgumentNullException.ThrowIfNull(docsUrlBuilder);
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(getHarvestHealthAsync);
 
         _aggregator = aggregator;
         _options = options;
         _docsUrlBuilder = docsUrlBuilder;
         _environment = environment;
+        _getHarvestHealthAsync = getHarvestHealthAsync;
         _namespacePrefixes = options.Sidebar.NamespacePrefixes
             .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
             .Select(prefix => prefix.Trim())
             .ToArray();
+    }
+
+    private static Func<CancellationToken, Task<DocHarvestHealthSnapshot>> CreateHarvestHealthLookup(DocAggregator aggregator)
+    {
+        ArgumentNullException.ThrowIfNull(aggregator);
+
+        return aggregator.GetHarvestHealthAsync;
     }
 
     /// <summary>
@@ -148,7 +183,7 @@ public class SidebarViewComponent : ViewComponent
             var requestAborted = ViewContext?.HttpContext?.RequestAborted ?? CancellationToken.None;
             try
             {
-                var health = await _aggregator.GetHarvestHealthAsync(requestAborted);
+                var health = await _getHarvestHealthAsync(requestAborted);
                 var healthHref = exposeHealthRoutes ? _docsUrlBuilder.BuildHealthUrl() : null;
                 var healthJsonHref = exposeHealthRoutes ? _docsUrlBuilder.BuildHealthJsonUrl() : null;
                 var healthOk = AppSurfaceDocsHarvestHealthResponse.IsOk(health.Status);

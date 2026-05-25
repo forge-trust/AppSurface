@@ -2123,7 +2123,7 @@ public class ExportEngineTests
         try
         {
             var handler = new DocsPartialHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");

@@ -292,6 +292,51 @@ public sealed class SidebarViewComponentTests
     }
 
     [Fact]
+    public async Task InvokeAsync_ShouldKeepRouteInspectorDiagnostics_WhenHealthLookupFails()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = AppSurfaceDocsHarvestHealthExposure.Always,
+                    ShowChrome = AppSurfaceDocsHarvestHealthExposure.Always
+                }
+            },
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always,
+                ShowChrome = AppSurfaceDocsHarvestHealthExposure.Always
+            }
+        };
+        var (component, cache, memo) = CreateComponent(
+            [
+                CreateDoc("Quickstart", "guides/start.md", "Start Here")
+            ],
+            options,
+            Environments.Production,
+            _ => throw new InvalidOperationException("Health lookup failed."));
+        using (memo)
+        using (cache)
+        {
+            var model = await GetModelAsync(component);
+
+            Assert.Null(model.HarvestHealth);
+            Assert.NotNull(model.Diagnostics);
+            var diagnostics = model.Diagnostics!;
+            Assert.Equal("Health unavailable", diagnostics.Status?.Label);
+            Assert.False(diagnostics.Status?.Ok);
+            Assert.Equal(
+                new[] { "Harvest health", "Route inspector" },
+                diagnostics.Tools.Select(tool => tool.Label).ToArray());
+            Assert.Equal("Health unavailable", diagnostics.Tools[0].Summary);
+            Assert.Null(diagnostics.Tools[0].Href);
+            Assert.Equal("/docs/_routes", diagnostics.Tools[1].Href);
+        }
+    }
+
+    [Fact]
     public async Task InvokeAsync_ShouldHideRouteInspectorChrome_WhenRouteIsExposedButChromeIsHidden()
     {
         var options = new AppSurfaceDocsOptions
@@ -1050,7 +1095,8 @@ public sealed class SidebarViewComponentTests
     private static (SidebarViewComponent Component, MemoryCache Cache, Memo Memo) CreateComponent(
         IEnumerable<DocNode> docs,
         AppSurfaceDocsOptions? options = null,
-        string? environmentName = null)
+        string? environmentName = null,
+        Func<CancellationToken, Task<DocHarvestHealthSnapshot>>? getHarvestHealthAsync = null)
     {
         var harvester = A.Fake<IDocHarvester>();
         var env = A.Fake<IWebHostEnvironment>();
@@ -1075,7 +1121,9 @@ public sealed class SidebarViewComponentTests
             sanitizer,
             logger);
 
-        var component = new SidebarViewComponent(aggregator, docsOptions, new DocsUrlBuilder(docsOptions), env);
+        var component = getHarvestHealthAsync is null
+            ? new SidebarViewComponent(aggregator, docsOptions, new DocsUrlBuilder(docsOptions), env)
+            : new SidebarViewComponent(aggregator, docsOptions, new DocsUrlBuilder(docsOptions), env, getHarvestHealthAsync);
         return (component, cache, memo);
     }
 }

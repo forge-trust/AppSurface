@@ -1368,6 +1368,39 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task SidebarView_ShouldRenderDiagnosticsDisclosureWithoutStatus()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        var model = new DocSidebarViewModel
+        {
+            Diagnostics = new DocSidebarDiagnosticsViewModel
+            {
+                Tools =
+                [
+                    new DocSidebarDiagnosticsToolViewModel
+                    {
+                        Label = "Route inspector",
+                        Href = "/docs/_routes",
+                        Summary = "Route manifest"
+                    }
+                ]
+            }
+        };
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Shared/Components/Sidebar/Default.cshtml",
+            model);
+
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        var diagnosticsChrome = document.QuerySelector("[data-docs-diagnostics-chrome='true']");
+        Assert.NotNull(diagnosticsChrome);
+        Assert.Contains("Diagnostics", html);
+        Assert.Contains("Route inspector", diagnosticsChrome.TextContent);
+    }
+
+    [Fact]
     public async Task HarvestHealthView_ShouldRenderRedactedSummaryAndDiagnostics()
     {
         using var services = CreateServiceProvider(CreateDocs());
