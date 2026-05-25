@@ -88,11 +88,24 @@ public class MarkdownHarvesterTests : IDisposable
     {
         var harvester = new DerivedMarkdownHarvester(_loggerFake);
         var context = CreateContextWithDefaultPolicy();
+        await File.WriteAllTextAsync(
+            CombineUnder(_testRoot, "Guide.md"),
+            """
+            ---
+            trust:
+              migration:
+                href: javascript:alert(1)
+            ---
+            # Guide
+            """);
+        _ = await harvester.HarvestAsync(_testRoot);
 
         var results = await harvester.HarvestAsync(context);
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester).GetHarvestDiagnostics();
 
         Assert.True(harvester.PublicHarvestCalled);
         Assert.Same(DerivedMarkdownHarvester.Result, results);
+        Assert.Empty(diagnostics);
     }
 
     [Fact]
@@ -950,11 +963,124 @@ public class MarkdownHarvesterTests : IDisposable
             """);
 
         var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnosticProvider = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester);
 
         Assert.Equal("Guide", doc.Title);
+        Assert.Empty(diagnosticProvider.GetHarvestDiagnostics());
         AssertWarningLogged("missing-featured-group-pages");
         AssertWarningLogged("Groups without pages cannot resolve any landing rows.");
         AssertWarningLogged("Add pages with at least one path, or remove the empty group.");
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldExposeUnsafeTrustMigrationHrefDiagnostics_FromInlineFrontMatter()
+    {
+        await File.WriteAllTextAsync(
+            Path.Join(_testRoot, Path.GetFileName("Guide.md")),
+            """
+            ---
+            trust:
+              migration:
+                label: Run the upgrade
+                href: javascript:alert(1)
+            ---
+            # Guide
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnosticProvider = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester);
+
+        Assert.Equal("Run the upgrade", doc.Metadata?.Trust?.Migration?.Label);
+        Assert.Null(doc.Metadata?.Trust?.Migration?.Href);
+        var diagnostic = Assert.Single(diagnosticProvider.GetHarvestDiagnostics());
+        Assert.Equal(DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Equal(nameof(MarkdownHarvester), diagnostic.HarvesterType);
+        Assert.Contains("Guide.md", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("trust.migration.href", diagnostic.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldExposeUnsafeTrustMigrationHrefDiagnostics_FromSidecarPath()
+    {
+        var markdownPath = Path.Join(_testRoot, Path.GetFileName("Guide.md"));
+        await File.WriteAllTextAsync(markdownPath, "# Guide");
+        await File.WriteAllTextAsync(
+            markdownPath + ".yml",
+            """
+            trust:
+              migration:
+                label: Run the upgrade
+                href: data:text/html;base64,PGgxPkJvb208L2gxPg==
+            """);
+
+        _ = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnosticProvider = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester);
+
+        var diagnostic = Assert.Single(diagnosticProvider.GetHarvestDiagnostics());
+        Assert.Equal(DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref, diagnostic.Code);
+        Assert.Contains("Guide.md.yml", diagnostic.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldAllowSafeSidecarMigrationHref_WhenInlineHrefIsUnsafe()
+    {
+        var markdownPath = Path.Join(_testRoot, Path.GetFileName("Guide.md"));
+        await File.WriteAllTextAsync(
+            markdownPath,
+            """
+            ---
+            trust:
+              migration:
+                href: javascript:alert(1)
+            ---
+            # Guide
+            """);
+        await File.WriteAllTextAsync(
+            markdownPath + ".yml",
+            """
+            trust:
+              migration:
+                label: Safe migration guide
+                href: /docs/releases/upgrade-policy
+            """);
+
+        var doc = Assert.Single(await _harvester.HarvestAsync(_testRoot));
+        var diagnosticProvider = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(_harvester);
+
+        Assert.Equal("Safe migration guide", doc.Metadata?.Trust?.Migration?.Label);
+        Assert.Equal("/docs/releases/upgrade-policy", doc.Metadata?.Trust?.Migration?.Href);
+        var diagnostic = Assert.Single(diagnosticProvider.GetHarvestDiagnostics());
+        Assert.Equal(DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref, diagnostic.Code);
+        Assert.Contains("Guide.md", diagnostic.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldReplaceMetadataDiagnosticsSnapshot_AfterLaterFailedHarvest()
+    {
+        var throwOnRead = false;
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            (path, cancellationToken) => throwOnRead
+                ? Task.FromException<string>(new IOException("boom"))
+                : File.ReadAllTextAsync(path, cancellationToken));
+        await File.WriteAllTextAsync(
+            Path.Join(_testRoot, Path.GetFileName("Guide.md")),
+            """
+            ---
+            trust:
+              migration:
+                href: javascript:alert(1)
+            ---
+            # Guide
+            """);
+        var diagnosticProvider = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+        throwOnRead = true;
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(diagnosticProvider.GetHarvestDiagnostics());
     }
 
     [Fact]

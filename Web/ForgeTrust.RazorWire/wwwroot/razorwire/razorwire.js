@@ -594,6 +594,56 @@
      *   event.detail.form.classList.remove('is-saving');
      * });
      */
+
+    /**
+     * Enables RazorWire form failure handling on a form.
+     * @public
+     * @namespace RazorWire
+     * @attribute data-rw-form
+     * @target form
+     * @type {"true"}
+     * @default none
+     */
+
+    /**
+     * Selects how RazorWire renders unhandled form failures.
+     * @public
+     * @namespace RazorWire
+     * @attribute data-rw-form-failure
+     * @target form[data-rw-form="true"]
+     * @type {"auto"|"manual"|"off"}
+     * @default auto
+     */
+
+    /**
+     * Reader-facing message used when a failed form submission has no more specific explanation.
+     * @public
+     * @namespace RazorWire
+     * @config defaultFailureMessage
+     * @source script[data-rw-default-failure-message]
+     * @type {string}
+     * @default We could not submit this form. Check your input and try again.
+     */
+
+    /**
+     * Stable selector for generated form failure UI.
+     * @public
+     * @namespace RazorWire
+     * @cssHook [data-rw-form-error-generated="true"]
+     * @hookKind data-attribute
+     * @target generated form failure UI
+     * @stability stable
+     */
+
+    /**
+     * Controls generated form failure text color.
+     * @public
+     * @namespace RazorWire
+     * @cssCustomProperty --rw-form-error-text
+     * @target [data-rw-form-error-generated="true"]
+     * @syntax <color>
+     * @default #3f3f46
+     */
     class FormFailureManager {
         constructor(config) {
             this.config = config;
@@ -1038,8 +1088,89 @@
         };
     }
 
+    function installVisitStreamAction() {
+        const turbo = resolveTurbo();
+        if (!turbo?.StreamActions || typeof turbo.visit !== 'function') {
+            return;
+        }
+
+        turbo.StreamActions['rw-visit'] = function () {
+            const visit = resolveVisitStream(this);
+            if (!visit) {
+                return;
+            }
+
+            turbo.visit(visit.url, { action: visit.action });
+        };
+    }
+
+    function resolveTurbo() {
+        if (window.Turbo) {
+            return window.Turbo;
+        }
+
+        if (typeof Turbo !== 'undefined') {
+            return Turbo;
+        }
+
+        return null;
+    }
+
+    function resolveVisitStream(streamElement) {
+        const rawUrl = streamElement?.getAttribute?.('url') || '';
+        const action = (streamElement?.getAttribute?.('visit-action') || 'advance').toLowerCase();
+        if (action !== 'advance' && action !== 'replace') {
+            return null;
+        }
+
+        const url = normalizeVisitUrl(rawUrl);
+        if (!url) {
+            return null;
+        }
+
+        return { url, action };
+    }
+
+    function normalizeVisitUrl(rawUrl) {
+        if (typeof rawUrl !== 'string' || rawUrl.length === 0 || rawUrl.trim() !== rawUrl) {
+            return null;
+        }
+
+        if (rawUrl.startsWith('~/') || rawUrl.startsWith('//') || rawUrl.startsWith('\\')) {
+            return null;
+        }
+
+        if (hasAsciiControlCharacter(rawUrl)) {
+            return null;
+        }
+
+        try {
+            const baseHref = window.location?.href || `${window.location?.origin || ''}/`;
+            const url = new URL(rawUrl, baseHref);
+            if (url.origin !== window.location.origin) {
+                return null;
+            }
+
+            return url.href;
+        } catch {
+            return null;
+        }
+    }
+
+    function hasAsciiControlCharacter(value) {
+        for (let index = 0; index < value.length; index += 1) {
+            const code = value.charCodeAt(index);
+            if (code <= 0x1F || code === 0x7F) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // Initialize
     const runtimeConfig = readRuntimeConfig();
+    installVisitStreamAction();
     const connectionManager = new ConnectionManager();
     const localTimeFormatter = new LocalTimeFormatter();
     const formFailureManager = new FormFailureManager(runtimeConfig);

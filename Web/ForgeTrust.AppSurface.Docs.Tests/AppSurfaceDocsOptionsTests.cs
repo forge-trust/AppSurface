@@ -62,6 +62,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.harvest.all_failed", DocHarvestDiagnosticCodes.AllFailed);
         Assert.Equal("appsurfacedocs.harvest.vcs_ignore_summary", DocHarvestDiagnosticCodes.VcsIgnoreSummary);
         Assert.Equal("appsurfacedocs.harvest.vcs_ignore_warning", DocHarvestDiagnosticCodes.VcsIgnoreWarning);
+        Assert.Equal("appsurfacedocs.metadata.unsafe_trust_migration_href", DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref);
         Assert.Equal("appsurfacedocs.javascript.file_too_large", DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
         Assert.Equal("appsurfacedocs.javascript.parse_failed", DocHarvestDiagnosticCodes.JavaScriptParseFailed);
         Assert.Equal("appsurfacedocs.javascript.missing_include", DocHarvestDiagnosticCodes.JavaScriptMissingInclude);
@@ -422,12 +423,13 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Empty(options.Harvest.CSharp.ExcludeGlobs);
         Assert.Empty(options.Harvest.CSharp.DefaultExclusions.DisabledGroups);
         Assert.Empty(options.Harvest.CSharp.DefaultExclusions.AllowGlobs);
-        Assert.False(options.Harvest.JavaScript.Enabled);
+        Assert.True(options.Harvest.JavaScript.Enabled);
         Assert.Empty(options.Harvest.JavaScript.IncludeGlobs);
         Assert.Equal(["**/*.min.js"], options.Harvest.JavaScript.ExcludeGlobs);
         Assert.Empty(options.Harvest.JavaScript.DefaultExclusions.DisabledGroups);
         Assert.Empty(options.Harvest.JavaScript.DefaultExclusions.AllowGlobs);
         Assert.True(options.Harvest.JavaScript.RequirePublicTag);
+        Assert.False(options.Harvest.JavaScript.StrictHealth);
         Assert.Equal(262_144, options.Harvest.JavaScript.MaxFileSizeBytes);
     }
 
@@ -544,6 +546,7 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Harvest:JavaScript:ExcludeGlobs:0"] = " **/*.generated.js ",
                         ["AppSurfaceDocs:Harvest:JavaScript:DefaultExclusions:DisabledGroups:0"] = " buildoutput ",
                         ["AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag"] = "false",
+                        ["AppSurfaceDocs:Harvest:JavaScript:StrictHealth"] = "true",
                         ["AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes"] = "1024"
                     })
                 .Build());
@@ -572,6 +575,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(["**/*.min.js", "**/*.generated.js"], options.Harvest.JavaScript.ExcludeGlobs);
         Assert.Equal(["BuildOutput"], options.Harvest.JavaScript.DefaultExclusions.DisabledGroups);
         Assert.False(options.Harvest.JavaScript.RequirePublicTag);
+        Assert.True(options.Harvest.JavaScript.StrictHealth);
         Assert.Equal(1024, options.Harvest.JavaScript.MaxFileSizeBytes);
         Assert.NotNull(provider.GetRequiredService<ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsHarvestPathPolicy>());
     }
@@ -1845,7 +1849,7 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
-    public void Validator_ShouldRejectEnabledJavaScriptHarvestWithoutIncludeGlobs()
+    public void Validator_ShouldAllowEnabledJavaScriptHarvestWithoutIncludeGlobs()
     {
         var validator = new AppSurfaceDocsOptionsValidator();
         var options = new AppSurfaceDocsOptions
@@ -1854,18 +1858,14 @@ public sealed class AppSurfaceDocsOptionsTests
             {
                 JavaScript = new AppSurfaceDocsJavaScriptHarvestOptions
                 {
-                    Enabled = true,
-                    IncludeGlobs = [" "]
+                    Enabled = true
                 }
             }
         };
 
         var result = validator.Validate(Options.DefaultName, options);
 
-        Assert.True(result.Failed);
-        Assert.Contains(
-            result.Failures,
-            failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs", StringComparison.Ordinal));
+        Assert.False(result.Failed);
     }
 
     [Fact]

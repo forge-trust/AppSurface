@@ -3218,18 +3218,33 @@ public class DocAggregatorTests : IDisposable
         Assert.DoesNotContain(
             firstHealth.Diagnostics.SelectMany(diagnostic => new[] { diagnostic.Problem, diagnostic.Cause, diagnostic.Fix }),
             value => value.Contains("Harvester boom", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(1, CountLogCalls(_loggerFake, LogLevel.Critical, "All AppSurface Docs harvesters failed"));
+        Assert.Equal(1, CountLogCalls(_loggerFake, LogLevel.Critical, "All strict AppSurface Docs harvesters failed"));
 
         aggregator.InvalidateCache();
         _ = await aggregator.GetHarvestHealthAsync();
 
-        Assert.Equal(2, CountLogCalls(_loggerFake, LogLevel.Critical, "All AppSurface Docs harvesters failed"));
+        Assert.Equal(2, CountLogCalls(_loggerFake, LogLevel.Critical, "All strict AppSurface Docs harvesters failed"));
     }
 
     [Fact]
     public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenTimeoutTokenCancelsWork()
     {
         var harvester = new DelayingHarvester();
+        var aggregator = CreateHarvestHealthAggregator([harvester], harvesterTimeout: TimeSpan.FromMilliseconds(10));
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Failed, health.Status);
+        var harvesterHealth = Assert.Single(health.Harvesters);
+        Assert.Equal(DocHarvesterHealthStatus.TimedOut, harvesterHealth.Status);
+        Assert.Equal(DocHarvestDiagnosticCodes.HarvesterTimedOut, harvesterHealth.Diagnostic?.Code);
+        Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.AllFailed);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldRecordTimedOutHarvester_WhenHarvesterObservesTimeoutTokenFirst()
+    {
+        var harvester = new BlockingUntilCanceledHarvester();
         var aggregator = CreateHarvestHealthAggregator([harvester], harvesterTimeout: TimeSpan.FromMilliseconds(10));
 
         var health = await aggregator.GetHarvestHealthAsync();
@@ -5062,6 +5077,23 @@ public class DocAggregatorTests : IDisposable
         }
     }
 
+    private sealed class BlockingUntilCanceledHarvester : IDocHarvester
+    {
+        public Task<IReadOnlyList<DocNode>> HarvestAsync(
+            string rootPath,
+            CancellationToken cancellationToken = default)
+        {
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(1);
+            while (!cancellationToken.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+            {
+                System.Threading.Thread.Sleep(1);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<IReadOnlyList<DocNode>>([]);
+        }
+    }
+
     private sealed class NonCancelingHarvester : IDocHarvester
     {
         private readonly TaskCompletionSource<IReadOnlyList<DocNode>> _release =
@@ -5192,6 +5224,58 @@ public class DocAggregatorTests : IDisposable
             Assert.Contains(docs, doc => doc.Path == "Visible.md");
             Assert.DoesNotContain(docs, doc => doc.Path == "ignored/Hidden.md");
             Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.VcsIgnoreSummary);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_WithBuiltInMarkdownHarvesterSurfacesMetadataDiagnostics()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-docaggregator-metadata-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(root, "Guide.md"),
+                """
+                ---
+                trust:
+                  migration:
+                    label: Run the upgrade
+                    href: javascript:alert(1)
+                ---
+                # Guide
+                """);
+
+            using var cache = new MemoryCache(new MemoryCacheOptions());
+            var memo = new Memo(cache);
+            var env = A.Fake<IWebHostEnvironment>();
+            A.CallTo(() => env.ContentRootPath).Returns(root);
+            var aggregator = new DocAggregator(
+                [new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, NullLoggerFactory.Instance)],
+                new AppSurfaceDocsOptions
+                {
+                    Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = root }
+                },
+                env,
+                memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var docs = await aggregator.GetDocsAsync();
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            var doc = Assert.Single(docs);
+            Assert.Equal("Run the upgrade", doc.Metadata?.Trust?.Migration?.Label);
+            Assert.Null(doc.Metadata?.Trust?.Migration?.Href);
+            var diagnostic = Assert.Single(
+                health.Diagnostics,
+                item => item.Code == DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref);
+            Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+            Assert.Equal(nameof(MarkdownHarvester), diagnostic.HarvesterType);
+            Assert.Contains("Guide.md", diagnostic.Problem, StringComparison.Ordinal);
         }
         finally
         {

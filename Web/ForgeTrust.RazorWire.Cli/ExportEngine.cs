@@ -115,16 +115,24 @@ public class ExportEngine
     /// <remarks>
     /// If <see cref="ExportContext.SeedRoutesPath"/> is provided, the file is read and each line is validated and normalized to a root-relative route; invalid seeds are logged. If the seed file exists but yields no valid routes, the root path ("/") is enqueued. If no seed file is provided, <see cref="ExportContext.InitialSeedRoutes"/> is used when present; invalid in-memory seeds are logged and an all-invalid set also falls back to the root path. If neither source is provided, the root path is enqueued. Before crawl processing begins, the engine probes AppSurface's reserved conventional 404 route and stages <c>404.html</c> when the route returns a successful HTML response. That reserved-route probe is best-effort only: failures are logged, do not abort the crawl, and do not prevent queued seed routes from being processed. Once staged, the <c>404.html</c> body participates in the same CDN validation and reference rewriting as other HTML artifacts.
     ///
-    /// Export then runs as a three-stage pipeline:
+    /// Export then runs as a staged pipeline:
     ///
     /// <code>
-    /// seed queue -> crawl/fetch/discover -> CDN validation -> materialize/rewrite
+    /// seed queue
+    ///   -> crawl/fetch/discover
+    ///   -> validate canonical artifacts and redirect aliases
+    ///   -> materialize/rewrite text routes
+    ///   -> redirect strategy
+    ///        |-- html: write alias HTML fallback artifacts
+    ///        `-- netlify: write root _redirects rules
     /// </code>
     ///
     /// The crawl stage records route outcomes, artifact URLs, and reference provenance. In CDN mode, HTML and CSS bodies
     /// are kept once until materialization so managed URLs can be rewritten after the artifact map is complete. In hybrid
-    /// mode, text artifacts and binary assets are written directly to their final files and only their outcomes are
-    /// retained in memory.
+    /// mode, text artifacts and binary assets are written directly to their final files and only their outcomes are retained
+    /// in memory. Redirect alias registrations are validated before text materialization, then written according to
+    /// <see cref="ExportContext.RedirectStrategy"/> after canonical artifacts exist. Netlify redirect output is an exact
+    /// publish-root rule file and does not use <see cref="ExportContext.BaseUrl"/> or emitted artifact URLs.
     /// </remarks>
     /// <returns>A task that completes when the crawl and export operations have finished.</returns>
     /// <exception cref="FileNotFoundException">Thrown when <see cref="ExportContext.SeedRoutesPath"/> is specified but the file does not exist.</exception>
@@ -163,7 +171,7 @@ public class ExportEngine
 
         ValidateExport(context);
         await MaterializeTextRoutesAsync(context, cancellationToken);
-        await MaterializeRedirectArtifactsAsync(context, cancellationToken);
+        await MaterializeRedirectsAsync(context, cancellationToken);
 
         sw.Stop();
         _logger.LogInformation("Export completed in {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
@@ -375,7 +383,22 @@ public class ExportEngine
         }
     }
 
-    private async Task MaterializeRedirectArtifactsAsync(ExportContext context, CancellationToken cancellationToken)
+    private async Task MaterializeRedirectsAsync(ExportContext context, CancellationToken cancellationToken)
+    {
+        switch (context.RedirectStrategy)
+        {
+            case ExportRedirectStrategy.Html:
+                await MaterializeHtmlRedirectArtifactsAsync(context, cancellationToken);
+                break;
+            case ExportRedirectStrategy.Netlify:
+                await MaterializeNetlifyRedirectsAsync(context, cancellationToken);
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported redirect strategy '{context.RedirectStrategy}'.");
+        }
+    }
+
+    private async Task MaterializeHtmlRedirectArtifactsAsync(ExportContext context, CancellationToken cancellationToken)
     {
         var writtenArtifactPaths = new HashSet<string>(CreateArtifactPathComparer());
         foreach (var artifact in context.RedirectArtifacts)
@@ -404,6 +427,35 @@ public class ExportEngine
                 artifactPath,
                 artifactUrl);
         }
+    }
+
+    private async Task MaterializeNetlifyRedirectsAsync(ExportContext context, CancellationToken cancellationToken)
+    {
+        if (context.RedirectArtifacts.Count == 0)
+        {
+            return;
+        }
+
+        var rules = context.RedirectArtifacts
+            .Select(artifact => new NetlifyRedirectRule(
+                SerializeNetlifyRedirectPath(artifact.AliasRoute),
+                SerializeNetlifyRedirectPath(artifact.CanonicalRoute)))
+            .Distinct()
+            .OrderBy(rule => rule.From, StringComparer.Ordinal)
+            .ThenBy(rule => rule.To, StringComparer.Ordinal)
+            .ToArray();
+
+        if (rules.Length == 0)
+        {
+            return;
+        }
+
+        var redirectsPath = Path.Join(context.OutputPath, "_redirects");
+        EnsureDirectoryExists(redirectsPath);
+        var body = string.Join(
+            Environment.NewLine,
+            rules.Select(rule => $"{rule.From} {rule.To} 301!"));
+        await File.WriteAllTextAsync(redirectsPath, body + Environment.NewLine, cancellationToken);
     }
 
     private bool TryGetNormalizedSeedRoute(string seed, ExportContext context, out string normalized)
@@ -571,10 +623,31 @@ public class ExportEngine
     private void ValidateRedirectArtifacts(ExportContext context, ISet<string> seen)
     {
         var aliasArtifactPathByCanonicalRoute = new Dictionary<string, string>(CreateArtifactPathComparer());
+        var canonicalRouteByAliasRoute = new Dictionary<string, string>(StringComparer.Ordinal);
         var routeByArtifactPath = BuildProtectedArtifactPathMap(context);
+
+        if (context.RedirectStrategy == ExportRedirectStrategy.Netlify)
+        {
+            ValidateNetlifyRedirectStrategy(context, routeByArtifactPath, seen);
+        }
 
         foreach (var artifact in context.RedirectArtifacts)
         {
+            if (canonicalRouteByAliasRoute.TryGetValue(artifact.AliasRoute, out var existingCanonicalRoute)
+                && !string.Equals(existingCanonicalRoute, artifact.CanonicalRoute, StringComparison.Ordinal))
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        $"AppSurface Docs redirect alias '{artifact.AliasRoute}' targets both '{existingCanonicalRoute}' and '{artifact.CanonicalRoute}'."));
+            }
+            else
+            {
+                canonicalRouteByAliasRoute[artifact.AliasRoute] = artifact.CanonicalRoute;
+            }
+
             if (!context.ArtifactUrls.TryGetValue(artifact.CanonicalRoute, out _)
                 || !context.RouteOutcomes.TryGetValue(artifact.CanonicalRoute, out var canonicalOutcome)
                 || !canonicalOutcome.Succeeded
@@ -586,6 +659,23 @@ public class ExportEngine
                     CreateRedirectArtifactDiagnostic(
                         artifact.AliasRoute,
                         $"AppSurface Docs redirect alias '{artifact.AliasRoute}' could not resolve canonical artifact '{artifact.CanonicalRoute}'."));
+                continue;
+            }
+
+            if (context.RedirectStrategy != ExportRedirectStrategy.Html)
+            {
+                if (context.RouteOutcomes.TryGetValue(artifact.AliasRoute, out var nonHtmlStrategyAliasOutcome)
+                    && nonHtmlStrategyAliasOutcome.Succeeded
+                    && !nonHtmlStrategyAliasOutcome.IsRedirectAliasArtifact)
+                {
+                    AddDiagnostic(
+                        context,
+                        seen,
+                        CreateRedirectArtifactDiagnostic(
+                            artifact.AliasRoute,
+                            $"AppSurface Docs redirect alias '{artifact.AliasRoute}' conflicts with an exported route at the same published path."));
+                }
+
                 continue;
             }
 
@@ -612,15 +702,15 @@ public class ExportEngine
                         $"AppSurface Docs redirect alias '{artifact.AliasRoute}' maps to the same artifact as canonical route '{artifact.CanonicalRoute}'."));
             }
 
-            if (aliasArtifactPathByCanonicalRoute.TryGetValue(aliasArtifactPath, out var existingCanonicalRoute)
-                && !string.Equals(existingCanonicalRoute, artifact.CanonicalRoute, StringComparison.Ordinal))
+            if (aliasArtifactPathByCanonicalRoute.TryGetValue(aliasArtifactPath, out var existingArtifactCanonicalRoute)
+                && !string.Equals(existingArtifactCanonicalRoute, artifact.CanonicalRoute, StringComparison.Ordinal))
             {
                 AddDiagnostic(
                     context,
                     seen,
                     CreateRedirectArtifactDiagnostic(
                         artifact.AliasRoute,
-                        $"AppSurface Docs redirect alias '{artifact.AliasRoute}' maps to the same artifact as alias for '{existingCanonicalRoute}'."));
+                        $"AppSurface Docs redirect alias '{artifact.AliasRoute}' maps to the same artifact as alias for '{existingArtifactCanonicalRoute}'."));
             }
             else
             {
@@ -638,6 +728,102 @@ public class ExportEngine
                     CreateRedirectArtifactDiagnostic(
                         artifact.AliasRoute,
                         $"AppSurface Docs redirect alias '{artifact.AliasRoute}' was crawled as a normal HTML page body."));
+            }
+        }
+    }
+
+    private static void ValidateNetlifyRedirectStrategy(
+        ExportContext context,
+        IReadOnlyDictionary<string, string> routeByArtifactPath,
+        ISet<string> seen)
+    {
+        if (context.Mode != ExportMode.Cdn)
+        {
+            AddDiagnostic(
+                context,
+                seen,
+                CreateRedirectArtifactDiagnostic(
+                    "/_redirects",
+                    "Netlify redirect rules require CDN export mode because they point at publish-root static routes."));
+        }
+
+        var redirectsPath = Path.Join(context.OutputPath, "_redirects");
+        if (routeByArtifactPath.TryGetValue(redirectsPath, out var existingRoute))
+        {
+            AddDiagnostic(
+                context,
+                seen,
+                CreateRedirectArtifactDiagnostic(
+                    "/_redirects",
+                    $"Netlify redirect output would overwrite the artifact for exported route '{existingRoute}'."));
+        }
+
+        foreach (var artifact in context.RedirectArtifacts.Where(artifact => string.Equals(artifact.AliasRoute, "/_redirects", StringComparison.Ordinal)))
+        {
+            AddDiagnostic(
+                context,
+                seen,
+                CreateRedirectArtifactDiagnostic(
+                    artifact.AliasRoute,
+                    "Netlify redirect output reserves the root '_redirects' file and cannot use it as an alias route."));
+        }
+
+        var targetBySerializedAlias = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var artifact in context.RedirectArtifacts)
+        {
+            var aliasSerialized = TrySerializeNetlifyRedirectPath(artifact.AliasRoute, out var serializedAlias, out var aliasSerializationError);
+            if (!aliasSerialized)
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        aliasSerializationError ?? $"Netlify redirect route '{artifact.AliasRoute}' cannot be represented in _redirects output."));
+            }
+
+            var canonicalSerialized = TrySerializeNetlifyRedirectPath(artifact.CanonicalRoute, out var serializedCanonical, out var canonicalSerializationError);
+            if (!canonicalSerialized)
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        $"Netlify redirect canonical route '{artifact.CanonicalRoute}' cannot be represented in _redirects output. {canonicalSerializationError}"));
+            }
+
+            if (!aliasSerialized || !canonicalSerialized)
+            {
+                continue;
+            }
+
+            var serializedAliasValue = serializedAlias!;
+            var serializedCanonicalValue = serializedCanonical!;
+
+            if (string.Equals(serializedAliasValue, serializedCanonicalValue, StringComparison.Ordinal))
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        $"Netlify redirect alias '{artifact.AliasRoute}' serializes to the same path as canonical route '{artifact.CanonicalRoute}'."));
+            }
+
+            if (targetBySerializedAlias.TryGetValue(serializedAliasValue, out var existingSerializedCanonical)
+                && !string.Equals(existingSerializedCanonical, serializedCanonicalValue, StringComparison.Ordinal))
+            {
+                AddDiagnostic(
+                    context,
+                    seen,
+                    CreateRedirectArtifactDiagnostic(
+                        artifact.AliasRoute,
+                        $"Netlify redirect alias '{artifact.AliasRoute}' serializes to '{serializedAliasValue}', which already targets '{existingSerializedCanonical}'."));
+            }
+            else
+            {
+                targetBySerializedAlias[serializedAliasValue] = serializedCanonicalValue;
             }
         }
     }
@@ -724,6 +910,67 @@ public class ExportEngine
             </html>
             """;
     }
+
+    private static string SerializeNetlifyRedirectPath(string route)
+    {
+        if (!TrySerializeNetlifyRedirectPath(route, out var serialized, out var error))
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        return serialized;
+    }
+
+    private static bool TrySerializeNetlifyRedirectPath(
+        string route,
+        [NotNullWhen(true)] out string? serialized,
+        [NotNullWhen(false)] out string? error)
+    {
+        serialized = null;
+        error = null;
+
+        if (!route.StartsWith("/", StringComparison.Ordinal)
+            || route.StartsWith("//", StringComparison.Ordinal)
+            || route.Contains('?')
+            || route.Contains('#')
+            || route.Contains('\r')
+            || route.Contains('\n')
+            || route.Contains('\t'))
+        {
+            error = $"Netlify redirect route '{route}' cannot be represented in _redirects output.";
+            return false;
+        }
+
+        var segments = route.Split('/');
+        var builder = new StringBuilder(route.Length);
+        try
+        {
+            for (var i = 0; i < segments.Length; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append('/');
+                }
+
+                if (segments[i].Length == 0)
+                {
+                    continue;
+                }
+
+                builder.Append(Uri.EscapeDataString(Uri.UnescapeDataString(segments[i])));
+            }
+        }
+        catch (UriFormatException ex)
+        {
+            error = $"Netlify redirect route '{route}' cannot be represented in _redirects output: {ex.Message}";
+            return false;
+        }
+
+        serialized = builder.ToString();
+        return true;
+    }
+
+    private sealed record NetlifyRedirectRule(string From, string To);
 
     private async Task TryStageConventionalNotFoundPageAsync(
         HttpClient client,

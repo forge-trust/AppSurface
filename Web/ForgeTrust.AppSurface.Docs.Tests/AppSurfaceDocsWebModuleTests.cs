@@ -987,6 +987,26 @@ public class AppSurfaceDocsWebModuleTests
         }
     }
 
+    [Theory]
+    [InlineData("docs", null, "/docs", "/docs")]
+    [InlineData("/docs/", "/docs/v/1.2.3/", "/docs", "/docs/v/1.2.3")]
+    [InlineData("/", null, "/", "/")]
+    [InlineData("/", "/v/1.2.3/", "/", "/v/1.2.3")]
+    public void AppSurfaceDocsPublishedTreeMount_ShouldNormalizeMountAndCanonicalRoots(
+        string mountRootPath,
+        string? canonicalRootPath,
+        string expectedMountRootPath,
+        string expectedCanonicalRootPath)
+    {
+        var mount = new AppSurfaceDocsPublishedTreeMount(
+            mountRootPath,
+            new NullFileProvider(),
+            canonicalRootPath: canonicalRootPath);
+
+        Assert.Equal(expectedMountRootPath, mount.MountRootPath);
+        Assert.Equal(expectedCanonicalRootPath, mount.CanonicalRootPath);
+    }
+
     [Fact]
     public void BuildPublishedTreeMounts_ShouldReuseProvider_ForRecommendedAliasOfPublicVersion()
     {
@@ -1036,7 +1056,9 @@ public class AppSurfaceDocsWebModuleTests
             Assert.Equal(2, mounts.Count);
             Assert.Single(providers);
             Assert.Equal("/docs/v/1.2.3", mounts[0].MountRootPath);
+            Assert.Equal("/docs/v/1.2.3", mounts[0].CanonicalRootPath);
             Assert.Equal("/docs", mounts[1].MountRootPath);
+            Assert.Equal("/docs/v/1.2.3", mounts[1].CanonicalRootPath);
             Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
             Assert.NotNull(mounts[0].FrozenRouteManifest);
             Assert.NotNull(mounts[1].FrozenRouteManifest);
@@ -1100,7 +1122,9 @@ public class AppSurfaceDocsWebModuleTests
             Assert.Equal(2, mounts.Count);
             Assert.Single(providers);
             Assert.Equal("/foo/bar/v/1.2.3", mounts[0].MountRootPath);
+            Assert.Equal("/foo/bar/v/1.2.3", mounts[0].CanonicalRootPath);
             Assert.Equal("/foo/bar", mounts[1].MountRootPath);
+            Assert.Equal("/foo/bar/v/1.2.3", mounts[1].CanonicalRootPath);
             Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
             Assert.NotNull(mounts[0].FrozenRouteManifest);
             Assert.NotNull(mounts[1].FrozenRouteManifest);

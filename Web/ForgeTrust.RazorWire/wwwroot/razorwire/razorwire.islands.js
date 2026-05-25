@@ -9,6 +9,17 @@
     const scheduledElements = new WeakSet();
 
     /**
+     * Island modules may export mount to hydrate a server-rendered root.
+     * @public
+     * @namespace RazorWire
+     * @moduleContract mount
+     * @target module referenced by data-rw-module
+     * @signature mount(root, props)
+     * @param {HTMLElement} root - Island root element.
+     * @param {Record<string, unknown>} props - Parsed island props.
+     */
+
+    /**
      * Hydrates all unhydrated RazorWire islands in the document according to each element's data-rw-strategy.
      *
      * For each element with `data-rw-module` that is not yet hydrated, attempts to parse JSON props from

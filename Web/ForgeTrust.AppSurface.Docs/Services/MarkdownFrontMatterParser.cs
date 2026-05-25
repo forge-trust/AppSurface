@@ -151,7 +151,7 @@ internal static class MarkdownFrontMatterParser
                 diagnostics),
             EntryPoints = NormalizeEntryPoints(document.EntryPoints, diagnostics),
             Outline = NormalizeOutline(document.Outline, diagnostics),
-            Trust = NormalizeTrust(document.Trust),
+            Trust = NormalizeTrust(document.Trust, diagnostics),
             Contributor = NormalizeContributor(document.Contributor),
             Localization = NormalizeLocalization(document, diagnostics),
             TitleIsDerived = document.Title is not null ? false : null,
@@ -756,7 +756,9 @@ internal static class MarkdownFrontMatterParser
                     : string.Concat(char.ToUpperInvariant(word[0]), word[1..].ToLowerInvariant())));
     }
 
-    private static DocTrustMetadata? NormalizeTrust(FrontMatterTrustDocument? value)
+    private static DocTrustMetadata? NormalizeTrust(
+        FrontMatterTrustDocument? value,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
     {
         if (value is null)
         {
@@ -769,7 +771,7 @@ internal static class MarkdownFrontMatterParser
             Summary = Normalize(value.Summary),
             Freshness = Normalize(value.Freshness),
             ChangeScope = Normalize(value.ChangeScope),
-            Migration = NormalizeTrustLink(value.Migration),
+            Migration = NormalizeTrustLink(value.Migration, diagnostics),
             Archive = Normalize(value.Archive),
             Sources = NormalizeList(value.Sources)
         };
@@ -785,17 +787,33 @@ internal static class MarkdownFrontMatterParser
             : trust;
     }
 
-    private static DocTrustLink? NormalizeTrustLink(FrontMatterTrustLinkDocument? value)
+    private static DocTrustLink? NormalizeTrustLink(
+        FrontMatterTrustLinkDocument? value,
+        List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
     {
         if (value is null)
         {
             return null;
         }
 
+        var hrefResult = AppSurfaceDocsMetadataHrefPolicy.NormalizeTrustMigrationHref(value.Href);
+        if (hrefResult.State == AppSurfaceDocsMetadataHrefPolicyState.Rejected)
+        {
+            diagnostics.Add(
+                new AppSurfaceDocsMetadataDiagnostic(
+                    "unsafe-trust-migration-href",
+                    "trust.migration.href",
+                    "The trust migration href uses an unsupported or unsafe URL scheme.",
+                    "The trust bar renders migration hrefs as plain anchors, so executable or protocol-relative destinations cannot be used safely.",
+                    "Use a relative URL, root-relative URL, fragment, or absolute http/https URL for trust.migration.href."));
+        }
+
         var link = new DocTrustLink
         {
             Label = Normalize(value.Label),
-            Href = Normalize(value.Href)
+            Href = hrefResult.State == AppSurfaceDocsMetadataHrefPolicyState.Allowed
+                ? hrefResult.Href
+                : null
         };
 
         return link.Label is null && link.Href is null

@@ -566,8 +566,13 @@ public sealed record DocTrustMetadata
     public string? ChangeScope { get; init; }
 
     /// <summary>
-    /// Gets an optional link to migration or upgrade guidance.
+    /// Gets an optional safe browser-facing link to migration or upgrade guidance.
     /// </summary>
+    /// <remarks>
+    /// Markdown metadata normalization treats blank hrefs as absent and rejects nonblank values whose scheme is not relative,
+    /// root-relative, fragment-only, <c>http</c>, or <c>https</c>. Rejected hrefs are omitted and reported through harvest
+    /// diagnostics with <see cref="DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref"/>.
+    /// </remarks>
     public DocTrustLink? Migration { get; init; }
 
     /// <summary>
@@ -618,6 +623,12 @@ public sealed record DocTrustLink
     /// <summary>
     /// Gets the browser-facing destination URL.
     /// </summary>
+    /// <remarks>
+    /// For trust migration links authored in Markdown front matter or paired sidecar metadata, AppSurface Docs accepts
+    /// relative URLs, root-relative URLs, fragment links, and absolute <c>http</c> or <c>https</c> URLs. Blank hrefs are
+    /// treated as missing; executable, protocol-relative, control-character, and other absolute-scheme hrefs are rejected
+    /// before the trust bar renders.
+    /// </remarks>
     public string? Href { get; init; }
 
     internal static DocTrustLink? Merge(DocTrustLink? primary, DocTrustLink? fallback)
@@ -779,22 +790,22 @@ public record DocNode(
 public enum DocHarvestHealthStatus
 {
     /// <summary>
-    /// At least one active harvester returned documentation and no harvester failed.
+    /// At least one documentation node was produced and no strict-health harvester failed.
     /// </summary>
     Healthy = 0,
 
     /// <summary>
-    /// Harvesting completed without failed harvesters, but no documentation nodes were produced.
+    /// Harvesting completed without failed strict-health harvesters, but no documentation nodes were produced.
     /// </summary>
     Empty = 1,
 
     /// <summary>
-    /// At least one harvester completed successfully while at least one other harvester failed, timed out, or canceled.
+    /// At least one strict-health harvester completed successfully while at least one other strict-health harvester failed, timed out, or canceled.
     /// </summary>
     Degraded = 2,
 
     /// <summary>
-    /// Every active harvester failed, timed out, or canceled.
+    /// Every strict-health harvester failed, timed out, or canceled.
     /// </summary>
     Failed = 3
 }
@@ -873,9 +884,9 @@ public enum DocHarvestDiagnosticSeverity
 /// Repository root passed to active harvesters. Treat this as server-only operational data because it can contain
 /// sensitive or environment-specific filesystem paths; redact or omit it before sending snapshots to clients.
 /// </param>
-/// <param name="TotalHarvesters">Number of active harvesters that participated in the snapshot.</param>
-/// <param name="SuccessfulHarvesters">Number of active harvesters that completed with either docs or a valid empty result.</param>
-/// <param name="FailedHarvesters">Number of active harvesters that failed, timed out, or canceled.</param>
+/// <param name="TotalHarvesters">Number of active harvesters that participated in strict aggregate health for the snapshot.</param>
+/// <param name="SuccessfulHarvesters">Number of strict-health harvesters that completed with either docs or a valid empty result.</param>
+/// <param name="FailedHarvesters">Number of strict-health harvesters that failed, timed out, or canceled.</param>
 /// <param name="TotalDocs">Number of documentation nodes published by the final cached docs snapshot.</param>
 /// <param name="Harvesters">Per-harvester health entries. Never <see langword="null" /> in AppSurface Docs-created snapshots.</param>
 /// <param name="Diagnostics">Structured diagnostics for failed, degraded, or noteworthy states. Never <see langword="null" /> in AppSurface Docs-created snapshots.</param>
@@ -956,7 +967,7 @@ public static class DocHarvestDiagnosticCodes
     public const string NoHarvesters = "appsurfacedocs.harvest.no_harvesters";
 
     /// <summary>
-    /// Every active harvester failed, timed out, or canceled for the snapshot.
+    /// Every strict-health harvester failed, timed out, or canceled for the snapshot.
     /// </summary>
     public const string AllFailed = "appsurfacedocs.harvest.all_failed";
 
@@ -969,6 +980,11 @@ public static class DocHarvestDiagnosticCodes
     /// AppSurface Docs could not read or normalize part of the repository-owned Git ignore policy.
     /// </summary>
     public const string VcsIgnoreWarning = "appsurfacedocs.harvest.vcs_ignore_warning";
+
+    /// <summary>
+    /// Markdown trust metadata contained a migration href that could execute script or otherwise escape the safe link policy.
+    /// </summary>
+    public const string MetadataUnsafeTrustMigrationHref = "appsurfacedocs.metadata.unsafe_trust_migration_href";
 
     /// <summary>
     /// A JavaScript source file matched the configured include set but exceeded the configured parse size limit.

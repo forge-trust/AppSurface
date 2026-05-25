@@ -202,6 +202,8 @@ Islands are isolated regions of a page that can load, reload, or update independ
 
 RazorWire can push Turbo Stream updates to one or more clients over Server-Sent Events. That makes it a good fit for counters, feeds, presence lists, and other UI that should update live while staying server-rendered.
 
+RazorWire can also send a narrow same-origin visit command with `Visit(...)`. Visit streams are one-shot navigation commands, not replayable state. Use them for active subscribers only, and keep normal links or retained state available when late subscribers or no-JavaScript users need to continue.
+
 ### Form Enhancement
 
 Standard HTML forms can return targeted stream updates instead of full reloads or redirect-first flows. The counter example above is the smallest version of that story: submit a normal MVC form, return RazorWire updates, and change only the DOM you care about.
@@ -261,7 +263,11 @@ Replay is opt-in and intentionally small. The in-memory hub keeps a bounded per-
 - `Remove(target)` removes the target element.
 - `FormError(target, title, message)` updates the target with an encoded generated error block and marks the response handled.
 - `FormValidationErrors(target, ModelState, title, maxErrors, message)` updates the target with a stable MVC validation summary and marks the response handled.
+- `Visit(url)` emits `<turbo-stream action="rw-visit" url="..." visit-action="advance"></turbo-stream>` and asks the browser to run a same-origin Turbo visit that advances history.
+- `Visit(url, RazorWireVisitAction.Replace)` emits the same command with `visit-action="replace"` so Turbo replaces the current history entry.
 - `BuildResult(statusCode)` returns the stream and optionally sets the HTTP status code.
+
+`Visit(...)` accepts relative URLs such as `/docs/next`, `?tab=done`, `#summary`, `./next`, `../next`, and same-origin absolute URLs. The server rejects blank URLs and ASCII control characters before rendering; the browser runtime rejects `~/` URLs, protocol-relative URLs, external origins, `javascript:`, `data:`, backslash-prefixed values, and malformed input before calling Turbo. Do not retain or replay `rw-visit` streams through `IRazorWireStreamHub`; publish a separate idempotent state stream when late subscribers need context.
 
 ## TagHelpers
 

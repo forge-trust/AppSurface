@@ -5,7 +5,9 @@ This test project verifies the public behavior of `ForgeTrust.AppSurface.Web.Ope
 ## Coverage
 
 - `AppSurfaceWebOpenApiModule.ConfigureServices` registers OpenAPI document generation and endpoint API explorer services.
-- `AppSurfaceWebOpenApiModule.ConfigureEndpoints` maps the conventional `/openapi/{documentName}.json` endpoint.
+- `AppSurfaceWebOpenApiModule.ConfigureServices` binds and validates endpoint exposure options.
+- `AppSurfaceWebOpenApiModule.ConfigureEndpoints` maps the conventional `/openapi/{documentName}.json` endpoint in Development, hides it by default outside Development, and honors `Always` and `Never` overrides.
+- `AppSurfaceApiDocumentationEndpointExposure` preserves its documented numeric values.
 - Hosted integration coverage confirms generated OpenAPI documents use the `StartupContext.ApplicationName` title.
 - Hosted integration coverage confirms the default document and operation transformers remove framework-owned `ForgeTrust.AppSurface.Web` tags while preserving consumer tags.
 
