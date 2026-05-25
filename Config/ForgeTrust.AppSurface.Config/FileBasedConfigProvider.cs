@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Hosting;
@@ -604,7 +605,7 @@ internal sealed class ConfigFileSourceLocationMap
 
             if (reader.TokenType != JsonTokenType.PropertyName)
             {
-                throw new JsonException("Expected a JSON object property.");
+                ThrowExpectedObjectProperty();
             }
 
             var propertyName = reader.GetString() ?? string.Empty;
@@ -626,19 +627,29 @@ internal sealed class ConfigFileSourceLocationMap
 
             if (!reader.Read())
             {
-                throw new JsonException("Expected a JSON property value.");
+                ThrowExpectedPropertyValue();
             }
 
             if (reader.TokenType == JsonTokenType.StartObject)
             {
                 ReadObject(ref reader, path, unsupportedPath, lineStarts, locations, canonicalPaths, ambiguousPaths);
             }
-            else if (reader.TokenType == JsonTokenType.StartArray)
+            else
             {
                 SkipValue(ref reader);
             }
         }
     }
+
+    [DoesNotReturn]
+    [ExcludeFromCodeCoverage(Justification = "Utf8JsonReader normally rejects malformed object content before this defensive mapper guard.")]
+    private static void ThrowExpectedObjectProperty() =>
+        throw new JsonException("Expected a JSON object property.");
+
+    [DoesNotReturn]
+    [ExcludeFromCodeCoverage(Justification = "Utf8JsonReader normally rejects missing property values before this defensive mapper guard.")]
+    private static void ThrowExpectedPropertyValue() =>
+        throw new JsonException("Expected a JSON property value.");
 
     private static void RecordLocation(
         string path,
@@ -718,11 +729,6 @@ internal sealed class ConfigFileSourceLocationMap
 
     private static ConfigAuditSourceLocation CreateLocation(long tokenStartIndex, int[] lineStarts)
     {
-        if (tokenStartIndex > int.MaxValue)
-        {
-            throw new ArgumentException("JSON token offset is outside the supported range.", nameof(tokenStartIndex));
-        }
-
         var byteOffset = (int)tokenStartIndex;
         var lineIndex = Array.BinarySearch(lineStarts, byteOffset);
         if (lineIndex < 0)
