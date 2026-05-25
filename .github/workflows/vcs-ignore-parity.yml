@@ -15,6 +15,10 @@ on:
       - 'packages.lock.json'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   parity:
     name: VCS ignore parity (${{ matrix.os }})

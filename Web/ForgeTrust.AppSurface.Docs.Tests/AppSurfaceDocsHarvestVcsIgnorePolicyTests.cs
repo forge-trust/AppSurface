@@ -592,7 +592,7 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         }
 
         await WriteAsync("docs/tracked.generated.md", "# tracked but still ignored by AppSurface");
-        await RunGitAsync("add -f docs/tracked.generated.md");
+        await RunGitAsync("add", "-f", "docs/tracked.generated.md");
         var allPaths = paths.Append("docs/tracked.generated.md").ToArray();
         var gitResult = await RunGitCheckIgnoreAsync(allPaths);
         var gitRecords = gitResult.Records.ToDictionary(record => record.Path, StringComparer.Ordinal);
@@ -838,9 +838,9 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         }
     }
 
-    private async Task RunGitAsync(string arguments)
+    private async Task RunGitAsync(params string[] arguments)
     {
-        var result = await RunProcessAsync(_root, "git", arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        var result = await RunProcessAsync(_root, "git", arguments);
         Assert.Equal(0, result.ExitCode);
     }
 
@@ -887,6 +887,15 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             catch (InvalidOperationException)
             {
                 // Process already exited between timeout observation and kill.
+            }
+
+            try
+            {
+                await Task.WhenAll(outputTask, errorTask);
+            }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+            {
+                // The timeout failure is the useful test signal; stream cleanup exceptions are secondary.
             }
 
             throw new TimeoutException($"Process '{fileName}' exceeded the 10 second test timeout.");
