@@ -35,6 +35,22 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigAuditKnownEntry_WithOptionsReturnsIndependentEntry()
+    {
+        var entry = new ConfigAuditKnownEntry("Valid.Key", null, typeof(string));
+        var updated = entry.WithOptions(
+            new ConfigAuditEntryOptions
+            {
+                TraverseCollectionElements = true,
+                MaxCollectionElements = 2
+            });
+
+        Assert.False(entry.Options.TraverseCollectionElements);
+        Assert.True(updated.Options.TraverseCollectionElements);
+        Assert.Equal(2, updated.Options.MaxCollectionElements);
+    }
+
+    [Fact]
     public void ConfigAuditEntryOptions_DefaultsPreserveOpaqueCollectionBehavior()
     {
         var options = new ConfigAuditEntryOptions();
@@ -44,6 +60,19 @@ public class ConfigAuditModelsTests
         Assert.Equal(128, options.MaxCollectionElements);
         Assert.Equal(4096, options.MaxReportNodes);
         Assert.True(options.DisplayDictionaryKeys);
+    }
+
+    [Fact]
+    public void ConfigAuditDictionaryLabelSet_ReusesLabelsForDuplicateRawKeys()
+    {
+        var labels = new ConfigAuditDictionaryLabelSet();
+
+        var first = labels.GetRedactedLabel("secret-key");
+        var duplicate = labels.GetRedactedLabel("secret-key");
+        var second = labels.GetRedactedLabel("other-secret-key");
+
+        Assert.Equal(first, duplicate);
+        Assert.NotEqual(first, second);
     }
 
     [Fact]

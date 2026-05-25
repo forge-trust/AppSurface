@@ -159,6 +159,20 @@ public class ConfigAuditReporterTests
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
+    private sealed class PropertyBudgetShape
+    {
+        public string First { get; set; } = "first";
+
+        public string Second { get; set; } = "second";
+    }
+
+    private sealed class FieldBudgetShape
+    {
+        public string First = "first";
+
+        public string Second = "second";
+    }
+
     private sealed class NamedEndpoint
     {
         public string? Name { get; set; }
@@ -608,11 +622,18 @@ public class ConfigAuditReporterTests
                     ["Array.Default"] = new[] { "opaque" },
                     ["Array.Items"] = new[] { "one", "two" },
                     ["Array.Deep"] = new[] { new[] { "too-deep" } },
+                    ["Array.Limited"] = new[] { "one", "two" },
                     ["ReadOnly.Default"] = new ReadOnlyValues(),
                     ["ReadOnly.Items"] = new ReadOnlyValues(),
+                    ["ReadOnly.Deep"] = new List<object> { new ReadOnlyValues() },
+                    ["ReadOnly.Limited"] = new ReadOnlyValues(),
                     ["Limited.Items"] = new List<int> { 1, 2, 3 },
                     ["Budget.Items"] = new List<int> { 1, 2, 3 },
                     ["Deep.Items"] = new List<object> { new List<string> { "too-deep" } },
+                    ["Dictionary.Default"] = new Dictionary<string, string>
+                    {
+                        ["one"] = "1"
+                    },
                     ["Dictionary.Deep"] = new Dictionary<string, object>
                     {
                         ["inner"] = new Dictionary<string, string>
@@ -620,6 +641,13 @@ public class ConfigAuditReporterTests
                             ["child"] = "too-deep"
                         }
                     },
+                    ["Dictionary.Limited"] = new Dictionary<string, string>
+                    {
+                        ["one"] = "1",
+                        ["two"] = "2"
+                    },
+                    ["PropertyBudget.Shape"] = new PropertyBudgetShape(),
+                    ["FieldBudget.Shape"] = new FieldBudgetShape(),
                     ["Unsupported.Default"] = new ThrowingEnumerable(),
                     ["Unsupported.Items"] = new ThrowingEnumerable(),
                     ["Matrix.Items"] = new int[1, 1]
@@ -635,10 +663,31 @@ public class ConfigAuditReporterTests
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionDepth = 1;
             });
+        services.AddConfigAuditKey<string[]>(
+            "Array.Limited",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxCollectionElements = 1;
+            });
         services.AddConfigAuditKey<ReadOnlyValues>("ReadOnly.Default");
         services.AddConfigAuditKey<ReadOnlyValues>(
             "ReadOnly.Items",
             options => options.TraverseCollectionElements = true);
+        services.AddConfigAuditKey<List<object>>(
+            "ReadOnly.Deep",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxCollectionDepth = 1;
+            });
+        services.AddConfigAuditKey<ReadOnlyValues>(
+            "ReadOnly.Limited",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxCollectionElements = 1;
+            });
         services.AddConfigAuditKey<List<int>>(
             "Limited.Items",
             options =>
@@ -660,6 +709,7 @@ public class ConfigAuditReporterTests
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionDepth = 1;
             });
+        services.AddConfigAuditKey<Dictionary<string, string>>("Dictionary.Default");
         services.AddConfigAuditKey<Dictionary<string, object>>(
             "Dictionary.Deep",
             options =>
@@ -667,6 +717,19 @@ public class ConfigAuditReporterTests
                 options.TraverseCollectionElements = true;
                 options.MaxCollectionDepth = 1;
             });
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Dictionary.Limited",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxCollectionElements = 1;
+            });
+        services.AddConfigAuditKey<PropertyBudgetShape>(
+            "PropertyBudget.Shape",
+            options => options.MaxReportNodes = 1);
+        services.AddConfigAuditKey<FieldBudgetShape>(
+            "FieldBudget.Shape",
+            options => options.MaxReportNodes = 1);
         services.AddConfigAuditKey<ThrowingEnumerable>("Unsupported.Default");
         services.AddConfigAuditKey<ThrowingEnumerable>(
             "Unsupported.Items",
@@ -687,10 +750,21 @@ public class ConfigAuditReporterTests
         var arrayDeep = AssertEntry(report, "Array.Deep", ConfigAuditEntryState.Resolved, null);
         Assert.Contains(arrayDeep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
 
+        var arrayLimited = AssertEntry(report, "Array.Limited", ConfigAuditEntryState.Resolved, null);
+        Assert.Single(arrayLimited.Children);
+        Assert.Contains(arrayLimited.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
+
         Assert.Empty(AssertEntry(report, "ReadOnly.Default", ConfigAuditEntryState.Resolved, null).Children);
         var readOnly = AssertEntry(report, "ReadOnly.Items", ConfigAuditEntryState.Resolved, null);
         Assert.Equal(["first", "second"], readOnly.Children.Select(child => child.DisplayValue));
         Assert.All(readOnly.Children, child => Assert.Equal(ConfigAuditElementKind.ListItem, child.Element?.Kind));
+
+        var readOnlyDeep = AssertEntry(report, "ReadOnly.Deep", ConfigAuditEntryState.Resolved, null);
+        Assert.Contains(readOnlyDeep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
+
+        var readOnlyLimited = AssertEntry(report, "ReadOnly.Limited", ConfigAuditEntryState.Resolved, null);
+        Assert.Single(readOnlyLimited.Children);
+        Assert.Contains(readOnlyLimited.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
 
         var limited = AssertEntry(report, "Limited.Items", ConfigAuditEntryState.Resolved, null);
         Assert.Equal(2, limited.Children.Count);
@@ -703,8 +777,22 @@ public class ConfigAuditReporterTests
         var deep = AssertEntry(report, "Deep.Items", ConfigAuditEntryState.Resolved, null);
         Assert.Contains(deep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
 
+        Assert.Empty(AssertEntry(report, "Dictionary.Default", ConfigAuditEntryState.Resolved, null).Children);
+
         var dictionaryDeep = AssertEntry(report, "Dictionary.Deep", ConfigAuditEntryState.Resolved, null);
         Assert.Contains(dictionaryDeep.Children[0].Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-depth-limit");
+
+        var dictionaryLimited = AssertEntry(report, "Dictionary.Limited", ConfigAuditEntryState.Resolved, null);
+        Assert.Single(dictionaryLimited.Children);
+        Assert.Contains(dictionaryLimited.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
+
+        var propertyBudget = AssertEntry(report, "PropertyBudget.Shape", ConfigAuditEntryState.Resolved, null);
+        Assert.Single(propertyBudget.Children);
+        Assert.Contains(propertyBudget.Diagnostics, diagnostic => diagnostic.Code == "config-audit-report-node-limit");
+
+        var fieldBudget = AssertEntry(report, "FieldBudget.Shape", ConfigAuditEntryState.Resolved, null);
+        Assert.Single(fieldBudget.Children);
+        Assert.Contains(fieldBudget.Diagnostics, diagnostic => diagnostic.Code == "config-audit-report-node-limit");
 
         Assert.Empty(AssertEntry(report, "Unsupported.Default", ConfigAuditEntryState.Resolved, null).Children);
         Assert.Contains(
@@ -713,6 +801,33 @@ public class ConfigAuditReporterTests
         Assert.Contains(
             AssertEntry(report, "Matrix.Items", ConfigAuditEntryState.Resolved, null).Diagnostics,
             diagnostic => diagnostic.Code == "config-audit-collection-kind-unsupported");
+    }
+
+    [Fact]
+    public void GetReport_FallsBackWhenSourcePathsAreUnavailable()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new PathlessSourceProvider(
+                "Pathless.Endpoint",
+                new NamedEndpoint
+                {
+                    Name = "billing",
+                    Url = "https://example.test"
+                }));
+        services.AddConfigAuditKey<NamedEndpoint>("Pathless.Endpoint");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Pathless.Endpoint", ConfigAuditEntryState.Resolved, null);
+        var name = entry.Children.Single(child => child.Key == "Pathless.Endpoint.Name");
+
+        Assert.Contains(name.Sources, source => source.ProviderName == nameof(PathlessSourceProvider));
     }
 
     [Fact]
@@ -1306,6 +1421,54 @@ public class ConfigAuditReporterTests
                         Message = "The provider value was invalid."
                     }
                 ]);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
+    private sealed class PathlessSourceProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        private readonly string _key;
+        private readonly object _value;
+
+        public PathlessSourceProvider(string key, object value)
+        {
+            _key = key;
+            _value = value;
+        }
+
+        public int Priority => 20;
+
+        public string Name => nameof(PathlessSourceProvider);
+
+        public T? GetValue<T>(string environment, string key) =>
+            string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            var source = new ConfigAuditSourceRecord
+            {
+                Kind = ConfigAuditSourceKind.Provider,
+                ProviderName = Name,
+                ProviderPriority = Priority,
+                Role = role
+            };
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                _value,
+                [source],
+                []);
         }
 
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
