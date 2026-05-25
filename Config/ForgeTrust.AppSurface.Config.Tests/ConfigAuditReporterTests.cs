@@ -1553,10 +1553,7 @@ public class ConfigAuditReporterTests
             {
                 ["Staging"] = environmentConfig
             },
-            new Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["Staging"] = new(StringComparer.OrdinalIgnoreCase)
-            },
+            new Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>>(StringComparer.OrdinalIgnoreCase),
             []);
         var provider = new FileBasedConfigProvider(snapshot);
 
