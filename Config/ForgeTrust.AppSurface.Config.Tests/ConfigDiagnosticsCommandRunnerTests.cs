@@ -132,14 +132,24 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
         Assert.DoesNotContain("super-secret", output.ToString(), StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Run_ReporterFailureReturnsSanitizedFailure()
+    public static TheoryData<Exception> OperationalFailures =>
+        new()
+        {
+            new InvalidOperationException("provider failed with super-secret"),
+            new ArgumentException("provider argument included super-secret"),
+            new FormatException("renderer format included super-secret"),
+            new IOException("output path included super-secret"),
+            new UnauthorizedAccessException("output permission included super-secret")
+        };
+
+    [Theory]
+    [MemberData(nameof(OperationalFailures))]
+    public void Run_OperationalFailureReturnsSanitizedFailure(Exception exception)
     {
         var reporter = A.Fake<IConfigAuditReporter>();
         var environmentProvider = A.Fake<IEnvironmentProvider>();
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
-        A.CallTo(() => reporter.GetReport("Production"))
-            .Throws(new InvalidOperationException("provider failed with super-secret"));
+        A.CallTo(() => reporter.GetReport("Production")).Throws(exception);
         using var output = new StringWriter();
         var runner = new ConfigDiagnosticsCommandRunner(
             reporter,
@@ -156,8 +166,7 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
         Assert.Contains("Problem:", display, StringComparison.Ordinal);
         Assert.Contains("Cause:", display, StringComparison.Ordinal);
         Assert.Contains("Fix:", display, StringComparison.Ordinal);
-        Assert.Contains("InvalidOperationException", display, StringComparison.Ordinal);
-        Assert.DoesNotContain("provider failed", display, StringComparison.Ordinal);
+        Assert.Contains(exception.GetType().Name, display, StringComparison.Ordinal);
         Assert.DoesNotContain("super-secret", display, StringComparison.Ordinal);
     }
 
