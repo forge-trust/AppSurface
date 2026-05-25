@@ -156,6 +156,8 @@ The package also keeps protective defaults for build output, hidden directories,
 
 AppSurface Docs also honors repository-owned Git `.gitignore` files by default. That is meant to make older repositories safer to adopt: generated bundles, `bower_components/`, `dist/`, `build/`, and other ignored trees stay out of the docs harvest without every host writing duplicate AppSurface excludes. This is snapshot-scoped and reproducible; AppSurface reads `.gitignore` files under the configured source root, not `.git/info/exclude` or global developer ignore files.
 
+The VCS-ignore contract is intentionally narrower than Git's full local environment. Repository `.gitignore` files are the source of truth, tracked files that match those rules are still excluded from docs, and matching is ordinal and case-sensitive so Linux, macOS, and Windows harvests agree. Configured AppSurface globs are separate from Git-ignore syntax and remain the package's normal repository-relative glob syntax.
+
 Use `VcsIgnore:AllowGlobs` only for intentionally public docs under ignored paths:
 
 ```json
@@ -175,6 +177,17 @@ Use `VcsIgnore:AllowGlobs` only for intentionally public docs under ignored path
 ```
 
 Those allow globs use AppSurface glob syntax, not Git-ignore syntax. They restore only VCS-ignore exclusions; AppSurface default exclusions and configured `ExcludeGlobs` still win. If a host needs the pre-existing behavior, set `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled=false`.
+
+If docs disappear after an upgrade, diagnose one repository-relative path first:
+
+| Symptom | Check | Fix |
+| --- | --- | --- |
+| Generated or bundled docs vanished. | The path matches a repository `.gitignore` rule. | Add a narrow `VcsIgnore:AllowGlobs` entry for the public docs path. |
+| A tracked file vanished even though Git still has it. | The tracked path also matches `.gitignore`. | Keep the ignore rule and add `VcsIgnore:AllowGlobs`, or move the public docs outside the ignored tree. |
+| A restored path still does not harvest. | AppSurface default exclusions or configured `ExcludeGlobs` also match it. | Add the matching default-exclusion allow, disable the intended default group, or change the configured exclude. |
+| The host needs time to migrate. | The repository relied on pre-existing AppSurface behavior. | Temporarily set `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled=false` while moving public docs or adding allow globs. |
+
+Use the harvest health page and JSON endpoint to inspect VCS-ignore counts and sample paths when a source-backed snapshot looks unexpectedly small.
 
 ## Understand first harvest behavior
 
