@@ -415,6 +415,46 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Fail_WithReadableMessage_WhenHealthEndpointTimesOut()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Exception = new OperationCanceledException(
+                "The request was canceled.",
+                new TimeoutException("The health endpoint did not respond before the timeout elapsed."))
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(
+            "could not read the health endpoint: The health endpoint did not respond before the timeout elapsed.",
+            result.AllText,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Reject_StrictHarvest()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Result = CreateHealthVerifyResult(ok: true)
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path, "--strict"],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("docs verify-health command does not accept --strict", result.AllText, StringComparison.Ordinal);
+        Assert.Null(runner.Args);
+    }
+
+    [Fact]
     public async Task DocsVerifyHealthCommand_Should_Fail_WithReadableMessage_WhenHealthJsonIsInvalid()
     {
         using var repository = TempDirectory.Create("appsurface-docs-health-repo-");

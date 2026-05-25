@@ -337,6 +337,10 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
         {
             throw new CommandException($"AppSurface Docs harvest health verification could not read the health endpoint: {ex.Message}");
         }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new CommandException($"AppSurface Docs harvest health verification could not read the health endpoint: {ResolveHealthEndpointCancellationMessage(ex)}");
+        }
         catch (JsonException ex)
         {
             throw new CommandException($"AppSurface Docs harvest health verification returned invalid JSON: {ex.Message}");
@@ -349,6 +353,11 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
     /// <returns>The health verification runner arguments.</returns>
     internal AppSurfaceDocsHealthVerifyArgs BuildVerifyArgs()
     {
+        if (StrictHarvest)
+        {
+            throw new CommandException("The docs verify-health command does not accept --strict because it keeps AppSurfaceDocs:Harvest:FailOnFailure=false and evaluates verification.ok instead.");
+        }
+
         var hostArgs = BuildHostArgs(defaultEnvironmentName: Environments.Production);
         var forwardedArgs = hostArgs.Args.ToList();
         forwardedArgs.Add("--AppSurfaceDocs:Harvest:StartupMode");
@@ -376,6 +385,13 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
             verifyHostArgs,
             docsUrlBuilder.BuildHealthJsonUrl(),
             DefaultVerifyUrl);
+    }
+
+    private static string ResolveHealthEndpointCancellationMessage(OperationCanceledException exception)
+    {
+        return exception.InnerException is TimeoutException timeoutException
+            ? timeoutException.Message
+            : exception.Message;
     }
 
     private static string BuildFailureMessage(AppSurfaceDocsHealthVerificationResult result)

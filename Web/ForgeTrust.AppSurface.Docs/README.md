@@ -1048,6 +1048,7 @@ static web assets.
 - `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets`
   - Defaults to `false`.
   - When `true`, incomplete public JavaScript event doclets emit `appsurfacedocs.javascript.incomplete_public_event_doclet` with error severity and fail harvest health.
+  - `DocAggregator` treats `appsurfacedocs.javascript.incomplete_public_event_doclet` as a strict blocking diagnostic: when `RequireCompleteEventDoclets` emits it, the JavaScript harvester is treated as though `ParticipatesInStrictHealth=true` and that diagnostic becomes the harvester health result, regardless of whether JavaScript would otherwise participate in `StrictHealth`.
   - This applies only to public `@event` doclets. Parse failures, oversized files, unsupported shapes, and malformed doclets stay governed by `StrictHealth` or explicit JavaScript include globs.
 - `AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes`
   - Defaults to `262144`.
@@ -1145,7 +1146,7 @@ Supported public shapes:
 
 Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
 
-Set `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets=true` when public browser events must be release-blocking. In that mode, each public `@event` must include `@target`, `@firesWhen`, and either at least one valid `detail.*` property or `@detail none`. Valid detail property names are exactly `detail.` plus dot-separated segments. Segments may contain letters, digits, `_`, `$`, `-`, and a trailing `[]`. Optional JSDoc brackets and defaults are accepted, so `detail.message`, `[detail.message]`, `[detail.message="fallback"]`, `detail.items[]`, and `detail.items[].id` are valid. Values such as `detail`, `[detail]`, `detail.`, `detail..message`, `detail. message`, `detail.[x]`, `Detail.message`, `form`, and `message` are invalid. `@detail none` is contradictory when any `detail.*` property is present.
+Set `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets=true` when public browser events must be release-blocking. In that mode, each public `@event` must include `@target`, `@firesWhen`, and either at least one valid `detail.*` property or `@detail none`. `@bubbles`, `@cancelable`, and `@example` remain recommended authoring fields, but they are intentionally excluded from the blocking strict-event contract. Valid detail property names are exactly `detail.` plus dot-separated segments. Segments may contain letters, digits, `_`, `$`, `-`, and a trailing `[]`. Optional JSDoc brackets and defaults are accepted, so `detail.message`, `[detail.message]`, `[detail.message="fallback"]`, `detail.items[]`, and `detail.items[].id` are valid. Values such as `detail`, `[detail]`, `detail.`, `detail..message`, `detail. message`, `detail.[x]`, `Detail.message`, `form`, and `message` are invalid. `@detail none` is contradictory when any `detail.*` property is present.
 
 ```js
 /**
@@ -1193,7 +1194,7 @@ dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csp
   --startup-timeout-seconds 30
 ```
 
-The verifier starts the standalone docs host on loopback, reads the same redacted response shape as `{DocsRootPath}/_health.json`, and exits nonzero when `verification.ok=false`. The reported status code matches the health endpoint contract: `200` for `Healthy` or `Empty`, `503` for `Degraded` or `Failed`. `AppSurfaceDocs:Harvest:FailOnFailure` still fails startup only for aggregate `Failed` snapshots; use `docs verify-health` when a `Degraded` snapshot, such as incomplete strict event docs with Markdown still available, should block publication.
+The verifier starts the standalone docs host on loopback, reads the same redacted response shape as `{DocsRootPath}/_health.json`, and exits nonzero when `verification.ok=false`. The reported status code matches the health endpoint contract: `200` for `Healthy` or `Empty`, `503` for `Degraded` or `Failed`. `docs verify-health --startup-timeout-seconds` defaults to 10 seconds when omitted; pass `0` to disable the startup watchdog instead of waiting indefinitely. `AppSurfaceDocs:Harvest:FailOnFailure` still fails startup only for aggregate `Failed` snapshots; use `docs verify-health` when a `Degraded` snapshot, such as incomplete strict event docs with Markdown still available, should block publication.
 
 Pitfalls:
 

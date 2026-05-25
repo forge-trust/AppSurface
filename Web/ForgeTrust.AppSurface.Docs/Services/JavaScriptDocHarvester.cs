@@ -878,6 +878,21 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
+    /// <summary>
+    /// Validates whether a parsed <c>@property</c> name is a supported event detail field contract.
+    /// </summary>
+    /// <param name="value">Parsed member name from the doclet property tag.</param>
+    /// <returns>
+    /// <see langword="true"/> when the member name represents a valid <c>detail.*</c> path; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// The validator trims whitespace, strips optional JSDoc property wrappers through
+    /// <see cref="StripOptionalPropertyWrapper"/>, requires an ordinal <c>detail.</c> prefix, and validates each remaining
+    /// segment with <see cref="IsValidEventDetailPropertySegment"/>. Array contracts use a trailing <c>[]</c> on a segment,
+    /// such as <c>detail.items[]</c> or <c>detail.items[].id</c>. Common pitfalls are blank names, omitted
+    /// <c>detail.</c> prefixes, empty segments, unsupported characters, and assuming case-insensitive matching.
+    /// </remarks>
     internal static bool IsValidEventDetailPropertyName(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
