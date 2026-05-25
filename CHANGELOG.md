@@ -29,6 +29,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs detail pages now expose copy-link actions for outline rows and section headers so readers can share deep links without navigating away from their current position.
 - AppSurface Docs now exposes `DocAggregator.GetHarvestHealthAsync(...)` plus structured harvest health models so hosts can distinguish healthy, empty, degraded, and all-failed source harvest snapshots without parsing logs.
 - AppSurface Docs hosts, preview runs, and static exports can now set a public canonical origin so metadata names the published domain even when the host is crawled through loopback.
+- AppSurface Docs recommended aliases now canonicalize duplicate metadata to the matching exact-version route while keeping reader navigation, search, and assets rooted at the friendly alias.
 - AppSurface Docs export can now choose redirect materialization with `--redirects html|netlify`; the Netlify strategy writes a validated root `_redirects` file with exact `301!` alias rules instead of alias HTML files.
 - AppSurface Docs generated C# and JavaScript API documentation now carries source-language metadata, renders language chips, and exposes a searchable `Language` facet.
 - RazorWire browser runtime assets now have an authored TypeScript pipeline with focused typecheck, test, build, and freshness verification commands, plus a docs-only JavaScript contract manifest for public browser APIs.
@@ -40,6 +41,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface now ships GitHub issue templates for bug reports and documentation feedback.
 - AppSurface Config now supports first-class scalar value validation on `Config<T>` and `ConfigStruct<T>` wrappers with `ConfigValueNotEmpty`, `ConfigValueRange`, `ConfigValueMinLength`, and a `ValidateValue` override for custom rules.
 - AppSurface Web CORS options now expose `AllowedHeaders` and `AllowedMethods` so applications can define explicit production preflight contracts without replacing the framework-managed policy.
+- AppSurface Web OpenAPI and Scalar modules now expose API documentation endpoints only in Development by default, with explicit `Always` and `Never` options for hosts that need production exposure or stricter local hiding.
 
 ### Changed
 
@@ -50,6 +52,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs search result rows now expose the whole visible result as one semantic link, making mobile taps easier while preserving keyboard focus, copied links, and open-in-new-tab browser behavior.
 - AppSurface Docs homepage navigation rows now use title-led scan paths with quiet decorative chevron affordances instead of repeated "Open..." labels.
 - RazorWire CLI validation errors now include a concrete next command and `razorwire export --help` hint so failed exports are easier to recover from.
+- RazorWire stream subscriptions are now denied by default through `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.DenyAll`; apps must opt into `RazorWireStreamAuthorizationMode.AllowAll` for public/demo streams or register `IRazorWireChannelAuthorizer` for request-aware channel rules.
 - RazorWire CLI export now defaults to CDN-safe output: managed internal links, frames, scripts, stylesheets, images, `<img>` and `<source>` `srcset`, conventional `404.html`, and CSS `url(...)` references rewrite to emitted static artifacts, with `--mode hybrid` available for extensionless server-routed deployments.
 - Tailwind development watch mode now logs a warning, not a startup error, when the standalone CLI is unavailable and the app can continue serving existing CSS.
 - AppSurface Docs search now keeps failure recovery markup out of the active search shell until the index actually fails to load.
@@ -70,11 +73,13 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Before `v0.1.0`, any breaking or behavior-changing update should record provisional guidance in [`releases/unreleased.md`](./releases/unreleased.md) and move finalized steps into the tagged release note once the version ships.
 - Existing `rw-active` forms opt into failed-form request markers and automatic fallback UI by default. Set `options.Forms.EnableFailureUx = false`, `options.Forms.FailureMode = RazorWireFormFailureMode.Manual`, or per-form `data-rw-form-failure="off"` if an app already owns all failure rendering.
 - RazorWire consumers do not need script-path changes for the TypeScript runtime pipeline. Maintainers should edit `Web/ForgeTrust.RazorWire/assets/src`, rebuild the committed `wwwroot/razorwire/*.js` outputs, and treat `VerifyRazorWireGeneratedAssetsBeforePack=false` as an emergency pack-only bypass.
+- Existing `rw:stream-source` subscriptions now return `403` until apps configure `RazorWireStreamAuthorizationMode.AllowAll` for public/demo streams or register a custom `IRazorWireChannelAuthorizer`.
 - Existing RazorWire CLI export users who depended on extensionless internal URLs should pass `--mode hybrid`; the default now rewrites exporter-managed URLs for plain static/CDN hosting and fails CDN validation when required frame or asset artifacts cannot be emitted.
 - Existing AppSurface Docs exports keep the default HTML redirect alias behavior. Netlify deployments should switch to `appsurface docs export --mode cdn --redirects netlify` and avoid committing or generating a separate `_redirects` file inside the export output.
 - AppSurface Docs authors using `featured_pages` should migrate to `featured_page_groups`; the old flat field now logs a warning and no longer renders.
 - Code that expected custom AppSurface labels from `IHostEnvironment.ApplicationName` should use `StartupContext.ApplicationName`; host environment application names now remain tied to assembly identity so ASP.NET static web assets continue to resolve.
 - Web apps with custom conventional 404 overrides should replace `NotFoundPageModel` with `BrowserStatusPageModel`. The old `ConventionalNotFoundPageMode`, `NotFoundPageMode`, `UseConventionalNotFoundPage()`, and `DisableNotFoundPage()` API names have moved to the `BrowserStatusPage*` naming surface before the first public tag.
+- Web apps that intentionally expose AppSurface-owned OpenAPI or Scalar routes outside Development should configure `AppSurfaceWebOpenApi:ExposeEndpoint=Always` and, for Scalar, `AppSurfaceWebScalar:ExposeEndpoint=Always`. Endpoint exposure does not add authentication or authorization.
 - AppSurface Docs hosts that need operational status for source-backed docs should call `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` and diagnostic codes instead of scraping warning or critical log messages.
 - AppSurface Docs hosts with expensive or side-effecting harvesters can set `AppSurfaceDocs:Harvest:StartupMode` to `Disabled` or adjust `InitialRequestWaitBudgetMilliseconds`; the `Testing*DelayMilliseconds` options are intended only for local and automated observatory testing.
 

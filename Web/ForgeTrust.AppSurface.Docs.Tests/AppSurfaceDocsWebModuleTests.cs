@@ -137,6 +137,89 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostHasNoCustomChannelAuthorizer_AllowsOnlyVisibleHarvestChannel()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.False(await authorizer.CanSubscribeAsync(context, "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenRazorWireWasAlreadyRegisteredWithBuiltInDenyAll_AllowsOnlyVisibleHarvestChannel()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddLogging();
+        services.AddRazorWire();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.False(await authorizer.CanSubscribeAsync(context, "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenBuiltInDenyAllAuthorizerWasRegisteredByType_AllowsOnlyVisibleHarvestChannel()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireChannelAuthorizer, DenyAllRazorWireChannelAuthorizer>();
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.False(await authorizer.CanSubscribeAsync(context, "host-channel"));
+    }
+
+    [Fact]
     public async Task AddAppSurfaceDocs_WhenHostHasCustomChannelAuthorizer_StillEnforcesHarvestVisibility()
     {
         var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
@@ -186,6 +269,34 @@ public class AppSurfaceDocsWebModuleTests
         Assert.False(await authorizer.CanSubscribeAsync(
             new DefaultHttpContext { RequestServices = serviceProvider },
             "host-channel"));
+    }
+
+    [Fact]
+    public async Task AddAppSurfaceDocs_WhenHostChannelAuthorizerFactoryReturnsNull_AllowsOnlyVisibleHarvestChannel()
+    {
+        var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:Health:ExposeRoutes"] = "Always"
+                    })
+                .Build());
+        services.AddSingleton<IWebHostEnvironment>(environment);
+        services.AddSingleton<IHostEnvironment>(environment);
+        services.AddSingleton<IRazorWireChannelAuthorizer>(_ => null!);
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var authorizer = serviceProvider.GetRequiredService<IRazorWireChannelAuthorizer>();
+        var context = new DefaultHttpContext { RequestServices = serviceProvider };
+
+        Assert.True(await authorizer.CanSubscribeAsync(context, AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.False(await authorizer.CanSubscribeAsync(context, "host-channel"));
     }
 
     [Fact]
@@ -876,6 +987,26 @@ public class AppSurfaceDocsWebModuleTests
         }
     }
 
+    [Theory]
+    [InlineData("docs", null, "/docs", "/docs")]
+    [InlineData("/docs/", "/docs/v/1.2.3/", "/docs", "/docs/v/1.2.3")]
+    [InlineData("/", null, "/", "/")]
+    [InlineData("/", "/v/1.2.3/", "/", "/v/1.2.3")]
+    public void AppSurfaceDocsPublishedTreeMount_ShouldNormalizeMountAndCanonicalRoots(
+        string mountRootPath,
+        string? canonicalRootPath,
+        string expectedMountRootPath,
+        string expectedCanonicalRootPath)
+    {
+        var mount = new AppSurfaceDocsPublishedTreeMount(
+            mountRootPath,
+            new NullFileProvider(),
+            canonicalRootPath: canonicalRootPath);
+
+        Assert.Equal(expectedMountRootPath, mount.MountRootPath);
+        Assert.Equal(expectedCanonicalRootPath, mount.CanonicalRootPath);
+    }
+
     [Fact]
     public void BuildPublishedTreeMounts_ShouldReuseProvider_ForRecommendedAliasOfPublicVersion()
     {
@@ -925,7 +1056,9 @@ public class AppSurfaceDocsWebModuleTests
             Assert.Equal(2, mounts.Count);
             Assert.Single(providers);
             Assert.Equal("/docs/v/1.2.3", mounts[0].MountRootPath);
+            Assert.Equal("/docs/v/1.2.3", mounts[0].CanonicalRootPath);
             Assert.Equal("/docs", mounts[1].MountRootPath);
+            Assert.Equal("/docs/v/1.2.3", mounts[1].CanonicalRootPath);
             Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
             Assert.NotNull(mounts[0].FrozenRouteManifest);
             Assert.NotNull(mounts[1].FrozenRouteManifest);
@@ -989,7 +1122,9 @@ public class AppSurfaceDocsWebModuleTests
             Assert.Equal(2, mounts.Count);
             Assert.Single(providers);
             Assert.Equal("/foo/bar/v/1.2.3", mounts[0].MountRootPath);
+            Assert.Equal("/foo/bar/v/1.2.3", mounts[0].CanonicalRootPath);
             Assert.Equal("/foo/bar", mounts[1].MountRootPath);
+            Assert.Equal("/foo/bar/v/1.2.3", mounts[1].CanonicalRootPath);
             Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
             Assert.NotNull(mounts[0].FrozenRouteManifest);
             Assert.NotNull(mounts[1].FrozenRouteManifest);

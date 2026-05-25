@@ -10,12 +10,17 @@ interface Window {
         localTimeFormatter?: unknown;
         formFailureManager?: unknown;
     };
+    Turbo?: TurboRuntime;
 }
 
-declare const Turbo: {
+interface TurboRuntime {
     connectStreamSource(source: EventSource): void;
     disconnectStreamSource(source: EventSource): void;
-};
+    visit?(url: string, options?: { action?: string }): void;
+    StreamActions?: Record<string, (this: Element) => void>;
+}
+
+declare const Turbo: TurboRuntime | undefined;
 
 (function () {
     if (window.RazorWireInitialized) return;
@@ -1111,8 +1116,89 @@ declare const Turbo: {
         };
     }
 
+    function installVisitStreamAction() {
+        const turbo = resolveTurbo();
+        if (!turbo?.StreamActions || typeof turbo.visit !== 'function') {
+            return;
+        }
+
+        turbo.StreamActions['rw-visit'] = function () {
+            const visit = resolveVisitStream(this);
+            if (!visit) {
+                return;
+            }
+
+            turbo.visit!(visit.url, { action: visit.action });
+        };
+    }
+
+    function resolveTurbo() {
+        if (window.Turbo) {
+            return window.Turbo;
+        }
+
+        if (typeof Turbo !== 'undefined') {
+            return Turbo;
+        }
+
+        return null;
+    }
+
+    function resolveVisitStream(streamElement: Element | null | undefined) {
+        const rawUrl = streamElement?.getAttribute?.('url') || '';
+        const action = (streamElement?.getAttribute?.('visit-action') || 'advance').toLowerCase();
+        if (action !== 'advance' && action !== 'replace') {
+            return null;
+        }
+
+        const url = normalizeVisitUrl(rawUrl);
+        if (!url) {
+            return null;
+        }
+
+        return { url, action };
+    }
+
+    function normalizeVisitUrl(rawUrl: string) {
+        if (typeof rawUrl !== 'string' || rawUrl.length === 0 || rawUrl.trim() !== rawUrl) {
+            return null;
+        }
+
+        if (rawUrl.startsWith('~/') || rawUrl.startsWith('//') || rawUrl.startsWith('\\')) {
+            return null;
+        }
+
+        if (hasAsciiControlCharacter(rawUrl)) {
+            return null;
+        }
+
+        try {
+            const baseHref = window.location?.href || `${window.location?.origin || ''}/`;
+            const url = new URL(rawUrl, baseHref);
+            if (url.origin !== window.location.origin) {
+                return null;
+            }
+
+            return url.href;
+        } catch {
+            return null;
+        }
+    }
+
+    function hasAsciiControlCharacter(value: string) {
+        for (let index = 0; index < value.length; index += 1) {
+            const code = value.charCodeAt(index);
+            if (code <= 0x1F || code === 0x7F) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // Initialize
     const runtimeConfig = readRuntimeConfig();
+    installVisitStreamAction();
     const connectionManager = new ConnectionManager();
     const localTimeFormatter = new LocalTimeFormatter();
     const formFailureManager = new FormFailureManager(runtimeConfig);

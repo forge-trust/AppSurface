@@ -185,15 +185,17 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             configureOptions: options => options.Harvest.TestingDelayPerDocumentMilliseconds = 500);
 
         Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
-        await WaitUntilAsync(() => coordinator.CurrentProgress.TotalDocs > 0);
+        var inProgressSnapshot = await WaitForProgressSnapshotAsync(
+            () => coordinator.CurrentProgress,
+            snapshot => snapshot.TotalDocs > 0 && snapshot.State == AppSurfaceDocsHarvestRunState.Running);
 
-        Assert.Equal(AppSurfaceDocsHarvestRunState.Running, coordinator.CurrentProgress.State);
-        Assert.InRange(coordinator.CurrentProgress.TotalDocs, 1, 2);
+        Assert.Equal(AppSurfaceDocsHarvestRunState.Running, inProgressSnapshot.State);
+        Assert.InRange(inProgressSnapshot.TotalDocs, 1, 2);
         Assert.Contains(
-            coordinator.CurrentProgress.Activity,
+            inProgressSnapshot.Activity,
             activity => activity.Message.Contains("processed", StringComparison.OrdinalIgnoreCase));
 
-        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
+        Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(10), CancellationToken.None));
         Assert.Equal(AppSurfaceDocsHarvestRunState.Completed, coordinator.CurrentProgress.State);
         Assert.Equal(3, coordinator.CurrentProgress.TotalDocs);
     }
@@ -241,6 +243,23 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         while (!predicate())
         {
+            await Task.Delay(10, cts.Token);
+        }
+    }
+
+    private static async Task<AppSurfaceDocsHarvestProgressSnapshot> WaitForProgressSnapshotAsync(
+        Func<AppSurfaceDocsHarvestProgressSnapshot> getSnapshot,
+        Func<AppSurfaceDocsHarvestProgressSnapshot, bool> predicate)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        while (true)
+        {
+            var snapshot = getSnapshot();
+            if (predicate(snapshot))
+            {
+                return snapshot;
+            }
+
             await Task.Delay(10, cts.Token);
         }
     }

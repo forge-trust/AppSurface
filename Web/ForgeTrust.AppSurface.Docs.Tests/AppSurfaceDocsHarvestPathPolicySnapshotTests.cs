@@ -232,6 +232,27 @@ public sealed class AppSurfaceDocsHarvestPathPolicySnapshotTests : IDisposable
     }
 
     [Fact]
+    public async Task EnumerateCandidateFiles_WhenCanceledMidWalkStopsBeforeExpandingNextDirectory()
+    {
+        await File.WriteAllTextAsync(Path.Join(_root, "README.md"), "# docs");
+        Directory.CreateDirectory(Path.Join(_root, "nested"));
+        await File.WriteAllTextAsync(Path.Join(_root, "nested", "Nested.md"), "# nested");
+        var snapshot = CreateSnapshot();
+        using var cts = new CancellationTokenSource();
+        using var enumerator = snapshot.EnumerateCandidateFiles(
+            _root,
+            AppSurfaceDocsHarvestSourceKind.Markdown,
+            "*.md",
+            cts.Token).GetEnumerator();
+
+        Assert.True(enumerator.MoveNext());
+        Assert.EndsWith("README.md", enumerator.Current, StringComparison.Ordinal);
+        await cts.CancelAsync();
+
+        Assert.Throws<OperationCanceledException>(() => enumerator.MoveNext());
+    }
+
+    [Fact]
     public async Task EnumerateCandidateFiles_ShouldPruneConfiguredAndVcsIgnoredDirectories()
     {
         await File.WriteAllTextAsync(Path.Join(_root, ".gitignore"), "generated/\n");

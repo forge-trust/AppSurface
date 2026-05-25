@@ -152,9 +152,35 @@ You can customize RazorWire behavior via `RazorWireOptions`:
 services.AddRazorWire(options =>
 {
     options.Streams.BasePath = "/custom-stream-path";
+    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.DenyAll;
     options.Forms.FailureMode = RazorWireFormFailureMode.Auto;
     options.Forms.DefaultFailureMessage = "We could not submit this form. Check your input and try again.";
 });
+```
+
+Stream subscriptions are denied by default. Choose `AllowAll` only for public/demo streams:
+
+```csharp
+services.AddRazorWire(options =>
+{
+    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+});
+```
+
+For user, tenant, or workflow-specific streams, register a custom authorizer instead:
+
+```csharp
+public sealed class TenantStreamAuthorizer : IRazorWireChannelAuthorizer
+{
+    public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+    {
+        var tenantId = context.User.FindFirst("tenant_id")?.Value;
+        return new ValueTask<bool>(tenantId is not null && channel == $"tenant:{tenantId}:updates");
+    }
+}
+
+services.AddSingleton<IRazorWireChannelAuthorizer, TenantStreamAuthorizer>();
+services.AddRazorWire();
 ```
 
 ## Also Possible
@@ -176,6 +202,8 @@ Islands are isolated regions of a page that can load, reload, or update independ
 
 RazorWire can push Turbo Stream updates to one or more clients over Server-Sent Events. That makes it a good fit for counters, feeds, presence lists, and other UI that should update live while staying server-rendered.
 
+RazorWire can also send a narrow same-origin visit command with `Visit(...)`. Visit streams are one-shot navigation commands, not replayable state. Use them for active subscribers only, and keep normal links or retained state available when late subscribers or no-JavaScript users need to continue.
+
 ### Form Enhancement
 
 Standard HTML forms can return targeted stream updates instead of full reloads or redirect-first flows. The counter example above is the smallest version of that story: submit a normal MVC form, return RazorWire updates, and change only the DOM you care about.
@@ -185,6 +213,8 @@ When `EnableFailureUx` is enabled, `form[rw-active]` also marks enhanced form po
 ## Security & Anti-Forgery
 
 Handling anti-forgery tokens correctly is critical when updating forms via Turbo Streams. See [Security & Anti-Forgery](Docs/antiforgery.md) for the detailed patterns and recommendations.
+
+RazorWire stream subscriptions are also safe by default: `RazorWireOptions.Streams.AuthorizationMode` starts at `RazorWireStreamAuthorizationMode.DenyAll`, so `rw:stream-source` receives `403` until the app either opts into `RazorWireStreamAuthorizationMode.AllowAll` for public/demo channels or registers `IRazorWireChannelAuthorizer`. Development responses include a safe plain-text diagnostic; production denials stay generic and logs avoid raw channel names, user identifiers, and claim values.
 
 Development anti-forgery failures from RazorWire forms are rewritten into helpful form-local diagnostics when possible. Production responses stay safe and generic. See [Failed Form UX](Docs/form-failures.md#development-diagnostics).
 
@@ -211,6 +241,19 @@ RazorWire is designed for a fast feedback loop during development:
 
 Replay is opt-in and intentionally small. The in-memory hub keeps a bounded per-channel buffer and drops the oldest retained fragments first. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
 
+### `IRazorWireChannelAuthorizer`
+
+- `CanSubscribeAsync(HttpContext, channel)` decides whether the current request may subscribe to a stream channel.
+- The built-in `DenyAllRazorWireChannelAuthorizer` is selected by default through `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.DenyAll`.
+- `AllowAllRazorWireChannelAuthorizer` is selected by `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll` and should only be used for public/demo streams.
+- Register a custom implementation for auth-context-aware decisions based on `HttpContext.User`, claims, tenant membership, workflow state, or route data.
+
+### `RazorWireStreamAuthorizationMode`
+
+- `DenyAll = 0`: default; every subscription returns `403` unless a custom `IRazorWireChannelAuthorizer` is registered.
+- `AllowAll = 1`: permits every subscription; intended for public/demo streams only.
+- Unknown enum values fail with a clear configuration exception instead of falling through to an unsafe mode.
+
 ### `this.RazorWireStream()` (controller extension)
 
 - `Append(target, content)` adds content to the end of the target element.
@@ -220,7 +263,11 @@ Replay is opt-in and intentionally small. The in-memory hub keeps a bounded per-
 - `Remove(target)` removes the target element.
 - `FormError(target, title, message)` updates the target with an encoded generated error block and marks the response handled.
 - `FormValidationErrors(target, ModelState, title, maxErrors, message)` updates the target with a stable MVC validation summary and marks the response handled.
+- `Visit(url)` emits `<turbo-stream action="rw-visit" url="..." visit-action="advance"></turbo-stream>` and asks the browser to run a same-origin Turbo visit that advances history.
+- `Visit(url, RazorWireVisitAction.Replace)` emits the same command with `visit-action="replace"` so Turbo replaces the current history entry.
 - `BuildResult(statusCode)` returns the stream and optionally sets the HTTP status code.
+
+`Visit(...)` accepts relative URLs such as `/docs/next`, `?tab=done`, `#summary`, `./next`, `../next`, and same-origin absolute URLs. The server rejects blank URLs and ASCII control characters before rendering; the browser runtime rejects `~/` URLs, protocol-relative URLs, external origins, `javascript:`, `data:`, backslash-prefixed values, and malformed input before calling Turbo. Do not retain or replay `rw-visit` streams through `IRazorWireStreamHub`; publish a separate idempotent state stream when late subscribers need context.
 
 ## TagHelpers
 
@@ -266,6 +313,7 @@ Subscribes the page to a RazorWire stream channel.
 
 - `channel`: required channel name.
 - `permanent`: keeps the stream source alive across Turbo visits.
+- Stream endpoints deny subscriptions by default; configure `RazorWireStreamAuthorizationMode.AllowAll` for public/demo channels or provide a custom `IRazorWireChannelAuthorizer`.
 - `replay`: when `true`, appends `?replay=1` to the stream endpoint so the page receives retained channel messages before live updates.
 
 ```html

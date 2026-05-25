@@ -200,6 +200,47 @@ public class AppSurfaceDocsViewsTests
     }
 
     [Fact]
+    public async Task HarvestingView_ShouldEncodeReturnUrlThroughRazorAndKeepItOutOfProgressFragment()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+        const string returnUrl = "/docs/search?filter=<script>alert(1)</script>&q=\"quoted\"";
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/Harvesting.cshtml",
+            new AppSurfaceDocsHarvestingViewModel
+            {
+                Progress = new AppSurfaceDocsHarvestProgressSnapshot
+                {
+                    State = AppSurfaceDocsHarvestRunState.Completed,
+                    StartedUtc = DateTimeOffset.UtcNow.AddSeconds(-1),
+                    CompletedUtc = DateTimeOffset.UtcNow,
+                    TotalHarvesters = 1,
+                    CompletedHarvesters = 1,
+                    TotalDocs = 1,
+                    Status = "Healthy"
+                },
+                ReturnUrl = returnUrl,
+                CompletionNavigationDelayMilliseconds = 50
+            });
+
+        Assert.DoesNotContain("<script>alert(1)</script>", html, StringComparison.Ordinal);
+
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var harvestPage = document.QuerySelector("#docs-harvest-page");
+        var returnLink = document.QuerySelector(".docs-harvest-return-link a");
+        var observatory = document.QuerySelector("#docs-harvest-observatory");
+
+        Assert.NotNull(harvestPage);
+        Assert.NotNull(returnLink);
+        Assert.NotNull(observatory);
+        Assert.Equal(returnUrl, harvestPage.GetAttribute("data-appsurface-docs-harvest-return-url"));
+        Assert.Equal(returnUrl, returnLink.GetAttribute("href"));
+        Assert.DoesNotContain("filter=", observatory.InnerHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurface-docs-harvest-return-url", observatory.InnerHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SearchClient_ShouldPersistAndRenderPageTypeBadgeFields()
     {
         var searchClient = ReadSearchClientMarkup();

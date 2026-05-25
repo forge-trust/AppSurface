@@ -306,7 +306,7 @@ AppSurface Docs starts the initial harvest in the background by default. If a us
 
 The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The defaults are `0`. Set `TestingPreHarvestDelayMilliseconds` to pause after the run is published but before any harvester starts, `TestingDelayPerHarvesterMilliseconds` to pause each active harvester after it reports `Running`, and `TestingDelayPerDocumentMilliseconds` to publish each harvester's document count one document at a time. For example, `TestingPreHarvestDelayMilliseconds=1000` and `TestingDelayPerDocumentMilliseconds=150` make the observatory visibly unfold. Do not enable these for production traffic.
 
-When the harvest completes successfully, AppSurface Docs reloads the current app-relative URL after the configured completion delay. The reload lets the server render the originally requested docs page, including any permanent redirect for source-shaped Markdown routes. The completion view also renders a plain return link so no-JavaScript users can continue manually.
+When the harvest completes successfully, AppSurface Docs first publishes the completed observatory state with replay enabled, then publishes a live-only RazorWire `rw-visit` command for active subscribers. Replay stays state-only, so late subscribers see the completed state and the plain continuation link without being auto-navigated by an old command. The completion view also renders a normal return link so no-JavaScript users can continue manually.
 
 The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints. In development it is exposed by default; non-development hosts must opt in with `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` if users should see the live progress stream.
 
@@ -314,6 +314,7 @@ Pitfalls:
 
 - Do not put secrets, absolute filesystem paths, or raw exception details in harvester diagnostics. The observatory uses the same redacted diagnostic shape as harvest health.
 - Do not rely on file-level progress counts in v1. The current stream reports harvester-level progress and aggregate document counts.
+- Do not retain or replay visit commands. Keep replay enabled only for safe progress state; navigation commands are live-only.
 - Do not use `StartupMode=Disabled` for hosts where first navigation latency matters; that preserves the old lazy-harvest behavior.
 
 ### Operator Diagnostics Routes
@@ -492,6 +493,14 @@ AppSurface Docs also reads repository-owned Git `.gitignore` files by default. T
 
 VCS ignore rules sit after AppSurface include boundaries and default exclusion groups, but before configured AppSurface excludes. Git negation can only neutralize a previous Git ignore rule. `VcsIgnore:AllowGlobs` can also restore selected VCS-ignored candidates, but those allow globs use AppSurface's normal repository-relative glob syntax, not Git-ignore syntax, and cannot override AppSurface default exclusions or configured excludes.
 
+| Git behavior | AppSurface Docs harvest policy |
+| --- | --- |
+| Repository `.gitignore` files can ignore generated, package-manager, or build output. | Repository-owned `.gitignore` files under the resolved source root are honored during each source snapshot. |
+| `.git/info/exclude` and global excludes are developer- or machine-local. | They are never read, so CI, static export, packaged hosts, and developer machines see the same docs source surface. |
+| Git tracked files can still match ignore rules. | AppSurface Docs ignores matching files even if they are tracked, because docs harvesting is source-policy driven rather than index driven. |
+| Git can vary case behavior through repository and platform settings. | AppSurface Docs uses ordinal, case-sensitive VCS-ignore matching for reproducible Linux, macOS, and Windows harvests. Configured AppSurface globs remain the package's normal case-insensitive repository-relative globs. |
+| Git negation can re-include paths only inside the Git ignore rule stack. | Git negation can neutralize earlier Git ignore rules, and `VcsIgnore:AllowGlobs` can restore selected VCS-only exclusions; neither can bypass AppSurface default exclusions or configured excludes. |
+
 ```json
 {
   "AppSurfaceDocs": {
@@ -525,6 +534,20 @@ Disable VCS ignore integration only when the host intentionally wants pre-existi
 ```
 
 AppSurface Docs reads only repository-owned `.gitignore` files under the resolved source root. It does not read `.git/info/exclude`, global Git excludes, or machine-local ignore state, so source-backed docs are reproducible in CI, static export, and packaged hosts. Tracked files that match `.gitignore` are still ignored by AppSurface Docs; use `VcsIgnore:AllowGlobs` for intentional public docs under ignored paths.
+
+If docs disappear after adopting or upgrading AppSurface Docs, diagnose a single path before changing broad policy:
+
+1. Check the nearest repository-owned `.gitignore` files that cover the missing repository-relative path.
+2. If the path is intentionally public but lives under an ignored tree, restore only that surface with `AppSurfaceDocs:Harvest:Paths:VcsIgnore:AllowGlobs`.
+3. If a host needs the old harvest behavior while migrating, temporarily set `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled=false`.
+4. If the path is still missing, check AppSurface default exclusions and configured `ExcludeGlobs`; those policies still win after VCS-ignore allows.
+5. Inspect harvest health diagnostics for the VCS-ignore summary and sample paths, then run the focused parity test when debugging package behavior:
+
+```bash
+dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj --filter AppSurfaceDocsHarvestVcsIgnorePolicyTests --logger "console;verbosity=normal"
+```
+
+The dedicated `vcs-ignore-parity.yml` workflow runs that parity suite on Linux, macOS, and Windows so case-sensitive ignore behavior and Git oracle traces stay pinned across supported runner families.
 
 Traversal uses the same policy for Markdown and C#. AppSurface Docs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file. The root `LICENSE` file is a Markdown candidate, but when global includes are configured it still needs to match an include such as `LICENSE`.
 
@@ -588,6 +611,8 @@ Default routing:
 
 AppSurface Docs registers only the configured docs routes. It does not add a generic `{controller}/{action}` fallback to the host application, so custom docs roots stay isolated from other modules and application routes.
 
+When versioning is enabled and the catalog proves the recommended release points at a healthy public exact tree, the route root is a friendly alias for that same frozen tree. It is not a redirect. Reader navigation, search config, search-index paths, static assets, and frozen-manifest alias redirects stay rooted at the alias, but `<link rel="canonical">` metadata points at the exact-version route. For example, `/docs/guide` serves the recommended tree with canonical `/docs/v/1.2.3/guide`; `/foo/bar/guide` canonicalizes to `/foo/bar/v/1.2.3/guide`; and a root-mounted docs family serves `/guide` with canonical `/v/1.2.3/guide`.
+
 ### Public canonical origin
 
 Set `AppSurfaceDocs:Routing:PublicOrigin` when a preview or export host listens on one origin but published metadata should name another origin:
@@ -603,6 +628,8 @@ Set `AppSurfaceDocs:Routing:PublicOrigin` when a preview or export host listens 
 ```
 
 `PublicOrigin` affects canonical metadata only. AppSurface Docs still chooses the page route from `RouteRootPath`, `DocsRootPath`, versioning settings, and page metadata before joining that route to the configured origin. For example, `PublicOrigin=https://docs.example.com` and the default docs root render a detail page canonical href such as `https://docs.example.com/docs/guides/intro`.
+
+Mounted published trees follow the same rule. If `PublicOrigin` is set, canonical hrefs for exact archives and recommended aliases are emitted as absolute URLs under that origin and do not receive the current request `PathBase`. If `PublicOrigin` is unset, app-relative exported canonical links remain app-relative and preserve the existing `PathBase` behavior; absolute exported canonical links keep their exported origin while AppSurface Docs rewrites only the path to the active canonical root.
 
 Use `PublicOrigin` for static export, reverse-proxied docs hosts, and CI hosts that crawl an internal loopback URL while publishing to a stable public domain. Leave it unset for local preview, ephemeral review apps, or deployments where AppSurface Docs should keep app-relative canonical links.
 
@@ -880,6 +907,7 @@ static web assets.
   - Defaults to `true`.
   - Reads repository-owned Git `.gitignore` files under the resolved source root during each cached docs snapshot.
   - Does not read `.git/info/exclude`, global Git excludes, or machine-local ignore state.
+  - VCS-ignore matching is ordinal and case-sensitive for reproducible Linux, macOS, and Windows harvests.
 - `AppSurfaceDocs:Harvest:Paths:VcsIgnore:AllowGlobs`
   - Defaults to an empty array.
   - Uses AppSurface repository-relative glob syntax, not Git-ignore syntax.
@@ -1118,7 +1146,9 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `minisearch.min.js` at the tree root
 - any section, detail, partial, and asset routes that belong to the exported docs surface for that release
 
-AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. The mount contract has two roots: `MountRootPath` controls normal serving, links, assets, search config, search-index payloads, and redirects; `CanonicalRootPath` controls only `<link rel="canonical">` metadata. Exact mounts self-canonicalize. Recommended alias mounts use the route-family root as `MountRootPath` and the matching exact-version root as `CanonicalRootPath`, so `/docs` remains friendly while crawlers see `/docs/v/{version}` as the durable duplicate URL.
+
+When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
 
 ### Archive ordering
 
@@ -1137,6 +1167,7 @@ AppSurface Docs does not regenerate these trees at request time. It resolves ext
 - Do not set `AppSurfaceDocs:Routing:DocsRootPath` to the same value as `RouteRootPath` when versioning is enabled. That collides with the stable published-release alias.
 - Do not configure only `DocsRootPath=/foo/bar/next` and expect archive routes to move to `/foo/bar`; set `RouteRootPath=/foo/bar` explicitly.
 - Do not point `recommendedVersion` at a hidden or broken release tree.
+- Do not expect the recommended alias to rewrite ordinary links to the exact-version route. Only canonical metadata moves from the alias root to the exact root.
 - Do not assume `AppSurfaceDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
 - Do not hand-edit `.appsurface-docs-route-manifest.json` to add aliases. New exports validate duplicate aliases, aliases that collide with canonical routes, and aliases that equal their own canonical route. Runtime ignores ambiguous aliases from hand-edited or legacy manifests and keeps serving normal files.

@@ -349,8 +349,16 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     var docsHtml = await docsResponse.Content.ReadAsStringAsync();
                     Assert.Equal(HttpStatusCode.OK, docsResponse.StatusCode);
                     Assert.Contains("data-tree=\"release-1.2.3\"", docsHtml);
+                    Assert.Contains("<link rel=\"canonical\" href=\"/docs/v/1.2.3\">", docsHtml);
                     Assert.Contains("href=\"/docs/search.css\"", docsHtml);
+                    Assert.Contains("href=\"/docs/guide.html\"", docsHtml);
                     Assert.Contains("\"docsRootPath\":\"/docs\"", docsHtml);
+
+                    using var recommendedGuideResponse = await client.GetAsync("/docs/guide.html");
+                    var recommendedGuideHtml = await recommendedGuideResponse.Content.ReadAsStringAsync();
+                    Assert.Equal(HttpStatusCode.OK, recommendedGuideResponse.StatusCode);
+                    Assert.Equal("/docs/guide.html", recommendedGuideResponse.RequestMessage?.RequestUri?.AbsolutePath);
+                    Assert.Contains("data-tree=\"release-guide\"", recommendedGuideHtml);
 
                     using var docsSearchResponse = await client.GetAsync("/docs/search");
                     var docsSearchHtml = await docsSearchResponse.Content.ReadAsStringAsync();
@@ -388,6 +396,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     using var exactVersionResponse = await client.GetAsync("/docs/v/1.2.3");
                     var exactVersionHtml = await exactVersionResponse.Content.ReadAsStringAsync();
                     Assert.Equal(HttpStatusCode.OK, exactVersionResponse.StatusCode);
+                    Assert.Contains("<link rel=\"canonical\" href=\"/docs/v/1.2.3\">", exactVersionHtml);
                     Assert.Contains("href=\"/docs/v/1.2.3/search.css\"", exactVersionHtml);
                     Assert.Contains("href=\"/docs/v/1.2.3/guide.html\"", exactVersionHtml);
                     Assert.Contains("href=\"/docs/versions\"", exactVersionHtml);
@@ -931,6 +940,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     var entryHtml = await entryResponse.Content.ReadAsStringAsync();
                     Assert.Equal(HttpStatusCode.OK, entryResponse.StatusCode);
                     Assert.Contains("No healthy recommended release tree", entryHtml, StringComparison.OrdinalIgnoreCase);
+                    Assert.DoesNotContain("rel=\"canonical\"", entryHtml, StringComparison.OrdinalIgnoreCase);
 
                     using var rootAssetResponse = await client.GetAsync("/docs/search.css");
                     var rootAssetBody = await rootAssetResponse.Content.ReadAsStringAsync();
@@ -1982,6 +1992,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
             <!DOCTYPE html>
             <html>
             <head>
+              <link rel="canonical" href="/docs" />
               <link rel="stylesheet" href="/docs/search.css" />
               <link rel="preload" href="/docs/search-index.json" as="fetch" crossorigin="use-credentials" />
               <script>window.__appSurfaceDocsConfig = {"docsRootPath":"/docs","docsSearchUrl":"/docs/search","docsSearchIndexUrl":"/docs/search-index.json"};</script>

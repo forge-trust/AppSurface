@@ -2,6 +2,14 @@ namespace ForgeTrust.RazorWire.Tests;
 
 public class RazorWireOptionsTests
 {
+    [Fact]
+    public void StreamsAuthorizationMode_DefaultsToDenyAll()
+    {
+        var options = new RazorWireOptions();
+
+        Assert.Equal(RazorWireStreamAuthorizationMode.DenyAll, options.Streams.AuthorizationMode);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

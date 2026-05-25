@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Web.OpenApi;
 
@@ -12,12 +13,14 @@ namespace ForgeTrust.AppSurface.Web.OpenApi;
 /// <remarks>
 /// Use <see cref="AppSurfaceWebOpenApiModule"/> when AppSurface should own the default OpenAPI service and endpoint
 /// wiring for an app. The module registers ASP.NET Core OpenAPI generation, endpoint API exploration, document and
-/// operation transformers, and maps the OpenAPI endpoint during endpoint configuration. The default document title is
+/// operation transformers, and maps the OpenAPI endpoint during endpoint configuration when
+/// <see cref="AppSurfaceWebOpenApiOptions.ExposeEndpoint"/> allows the active environment. The default document title is
 /// <c>{ApplicationName} | v1</c>, and the built-in transformers remove the framework implementation tag
 /// <c>ForgeTrust.AppSurface.Web</c> while preserving other tags. Register a custom module or add additional OpenAPI
 /// options when an application needs multiple documents, custom versioning, authentication metadata, or different tag
 /// policies. Pitfall: transformer tag collections may be null and this module must run before consumers expect the
-/// <c>MapOpenApi</c> endpoint to be mapped.
+/// <c>MapOpenApi</c> endpoint to be mapped. The production opt-in setting maps the endpoint only; hosts must still
+/// protect exposed OpenAPI documents with authorization, private networking, or another deployment boundary.
 /// </remarks>
 public class AppSurfaceWebOpenApiModule : IAppSurfaceWebModule
 {
@@ -34,6 +37,12 @@ public class AppSurfaceWebOpenApiModule : IAppSurfaceWebModule
     /// <param name="services">The service collection receiving OpenAPI and endpoint exploration registrations.</param>
     public virtual void ConfigureServices(StartupContext context, IServiceCollection services)
     {
+        services.AddOptions<AppSurfaceWebOpenApiOptions>()
+            .BindConfiguration(AppSurfaceWebOpenApiOptions.SectionName)
+            .Validate(
+                options => Enum.IsDefined(options.ExposeEndpoint),
+                $"{AppSurfaceWebOpenApiOptions.SectionName}:ExposeEndpoint must be one of DevelopmentOnly, Always, or Never.");
+
         services.AddOpenApi(options =>
         {
             options.AddDocumentTransformer((d, _, _) =>
@@ -67,13 +76,27 @@ public class AppSurfaceWebOpenApiModule : IAppSurfaceWebModule
     }
 
     /// <summary>
-    /// Maps the OpenAPI document endpoint.
+    /// Maps the OpenAPI document endpoint when <see cref="AppSurfaceWebOpenApiOptions.ExposeEndpoint"/> allows it.
     /// </summary>
     /// <param name="context">The startup context.</param>
     /// <param name="endpoints">The endpoint route builder.</param>
     public virtual void ConfigureEndpoints(StartupContext context, IEndpointRouteBuilder endpoints)
     {
+        var options = endpoints.ServiceProvider.GetRequiredService<IOptions<AppSurfaceWebOpenApiOptions>>().Value;
+        if (!AllowsEndpointExposure(options.ExposeEndpoint, context))
+        {
+            return;
+        }
+
         endpoints.MapOpenApi();
+    }
+
+    private static bool AllowsEndpointExposure(
+        AppSurfaceApiDocumentationEndpointExposure exposure,
+        StartupContext context)
+    {
+        return exposure == AppSurfaceApiDocumentationEndpointExposure.Always
+            || (exposure == AppSurfaceApiDocumentationEndpointExposure.DevelopmentOnly && context.IsDevelopment);
     }
 
     /// <summary>

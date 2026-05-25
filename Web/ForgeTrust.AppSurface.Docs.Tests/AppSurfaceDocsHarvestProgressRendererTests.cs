@@ -6,7 +6,7 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 public sealed class AppSurfaceDocsHarvestProgressRendererTests
 {
     [Fact]
-    public void Render_WhenHarvestCompleted_EmitsCompletionMarkerAndReturnLink()
+    public void Render_WhenHarvestCompleted_EmitsCompletionMarkerWithoutReturnUrl()
     {
         var html = AppSurfaceDocsHarvestProgressRenderer.Render(
             new AppSurfaceDocsHarvestProgressSnapshot
@@ -25,13 +25,12 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
                 ],
                 Activity = [new AppSurfaceDocsHarvestActivity(DateTimeOffset.UtcNow, "Harvest completed.")]
             },
-            "/docs/search?q=api",
             123);
 
         Assert.Contains("data-appsurface-docs-harvest-complete=\"true\"", html, StringComparison.Ordinal);
-        Assert.Contains("data-appsurface-docs-harvest-return-url=\"/docs/search?q=api\"", html, StringComparison.Ordinal);
         Assert.Contains("data-appsurface-docs-harvest-delay=\"123\"", html, StringComparison.Ordinal);
-        Assert.Contains("href=\"/docs/search?q=api\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-appsurface-docs-harvest-return-url", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs-harvest-return-link", html, StringComparison.Ordinal);
         Assert.Contains("Docs processed", html, StringComparison.Ordinal);
         Assert.Contains("7", html, StringComparison.Ordinal);
     }
@@ -48,7 +47,6 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
                 CompletedHarvesters = 1,
                 TotalDocs = 42
             },
-            "/docs",
             0);
 
         Assert.Contains("docs-harvest-rate", html, StringComparison.Ordinal);
@@ -77,7 +75,6 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
                     }
                 ]
             },
-            "/docs",
             0);
 
         Assert.Contains("appsurface.test", html, StringComparison.Ordinal);
@@ -115,14 +112,12 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
                     })
                     .ToArray()
             },
-            " ",
             0);
 
         Assert.Contains("Docs are ready. Taking you back to the page you asked for.", html, StringComparison.Ordinal);
         Assert.Contains("<strong>1s</strong>", html, StringComparison.Ordinal);
         Assert.Contains("JavaScript public API", html, StringComparison.Ordinal);
         Assert.Contains("CustomHarvester", html, StringComparison.Ordinal);
-        Assert.Contains("href=\"/\"", html, StringComparison.Ordinal);
         Assert.Contains("Activity 7", html, StringComparison.Ordinal);
         Assert.DoesNotContain("Activity 8", html, StringComparison.Ordinal);
         Assert.Contains("appsurface.test.3", html, StringComparison.Ordinal);
@@ -138,7 +133,6 @@ public sealed class AppSurfaceDocsHarvestProgressRendererTests
                 State = AppSurfaceDocsHarvestRunState.Idle,
                 StartedUtc = DateTimeOffset.UtcNow
             },
-            "/docs",
             0);
 
         Assert.Contains("Starting the first docs harvest.", html, StringComparison.Ordinal);
