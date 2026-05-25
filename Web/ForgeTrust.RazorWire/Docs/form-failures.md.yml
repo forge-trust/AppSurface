@@ -4,5 +4,6 @@ sequence_key: razorwire-proof
 order: 25
 related_pages:
   - Web/ForgeTrust.RazorWire/README.md
+  - Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md
   - Web/ForgeTrust.RazorWire/Docs/antiforgery.md
   - examples/razorwire-mvc/README.md

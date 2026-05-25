@@ -32,6 +32,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs recommended aliases now canonicalize duplicate metadata to the matching exact-version route while keeping reader navigation, search, and assets rooted at the friendly alias.
 - AppSurface Docs export can now choose redirect materialization with `--redirects html|netlify`; the Netlify strategy writes a validated root `_redirects` file with exact `301!` alias rules instead of alias HTML files.
 - AppSurface Docs generated C# and JavaScript API documentation now carries source-language metadata, renders language chips, and exposes a searchable `Language` facet.
+- RazorWire browser runtime assets now have an authored TypeScript pipeline with focused typecheck, test, build, and freshness verification commands, plus a docs-only JavaScript contract manifest for public browser APIs.
 - AppSurface Docs cold requests now show a RazorWire-powered harvest observatory while the first source snapshot is being assembled, with background startup warmup, operator-safe progress, and local testing delays for deterministic QA.
 - RazorWire streams now support opt-in bounded replay, letting late subscribers receive the latest retained state snapshots before live stream events.
 - AppSurface Caching now supports absolute stale-while-revalidate memo policies so callers can serve bounded stale data immediately while one background refresh updates the cached value.
@@ -64,12 +65,14 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - The conventional browser 404 page now favors user recovery, including documentation search for missing docs routes and a home link for other missing pages.
 - AppSurface Web now generalizes conventional browser status pages to empty HTML `401`, `403`, and `404` responses with `BrowserStatusPageMode`, `BrowserStatusPageModel`, preview routes, and status-specific Razor override paths. Static export still writes only `404.html`; conventional production `500` exception pages are tracked separately in issue #224.
 - `StartupContext.ApplicationName` is now treated as a display label while `IHostEnvironment.ApplicationName` stays assembly-backed for static web asset manifest discovery.
+- AppSurface Docs now harvests RazorWire's public JavaScript API from a docs-only contract manifest instead of generated runtime bundles, keeping minification independent from public API documentation.
 
 ### Migration
 
 - AppSurface has not cut `v0.1.0` yet, so there is no tagged migration guide today.
 - Before `v0.1.0`, any breaking or behavior-changing update should record provisional guidance in [`releases/unreleased.md`](./releases/unreleased.md) and move finalized steps into the tagged release note once the version ships.
 - Existing `rw-active` forms opt into failed-form request markers and automatic fallback UI by default. Set `options.Forms.EnableFailureUx = false`, `options.Forms.FailureMode = RazorWireFormFailureMode.Manual`, or per-form `data-rw-form-failure="off"` if an app already owns all failure rendering.
+- RazorWire consumers do not need script-path changes for the TypeScript runtime pipeline. Maintainers should edit `Web/ForgeTrust.RazorWire/assets/src`, rebuild the committed `wwwroot/razorwire/*.js` outputs, and treat `VerifyRazorWireGeneratedAssetsBeforePack=false` as an emergency pack-only bypass.
 - Existing `rw:stream-source` subscriptions now return `403` until apps configure `RazorWireStreamAuthorizationMode.AllowAll` for public/demo streams or register a custom `IRazorWireChannelAuthorizer`.
 - Existing RazorWire CLI export users who depended on extensionless internal URLs should pass `--mode hybrid`; the default now rewrites exporter-managed URLs for plain static/CDN hosting and fails CDN validation when required frame or asset artifacts cannot be emitted.
 - Existing AppSurface Docs exports keep the default HTML redirect alias behavior. Netlify deployments should switch to `appsurface docs export --mode cdn --redirects netlify` and avoid committing or generating a separate `_redirects` file inside the export output.

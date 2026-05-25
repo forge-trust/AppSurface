@@ -7,6 +7,8 @@ namespace ForgeTrust.AppSurface.Config;
 /// </summary>
 public sealed class ConfigAuditKnownEntry
 {
+    private readonly ConfigAuditEntryOptions _options;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigAuditKnownEntry"/> class.
     /// </summary>
@@ -14,6 +16,18 @@ public sealed class ConfigAuditKnownEntry
     /// <param name="configType">The config wrapper type, when one exists.</param>
     /// <param name="valueType">The declared value type.</param>
     public ConfigAuditKnownEntry(string key, Type? configType, Type valueType)
+        : this(key, configType, valueType, options: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConfigAuditKnownEntry"/> class with audit entry options.
+    /// </summary>
+    /// <param name="key">The configuration key.</param>
+    /// <param name="configType">The config wrapper type, when one exists.</param>
+    /// <param name="valueType">The declared value type.</param>
+    /// <param name="options">The entry-specific audit options. The entry snapshots these values.</param>
+    public ConfigAuditKnownEntry(string key, Type? configType, Type valueType, ConfigAuditEntryOptions? options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentNullException.ThrowIfNull(valueType);
@@ -21,6 +35,7 @@ public sealed class ConfigAuditKnownEntry
         Key = key;
         ConfigType = configType;
         ValueType = valueType;
+        _options = new ConfigAuditEntryOptions(options);
     }
 
     /// <summary>
@@ -37,6 +52,426 @@ public sealed class ConfigAuditKnownEntry
     /// Gets the declared value type.
     /// </summary>
     public Type ValueType { get; }
+
+    /// <summary>
+    /// Gets a copy of the audit entry options captured for this known entry.
+    /// </summary>
+    /// <remarks>
+    /// The returned options object is immutable. Configure options during registration by using
+    /// <see cref="ConfigAuditServiceCollectionExtensions.AddConfigAuditKey{T}(IServiceCollection,string,Action{ConfigAuditEntryOptionsBuilder})"/>
+    /// or the constructor overload that accepts <see cref="ConfigAuditEntryOptions"/>.
+    /// </remarks>
+    public ConfigAuditEntryOptions Options => new(_options);
+
+    internal ConfigAuditEntryOptions OptionsSnapshot => _options;
+
+    internal ConfigAuditKnownEntry WithOptions(ConfigAuditEntryOptions options) =>
+        new(Key, ConfigType, ValueType, options);
+}
+
+/// <summary>
+/// Controls optional expansion behavior for one configuration audit entry.
+/// </summary>
+/// <remarks>
+/// Defaults preserve the original audit behavior: object members are reported, collection parent values remain opaque,
+/// and collection elements are not traversed unless <see cref="TraverseCollectionElements"/> is enabled. Instances are
+/// copied by <see cref="ConfigAuditKnownEntry"/>, so registration captures a stable snapshot. Use
+/// <see cref="ConfigAuditEntryOptionsBuilder"/> with the service-collection registration callback when mutable
+/// callback configuration is more convenient than an object initializer. When entries with the same key are merged,
+/// explicitly assigned manual options override wrapper-discovered options one property at a time.
+/// </remarks>
+public sealed class ConfigAuditEntryOptions
+{
+    internal const int DefaultMaxCollectionDepth = 4;
+    internal const int DefaultMaxCollectionElements = 128;
+    internal const int DefaultMaxReportNodes = 4096;
+
+    private bool _traverseCollectionElements;
+    private int _maxCollectionDepth = DefaultMaxCollectionDepth;
+    private int _maxCollectionElements = DefaultMaxCollectionElements;
+    private int _maxReportNodes = DefaultMaxReportNodes;
+    private bool _displayDictionaryKeys = true;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConfigAuditEntryOptions"/> class with safe defaults.
+    /// </summary>
+    public ConfigAuditEntryOptions()
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new immutable snapshot from an existing options object.
+    /// </summary>
+    /// <remarks>
+    /// This constructor copies option values and assignment flags at the time it is called. Later mutations to the
+    /// source reference cannot affect the snapshot used by <see cref="ConfigAuditKnownEntry"/> or audit reporting.
+    /// </remarks>
+    /// <param name="source">The options to copy, or <see langword="null"/> to keep safe defaults.</param>
+    internal ConfigAuditEntryOptions(ConfigAuditEntryOptions? source)
+    {
+        if (source == null)
+        {
+            return;
+        }
+
+        _traverseCollectionElements = source.TraverseCollectionElements;
+        _maxCollectionDepth = source.MaxCollectionDepth;
+        _maxCollectionElements = source.MaxCollectionElements;
+        _maxReportNodes = source.MaxReportNodes;
+        _displayDictionaryKeys = source.DisplayDictionaryKeys;
+        AssignedOptions = source.AssignedOptions;
+    }
+
+    /// <summary>
+    /// Initializes a new immutable options snapshot with explicit values and assignment flags.
+    /// </summary>
+    /// <remarks>
+    /// The values are stored as provided so callers can preserve invalid wrapper or manual inputs until validation
+    /// emits diagnostics. The assignment flags are part of the merge contract: they describe which properties were
+    /// intentionally assigned, not whether those values differ from defaults.
+    /// </remarks>
+    /// <param name="traverseCollectionElements">Whether collection elements should be traversed.</param>
+    /// <param name="maxCollectionDepth">The maximum nested collection depth.</param>
+    /// <param name="maxCollectionElements">The maximum number of elements per collection.</param>
+    /// <param name="maxReportNodes">The maximum number of child nodes reported for the entry.</param>
+    /// <param name="displayDictionaryKeys">Whether non-sensitive dictionary keys may be displayed.</param>
+    /// <param name="assignedOptions">The properties intentionally assigned by the source.</param>
+    internal ConfigAuditEntryOptions(
+        bool traverseCollectionElements,
+        int maxCollectionDepth,
+        int maxCollectionElements,
+        int maxReportNodes,
+        bool displayDictionaryKeys,
+        ConfigAuditEntryOptionAssignments assignedOptions)
+    {
+        _traverseCollectionElements = traverseCollectionElements;
+        _maxCollectionDepth = maxCollectionDepth;
+        _maxCollectionElements = maxCollectionElements;
+        _maxReportNodes = maxReportNodes;
+        _displayDictionaryKeys = displayDictionaryKeys;
+        AssignedOptions = assignedOptions;
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether arrays, lists, and dictionaries should emit child element entries.
+    /// </summary>
+    public bool TraverseCollectionElements
+    {
+        get => _traverseCollectionElements;
+        init
+        {
+            _traverseCollectionElements = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.TraverseCollectionElements;
+        }
+    }
+
+    /// <summary>
+    /// Gets the maximum nested collection depth traversed when collection traversal is enabled.
+    /// </summary>
+    public int MaxCollectionDepth
+    {
+        get => _maxCollectionDepth;
+        init
+        {
+            _maxCollectionDepth = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxCollectionDepth;
+        }
+    }
+
+    /// <summary>
+    /// Gets the maximum number of elements reported from any one traversed collection.
+    /// </summary>
+    public int MaxCollectionElements
+    {
+        get => _maxCollectionElements;
+        init
+        {
+            _maxCollectionElements = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxCollectionElements;
+        }
+    }
+
+    /// <summary>
+    /// Gets the maximum number of child nodes created for this entry before traversal stops.
+    /// </summary>
+    public int MaxReportNodes
+    {
+        get => _maxReportNodes;
+        init
+        {
+            _maxReportNodes = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxReportNodes;
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether non-sensitive dictionary keys may appear as element labels.
+    /// </summary>
+    public bool DisplayDictionaryKeys
+    {
+        get => _displayDictionaryKeys;
+        init
+        {
+            _displayDictionaryKeys = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.DisplayDictionaryKeys;
+        }
+    }
+
+    /// <summary>
+    /// Gets the option properties that were intentionally assigned by the source registration.
+    /// </summary>
+    /// <remarks>
+    /// Assignment tracking is independent from value comparison. For example, manually assigning
+    /// <see cref="MaxCollectionDepth"/> to its default value still sets the corresponding flag and therefore
+    /// overrides a wrapper attribute's custom depth during duplicate-registration merging.
+    /// </remarks>
+    internal ConfigAuditEntryOptionAssignments AssignedOptions { get; init; }
+
+    internal IReadOnlyList<ConfigAuditDiagnostic> Validate(string key)
+    {
+        var diagnostics = new List<ConfigAuditDiagnostic>();
+        if (MaxCollectionDepth < 0)
+        {
+            diagnostics.Add(CreateInvalidOptionDiagnostic(key, nameof(MaxCollectionDepth), "must be greater than or equal to 0"));
+        }
+
+        if (MaxCollectionElements < 0)
+        {
+            diagnostics.Add(CreateInvalidOptionDiagnostic(key, nameof(MaxCollectionElements), "must be greater than or equal to 0"));
+        }
+
+        if (MaxReportNodes < 1)
+        {
+            diagnostics.Add(CreateInvalidOptionDiagnostic(key, nameof(MaxReportNodes), "must be greater than or equal to 1"));
+        }
+
+        return diagnostics;
+    }
+
+    /// <summary>
+    /// Returns options with invalid traversal limits replaced by safe defaults.
+    /// </summary>
+    /// <remarks>
+    /// Normalization preserves <see cref="TraverseCollectionElements"/>, <see cref="DisplayDictionaryKeys"/>, and
+    /// <see cref="AssignedOptions"/>. It is intended for report generation after diagnostics have captured invalid
+    /// inputs; it should not be used as a signal that an option was unassigned.
+    /// </remarks>
+    internal ConfigAuditEntryOptions Normalize() =>
+        Validate("unused").Count == 0
+            ? new ConfigAuditEntryOptions(this)
+            : new ConfigAuditEntryOptions(
+                TraverseCollectionElements,
+                DefaultMaxCollectionDepth,
+                DefaultMaxCollectionElements,
+                DefaultMaxReportNodes,
+                DisplayDictionaryKeys,
+                AssignedOptions);
+
+    /// <summary>
+    /// Applies explicitly assigned option values from a later registration over this options snapshot.
+    /// </summary>
+    /// <remarks>
+    /// Merging happens per property. A property in <paramref name="overrides"/> wins only when its assignment flag is
+    /// present, and it wins even when the overriding value equals the default. This preserves duplicate-registration
+    /// precedence where wrapper-discovered options provide a complete policy, while manual provider options can
+    /// intentionally reset any individual setting back to a default value.
+    /// </remarks>
+    /// <param name="overrides">The options whose assigned properties should override this snapshot.</param>
+    /// <returns>A new options snapshot containing merged values and the union of assignment flags.</returns>
+    internal ConfigAuditEntryOptions ApplyAssignedOverrides(ConfigAuditEntryOptions overrides)
+    {
+        ArgumentNullException.ThrowIfNull(overrides);
+
+        return new ConfigAuditEntryOptions(
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.TraverseCollectionElements)
+                ? overrides.TraverseCollectionElements
+                : TraverseCollectionElements,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.MaxCollectionDepth)
+                ? overrides.MaxCollectionDepth
+                : MaxCollectionDepth,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.MaxCollectionElements)
+                ? overrides.MaxCollectionElements
+                : MaxCollectionElements,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.MaxReportNodes)
+                ? overrides.MaxReportNodes
+                : MaxReportNodes,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.DisplayDictionaryKeys)
+                ? overrides.DisplayDictionaryKeys
+                : DisplayDictionaryKeys,
+            AssignedOptions | overrides.AssignedOptions);
+    }
+
+    private static ConfigAuditDiagnostic CreateInvalidOptionDiagnostic(string key, string optionName, string rule) =>
+        new()
+        {
+            Severity = ConfigAuditDiagnosticSeverity.Error,
+            Code = "config-audit-options-invalid",
+            Key = key,
+            ConfigPath = key,
+            Message = $"Config audit option {optionName} for '{key}' is invalid: {rule}."
+        };
+}
+
+/// <summary>
+/// Mutable builder used by registration callbacks to create immutable <see cref="ConfigAuditEntryOptions"/>.
+/// </summary>
+/// <remarks>
+/// The builder exists only for configuration ergonomics. AppSurface snapshots it into immutable options when
+/// registering the audit key, so later builder mutations cannot affect reports. Property setters are also tracked as
+/// explicit assignments, allowing manual registrations to override wrapper attribute options even when the assigned
+/// value is the option's default.
+/// </remarks>
+public sealed class ConfigAuditEntryOptionsBuilder
+{
+    private bool _traverseCollectionElements;
+    private int _maxCollectionDepth = ConfigAuditEntryOptions.DefaultMaxCollectionDepth;
+    private int _maxCollectionElements = ConfigAuditEntryOptions.DefaultMaxCollectionElements;
+    private int _maxReportNodes = ConfigAuditEntryOptions.DefaultMaxReportNodes;
+    private bool _displayDictionaryKeys = true;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConfigAuditEntryOptionsBuilder"/> class with safe defaults.
+    /// </summary>
+    public ConfigAuditEntryOptionsBuilder()
+    {
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether arrays, lists, and dictionaries should emit child element entries.
+    /// </summary>
+    public bool TraverseCollectionElements
+    {
+        get => _traverseCollectionElements;
+        set
+        {
+            _traverseCollectionElements = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.TraverseCollectionElements;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the maximum nested collection depth traversed when collection traversal is enabled.
+    /// </summary>
+    public int MaxCollectionDepth
+    {
+        get => _maxCollectionDepth;
+        set
+        {
+            _maxCollectionDepth = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxCollectionDepth;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the maximum number of elements reported from any one traversed collection.
+    /// </summary>
+    public int MaxCollectionElements
+    {
+        get => _maxCollectionElements;
+        set
+        {
+            _maxCollectionElements = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxCollectionElements;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the maximum number of child nodes created for this entry before traversal stops.
+    /// </summary>
+    public int MaxReportNodes
+    {
+        get => _maxReportNodes;
+        set
+        {
+            _maxReportNodes = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxReportNodes;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether non-sensitive dictionary keys may appear as element labels.
+    /// </summary>
+    public bool DisplayDictionaryKeys
+    {
+        get => _displayDictionaryKeys;
+        set
+        {
+            _displayDictionaryKeys = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.DisplayDictionaryKeys;
+        }
+    }
+
+    /// <summary>
+    /// Gets the option properties that were assigned through this builder.
+    /// </summary>
+    /// <remarks>
+    /// The builder tracks setter calls rather than non-default values so duplicate-registration merging can
+    /// distinguish "caller left the wrapper value alone" from "caller explicitly reset this option to its default."
+    /// </remarks>
+    internal ConfigAuditEntryOptionAssignments AssignedOptions { get; private set; }
+
+    /// <summary>
+    /// Creates an immutable options snapshot from the current builder state.
+    /// </summary>
+    /// <remarks>
+    /// The returned options copy current values and assignment flags. Later builder mutations do not affect the
+    /// returned options, which is important because registrations are snapshotted before reports are built or
+    /// serialized.
+    /// </remarks>
+    internal ConfigAuditEntryOptions ToOptions() =>
+        new(
+            TraverseCollectionElements,
+            MaxCollectionDepth,
+            MaxCollectionElements,
+            MaxReportNodes,
+            DisplayDictionaryKeys,
+            AssignedOptions);
+}
+
+/// <summary>
+/// Tracks which audit entry options were intentionally assigned by a wrapper attribute or manual registration.
+/// </summary>
+/// <remarks>
+/// These flags control duplicate-registration precedence. They are not a serialization format and should not be
+/// inferred from option values, because default-valued assignments are meaningful overrides.
+/// </remarks>
+[Flags]
+internal enum ConfigAuditEntryOptionAssignments
+{
+    /// <summary>
+    /// No options were explicitly assigned.
+    /// </summary>
+    None = 0,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.TraverseCollectionElements"/> was explicitly assigned.
+    /// </summary>
+    TraverseCollectionElements = 1 << 0,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.MaxCollectionDepth"/> was explicitly assigned.
+    /// </summary>
+    MaxCollectionDepth = 1 << 1,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.MaxCollectionElements"/> was explicitly assigned.
+    /// </summary>
+    MaxCollectionElements = 1 << 2,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.MaxReportNodes"/> was explicitly assigned.
+    /// </summary>
+    MaxReportNodes = 1 << 3,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.DisplayDictionaryKeys"/> was explicitly assigned.
+    /// </summary>
+    DisplayDictionaryKeys = 1 << 4,
+
+    /// <summary>
+    /// Every audit entry option was explicitly assigned.
+    /// </summary>
+    All = TraverseCollectionElements | MaxCollectionDepth | MaxCollectionElements | MaxReportNodes | DisplayDictionaryKeys
 }
 
 /// <summary>
@@ -61,10 +496,36 @@ public static class ConfigAuditServiceCollectionExtensions
     /// <returns>The original <paramref name="services"/> instance.</returns>
     public static IServiceCollection AddConfigAuditKey<T>(this IServiceCollection services, string key)
     {
+        return AddConfigAuditKey<T>(services, key, configure: null);
+    }
+
+    /// <summary>
+    /// Registers an additional configuration key for audit reports with entry-specific options.
+    /// </summary>
+    /// <remarks>
+    /// Use <paramref name="configure"/> to opt into collection element traversal for this key only. Options are
+    /// snapshotted when the registration is created; collection traversal remains disabled by default so existing
+    /// reports keep their previous shape unless callers explicitly enable it. If this key is also discovered from a
+    /// config wrapper, the wrapper supplies metadata and validation while explicitly assigned manual options override
+    /// wrapper audit options per property.
+    /// </remarks>
+    /// <typeparam name="T">The expected value type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="key">The configuration key.</param>
+    /// <param name="configure">A callback that customizes the audit options for this key.</param>
+    /// <returns>The original <paramref name="services"/> instance.</returns>
+    public static IServiceCollection AddConfigAuditKey<T>(
+        this IServiceCollection services,
+        string key,
+        Action<ConfigAuditEntryOptionsBuilder>? configure)
+    {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
-        services.AddSingleton(new ConfigAuditKnownEntry(key, configType: null, typeof(T)));
+        var options = new ConfigAuditEntryOptionsBuilder();
+        configure?.Invoke(options);
+
+        services.AddSingleton(new ConfigAuditKnownEntry(key, configType: null, typeof(T), options.ToOptions()));
         return services;
     }
 }

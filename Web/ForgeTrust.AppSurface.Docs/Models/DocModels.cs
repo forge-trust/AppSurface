@@ -1556,9 +1556,135 @@ public sealed record DocSidebarViewModel
     public IReadOnlyList<DocSidebarSectionViewModel> Sections { get; init; } = [];
 
     /// <summary>
-    /// Gets the harvest health sidebar entry when the current host should show health chrome.
+    /// Gets the maintainer diagnostics disclosure when the current host should show diagnostics chrome.
     /// </summary>
+    public DocSidebarDiagnosticsViewModel? Diagnostics { get; init; }
+
+    /// <summary>
+    /// Gets the legacy harvest health sidebar entry when the current host should show health chrome.
+    /// </summary>
+    /// <remarks>
+    /// Prefer <see cref="Diagnostics"/> for built-in sidebar rendering. This property remains available for callers that
+    /// inspect the component model directly and need the pre-diagnostics health status shape.
+    /// </remarks>
     public DocSidebarHarvestHealthViewModel? HarvestHealth { get; init; }
+}
+
+/// <summary>
+/// View model for the AppSurface Docs maintainer diagnostics sidebar disclosure.
+/// </summary>
+/// <remarks>
+/// Diagnostics chrome is a maintainer affordance, not public reader navigation. The model links only to routes that are
+/// exposed for the current environment and options; hidden routes can still produce status-only rows when their chrome
+/// is visible. JSON destinations stay secondary to the human HTML diagnostics pages. Prefer this model for new sidebar
+/// rendering because it can represent harvest health, route-inspector tools, status-only rows, and secondary JSON
+/// actions together. Keep <see cref="DocSidebarViewModel.HarvestHealth"/> only for compatibility with callers that
+/// consumed the pre-diagnostics health shape directly.
+/// </remarks>
+public sealed record DocSidebarDiagnosticsViewModel
+{
+    /// <summary>
+    /// Gets the disclosure label shown in the sidebar.
+    /// </summary>
+    public string Label { get; init; } = "Diagnostics";
+
+    /// <summary>
+    /// Gets the optional harvest status badge shown beside the disclosure label.
+    /// </summary>
+    public DocSidebarDiagnosticsStatusViewModel? Status { get; init; }
+
+    /// <summary>
+    /// Gets the maintainer tools currently available from the diagnostics disclosure.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to an empty list. A diagnostics disclosure can still be meaningful with no tools when <see cref="Status"/>
+    /// carries a health summary, but built-in rendering normally omits the disclosure when both <see cref="Status"/> is
+    /// <see langword="null"/> and this list is empty. Tool membership is environment- and option-dependent; do not infer
+    /// that a missing tool means the underlying route is absent in every host.
+    /// </remarks>
+    public IReadOnlyList<DocSidebarDiagnosticsToolViewModel> Tools { get; init; } = [];
+}
+
+/// <summary>
+/// View model for the diagnostics disclosure status badge.
+/// </summary>
+/// <remarks>
+/// Use the status badge for a compact aggregate state such as <c>Healthy</c>, <c>Degraded</c>, or
+/// <c>Health unavailable</c>. <see cref="Label"/> defaults to an empty string so callers that construct the model
+/// manually should provide a reader-facing label. <see cref="Ok"/> is a presentation hint for pass/fail styling only;
+/// it does not expose route availability or permission state. The badge should be derived from the same snapshot used
+/// for any harvest-health tool row so concurrent harvest refreshes do not show mismatched status and tool summaries.
+/// </remarks>
+public sealed record DocSidebarDiagnosticsStatusViewModel
+{
+    /// <summary>
+    /// Gets the status text shown in the compact badge.
+    /// </summary>
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets a value indicating whether the status should pass local or CI verification.
+    /// </summary>
+    public bool Ok { get; init; }
+}
+
+/// <summary>
+/// View model for one maintainer diagnostics destination in the sidebar disclosure.
+/// </summary>
+/// <remarks>
+/// A tool row can be linked or status-only. Set <see cref="Href"/> to an app-relative URL such as
+/// <c>/docs/_health</c> or <c>/docs/_routes</c> only when the corresponding route is exposed for the current
+/// environment and options. Leave <see cref="Href"/> <see langword="null"/> when chrome is visible but the route should
+/// not be advertised, or when a fallback row such as <c>Health unavailable</c> has no destination. <see cref="JsonAction"/>
+/// is optional and should be present only when there is a secondary machine-readable route paired with the human HTML
+/// destination. Do not use the presence of chrome alone as an authorization signal; route exposure is resolved
+/// independently and can differ between development, production, and explicit configuration.
+/// </remarks>
+public sealed record DocSidebarDiagnosticsToolViewModel
+{
+    /// <summary>
+    /// Gets the human-readable tool label.
+    /// </summary>
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the app-relative HTML destination when the tool route is exposed; otherwise <see langword="null"/> for a
+    /// status-only row.
+    /// </summary>
+    public string? Href { get; init; }
+
+    /// <summary>
+    /// Gets optional supporting text for the tool row.
+    /// </summary>
+    public string? Summary { get; init; }
+
+    /// <summary>
+    /// Gets the optional secondary JSON action for automation-oriented diagnostics.
+    /// </summary>
+    public DocSidebarDiagnosticsActionViewModel? JsonAction { get; init; }
+}
+
+/// <summary>
+/// View model for a secondary diagnostics action.
+/// </summary>
+/// <remarks>
+/// Secondary actions are intended for automation-oriented representations such as <c>/docs/_health.json</c> or
+/// <c>/docs/_routes.json</c>. <see cref="Label"/> and <see cref="Href"/> default to empty strings for object-initializer
+/// friendliness, but built-in callers should populate both before rendering the action. Prefer placing the human HTML
+/// route on <see cref="DocSidebarDiagnosticsToolViewModel.Href"/> and the JSON route here so keyboard, screen-reader,
+/// and crawler behavior stays predictable.
+/// </remarks>
+public sealed record DocSidebarDiagnosticsActionViewModel
+{
+    /// <summary>
+    /// Gets the accessible action label.
+    /// </summary>
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the app-relative action destination.
+    /// </summary>
+    public string Href { get; init; } = string.Empty;
 }
 
 /// <summary>

@@ -14,3 +14,13 @@ This will output:
 ```
 Hello, World!
 ```
+
+The sample also exposes the app-owned configuration diagnostics wrapper:
+
+```bash
+dotnet run --project examples/console-app/ConsoleAppExample.csproj -- config diagnostics
+```
+
+That command runs inside the sample app's own AppSurface host and prints the active environment's known configuration
+audit entries. It does not accept a command-level `--environment`; pass AppSurface host environment input at startup
+when the whole app should start under another environment.

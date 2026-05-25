@@ -153,13 +153,13 @@ The event detail includes `form`, `target`, `message`, and optional `development
 
 ## Test Workflow
 
-Runtime tests live beside the RazorWire static asset:
+Runtime tests live beside the RazorWire asset pipeline:
 
 ```bash
-node --test Web/ForgeTrust.RazorWire/test/*.test.mjs
+pnpm --dir Web run assets:razorwire:test
 ```
 
-CI runs the same tests with `npm ci --prefix Web/ForgeTrust.RazorWire` followed by `npm test --prefix Web/ForgeTrust.RazorWire`.
+The focused command builds the generated runtime outputs first, then runs the Node test suite against the package assets.
 
 Server behavior is covered by the RazorWire unit tests:
 

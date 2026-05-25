@@ -66,13 +66,54 @@ public class RazorWireScriptsTagHelperTests
         Assert.Null(_output.TagName); // Should remove the wrapper tag
 
         var content = _output.Content.GetContent();
-        Assert.Contains("turbo.es2017-umd.js", content);
+        Assert.Contains(
+            "src=\"https://cdn.jsdelivr.net/npm/@hotwired/turbo@8.0.12/dist/turbo.es2017-umd.js\"",
+            content);
+        Assert.Contains(
+            "integrity=\"sha256-1evN/OxCRDJtuVCzQ3gklVq8LzN6qhCm7x/sbawknOk=\"",
+            content);
+        Assert.Contains("crossorigin=\"anonymous\"", content);
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.js?v=123\"",
             content);
         Assert.Contains(
             "src=\"/my-app/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js?v=456\"",
             content);
+    }
+
+    [Fact]
+    public void RazorWireProject_DefinesPackOnlyGeneratedAssetGuardWithEmergencyBypass()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var projectPath = Path.Join(
+            repoRoot,
+            "Web",
+            "ForgeTrust.RazorWire",
+            "ForgeTrust.RazorWire.csproj");
+        var project = File.ReadAllText(projectPath);
+
+        Assert.Contains("BeforeTargets=\"GenerateNuspec\"", project, StringComparison.Ordinal);
+        Assert.Contains("VerifyRazorWireGeneratedAssetsBeforePack", project, StringComparison.Ordinal);
+        Assert.Contains("assets:razorwire:verify", project, StringComparison.Ordinal);
+        Assert.Contains("RWPACK001", project, StringComparison.Ordinal);
+        Assert.Contains("""<Content Remove="assets\**\*" />""", project, StringComparison.Ordinal);
+        Assert.Contains("""<None Remove="assets\**\*" />""", project, StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null)
+        {
+            if (File.Exists(Path.Join(directory.FullName, "ForgeTrust.AppSurface.slnx")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new InvalidOperationException("Unable to find repository root from the current test assembly path.");
     }
 
     [Fact]

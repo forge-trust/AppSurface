@@ -39,7 +39,8 @@ public sealed partial class RepositoryReadmePolicyTests
         Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Docs/AppSurfaceDocsOptions.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
         Assert.False(policy.ShouldIncludeFilePath("examples/web-app/Program.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Web.Tests/Fixture.cs", AppSurfaceDocsHarvestSourceKind.CSharp));
-        Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js", AppSurfaceDocsHarvestSourceKind.JavaScript));
+        Assert.True(policy.ShouldIncludeFilePath("Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js", AppSurfaceDocsHarvestSourceKind.JavaScript));
+        Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js", AppSurfaceDocsHarvestSourceKind.JavaScript));
         Assert.False(policy.ShouldIncludeFilePath("Web/ForgeTrust.AppSurface.Web.Tests/fixture.js", AppSurfaceDocsHarvestSourceKind.JavaScript));
     }
 

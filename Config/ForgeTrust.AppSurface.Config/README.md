@@ -18,6 +18,8 @@ AppSurface is preparing the first coordinated `v0.1.0` release. Before installin
 - **`FileBasedConfigProvider`**: Loads configuration from files.
 - **`IConfigAuditReporter`**: Builds source-aware configuration audit reports for known config entries.
 - **`ConfigAuditTextRenderer`**: Renders a safe, human-readable audit report from the structured model.
+- **`ConfigAuditCollectionTraversalAttribute`**: Enables bounded collection element traversal for a discovered config wrapper.
+- **`ConfigDiagnosticsCommandRunner`**: Runs the app-owned text diagnostics workflow for the active AppSurface environment.
 - **`Config<T>` / `ConfigStruct<T>`**: Base types for strongly typed configuration values.
 - **`ConfigKeyAttribute`**: Associates a configuration type or property with a specific key.
 - **`ConfigKeyRequiredAttribute`**: Requires a config wrapper to resolve a provider or default value during startup.
@@ -76,6 +78,138 @@ Explicit registrations are useful for keys that are read directly through `IConf
 services.AddConfigAuditKey<string>("Billing.Endpoint");
 ```
 
+### Audit Hello World
+
+Opt in a wrapper, produce the structured report, and render it when humans need a pasteable view:
+
+```csharp
+[ConfigKey("Services", root: true)]
+[ConfigAuditCollectionTraversal]
+public sealed class ServicesConfig : Config<List<ServiceEndpoint>>
+{
+}
+
+var report = auditReporter.GetReport("Production");
+Console.WriteLine(textRenderer.Render(report));
+```
+
+Given this configuration:
+
+```json
+{
+  "Services": [
+    {
+      "Name": "billing",
+      "Url": "https://billing.example",
+      "Password": "do-not-print"
+    }
+  ]
+}
+```
+
+the rendered output keeps collection provenance visible while redacting sensitive members:
+
+```text
+Services
+  State: Resolved
+  Source: FileBasedConfigProvider appsettings.Production.json :: Services
+  Children:
+    Services[0]
+      State: Resolved
+      Source: FileBasedConfigProvider appsettings.Production.json :: Services.0
+      Children:
+        Services[0].Name = billing
+        Services[0].Password = [redacted]
+        Services[0].Url = https://billing.example
+```
+
+### App-Owned Diagnostics Command
+
+Use `ConfigDiagnosticsCommandRunner` when an AppSurface console app should expose an operator command that prints the
+same audit report from inside the app's own DI graph. The runner is registered by `AppSurfaceConfigModule` and stays
+console-agnostic; your app owns the small CliFx wrapper:
+
+```csharp
+using CliFx;
+using CliFx.Binding;
+using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Config;
+
+namespace MyApp;
+
+/// <summary>
+/// Renders the active AppSurface configuration audit report to the console.
+/// </summary>
+/// <param name="runner">The console-agnostic diagnostics runner registered by the config module.</param>
+/// <remarks>
+/// This app-local CliFx command keeps command discovery, console output, and command-framework failure mapping in the
+/// consuming app while reusing Config's redacted audit renderer. The class is partial so CliFx 3 can generate the
+/// descriptor AppSurface Console discovers at startup.
+/// </remarks>
+[Command("config diagnostics", Description = "Prints the active AppSurface configuration audit report.")]
+public sealed partial class ConfigDiagnosticsCommand(ConfigDiagnosticsCommandRunner runner) : ICommand
+{
+    /// <summary>
+    /// Executes the diagnostics command against the already-selected AppSurface host environment.
+    /// </summary>
+    /// <param name="console">The CliFx console whose output writer receives the rendered audit report.</param>
+    /// <returns>A completed value task when the report renders successfully.</returns>
+    /// <exception cref="CommandException">
+    /// Thrown with sanitized diagnostics text when the runner cannot produce a report.
+    /// </exception>
+    public ValueTask ExecuteAsync(IConsole console)
+    {
+        var result = runner.Run(console.Output);
+        if (!result.Succeeded)
+        {
+            throw new CommandException(result.Failure?.ToDisplayString() ?? "Configuration diagnostics failed.");
+        }
+
+        return default;
+    }
+}
+```
+
+Run the command from the app project:
+
+```bash
+dotnet run --project src/MyApp -- config diagnostics
+```
+
+The command audits the active AppSurface environment selected during host startup. It does not define a command-level
+`--environment` option; AppSurface already treats `--environment` as host startup input. A typical report starts like:
+
+```text
+Environment: Staging
+Providers:
+  0. EnvironmentConfigProvider (override)
+  1. FileBasedConfigProvider (priority 0)
+
+Entries:
+  Billing.Endpoint = https://billing.internal
+    State: Resolved
+    Source: FileBasedConfigProvider appsettings.Staging.json :: Billing.Endpoint
+  Billing.ApiKey = [redacted]
+    State: Resolved
+    Source: Environment variable BILLING__APIKEY
+  Retry.Count = 10
+    State: Invalid
+    Diagnostic: The configuration value must be between 1 and 5.
+```
+
+Known AppSurface audit entries only: the report includes discovered `Config<T>` / `ConfigStruct<T>` wrappers and
+entries registered with `AddConfigAuditKey<T>()`. It does not enumerate every raw environment variable, unused JSON key,
+or typo in a provider.
+
+Place the wrapper where AppSurface Console command discovery can see it. By default, `ConsoleStartup<TModule>` scans
+`StartupContext.EntryPointAssembly`, which is normally the root module assembly. If your command lives elsewhere, set
+`StartupContext.OverrideEntryPointAssembly` from a custom startup path.
+
+Diagnostics run after the app host and command service can start. They are not a diagnostic startup mode for apps that
+fail during host construction or eager validation before commands execute. AppSurface console commands also run inside
+the normal Generic Host lifecycle, so unrelated hosted services can start unless your app owns a separate command-only
+startup path.
+
 Audit entry states are intentionally small:
 
 | State | Meaning |
@@ -104,6 +238,82 @@ MyApp.Settings
 The report is observational. Environment patch diagnostics trace patches against a cloned value so asking for an audit
 report does not mutate the provider object being inspected.
 
+Collection element provenance is opt-in per entry. Arrays and lists use zero-based numeric element paths such as
+`Services.0`. Dictionary items use display labels such as `Routes["primary"]` when the key is non-sensitive and safe to
+display. Dotted, quoted, bracketed, hidden, or sensitive dictionary keys use inherited parent provenance instead of
+exposing a raw key path; for example, keys such as `user.name`, `items[0]`, or `"first name"` inherit the parent source
+because they cannot form an unambiguous raw config path.
+
+### Collection Traversal API
+
+`ConfigAuditEntryOptions` is an immutable snapshot that controls collection expansion for one known entry:
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `TraverseCollectionElements` | `false` | Keeps existing reports opaque unless explicitly enabled. |
+| `MaxCollectionDepth` | `4` | Stops nested collection traversal after the configured depth. |
+| `MaxCollectionElements` | `128` | Stops after this many elements from any one collection. |
+| `MaxReportNodes` | `4096` | Bounds total child nodes created for the entry. |
+| `DisplayDictionaryKeys` | `true` | Allows non-sensitive dictionary keys to appear as labels. Sensitive keys are still redacted. |
+
+For discovered wrappers, use `ConfigAuditCollectionTraversalAttribute`. Attribute presence enables traversal and its
+named properties mirror the bounded options:
+
+```csharp
+[ConfigAuditCollectionTraversal(MaxCollectionElements = 32, DisplayDictionaryKeys = false)]
+public sealed class ServicesByNameConfig : Config<Dictionary<string, ServiceEndpoint>>
+{
+}
+```
+
+Use the `AddConfigAuditKey<T>()` overload when registering provider-only keys. The callback receives a mutable
+`ConfigAuditEntryOptionsBuilder`; AppSurface snapshots the builder into immutable options during registration:
+
+```csharp
+services.AddConfigAuditKey<Dictionary<string, ServiceEndpoint>>(
+    "ServicesByName",
+    options =>
+    {
+        options.TraverseCollectionElements = true;
+        options.MaxCollectionElements = 32;
+    });
+```
+
+`ConfigAuditKnownEntry` also has an options overload for wrapper-discovered or manually constructed entries.
+Use an object initializer to create the immutable options snapshot:
+
+```csharp
+services.AddSingleton(
+    new ConfigAuditKnownEntry(
+        "Services",
+        configType: null,
+        typeof(List<ServiceEndpoint>),
+        new ConfigAuditEntryOptions { TraverseCollectionElements = true }));
+```
+
+Each collection child can include `ConfigAuditEntry.Element`. Array and list entries set `Element.Kind` to
+`ArrayItem` or `ListItem` and set `Element.Index`. Dictionary entries set `Element.Kind` to `DictionaryItem` and set
+`Element.KeyLabel` to a display-safe label. Redacted dictionary labels are report-local, for example
+`[redacted-key-1]`; they are not stable identifiers across reports.
+
+When wrapper discovery and manual registration use the same key, the wrapper remains the source of wrapper metadata
+and validation behavior. Explicit manual option assignments override wrapper attribute options per property, including
+assignments back to the default value. For example, a wrapper can hide dictionary keys by default while one manual
+registration sets `DisplayDictionaryKeys = true` for a provider-only report composition.
+
+### Collection Examples
+
+| Shape | Traversal result |
+| --- | --- |
+| `string[]` or `List<T>` | Children render as `Key[0]`, `Key[1]`, preserving numeric order in text output. |
+| `Dictionary<string,T>` | Non-sensitive keys render as `Key["name"]`; sensitive keys render as `Key[[redacted-key-1]]`. |
+| null element | Emits an element child with a `null` display value and no grandchildren. |
+| object element | Emits the element and then ordinary public property/field children below it. |
+| non-string dictionary key | Uses the invariant string label when it is non-sensitive and display is enabled. |
+| dotted or bracketed dictionary key | Uses a display label but inherits parent provenance because no safe exact source path is available. |
+| unsupported enumerable | Emits a traversal diagnostic instead of enumerating. |
+| multidimensional array | Emits a traversal diagnostic; only one-dimensional arrays are expanded. |
+
 ### Redaction Defaults
 
 Audit reports are redacted by default before renderers see values. Sensitive-looking paths, keys, and environment
@@ -112,18 +322,48 @@ variable names render as `[redacted]`. The built-in fragments include `password`
 
 Redaction is deliberately conservative. It does not expose string lengths, sensitive collection counts, or sensitive
 nested values. Source metadata remains visible unless a provider marks the source metadata itself as sensitive. This
-keeps reports safe to paste into support issues while still showing where a value came from.
+keeps values redacted while still showing where a value came from. Treat rendered reports as internal support data:
+provider names, file names, environment variable names, key names, and the existence of redacted values can still be
+operationally sensitive.
 
 Collection parent values are omitted instead of serialized when the collection key and source metadata are not
 sensitive. This avoids leaking nested element fields such as `Password`, `Token`, `Secret`, or `ApiKey` through a raw
-JSON dump. Use source records, diagnostics, and object child entries that the reporter already exposes to inspect
-structure; collection element traversal is intentionally outside the first audit surface.
+JSON dump. When element traversal is enabled, dictionary key labels and source selection are redacted before public
+report objects are created. Raw sensitive dictionary keys do not appear in `Key`, `Element`, `Sources`, diagnostics, or
+the text renderer.
+
+### Audit Diagnostics
+
+| Code | Severity | Meaning |
+| --- | --- | --- |
+| `config-audit-collection-kind-unsupported` | Warning | The value is an unsupported enumerable shape or a multidimensional array. |
+| `config-audit-collection-depth-limit` | Warning | Traversal stopped at `MaxCollectionDepth`. |
+| `config-audit-collection-element-limit` | Warning | Traversal stopped at `MaxCollectionElements` for one collection. |
+| `config-audit-report-node-limit` | Warning | Traversal stopped at `MaxReportNodes` for the entry. |
+| `config-audit-source-inherited` | Info | An element inherited parent provenance because an exact safe source path was unavailable. |
+| `config-audit-source-unavailable` | Info | No provider source record was available for an element. |
+| `config-audit-options-invalid` | Error | Entry options were invalid; safe defaults were used for bounded traversal values. |
+
+### Migration Note
+
+Existing reports keep the same collection shape unless an entry opts into collection traversal through
+`ConfigAuditCollectionTraversalAttribute` or manual `TraverseCollectionElements`. Object child entries, redacted scalar
+display values, provider precedence, and wrapper diagnostics continue to work as before. If a wrapper-discovered key
+and a manual key registration use the same config key, wrapper metadata still wins for type and validation, while
+explicit manual audit option assignments are merged into the selected entry.
 
 ### Audit Pitfalls
 
 - Audit reports cover AppSurface-known entries, not every raw process environment variable or every unused file key.
-- Collection display values are intentionally omitted rather than summarized or serialized; register more specific
-  keys when element-level audit visibility is required.
+- Collection display values are intentionally omitted rather than summarized or serialized; opt into element traversal
+  for keys where element-level visibility is safe and useful.
+- `ConfigAuditCollectionTraversalAttribute` is inherited. Put a new attribute on a derived wrapper when inherited
+  traversal limits are too broad or too narrow for that derived key.
+- Attribute values are compile-time metadata. Use manual `AddConfigAuditKey<T>()` options when traversal settings must
+  be chosen dynamically at registration time.
+- Sensitive dictionary key labels are report-local. Do not use `[redacted-key-1]` as a durable correlation identifier.
+- Element traversal reports existing provider values. Environment-created missing collection elements, global debug
+  expansion, diffing, raw-key drift analysis, and support-bundle export are separate product surfaces.
 - Provider-discovered raw key enumeration is intentionally separate from the first audit surface.
 - File origins include file path and config path. Line and column origins are not part of the first report.
 - Validation diagnostics name keys and rules; they do not include attempted secret values.

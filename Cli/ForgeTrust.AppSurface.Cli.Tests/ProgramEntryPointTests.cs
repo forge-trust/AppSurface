@@ -2567,12 +2567,24 @@ public sealed class ProgramEntryPointTests
 
     private sealed class StaticHttpMessageHandler(HttpStatusCode statusCode, string body) : HttpMessageHandler
     {
+        private readonly HttpResponseMessage _response = new(statusCode)
+        {
+            Content = new StringContent(body)
+        };
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            return Task.FromResult(new HttpResponseMessage(statusCode)
+            return Task.FromResult(_response);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
             {
-                Content = new StringContent(body)
-            });
+                _response.Dispose();
+            }
+
+            base.Dispose(disposing);
         }
     }
 

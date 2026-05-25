@@ -430,6 +430,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Harvest.Health);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
+        Assert.NotNull(options.Diagnostics);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ExposeRouteInspector);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ShowChrome);
     }
 
     [Fact]
@@ -571,8 +574,8 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Harvest:CSharp:IncludeGlobs:0"] = "src\\**",
                         ["AppSurfaceDocs:Harvest:CSharp:DefaultExclusions:DisabledGroups:0"] = " csharpexamplesource ",
                         ["AppSurfaceDocs:Harvest:JavaScript:Enabled"] = "true",
-                        ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:0"] = " Web\\ForgeTrust.RazorWire\\wwwroot\\razorwire\\razorwire.js ",
-                        ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:1"] = "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js",
+                        ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:0"] = " Web\\ForgeTrust.RazorWire\\assets\\contracts\\razorwire-public-contracts.js ",
+                        ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:1"] = "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js",
                         ["AppSurfaceDocs:Harvest:JavaScript:ExcludeGlobs:0"] = " **/*.generated.js ",
                         ["AppSurfaceDocs:Harvest:JavaScript:DefaultExclusions:DisabledGroups:0"] = " buildoutput ",
                         ["AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag"] = "false",
@@ -601,7 +604,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(["src/**"], options.Harvest.CSharp.IncludeGlobs);
         Assert.Equal(["CSharpExampleSource"], options.Harvest.CSharp.DefaultExclusions.DisabledGroups);
         Assert.True(options.Harvest.JavaScript.Enabled);
-        Assert.Equal(["Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js"], options.Harvest.JavaScript.IncludeGlobs);
+        Assert.Equal(["Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"], options.Harvest.JavaScript.IncludeGlobs);
         Assert.Equal(["**/*.min.js", "**/*.generated.js"], options.Harvest.JavaScript.ExcludeGlobs);
         Assert.Equal(["BuildOutput"], options.Harvest.JavaScript.DefaultExclusions.DisabledGroups);
         Assert.False(options.Harvest.JavaScript.RequirePublicTag);
@@ -878,6 +881,29 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindConfiguredDiagnosticsOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Diagnostics:ExposeRouteInspector"] = "Always",
+                        ["AppSurfaceDocs:Diagnostics:ShowChrome"] = "Never"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
     }
 
     [Fact]
@@ -1255,7 +1281,8 @@ public sealed class AppSurfaceDocsOptionsTests
         harvest.Health.ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never;
         var diagnostics = new AppSurfaceDocsDiagnosticsOptions
         {
-            ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always
+            ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always,
+            ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never
         };
         var bundle = new AppSurfaceDocsBundleOptions { Path = " /tmp/docs.bundle.json " };
         var sidebar = new AppSurfaceDocsSidebarOptions
@@ -1313,6 +1340,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.True(options.Harvest.FailOnFailure);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
         Assert.Equal("/tmp/docs.bundle.json", options.Bundle.Path);
         Assert.Equal(["Contoso.Product."], options.Sidebar.NamespacePrefixes);
         Assert.Equal("main", options.Contributor.DefaultBranch);
@@ -1380,6 +1408,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ExposeRouteInspector);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ShowChrome);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
         Assert.False(options.Localization.Enabled);
@@ -1585,6 +1614,26 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(
             result.Failures,
             failure => failure.Contains("Unsupported AppSurface Docs route inspector exposure mode", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectUnsupportedDiagnosticsChromeExposureValue()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ShowChrome = (AppSurfaceDocsHarvestHealthExposure)999
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("Unsupported AppSurface Docs diagnostics chrome exposure mode", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
