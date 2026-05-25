@@ -168,9 +168,9 @@ public class ConfigAuditReporterTests
 
     private sealed class FieldBudgetShape
     {
-        public string First = "first";
+        public string First = string.Empty;
 
-        public string Second = "second";
+        public string Second = string.Empty;
     }
 
     private readonly struct StructShape
@@ -710,7 +710,11 @@ public class ConfigAuditReporterTests
                         ["two"] = "2"
                     },
                     ["PropertyBudget.Shape"] = new PropertyBudgetShape(),
-                    ["FieldBudget.Shape"] = new FieldBudgetShape(),
+                    ["FieldBudget.Shape"] = new FieldBudgetShape
+                    {
+                        First = "first",
+                        Second = "second"
+                    },
                     ["Struct.Shape"] = new StructShape { Name = "value-type" },
                     ["Unsupported.Default"] = new ThrowingEnumerable(),
                     ["Unsupported.Items"] = new ThrowingEnumerable(),
