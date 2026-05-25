@@ -812,13 +812,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     missing.Add("@property detail.* or @detail none");
                 }
 
-                foreach (var property in item.Properties)
+                if (item.Properties.Any(property => !IsValidEventDetailPropertyName(property.Name)))
                 {
-                    if (!IsValidEventDetailPropertyName(property.Name))
-                    {
-                        missing.Add("@property detail.*");
-                        break;
-                    }
+                    missing.Add("@property detail.*");
                 }
 
                 if (item.DetailNone && item.Properties.Count > 0)

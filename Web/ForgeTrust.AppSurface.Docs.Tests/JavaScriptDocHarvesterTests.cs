@@ -125,6 +125,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     [InlineData("[detail.message=\"fallback\"]")]
     [InlineData("detail.items[]")]
     [InlineData("detail.items[].id")]
+    [InlineData("detail.$payload-id")]
     public async Task HarvestAsync_ShouldAcceptStrictEventDetailPropertyNames(string detailPropertyName)
     {
         await WriteAsync(
