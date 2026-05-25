@@ -674,6 +674,36 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_CdnMode_Should_Report_Reference_Provenance_For_Missing_Assets()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new MissingParserDiscoveredAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT003");
+
+            Assert.Contains("<img src>", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("Normalized path: '/img/missing.png'", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("Add the route or asset", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Equal("/img/missing.png", diagnostic.Reference?.Path);
+            Assert.Equal("<img src>", diagnostic.Reference?.Provenance?.DisplaySource);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Skip_404Html_When_ReservedRoute_IsUnavailable()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -832,6 +862,52 @@ public class ExportEngineTests
             Assert.All(
                 context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && (outcome.IsHtml || outcome.IsCss)),
                 outcome => Assert.Null(outcome.TextBody));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Rewrite_Source_Preserving_Parser_Discovered_References()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new ParserBackedRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            Assert.StartsWith("<!DOCTYPE html>\n<HTML data-kind=raw>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<!-- keep me -->", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<A HREF=/about.html data-extra='keep'>About</A>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<a DATA-RW-EXPORT-IGNORE href=/ignored>Ignored</a>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<a href=./Program.cs>Program</a>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<LINK REL='stylesheet preload' HREF=/styles/app data-copy=1>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<LINK REL='notstylesheet' HREF=/wrong.css>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""<script SRC=/app>const fake = "<img src=/about>";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<!-- <a href=/about>Comment fake link</a> -->", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<!-- <style>.comment-fake { background:url(/about); }</style> -->", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""const fake = "<img src=/about>";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""const close = "</script-not-real><img src=/about>";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""const fakeStyle = "<style>.script-fake { background:url(/about); }</style>";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""/* url('/img/comment.png') */""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""content: "url('/img/string.png')";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""@import "/about.html";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("background:URL(/about.html)", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("srcset=\"data:image/svg+xml,%3Csvg%3E,%3C/svg%3E 1x, /img/logo-2x.png?v=1 2x\"", indexHtml, StringComparison.Ordinal);
+
+            var stylesheet = await File.ReadAllTextAsync(Path.Combine(tempDir, "styles", "app"));
+            Assert.Contains("url('/about.html')", stylesheet, StringComparison.Ordinal);
         }
         finally
         {
@@ -1881,6 +1957,56 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractReferences_Should_Use_Parser_Backed_Html_And_Stateful_Css_Discovery()
+    {
+        var html = """
+            <A HREF=/about>About</A>
+            <a href=/ignored data-rw-export-ignore>Ignored</a>
+            <a href=./Program.cs>Program</a>
+            <link rel="notstylesheet" href="/wrong.css">
+            <link rel="stylesheet preload" href="/styles/site">
+            <img SRC=/img/logo.png srcset="data:image/svg+xml,%3Csvg%3E,%3C/svg%3E 1x, /img/logo-2x.png 2x, /img/logo.png?version=1#frag 3x">
+            <div style="background:url('/img/attr.png')"></div>
+            <style>
+            /* url('/img/comment.png') */
+            .literal::before { content: "url('/img/string.png')"; }
+            @import "css/theme.css";
+            @import url('/css/print.css');
+            .hero { background: URL(/img/bg.png?x=1#frag); }
+            .bad { background: url('/img/missing.png' }
+            </style>
+            """;
+
+        var references = _sut.ExtractReferences(html, "/docs/start", htmlScope: true);
+        var paths = references.Select(reference => reference.Path).ToArray();
+
+        Assert.Contains("/about", paths);
+        Assert.Contains("/styles/site", paths);
+        Assert.Contains("/img/logo.png", paths);
+        Assert.Contains("/img/logo-2x.png", paths);
+        Assert.Contains("/img/attr.png", paths);
+        Assert.Contains("/docs/css/theme.css", paths);
+        Assert.Contains("/css/print.css", paths);
+        Assert.Contains("/img/bg.png", paths);
+        Assert.DoesNotContain("/ignored", paths);
+        Assert.DoesNotContain("/docs/Program.cs", paths);
+        Assert.DoesNotContain("/wrong.css", paths);
+        Assert.DoesNotContain("/img/comment.png", paths);
+        Assert.DoesNotContain("/img/string.png", paths);
+        Assert.DoesNotContain("/img/missing.png", paths);
+        Assert.DoesNotContain(paths, path => path.Contains("%3Csvg", StringComparison.Ordinal));
+
+        var aboutReference = Assert.Single(references, reference => reference.Path == "/about");
+        Assert.Equal(ExportReferenceKind.AnchorHref, aboutReference.Kind);
+        Assert.Equal("<a href>", aboutReference.Provenance?.DisplaySource);
+        Assert.NotNull(aboutReference.Provenance?.Line);
+
+        var versionedLogo = Assert.Single(references, reference => reference.RawValue == "/img/logo.png?version=1#frag");
+        Assert.Equal("?version=1", versionedLogo.Query);
+        Assert.Equal("#frag", versionedLogo.Fragment);
+    }
+
+    [Fact]
     public void ExtractReferences_Should_Ignore_Hash_Only_Css_References()
     {
         var css = """
@@ -1892,6 +2018,35 @@ public class ExportEngineTests
         var reference = Assert.Single(_sut.ExtractReferences(css, "/docs/start", htmlScope: false));
 
         Assert.Equal("/docs/images/bg.png", reference.Path);
+    }
+
+    [Fact]
+    public void ExtractReferences_Should_Include_Css_Import_Strings_But_Not_Comments_Or_Strings()
+    {
+        var css = """
+            /* url('/comment.png') */
+            .literal::before { content: "url('/string.png')"; }
+            @import "theme.css";
+            @import url('/print.css');
+            .hero { background: image-set(url('/hero.png') 1x, URL("/hero@2x.png") 2x); }
+            .escaped { background: url('/hero\ 2x.png'); }
+            .oversized-escape { background: url('/hero\FFFFFF.png'); }
+            .broken { background: url('/broken.png' }
+            """;
+
+        var references = _sut.ExtractReferences(css, "/css/site.css", htmlScope: false);
+        var paths = references.Select(reference => reference.Path).ToArray();
+
+        Assert.Contains("/css/theme.css", paths);
+        Assert.Contains("/print.css", paths);
+        Assert.Contains("/hero.png", paths);
+        Assert.Contains("/hero@2x.png", paths);
+        Assert.Contains(references, reference => reference.RawValue == "/hero 2x.png");
+        Assert.DoesNotContain(paths, path => path.Contains('\uFFFD'));
+        Assert.DoesNotContain("/comment.png", paths);
+        Assert.DoesNotContain("/string.png", paths);
+        Assert.DoesNotContain("/broken.png", paths);
+        Assert.All(references, reference => Assert.NotNull(reference.Provenance));
     }
 
     [Fact]
@@ -2238,6 +2393,77 @@ public class ExportEngineTests
             }
 
             return NotFound();
+        }
+    }
+
+    private sealed class ParserBackedRewriteHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/")
+            {
+                var html = """
+<!DOCTYPE html>
+<HTML data-kind=raw>
+<HEAD>
+<!-- keep me -->
+<LINK REL='stylesheet preload' HREF=/styles/app data-copy=1>
+<LINK REL='notstylesheet' HREF=/wrong.css>
+<style>
+/* url('/img/comment.png') */
+.literal::before { content: "url('/img/string.png')"; }
+@import "about";
+.hero { background:URL(/about); }
+.broken { background: url('/img/broken.png' }
+</style>
+</HEAD>
+<BODY>
+<A HREF=/about data-extra='keep'>About</A>
+<a DATA-RW-EXPORT-IGNORE href=/ignored>Ignored</a>
+<a href=./Program.cs>Program</a>
+<!-- <a href=/about>Comment fake link</a> -->
+<!-- <style>.comment-fake { background:url(/about); }</style> -->
+<script SRC=/app>const fake = "<img src=/about>"; const close = "</script-not-real><img src=/about>"; const fakeStyle = "<style>.script-fake { background:url(/about); }</style>";</script>
+<img srcset="data:image/svg+xml,%3Csvg%3E,%3C/svg%3E 1x, /img/logo-2x.png?v=1 2x">
+</BODY>
+</HTML>
+""";
+                return Html(html);
+            }
+
+            if (path == "/about")
+            {
+                return Html("<html><body><h1>About</h1></body></html>");
+            }
+
+            if (path == "/styles/app")
+            {
+                return Text(".sheet { background: url('/about'); }", "text/css");
+            }
+
+            if (path == "/app")
+            {
+                return Text("console.log('parser-backed');", "text/javascript");
+            }
+
+            if (path.StartsWith("/img/", StringComparison.Ordinal))
+            {
+                return Bytes("image/png");
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class MissingParserDiscoveredAssetHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path == "/"
+                ? Html("<html><body><img src=/img/missing.png></body></html>")
+                : NotFound();
         }
     }
 

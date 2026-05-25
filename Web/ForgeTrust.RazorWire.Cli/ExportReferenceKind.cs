@@ -23,6 +23,6 @@ internal enum ExportReferenceKind
     /// <summary>One URL candidate inside a <c>srcset</c> attribute.</summary>
     ImgSrcSet,
 
-    /// <summary>A CSS <c>url(...)</c> reference from a stylesheet, style block, or style attribute.</summary>
+    /// <summary>A CSS <c>url(...)</c> or string-form <c>@import</c> reference from a stylesheet, style block, or style attribute.</summary>
     CssUrl
 }
