@@ -9,7 +9,7 @@
     <details class="group mb-3 rounded-lg border border-[#1b2a43] bg-[#07111f]/70 text-xs" data-docs-diagnostics-chrome="true">
         <summary class="list-none cursor-pointer">
             <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-[#0d182a]/70">
-                <span class="min-w-0 truncate font-semibold uppercase tracking-[0.16em] text-slate-300">@Model.Diagnostics.Label</span>
+                <span class="min-w-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">@Model.Diagnostics.Label</span>
                 <span class="inline-flex flex-none items-center gap-2">
                     @if (Model.Diagnostics.Status is not null)
                     {
@@ -28,30 +28,30 @@
             <ul class="space-y-1 px-2 pb-2">
                 @foreach (var diagnosticsTool in Model.Diagnostics.Tools)
                 {
-                    <li class="flex items-center justify-between gap-2 rounded-md px-2 py-1.5">
-                        <span class="min-w-0">
+                    <li class="rounded-md px-2 py-1.5">
+                        <span class="block min-w-0">
                             @if (!string.IsNullOrWhiteSpace(diagnosticsTool.Href))
                             {
                                 <a href="@Url.PathBaseAware(diagnosticsTool.Href)"
-                                   class="block truncate text-sm font-medium text-slate-300 no-underline transition-colors hover:text-[#14b8a6]">
+                                   class="block text-sm font-medium text-slate-300 no-underline transition-colors hover:text-[#14b8a6]">
                                     @diagnosticsTool.Label
                                 </a>
                             }
                             else
                             {
-                                <span class="block truncate text-sm font-medium text-slate-300">@diagnosticsTool.Label</span>
+                                <span class="block text-sm font-medium text-slate-300">@diagnosticsTool.Label</span>
                             }
 
                             @if (!string.IsNullOrWhiteSpace(diagnosticsTool.Summary))
                             {
-                                <span class="block truncate text-[11px] font-medium text-slate-500">@diagnosticsTool.Summary</span>
+                                <span class="block text-[11px] font-medium text-slate-500">@diagnosticsTool.Summary</span>
                             }
                         </span>
 
                         @if (diagnosticsTool.JsonAction is not null)
                         {
                             <a href="@Url.PathBaseAware(diagnosticsTool.JsonAction.Href)"
-                               class="flex-none rounded border border-[#1b2a43] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 no-underline transition-colors hover:border-[#14b8a6]/45 hover:text-[#14b8a6]">
+                               class="mt-1 inline-flex rounded border border-[#1b2a43] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 no-underline transition-colors hover:border-[#14b8a6]/45 hover:text-[#14b8a6]">
                                 @diagnosticsTool.JsonAction.Label
                             </a>
                         }
