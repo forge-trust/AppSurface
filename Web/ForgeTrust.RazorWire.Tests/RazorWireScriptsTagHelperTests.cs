@@ -84,14 +84,16 @@ public class RazorWireScriptsTagHelperTests
     [Fact]
     public void RazorWireProject_DefinesPackOnlyGeneratedAssetGuardWithEmergencyBypass()
     {
-        var projectPath = Path.GetFullPath(Path.Combine(
+        var repoRoot = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "..",
             "..",
             "..",
-            "..",
+            ".."));
+        var projectPath = Path.Combine(
+            repoRoot,
             "ForgeTrust.RazorWire",
-            "ForgeTrust.RazorWire.csproj"));
+            "ForgeTrust.RazorWire.csproj");
         var project = File.ReadAllText(projectPath);
 
         Assert.Contains("BeforeTargets=\"GenerateNuspec\"", project, StringComparison.Ordinal);

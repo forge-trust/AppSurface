@@ -74,10 +74,9 @@ declare const Turbo: TurboRuntime | undefined;
 
         prune() {
             // console.log('[ConnectionManager] Pruning disconnected elements...');
-            for (const [src, source] of this.sources) {
+            for (const [, source] of this.sources) {
                 for (const element of source.elements) {
                     if (!element.isConnected) {
-                        // console.log('[ConnectionManager] Pruning element:', src);
                         this.unregister(element);
                     }
                 }
