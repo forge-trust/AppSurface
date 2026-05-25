@@ -3271,21 +3271,84 @@ public class DocsControllerTests : IDisposable
     [InlineData(
         AppSurfaceDocsHarvestHealthExposure.Always,
         AppSurfaceDocsHarvestHealthExposure.Never,
+        "Production",
         true,
         false)]
     [InlineData(
         AppSurfaceDocsHarvestHealthExposure.Never,
         AppSurfaceDocsHarvestHealthExposure.Always,
+        "Production",
         false,
         true)]
+    [InlineData(
+        AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
+        AppSurfaceDocsHarvestHealthExposure.Always,
+        "Development",
+        true,
+        true)]
+    [InlineData(
+        AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
+        AppSurfaceDocsHarvestHealthExposure.Never,
+        "Development",
+        true,
+        false)]
+    [InlineData(
+        AppSurfaceDocsHarvestHealthExposure.Always,
+        AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
+        "Development",
+        true,
+        true)]
+    [InlineData(
+        AppSurfaceDocsHarvestHealthExposure.Never,
+        AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
+        "Development",
+        false,
+        true)]
+    [InlineData(
+        AppSurfaceDocsHarvestHealthExposure.Always,
+        AppSurfaceDocsHarvestHealthExposure.Always,
+        "Production",
+        true,
+        true)]
+    [InlineData(
+        AppSurfaceDocsHarvestHealthExposure.Never,
+        AppSurfaceDocsHarvestHealthExposure.Never,
+        "Production",
+        false,
+        false)]
+    [InlineData(
+        AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
+        AppSurfaceDocsHarvestHealthExposure.Always,
+        "Production",
+        false,
+        true)]
+    [InlineData(
+        AppSurfaceDocsHarvestHealthExposure.Always,
+        AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
+        "Production",
+        true,
+        false)]
+    [InlineData(
+        AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
+        AppSurfaceDocsHarvestHealthExposure.Never,
+        "Production",
+        false,
+        false)]
+    [InlineData(
+        AppSurfaceDocsHarvestHealthExposure.Never,
+        AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
+        "Production",
+        false,
+        false)]
     public void AppSurfaceDocsDiagnosticsVisibility_ShouldResolveChromeSeparatelyFromRouteExposure(
         AppSurfaceDocsHarvestHealthExposure showChrome,
         AppSurfaceDocsHarvestHealthExposure exposeRouteInspector,
+        string environmentName,
         bool expectedChrome,
         bool expectedRoute)
     {
         var environment = A.Fake<IHostEnvironment>();
-        A.CallTo(() => environment.EnvironmentName).Returns(Environments.Production);
+        A.CallTo(() => environment.EnvironmentName).Returns(environmentName);
         var options = new AppSurfaceDocsOptions
         {
             Diagnostics = new AppSurfaceDocsDiagnosticsOptions
