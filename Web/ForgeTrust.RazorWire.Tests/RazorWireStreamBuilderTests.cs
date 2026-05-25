@@ -57,6 +57,76 @@ public class RazorWireStreamBuilderTests
     }
 
     [Fact]
+    public void Visit_DefaultsToAdvanceAndRendersCommandStream()
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder();
+
+        // Act
+        var result = builder.Visit("/docs/next").Build();
+
+        // Assert
+        Assert.Equal(
+            "<turbo-stream action=\"rw-visit\" url=\"/docs/next\" visit-action=\"advance\"></turbo-stream>",
+            result);
+    }
+
+    [Fact]
+    public void Visit_WithReplaceAction_RendersReplaceCommandStream()
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder();
+
+        // Act
+        var result = builder.Visit("?tab=done", RazorWireVisitAction.Replace).Build();
+
+        // Assert
+        Assert.Equal(
+            "<turbo-stream action=\"rw-visit\" url=\"?tab=done\" visit-action=\"replace\"></turbo-stream>",
+            result);
+    }
+
+    [Fact]
+    public void Visit_EncodesUrlAttribute()
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder();
+
+        // Act
+        var result = builder.Visit("/docs/search?q=<api>&kind=\"all\"").Build();
+
+        // Assert
+        Assert.Equal(
+            "<turbo-stream action=\"rw-visit\" url=\"/docs/search?q=&lt;api&gt;&amp;kind=&quot;all&quot;\" visit-action=\"advance\"></turbo-stream>",
+            result);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("/docs/\u0001next")]
+    [InlineData("/docs/\u007Fnext")]
+    public void Visit_WithInvalidUrl_ThrowsArgumentException(string? url)
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder();
+
+        // Act + Assert
+        Assert.ThrowsAny<ArgumentException>(() => builder.Visit(url!));
+    }
+
+    [Fact]
+    public void Visit_WithUnsupportedAction_ThrowsArgumentOutOfRangeException()
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder();
+
+        // Act + Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => builder.Visit("/docs", (RazorWireVisitAction)99));
+    }
+
+    [Fact]
     public void Build_WithAsyncActions_ThrowsInvalidOperationException()
     {
         // Arrange
@@ -86,6 +156,53 @@ public class RazorWireStreamBuilderTests
         Assert.Contains("<template><li>one</li></template>", result);
         Assert.Contains("action=\"remove\"", result);
         Assert.Contains("target=\"obsolete\"", result);
+    }
+
+    [Fact]
+    public async Task RenderAsync_WithVisitAction_RendersCommandStreamInOrder()
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder()
+            .Update("status", "<p>done</p>")
+            .Visit("/docs/next", RazorWireVisitAction.Replace);
+
+        var viewContext = CreateViewContext();
+
+        // Act
+        var result = await builder.RenderAsync(viewContext);
+
+        // Assert
+        var updateIndex = result.IndexOf("action=\"update\"", StringComparison.Ordinal);
+        var visitIndex = result.IndexOf("action=\"rw-visit\"", StringComparison.Ordinal);
+        Assert.True(updateIndex >= 0);
+        Assert.True(visitIndex > updateIndex);
+        Assert.Contains("url=\"/docs/next\"", result);
+        Assert.Contains("visit-action=\"replace\"", result);
+    }
+
+    [Fact]
+    public async Task BuildResult_WithVisitAction_RendersCommandStream()
+    {
+        // Arrange
+        var tempDataFactory = A.Fake<ITempDataDictionaryFactory>();
+        using var actionContext = RazorWireTestContext.CreateActionContext(services =>
+        {
+            services.AddSingleton(tempDataFactory);
+        });
+        A.CallTo(() => tempDataFactory.GetTempData(A<HttpContext>._)).Returns(A.Fake<ITempDataDictionary>());
+
+        // Act
+        var result = new RazorWireStreamBuilder()
+            .Visit("./next")
+            .BuildResult();
+        await result.ExecuteResultAsync(actionContext.ActionContext);
+        var rendered = await RazorWireTestContext.ReadBodyAsync(actionContext.ActionContext.HttpContext.Response);
+
+        // Assert
+        Assert.Equal("text/vnd.turbo-stream.html", actionContext.ActionContext.HttpContext.Response.ContentType);
+        Assert.Equal(
+            "<turbo-stream action=\"rw-visit\" url=\"./next\" visit-action=\"advance\"></turbo-stream>",
+            rendered);
     }
 
     [Fact]
@@ -128,6 +245,7 @@ public class RazorWireStreamBuilderTests
             .ReplaceComponent("target-15", "Widget", new { Id = 7 })
             .UpdateComponent("target-16", "Widget", new { Id = 8 })
             .Remove("target-17")
+            .Visit("/docs/complete", RazorWireVisitAction.Replace)
             .BuildResult();
 
         await result.ExecuteResultAsync(actionContext.ActionContext);
@@ -135,7 +253,7 @@ public class RazorWireStreamBuilderTests
 
         // Assert
         Assert.Equal("text/vnd.turbo-stream.html", actionContext.ActionContext.HttpContext.Response.ContentType);
-        Assert.Equal(17, Regex.Matches(rendered, "<turbo-stream").Count);
+        Assert.Equal(18, Regex.Matches(rendered, "<turbo-stream").Count);
         var expectedTargets = new[]
         {
             "target-1",
@@ -166,6 +284,10 @@ public class RazorWireStreamBuilderTests
             previousIndex = index;
         }
 
+        var visitIndex = rendered.IndexOf("action=\"rw-visit\"", StringComparison.Ordinal);
+        Assert.True(visitIndex > previousIndex, "Expected visit action to render after queued target actions.");
+        Assert.Contains("url=\"/docs/complete\"", rendered, StringComparison.Ordinal);
+        Assert.Contains("visit-action=\"replace\"", rendered, StringComparison.Ordinal);
         Assert.Equal(4, viewComponentHelper.TypedInvocationCount);
         Assert.Equal(4, viewComponentHelper.NamedInvocationCount);
     }

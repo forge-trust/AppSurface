@@ -254,6 +254,45 @@ public class RazorWireStreamBuilder
     }
 
     /// <summary>
+    /// Queues a one-shot Turbo Drive visit stream command that advances browser history.
+    /// </summary>
+    /// <remarks>
+    /// RazorWire emits this command as a <c>rw-visit</c> Turbo Stream action with a <c>visit-action</c> value of
+    /// <c>advance</c>. The browser runtime validates that the resolved URL stays on the current origin before calling
+    /// Turbo. Visit commands are not idempotent state snapshots, so publish them only to live subscribers and never to
+    /// retained replay channels.
+    /// </remarks>
+    /// <param name="url">The relative or same-origin URL that the browser should visit.</param>
+    /// <returns>The current <see cref="RazorWireStreamBuilder"/> instance for fluent chaining.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="url"/> is null, empty, whitespace, or contains an ASCII control character.</exception>
+    public RazorWireStreamBuilder Visit(string url)
+    {
+        return Visit(url, RazorWireVisitAction.Advance);
+    }
+
+    /// <summary>
+    /// Queues a one-shot Turbo Drive visit stream command.
+    /// </summary>
+    /// <remarks>
+    /// The generated stream contains no <c>target</c> or <c>template</c>; it is a command for the RazorWire browser
+    /// runtime. Server-side validation rejects only input that cannot safely be serialized. Origin checks happen in the
+    /// browser because relative URLs resolve against the current document location. Do not use this method for fallback
+    /// content or replayable state; render a normal link or retained state stream for those cases.
+    /// </remarks>
+    /// <param name="url">The relative or same-origin URL that the browser should visit.</param>
+    /// <param name="action">The Turbo Drive history action to apply.</param>
+    /// <returns>The current <see cref="RazorWireStreamBuilder"/> instance for fluent chaining.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="url"/> is null, empty, whitespace, or contains an ASCII control character.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="action"/> is not a supported <see cref="RazorWireVisitAction"/> value.</exception>
+    public RazorWireStreamBuilder Visit(string url, RazorWireVisitAction action)
+    {
+        ValidateVisitUrl(url);
+        _actions.Add(new VisitStreamAction(url, action));
+
+        return this;
+    }
+
+    /// <summary>
     /// Queues a form-local failure summary for an enhanced RazorWire form.
     /// </summary>
     /// <remarks>
@@ -328,24 +367,18 @@ public class RazorWireStreamBuilder
     }
 
     /// <summary>
-    /// Builds a single concatenated Turbo Stream markup string from the queued raw HTML actions.
+    /// Builds a single concatenated Turbo Stream markup string from the queued synchronous actions.
     /// </summary>
-    /// <returns>The concatenated Turbo Stream markup representing the queued raw HTML actions.</returns>
+    /// <returns>The concatenated Turbo Stream markup representing the queued synchronous actions.</returns>
     /// <exception cref="InvalidOperationException">Thrown if the builder contains actions that require asynchronous rendering (such as partial views or view components); use RenderAsync(viewContext) or BuildResult() instead.</exception>
     public string Build()
     {
         var sb = new System.Text.StringBuilder();
         foreach (var action in _actions)
         {
-            if (action is RawHtmlStreamAction raw)
+            if (action is ISynchronousRazorWireStreamAction synchronous)
             {
-                var encodedTarget = HtmlEncoder.Default.Encode(raw.Target);
-                var encodedAction = HtmlEncoder.Default.Encode(raw.Action);
-                if (raw.Action == "remove")
-                    sb.Append($"<turbo-stream action=\"remove\" target=\"{encodedTarget}\"></turbo-stream>");
-                else
-                    sb.Append(
-                        $"<turbo-stream action=\"{encodedAction}\" target=\"{encodedTarget}\"><template>{raw.Html}</template></turbo-stream>");
+                sb.Append(synchronous.Render());
             }
             else
             {
@@ -462,9 +495,24 @@ public class RazorWireStreamBuilder
             .ToList();
     }
 
+    private static void ValidateVisitUrl(string url)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(url);
+
+        if (url.Any(IsAsciiControlCharacter))
+        {
+            throw new ArgumentException("Visit stream URLs cannot contain ASCII control characters.", nameof(url));
+        }
+    }
+
+    private static bool IsAsciiControlCharacter(char value)
+    {
+        return value <= '\u001F' || value == '\u007F';
+    }
+
     private sealed record RazorWireValidationError(string Key, string Message);
 
-    private class RawHtmlStreamAction : IRazorWireStreamAction
+    private class RawHtmlStreamAction : ISynchronousRazorWireStreamAction
     {
         public string Action { get; }
         public string Target { get; }
@@ -486,6 +534,24 @@ public class RazorWireStreamBuilder
         /// <summary>
         /// Renders the action as a turbo-stream HTML string.
         /// </summary>
+        /// <returns>The turbo-stream element for the action and target; for action "remove" the element has no &lt;template&gt;, otherwise its &lt;template&gt; contains the action's HTML.</returns>
+        public string Render()
+        {
+            var encodedTarget = HtmlEncoder.Default.Encode(Target);
+            var encodedAction = HtmlEncoder.Default.Encode(Action);
+            if (Action == "remove")
+            {
+                return $"<turbo-stream action=\"remove\" target=\"{encodedTarget}\">"
+                       + $"</turbo-stream>";
+            }
+
+            return $"<turbo-stream action=\"{encodedAction}\" target=\"{encodedTarget}\">"
+                   + $"<template>{Html}</template></turbo-stream>";
+        }
+
+        /// <summary>
+        /// Renders the action as a turbo-stream HTML string.
+        /// </summary>
         /// <param name="viewContext">The rendering context used when rendering the action.</param>
         /// <param name="cancellationToken">Cancellation token (ignored for raw HTML).</param>
         /// <returns>The turbo-stream element for the action and target; for action "remove" the element has no &lt;template&gt;, otherwise its &lt;template&gt; contains the action's HTML.</returns>
@@ -493,18 +559,49 @@ public class RazorWireStreamBuilder
             Microsoft.AspNetCore.Mvc.Rendering.ViewContext viewContext,
             CancellationToken cancellationToken = default)
         {
-            var encodedTarget = HtmlEncoder.Default.Encode(Target);
-            var encodedAction = HtmlEncoder.Default.Encode(Action);
-            if (Action == "remove")
-            {
-                return Task.FromResult(
-                    $"<turbo-stream action=\"remove\" target=\"{encodedTarget}\">"
-                    + $"</turbo-stream>");
-            }
+            return Task.FromResult(Render());
+        }
+    }
 
-            return Task.FromResult(
-                $"<turbo-stream action=\"{encodedAction}\" target=\"{encodedTarget}\">"
-                + $"<template>{Html}</template></turbo-stream>");
+    private sealed class VisitStreamAction : ISynchronousRazorWireStreamAction
+    {
+        private readonly string _url;
+        private readonly RazorWireVisitAction _action;
+
+        public VisitStreamAction(string url, RazorWireVisitAction action)
+        {
+            ValidateVisitUrl(url);
+            _action = action switch
+            {
+                RazorWireVisitAction.Advance or RazorWireVisitAction.Replace => action,
+                _ => throw new ArgumentOutOfRangeException(nameof(action), action, "Unsupported RazorWire visit action.")
+            };
+            _url = url;
+        }
+
+        public string Render()
+        {
+            var encodedUrl = HtmlEncoder.Default.Encode(_url);
+            var encodedAction = HtmlEncoder.Default.Encode(ToWireValue(_action));
+
+            return $"<turbo-stream action=\"rw-visit\" url=\"{encodedUrl}\" visit-action=\"{encodedAction}\"></turbo-stream>";
+        }
+
+        public Task<string> RenderAsync(
+            Microsoft.AspNetCore.Mvc.Rendering.ViewContext viewContext,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Render());
+        }
+
+        private static string ToWireValue(RazorWireVisitAction action)
+        {
+            return action switch
+            {
+                RazorWireVisitAction.Advance => "advance",
+                RazorWireVisitAction.Replace => "replace",
+                _ => throw new ArgumentOutOfRangeException(nameof(action), action, "Unsupported RazorWire visit action.")
+            };
         }
     }
 }

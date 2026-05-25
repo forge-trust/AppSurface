@@ -247,12 +247,123 @@ test('legacy runtime mode off also disables stale form-level auto markup', () =>
   assert.equal(context.window.RazorWire.formFailureManager.isRazorWireForm(form), false);
 });
 
+test('rw-visit stream action visits same-origin urls with configured action', () => {
+  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+
+  const stream = new FakeElement('turbo-stream');
+  stream.setAttribute('url', '../next?tab=done#summary');
+  stream.setAttribute('visit-action', 'replace');
+
+  turbo.StreamActions['rw-visit'].call(stream);
+
+  assert.equal(turbo.visits.length, 1);
+  assert.equal(turbo.visits[0].url, 'https://example.test/next?tab=done#summary');
+  assert.equal(turbo.visits[0].options.action, 'replace');
+});
+
+test('rw-visit stream action revisits the current page for completion sentinel urls', () => {
+  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current?q=old#top' });
+
+  const stream = new FakeElement('turbo-stream');
+  stream.setAttribute('url', '#');
+  stream.setAttribute('visit-action', 'replace');
+
+  turbo.StreamActions['rw-visit'].call(stream);
+
+  assert.equal(turbo.visits.length, 1);
+  assert.equal(turbo.visits[0].url, 'https://example.test/docs/current?q=old#');
+  assert.equal(turbo.visits[0].options.action, 'replace');
+});
+
+test('rw-visit stream action accepts the supported same-origin url forms', () => {
+  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current?q=old#top' });
+  const allowed = [
+    ['/docs/next', 'https://example.test/docs/next'],
+    ['?tab=done', 'https://example.test/docs/current?tab=done'],
+    ['#summary', 'https://example.test/docs/current?q=old#summary'],
+    ['./next', 'https://example.test/docs/next'],
+    ['../next', 'https://example.test/next'],
+    ['https://example.test/docs/absolute', 'https://example.test/docs/absolute']
+  ];
+
+  for (const [url, expected] of allowed) {
+    const stream = new FakeElement('turbo-stream');
+    stream.setAttribute('url', url);
+    turbo.StreamActions['rw-visit'].call(stream);
+    assert.equal(turbo.visits.at(-1).url, expected);
+    assert.equal(turbo.visits.at(-1).options.action, 'advance');
+  }
+
+  assert.equal(turbo.visits.length, allowed.length);
+});
+
+test('rw-visit stream action defaults to advance', () => {
+  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+
+  const stream = new FakeElement('turbo-stream');
+  stream.setAttribute('url', '#summary');
+
+  turbo.StreamActions['rw-visit'].call(stream);
+
+  assert.equal(turbo.visits.length, 1);
+  assert.equal(turbo.visits[0].url, 'https://example.test/docs/current#summary');
+  assert.equal(turbo.visits[0].options.action, 'advance');
+});
+
+test('rw-visit stream action rejects unsafe urls without throwing', () => {
+  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+  const rejectedUrls = [
+    '',
+    ' /docs/next',
+    '~/docs/next',
+    'javascript:alert(1)',
+    'data:text/html,hello',
+    '//evil.example/path',
+    'https://evil.example/path',
+    '\\\\evil.example\\path',
+    '/docs/\u0001next',
+    '/docs/\u007Fnext'
+  ];
+
+  for (const url of rejectedUrls) {
+    const stream = new FakeElement('turbo-stream');
+    stream.setAttribute('url', url);
+
+    assert.doesNotThrow(() => turbo.StreamActions['rw-visit'].call(stream));
+  }
+
+  assert.deepEqual(turbo.visits, []);
+});
+
+test('rw-visit stream action rejects unsupported visit action without throwing', () => {
+  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+
+  const stream = new FakeElement('turbo-stream');
+  stream.setAttribute('url', '/docs/next');
+  stream.setAttribute('visit-action', 'restore');
+
+  assert.doesNotThrow(() => turbo.StreamActions['rw-visit'].call(stream));
+  assert.deepEqual(turbo.visits, []);
+});
+
 function loadRuntime(runtimeOptions = {}) {
   const document = new FakeDocument(runtimeOptions);
+  const visits = [];
+  const turbo = {
+    StreamActions: {},
+    visits,
+    connectStreamSource: () => {},
+    disconnectStreamSource: () => {},
+    visit: (url, options) => visits.push({ url, options })
+  };
   const window = {
     RazorWireInitialized: false,
     RazorWire: { config: { existing: true } },
-    location: { origin: 'https://example.test' },
+    Turbo: turbo,
+    location: {
+      href: runtimeOptions.windowHref ?? 'https://example.test/',
+      origin: 'https://example.test'
+    },
     addEventListener: () => {}
   };
   const context = {
@@ -266,10 +377,7 @@ function loadRuntime(runtimeOptions = {}) {
       observe() {}
       disconnect() {}
     },
-    Turbo: {
-      connectStreamSource: () => {},
-      disconnectStreamSource: () => {}
-    },
+    Turbo: turbo,
     setTimeout,
     clearTimeout,
     setInterval: () => 1,
@@ -282,7 +390,7 @@ function loadRuntime(runtimeOptions = {}) {
   vm.createContext(context);
   vm.runInContext(readFileSync(runtimePath, 'utf8'), context);
 
-  return { context, document, window };
+  return { context, document, window, turbo };
 }
 
 function response(status, headers) {

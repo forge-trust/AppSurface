@@ -43,24 +43,156 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         Assert.Equal(AppSurfaceDocsHarvestRunState.Running, reporter.CurrentSnapshot.State);
     }
 
-    private static DocHarvestHealthSnapshot CreateHealth()
+    [Fact]
+    public async Task ProgressReporter_ShouldPublishRetainedCompletionBeforeLiveVisit()
     {
+        var hub = new RecordingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        Assert.True(hub.Published.Count >= 3);
+        var completion = hub.Published[^2];
+        var visit = hub.Published[^1];
+        Assert.Equal(AppSurfaceDocsHarvestProgressReporter.ChannelName, completion.Channel);
+        Assert.True(completion.Options?.Replay);
+        Assert.Contains("data-appsurface-docs-harvest-complete=\"true\"", completion.Message, StringComparison.Ordinal);
+        Assert.Equal(AppSurfaceDocsHarvestProgressReporter.ChannelName, visit.Channel);
+        Assert.False(visit.Options?.Replay ?? false);
+        Assert.Equal(
+            "<turbo-stream action=\"rw-visit\" url=\"#\" visit-action=\"replace\"></turbo-stream>",
+            visit.Message);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldNotReplayCompletionVisit()
+    {
+        var hub = new InMemoryRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        var replay = hub.Subscribe(
+            AppSurfaceDocsHarvestProgressReporter.ChannelName,
+            new RazorWireStreamSubscribeOptions { Replay = true });
+        var messages = new List<string>();
+        while (replay.TryRead(out var message))
+        {
+            messages.Add(message);
+        }
+
+        Assert.NotEmpty(messages);
+        Assert.All(messages, message => Assert.DoesNotContain("action=\"rw-visit\"", message, StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("data-appsurface-docs-harvest-complete=\"true\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldPublishCompletionVisitOnlyOnce()
+    {
+        var hub = new RecordingRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+        await reporter.CompleteRunAsync(runId, CreateHealth());
+
+        var visitMessages = hub.Published
+            .Where(item => item.Message.Contains("action=\"rw-visit\"", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Single(visitMessages);
+    }
+
+    [Fact]
+    public async Task ProgressReporter_ShouldReplayFailedTerminalStateWithoutVisit()
+    {
+        var hub = new InMemoryRazorWireStreamHub();
+        var services = new ServiceCollection();
+        services.AddSingleton<IRazorWireStreamHub>(hub);
+        using var provider = services.BuildServiceProvider();
+        var reporter = new AppSurfaceDocsHarvestProgressReporter(
+            provider,
+            NullLogger<AppSurfaceDocsHarvestProgressReporter>.Instance);
+
+        var runId = await reporter.BeginRunAsync([nameof(MarkdownHarvester)]);
+        await reporter.CompleteRunAsync(runId, CreateHealth(DocHarvestHealthStatus.Failed));
+
+        var replay = hub.Subscribe(
+            AppSurfaceDocsHarvestProgressReporter.ChannelName,
+            new RazorWireStreamSubscribeOptions { Replay = true });
+        var messages = new List<string>();
+        while (replay.TryRead(out var message))
+        {
+            messages.Add(message);
+        }
+
+        Assert.NotEmpty(messages);
+        Assert.All(messages, message => Assert.DoesNotContain("action=\"rw-visit\"", message, StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("Needs attention", StringComparison.Ordinal));
+        Assert.Contains(messages, message => message.Contains("Harvest finished with diagnostics", StringComparison.Ordinal));
+    }
+
+    private static DocHarvestHealthSnapshot CreateHealth(DocHarvestHealthStatus status = DocHarvestHealthStatus.Healthy)
+    {
+        var failed = status == DocHarvestHealthStatus.Failed;
         return new DocHarvestHealthSnapshot(
-            DocHarvestHealthStatus.Healthy,
+            status,
             DateTimeOffset.UtcNow,
             "/tmp/repo",
             TotalHarvesters: 1,
-            SuccessfulHarvesters: 1,
-            FailedHarvesters: 0,
-            TotalDocs: 1,
+            SuccessfulHarvesters: failed ? 0 : 1,
+            FailedHarvesters: failed ? 1 : 0,
+            TotalDocs: failed ? 0 : 1,
             [
                 new DocHarvesterHealth(
                     nameof(MarkdownHarvester),
-                    DocHarvesterHealthStatus.Succeeded,
-                    DocCount: 1,
+                    failed ? DocHarvesterHealthStatus.Failed : DocHarvesterHealthStatus.Succeeded,
+                    DocCount: failed ? 0 : 1,
                     Diagnostic: null)
             ],
             Diagnostics: []);
+    }
+
+    private sealed class RecordingRazorWireStreamHub : IRazorWireStreamHub
+    {
+        public List<PublishedMessage> Published { get; } = [];
+
+        public ValueTask PublishAsync(string channel, string message)
+        {
+            Published.Add(new PublishedMessage(channel, message, null));
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
+        {
+            Published.Add(new PublishedMessage(channel, message, options));
+            return ValueTask.CompletedTask;
+        }
+
+        public ChannelReader<string> Subscribe(string channel)
+        {
+            return Channel.CreateUnbounded<string>().Reader;
+        }
+
+        public void Unsubscribe(string channel, ChannelReader<string> reader)
+        {
+        }
     }
 
     private sealed class ThrowingRazorWireStreamHub : IRazorWireStreamHub
@@ -84,4 +216,9 @@ public sealed class AppSurfaceDocsHarvestProgressReporterTests
         {
         }
     }
+
+    private sealed record PublishedMessage(
+        string Channel,
+        string Message,
+        RazorWireStreamPublishOptions? Options);
 }

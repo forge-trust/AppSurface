@@ -33,6 +33,13 @@ test('generated search client keeps a first-party source banner', async () => {
   assert.match(searchClient, /^\/\/ Generated from assets\/src\/search-client\.ts\./);
 });
 
+test('authored search client no longer owns harvest completion navigation', async () => {
+  const source = await readFile(repoPath('Web', 'ForgeTrust.AppSurface.Docs', 'assets', 'src', 'search-client.ts'), 'utf8');
+
+  assert.doesNotMatch(source, /window\.location\.reload/);
+  assert.doesNotMatch(source, /harvestCompletionNavigationScheduled/);
+});
+
 test('generated asset verification compares rebuilt outputs against git', async () => {
   const verifier = await readFile(repoPath('Web', 'ForgeTrust.AppSurface.Docs', 'assets', 'scripts', 'verify-generated.mjs'), 'utf8');
 
