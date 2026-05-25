@@ -216,6 +216,11 @@ public class SidebarViewComponent : ViewComponent
             }
             catch (Exception) when (!requestAborted.IsCancellationRequested)
             {
+                legacyHealth = new DocSidebarHarvestHealthViewModel
+                {
+                    Status = "Health unavailable",
+                    Ok = false
+                };
                 status = new DocSidebarDiagnosticsStatusViewModel { Label = "Health unavailable", Ok = false };
                 tools.Add(
                     new DocSidebarDiagnosticsToolViewModel
@@ -258,7 +263,8 @@ public class SidebarViewComponent : ViewComponent
 
     private CancellationToken ResolveRequestAborted()
     {
-        if (ViewContext.HttpContext is not { } httpContext)
+        var httpContext = ViewContext?.HttpContext;
+        if (httpContext is null)
         {
             return CancellationToken.None;
         }

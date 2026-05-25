@@ -322,7 +322,10 @@ public sealed class SidebarViewComponentTests
         {
             var model = await GetModelAsync(component);
 
-            Assert.Null(model.HarvestHealth);
+            Assert.NotNull(model.HarvestHealth);
+            Assert.Equal("Health unavailable", model.HarvestHealth.Status);
+            Assert.False(model.HarvestHealth.Ok);
+            Assert.Null(model.HarvestHealth.Href);
             Assert.NotNull(model.Diagnostics);
             var diagnostics = model.Diagnostics!;
             Assert.Equal("Health unavailable", diagnostics.Status?.Label);
