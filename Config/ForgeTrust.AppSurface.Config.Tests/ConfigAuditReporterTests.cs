@@ -235,7 +235,9 @@ public class ConfigAuditReporterTests
                   }
                 }
                 """);
-            File.WriteAllText(Path.Join(tempDir, "appsettings.Broken.json"), "{");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.Staging.Broken.json"), "{");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.Development.Broken.json"), "{");
+            File.WriteAllText(Path.Join(tempDir, "appsettings.Development.Array.json"), "[1, 2, 3]");
             File.WriteAllText(
                 Path.Join(tempDir, "config_Override.Staging.json"),
                 """
@@ -274,6 +276,10 @@ public class ConfigAuditReporterTests
             var report = reporter.GetReport("Staging");
 
             Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "config-file-malformed");
+            Assert.DoesNotContain(
+                report.Diagnostics,
+                diagnostic => diagnostic.Message.Contains("appsettings.Development.Broken.json", StringComparison.Ordinal)
+                              || diagnostic.Message.Contains("appsettings.Development.Array.json", StringComparison.Ordinal));
             AssertEntry(report, "Feature.Enabled", ConfigAuditEntryState.Resolved, "True");
             Assert.DoesNotContain(
                 report.Entries.SelectMany(entry => entry.Diagnostics),

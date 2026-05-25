@@ -240,6 +240,7 @@ public class ConfigAuditModelsTests
         Assert.True(rendered.IndexOf("Root[\"alpha\"]", StringComparison.Ordinal) < rendered.IndexOf("Root[\"zeta\"]", StringComparison.Ordinal));
         Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root.Plain", StringComparison.Ordinal));
         Assert.Contains("Provider", rendered, StringComparison.Ordinal);
+        Assert.Contains("Discovered keys:", rendered, StringComparison.Ordinal);
         Assert.Contains("Discovered.Fallback [99] = value", rendered, StringComparison.Ordinal);
         Assert.Contains("Diagnostic: Discovered diagnostic.", rendered, StringComparison.Ordinal);
     }

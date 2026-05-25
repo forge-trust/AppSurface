@@ -35,7 +35,7 @@ public sealed class ConfigAuditTextRenderer
         if (report.DiscoveredKeys.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("Discovered file keys:");
+            builder.AppendLine(FormatDiscoveredKeysHeading(report.DiscoveredKeys));
             foreach (var discoveredKey in report.DiscoveredKeys
                          .OrderBy(key => key.Classification)
                          .ThenBy(key => key.Key, StringComparer.OrdinalIgnoreCase))
@@ -55,6 +55,15 @@ public sealed class ConfigAuditTextRenderer
         }
 
         return builder.ToString();
+    }
+
+    private static string FormatDiscoveredKeysHeading(IReadOnlyList<ConfigAuditDiscoveredKey> discoveredKeys)
+    {
+        var allSourcesAreFileBacked = discoveredKeys.All(discoveredKey =>
+            discoveredKey.Sources.Count > 0
+            && discoveredKey.Sources.All(source => source.Kind == ConfigAuditSourceKind.File));
+
+        return allSourcesAreFileBacked ? "Discovered file keys:" : "Discovered keys:";
     }
 
     private static void RenderEntry(StringBuilder builder, ConfigAuditEntry entry, string indent)

@@ -199,6 +199,9 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         // Deterministic order so merges are predictable; later files override earlier ones when keys collide
         foreach (var file in files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
         {
+            var fileName = Path.GetFileNameWithoutExtension(file);
+            var environment = ExtractEnvironment(fileName);
+            var displayFileName = Path.GetFileName(file);
             JsonNode? root;
             try
             {
@@ -212,14 +215,14 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Skipping malformed config file {FileName}", Path.GetFileName(file));
+                _logger.LogWarning(ex, "Skipping malformed config file {FileName}", displayFileName);
                 diagnostics.Add(new ConfigFileProviderDiagnostic(
-                    null,
+                    environment,
                     new ConfigAuditDiagnostic
                     {
                         Severity = ConfigAuditDiagnosticSeverity.Warning,
                         Code = "config-file-malformed",
-                        Message = $"Skipping malformed config file {Path.GetFileName(file)}."
+                        Message = $"Skipping malformed config file {displayFileName}."
                     }));
 
                 continue;
@@ -228,18 +231,15 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
             if (root is not JsonObject obj)
             {
                 diagnostics.Add(new ConfigFileProviderDiagnostic(
-                    null,
+                    environment,
                     new ConfigAuditDiagnostic
                     {
                         Severity = ConfigAuditDiagnosticSeverity.Warning,
                         Code = "config-file-non-object-root",
-                        Message = $"Skipping config file {Path.GetFileName(file)} because the root is not a JSON object."
+                        Message = $"Skipping config file {displayFileName} because the root is not a JSON object."
                     }));
                 continue; // Only merge JSON objects at the root
             }
-
-            var fileName = Path.GetFileNameWithoutExtension(file);
-            var environment = ExtractEnvironment(fileName);
 
             if (!environments.TryGetValue(environment, out var existing))
             {

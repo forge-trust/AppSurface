@@ -77,10 +77,11 @@ Explicit registrations are useful for keys that are read directly through `IConf
 services.AddConfigAuditKey<string>("Billing.Endpoint");
 ```
 
-The report also includes `DiscoveredKeys` for effective merged file-backed configuration visible to enumerable
-providers. The built-in v1 surface discovers keys from `FileBasedConfigProvider`; it does not enumerate environment
-variables, secret providers, shadowed lower-priority file values, or every raw key a custom provider may know about.
-Classifications are relative to the AppSurface audit registry: `Unknown` means unknown to `Config<T>` wrappers and
+The report also includes `DiscoveredKeys` for effective merged configuration visible to enumerable providers. The
+built-in v1 surface discovers file-backed keys from `FileBasedConfigProvider`, so the text renderer labels that section
+`Discovered file keys:` when all discovered sources are files. It does not enumerate environment variables, secret
+providers, shadowed lower-priority file values, or every raw key a custom provider may know about. Classifications are
+relative to the AppSurface audit registry: `Unknown` means unknown to `Config<T>` wrappers and
 `AddConfigAuditKey<T>()`, not globally unused.
 
 For example, this file-backed configuration:
