@@ -842,6 +842,16 @@ public class FileBasedConfigProviderTests
     }
 
     [Fact]
+    public void SourceLocationMap_ReturnsNoLocationsForEmptyAndNonObjectJson()
+    {
+        var empty = ConfigFileSourceLocationMap.Create(Array.Empty<byte>());
+        var nonObject = ConfigFileSourceLocationMap.Create(Encoding.UTF8.GetBytes("""["Port"]"""));
+
+        Assert.Null(empty.GetLocation("Port"));
+        Assert.Null(nonObject.GetLocation("Port"));
+    }
+
+    [Fact]
     public void SourceLocationMap_KeepsCaseInsensitiveAmbiguityAfterLaterExactDuplicate()
     {
         var map = ConfigFileSourceLocationMap.Create(Encoding.UTF8.GetBytes(

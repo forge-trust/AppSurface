@@ -1370,6 +1370,31 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_RemovesInheritedParentLocationFromChildSource()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new ParentLocatedSourceProvider());
+        services.AddConfigAuditKey<AppSettings>("Located.Parent");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Located.Parent", ConfigAuditEntryState.Resolved, null);
+        var parentSource = Assert.Single(entry.Sources, source => source.ProviderName == nameof(ParentLocatedSourceProvider));
+        AssertLocation(parentSource, lineNumber: 10, byteColumnNumber: 4);
+
+        var mode = Assert.Single(entry.Children, child => child.Key == "Located.Parent.Mode");
+        var childSource = Assert.Single(mode.Sources, source => source.ProviderName == nameof(ParentLocatedSourceProvider));
+        Assert.Equal("Located.Parent", childSource.ConfigPath);
+        Assert.Equal("Located.Parent", childSource.AppliedToPath);
+        Assert.Null(childSource.Location);
+    }
+
+    [Fact]
     public void GetReport_MarksResolvedEntryPartialWhenChildSourcesContainPatch()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -1772,6 +1797,51 @@ public class ConfigAuditReporterTests
                         ConfigPath = "Patch.Source.Mode",
                         AppliedToPath = "Patch.Source.Mode",
                         Role = ConfigAuditSourceRole.Patch
+                    }
+                ],
+                []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
+    private sealed class ParentLocatedSourceProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        public int Priority => 40;
+
+        public string Name => nameof(ParentLocatedSourceProvider);
+
+        public T? GetValue<T>(string environment, string key) => default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(key, "Located.Parent", StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                new AppSettings
+                {
+                    Mode = "located"
+                },
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.File,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        FilePath = "/tmp/appsettings.json",
+                        ConfigPath = key,
+                        AppliedToPath = key,
+                        Location = new ConfigAuditSourceLocation(10, 4),
+                        Role = role
                     }
                 ],
                 []);
