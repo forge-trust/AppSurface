@@ -69,6 +69,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.javascript.unsupported_public_shape", DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
         Assert.Equal("appsurfacedocs.javascript.malformed_public_doclet", DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
         Assert.Equal("appsurfacedocs.javascript.incomplete_public_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
+        Assert.Equal("appsurfacedocs.javascript.incomplete_public_event_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
         Assert.Equal("appsurfacedocs.javascript.duplicate_anchor", DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
         Assert.Equal("appsurfacedocs.routes.reserved_collision", DocHarvestDiagnosticCodes.DocReservedRouteCollision);
         Assert.Equal("appsurfacedocs.routes.doc_collision", DocHarvestDiagnosticCodes.DocRouteCollision);
@@ -93,6 +94,35 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.True(options.Harvest.Paths.VcsIgnore.Enabled);
         Assert.Empty(options.Harvest.Paths.VcsIgnore.AllowGlobs);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsOptions_ShouldDisableStrictJavaScriptEventDocletsByDefault()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.False(options.Harvest.JavaScript.RequireCompleteEventDoclets);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindStrictJavaScriptEventDoclets()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets"] = "true"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.True(options.Harvest.JavaScript.RequireCompleteEventDoclets);
     }
 
     [Fact]

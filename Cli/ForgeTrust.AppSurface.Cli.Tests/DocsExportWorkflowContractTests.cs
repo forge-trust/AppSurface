@@ -30,6 +30,21 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal("actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd", GetScalar(checkout, "uses"));
         Assert.Equal("0", GetScalar(GetMapping(checkout, "with"), "fetch-depth"));
 
+        var verifyStep = FindStep(steps, "Verify AppSurface Docs harvest health");
+        var verifyEnv = GetMapping(verifyStep, "env");
+        Assert.Equal(
+            "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js",
+            GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"));
+        Assert.Equal(
+            "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.islands.js",
+            GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__1"));
+        var verifyRun = GetScalar(verifyStep, "run");
+        Assert.Contains("docs verify-health", verifyRun, StringComparison.Ordinal);
+        Assert.Contains("--repo .", verifyRun, StringComparison.Ordinal);
+        Assert.Contains("--require-complete-event-doclets", verifyRun, StringComparison.Ordinal);
+        Assert.Contains("--environment Production", verifyRun, StringComparison.Ordinal);
+        Assert.Contains("--startup-timeout-seconds 30", verifyRun, StringComparison.Ordinal);
+
         var exportStep = FindStep(steps, "Export AppSurface Docs static site with CDN validation");
         var exportEnv = GetMapping(exportStep, "env");
         Assert.Contains("AppSurfaceDocs__Contributor__DefaultBranch", ScalarKeys(exportEnv));

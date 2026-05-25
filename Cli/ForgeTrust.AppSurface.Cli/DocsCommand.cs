@@ -1,5 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Net;
+using System.Text;
+using System.Text.Json;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
@@ -245,6 +248,165 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsRepositoryComman
         return new[] { "/", docsUrlBuilder.CurrentDocsRootPath }
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+    }
+}
+
+/// <summary>
+/// Verifies AppSurface Docs harvest health for CI and release gates.
+/// </summary>
+/// <remarks>
+/// This command loads the standalone docs host service graph, reads the same redacted health response shape as the JSON
+/// endpoint, and fails when the machine-checkable health response is not OK.
+/// </remarks>
+[Command("docs verify-health", Description = "Verify AppSurface Docs harvest health for CI and release gates.")]
+internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepositoryCommand, ICommand
+{
+    private const string DefaultVerifyUrl = "http://127.0.0.1:0";
+
+    private readonly ILogger<DocsVerifyHealthCommand> _logger;
+    private readonly IAppSurfaceDocsHealthVerifyRunner _verifyRunner;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocsVerifyHealthCommand"/> class.
+    /// </summary>
+    /// <param name="logger">Logger used for command diagnostics.</param>
+    /// <param name="verifyRunner">Runner that starts the docs host and reads harvest health.</param>
+    public DocsVerifyHealthCommand(
+        ILogger<DocsVerifyHealthCommand> logger,
+        IAppSurfaceDocsHealthVerifyRunner verifyRunner)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(verifyRunner);
+
+        _logger = logger;
+        _verifyRunner = verifyRunner;
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether public JavaScript event doclets must include complete event contract fields.
+    /// </summary>
+    /// <remarks>
+    /// This forwards <c>AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets=true</c> into the verification host
+    /// without changing runtime startup failure semantics.
+    /// </remarks>
+    [CommandOption("require-complete-event-doclets", Description = "Fail verification when public JavaScript events are missing @target, @firesWhen, or detail docs.")]
+    public bool RequireCompleteEventDoclets { get; set; }
+
+    /// <summary>
+    /// Executes the command through the CliFx console integration.
+    /// </summary>
+    /// <param name="console">Console abstraction used to register cancellation handling.</param>
+    /// <returns>A value task that completes when verification finishes.</returns>
+    [ExcludeFromCodeCoverage]
+    public async ValueTask ExecuteAsync(IConsole console)
+    {
+        var cancellationToken = console.RegisterCancellationHandler();
+        await ExecuteAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Executes the command using an explicit cancellation token.
+    /// </summary>
+    /// <param name="cancellationToken">Token observed while loading host services and reading harvest health.</param>
+    /// <returns>A value task that completes when verification finishes.</returns>
+    internal async ValueTask ExecuteAsync(CancellationToken cancellationToken)
+    {
+        var args = BuildVerifyArgs();
+        _logger.LogInformation(
+            "Verifying AppSurface Docs harvest health for {RepositoryRoot}.",
+            args.HostArgs.RepositoryRoot);
+
+        try
+        {
+            var result = await _verifyRunner.VerifyAsync(args, cancellationToken);
+            if (!result.Health.Verification.Ok)
+            {
+                throw new CommandException(BuildFailureMessage(result));
+            }
+
+            _logger.LogInformation(
+                "AppSurface Docs harvest health verified: {Status} ({HttpStatusCode}).",
+                result.Health.Status,
+                (int)result.HttpStatusCode);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new CommandException(ex.Message);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new CommandException($"AppSurface Docs harvest health verification could not read the health endpoint: {ex.Message}");
+        }
+        catch (JsonException ex)
+        {
+            throw new CommandException($"AppSurface Docs harvest health verification returned invalid JSON: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Translates CLI options into a one-shot harvest-health verification invocation.
+    /// </summary>
+    /// <returns>The health verification runner arguments.</returns>
+    internal AppSurfaceDocsHealthVerifyArgs BuildVerifyArgs()
+    {
+        var hostArgs = BuildHostArgs(defaultEnvironmentName: Environments.Production);
+        var forwardedArgs = hostArgs.Args.ToList();
+        forwardedArgs.Add("--AppSurfaceDocs:Harvest:StartupMode");
+        forwardedArgs.Add(nameof(AppSurfaceDocsHarvestStartupMode.Disabled));
+        forwardedArgs.Add("--AppSurfaceDocs:Harvest:FailOnFailure");
+        forwardedArgs.Add("false");
+        forwardedArgs.Add("--AppSurfaceDocs:Harvest:Health:ExposeRoutes");
+        forwardedArgs.Add(nameof(AppSurfaceDocsHarvestHealthExposure.Always));
+        if (RequireCompleteEventDoclets)
+        {
+            forwardedArgs.Add("--AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets");
+            forwardedArgs.Add("true");
+        }
+
+        var docsUrlBuilder = new DocsUrlBuilder(new AppSurfaceDocsOptions
+        {
+            Routing = new AppSurfaceDocsRoutingOptions
+            {
+                RouteRootPath = RouteRootPath,
+                DocsRootPath = DocsRootPath
+            }
+        });
+        var verifyHostArgs = hostArgs with { Args = forwardedArgs.ToArray() };
+        return new AppSurfaceDocsHealthVerifyArgs(
+            verifyHostArgs,
+            docsUrlBuilder.BuildHealthJsonUrl(),
+            DefaultVerifyUrl);
+    }
+
+    private static string BuildFailureMessage(AppSurfaceDocsHealthVerificationResult result)
+    {
+        var builder = new StringBuilder();
+        builder.Append(CultureInfo.InvariantCulture, $"AppSurface Docs harvest health verification failed: status {result.Health.Status}, HTTP {(int)result.HttpStatusCode}.");
+        foreach (var diagnostic in result.Health.Diagnostics)
+        {
+            builder.AppendLine();
+            builder.Append("- ");
+            builder.Append(diagnostic.Code);
+            if (!string.IsNullOrWhiteSpace(diagnostic.Severity))
+            {
+                builder.Append(CultureInfo.InvariantCulture, $" [{diagnostic.Severity}]");
+            }
+
+            if (!string.IsNullOrWhiteSpace(diagnostic.HarvesterType))
+            {
+                builder.Append(CultureInfo.InvariantCulture, $" ({diagnostic.HarvesterType})");
+            }
+
+            builder.Append(": ");
+            builder.Append(diagnostic.Problem);
+            if (!string.IsNullOrWhiteSpace(diagnostic.Fix))
+            {
+                builder.Append(" Fix: ");
+                builder.Append(diagnostic.Fix);
+            }
+        }
+
+        return builder.ToString();
     }
 }
 
@@ -600,6 +762,33 @@ internal readonly record struct AppSurfaceDocsExportArgs(
     string RequestedBaseUrl);
 
 /// <summary>
+/// Describes a one-shot AppSurface Docs harvest-health verification request.
+/// </summary>
+/// <param name="HostArgs">Standalone AppSurface Docs host arguments.</param>
+/// <param name="HealthJsonPath">App-relative health JSON path represented by this verification run.</param>
+/// <param name="RequestedBaseUrl">Loopback URL passed to Kestrel. The default uses port 0 so the OS chooses a free port.</param>
+internal readonly record struct AppSurfaceDocsHealthVerifyArgs(
+    AppSurfaceDocsHostArgs HostArgs,
+    string HealthJsonPath,
+    string RequestedBaseUrl);
+
+/// <summary>
+/// Result returned by the AppSurface Docs harvest-health verification runner.
+/// </summary>
+/// <param name="Health">Parsed health response from the docs host.</param>
+/// <param name="HttpStatusCode">HTTP status code that the health endpoint would return for this health response.</param>
+internal readonly record struct AppSurfaceDocsHealthVerificationResult(
+    AppSurfaceDocsHarvestHealthResponse Health,
+    HttpStatusCode HttpStatusCode);
+
+/// <summary>
+/// Raw HTTP response returned by the AppSurface Docs harvest-health client seam.
+/// </summary>
+/// <param name="StatusCode">HTTP status returned by the health endpoint.</param>
+/// <param name="Body">Response body read from the health endpoint.</param>
+internal readonly record struct AppSurfaceDocsHealthHttpResponse(HttpStatusCode StatusCode, string Body);
+
+/// <summary>
 /// Applies shared host options required by packaged AppSurface docs tooling.
 /// </summary>
 internal static class AppSurfaceDocsCliHost
@@ -678,6 +867,54 @@ internal interface IAppSurfaceDocsExportRunner
     /// <param name="cancellationToken">Token observed during host startup and export.</param>
     /// <returns>A task that completes when export finishes.</returns>
     Task ExportAsync(AppSurfaceDocsExportArgs args, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Loads the AppSurface Docs host service graph and verifies the redacted harvest-health response.
+/// </summary>
+internal interface IAppSurfaceDocsHealthVerifyRunner
+{
+    /// <summary>
+    /// Starts the docs host, reads harvest health, and stops the host.
+    /// </summary>
+    /// <param name="args">Resolved verification arguments.</param>
+    /// <param name="cancellationToken">Token observed during host startup and health retrieval.</param>
+    /// <returns>The parsed harvest-health verification result.</returns>
+    Task<AppSurfaceDocsHealthVerificationResult> VerifyAsync(
+        AppSurfaceDocsHealthVerifyArgs args,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Reads the AppSurface Docs harvest-health JSON endpoint.
+/// </summary>
+internal interface IAppSurfaceDocsHealthHttpClient
+{
+    /// <summary>
+    /// Requests a redacted health JSON URL and returns the body regardless of success or failure HTTP status.
+    /// </summary>
+    /// <param name="url">Absolute health JSON URL.</param>
+    /// <param name="cancellationToken">Token observed by the HTTP request.</param>
+    /// <returns>The HTTP status and body.</returns>
+    Task<AppSurfaceDocsHealthHttpResponse> GetAsync(string url, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Builds and starts the AppSurface Docs host used by harvest-health verification.
+/// </summary>
+internal interface IAppSurfaceDocsHealthHostStarter
+{
+    /// <summary>
+    /// Builds the standalone docs host, starts Kestrel, and returns the started host for health verification.
+    /// </summary>
+    /// <param name="args">Resolved verification arguments.</param>
+    /// <param name="environmentName">Resolved host environment.</param>
+    /// <param name="cancellationToken">Token observed while starting the host.</param>
+    /// <returns>The started host.</returns>
+    Task<IHost> BuildAndStartAsync(
+        AppSurfaceDocsHealthVerifyArgs args,
+        string environmentName,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -1733,6 +1970,309 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
         }
     }
 
+}
+
+/// <summary>
+/// Production harvest-health HTTP client used by <see cref="AppSurfaceDocsInProcessHealthVerifyRunner"/>.
+/// </summary>
+internal sealed class AppSurfaceDocsHealthHttpClient : IAppSurfaceDocsHealthHttpClient
+{
+    private readonly HttpClient _httpClient;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsHealthHttpClient"/> class.
+    /// </summary>
+    /// <param name="httpClient">HTTP client used for loopback health requests.</param>
+    public AppSurfaceDocsHealthHttpClient(HttpClient httpClient)
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        _httpClient = httpClient;
+    }
+
+    /// <inheritdoc />
+    public async Task<AppSurfaceDocsHealthHttpResponse> GetAsync(string url, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        return new AppSurfaceDocsHealthHttpResponse(response.StatusCode, body);
+    }
+}
+
+/// <summary>
+/// Production <see cref="IAppSurfaceDocsHealthHostStarter"/> that uses the AppSurface Docs standalone host builder.
+/// </summary>
+[ExcludeFromCodeCoverage(
+    Justification = "Production adapter delegates into the real standalone host builder and Kestrel; command and runner tests cover behavior before this boundary.")]
+internal sealed class AppSurfaceDocsStandaloneHealthHostStarter : IAppSurfaceDocsHealthHostStarter
+{
+    /// <inheritdoc />
+    public async Task<IHost> BuildAndStartAsync(
+        AppSurfaceDocsHealthVerifyArgs args,
+        string environmentName,
+        CancellationToken cancellationToken)
+    {
+        var builder = AppSurfaceDocsStandaloneHost.CreateBuilder(
+            args.HostArgs.Args,
+            new FixedEnvironmentProvider(environmentName),
+            options => AppSurfaceDocsCliHost.ConfigurePackagedToolHost(options, args.HostArgs.StartupTimeout));
+
+        builder.UseContentRoot(args.HostArgs.RepositoryRoot);
+        builder.ConfigureWebHost(webHost =>
+        {
+            webHost.UseEnvironment(environmentName);
+            webHost.UseUrls(args.RequestedBaseUrl);
+        });
+
+        var host = builder.Build();
+        try
+        {
+            await host.StartAsync(cancellationToken);
+            return host;
+        }
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+        {
+            host.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Provides a fixed environment name to the standalone host builder during health verification startup.
+    /// </summary>
+    private sealed class FixedEnvironmentProvider : IEnvironmentProvider
+    {
+        private readonly string _environmentName;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="FixedEnvironmentProvider"/> class.
+        /// </summary>
+        /// <param name="environmentName">Environment name exposed to the host builder.</param>
+        public FixedEnvironmentProvider(string environmentName)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(environmentName);
+            _environmentName = environmentName;
+        }
+
+        /// <summary>
+        /// Gets the fixed environment name.
+        /// </summary>
+        public string Environment => _environmentName;
+
+        /// <summary>
+        /// Gets a value indicating whether the fixed environment is Development.
+        /// </summary>
+        public bool IsDevelopment => string.Equals(_environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Gets environment variable values while overriding ASP.NET and .NET environment variables.
+        /// </summary>
+        /// <param name="name">Environment variable name.</param>
+        /// <param name="defaultValue">Fallback value when the variable is not set.</param>
+        /// <returns>The fixed host environment for environment-name variables, otherwise the process value or fallback.</returns>
+        public string? GetEnvironmentVariable(string name, string? defaultValue = null)
+        {
+            if (string.Equals(name, "ASPNETCORE_ENVIRONMENT", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "DOTNET_ENVIRONMENT", StringComparison.OrdinalIgnoreCase))
+            {
+                return _environmentName;
+            }
+
+            var value = System.Environment.GetEnvironmentVariable(name);
+            return value ?? defaultValue;
+        }
+    }
+}
+
+/// <summary>
+/// Starts AppSurface Docs in-process and verifies the redacted harvest-health response over loopback HTTP.
+/// </summary>
+internal sealed class AppSurfaceDocsInProcessHealthVerifyRunner : IAppSurfaceDocsHealthVerifyRunner
+{
+    private static readonly JsonSerializerOptions HealthJsonOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly ILogger<AppSurfaceDocsInProcessHealthVerifyRunner> _logger;
+    private readonly IAppSurfaceDocsHealthHttpClient _healthClient;
+    private readonly IAppSurfaceDocsHealthHostStarter _hostStarter;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsInProcessHealthVerifyRunner"/> class.
+    /// </summary>
+    /// <param name="logger">Logger used for host lifecycle diagnostics.</param>
+    /// <param name="healthClient">HTTP client seam used to read the health endpoint.</param>
+    public AppSurfaceDocsInProcessHealthVerifyRunner(
+        ILogger<AppSurfaceDocsInProcessHealthVerifyRunner> logger,
+        IAppSurfaceDocsHealthHttpClient healthClient)
+        : this(logger, healthClient, new AppSurfaceDocsStandaloneHealthHostStarter())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceDocsInProcessHealthVerifyRunner"/> class with explicit test seams.
+    /// </summary>
+    /// <param name="logger">Logger used for host lifecycle diagnostics.</param>
+    /// <param name="healthClient">HTTP client seam used to read the health endpoint.</param>
+    /// <param name="hostStarter">Host starter used to build and start the docs application.</param>
+    internal AppSurfaceDocsInProcessHealthVerifyRunner(
+        ILogger<AppSurfaceDocsInProcessHealthVerifyRunner> logger,
+        IAppSurfaceDocsHealthHttpClient healthClient,
+        IAppSurfaceDocsHealthHostStarter hostStarter)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(healthClient);
+        ArgumentNullException.ThrowIfNull(hostStarter);
+
+        _logger = logger;
+        _healthClient = healthClient;
+        _hostStarter = hostStarter;
+    }
+
+    /// <inheritdoc />
+    public async Task<AppSurfaceDocsHealthVerificationResult> VerifyAsync(
+        AppSurfaceDocsHealthVerifyArgs args,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var environmentName = args.HostArgs.EnvironmentName ?? Environments.Production;
+        IHost? host = null;
+        using var currentDirectory = AppSurfaceDocsRepositoryCommand.CurrentDirectoryScope.ChangeTo(args.HostArgs.RepositoryRoot);
+        try
+        {
+            host = await BuildAndStartHostWithTimeoutAsync(args, environmentName, cancellationToken);
+            var baseUrl = AppSurfaceDocsInProcessExportRunner.ResolveBoundBaseUrl(host);
+            var healthUrl = BuildHealthUrl(baseUrl, args.HealthJsonPath);
+            _logger.LogInformation("Reading AppSurface Docs harvest health from {HealthUrl}.", healthUrl);
+            var response = await _healthClient.GetAsync(healthUrl, cancellationToken);
+            var health = ParseHealthResponse(response.Body);
+            return new AppSurfaceDocsHealthVerificationResult(health, response.StatusCode);
+        }
+        finally
+        {
+            if (host is not null)
+            {
+                await StopAndDisposeHostAsync(host);
+            }
+        }
+    }
+
+    private async Task<IHost> BuildAndStartHostWithTimeoutAsync(
+        AppSurfaceDocsHealthVerifyArgs args,
+        string environmentName,
+        CancellationToken cancellationToken)
+    {
+        var startupTimeout = args.HostArgs.StartupTimeout;
+        if (startupTimeout is null)
+        {
+            return await _hostStarter.BuildAndStartAsync(args, environmentName, cancellationToken);
+        }
+
+        using var startupTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        startupTimeoutCts.CancelAfter(startupTimeout.Value);
+        var startTask = Task.Run(
+            () => _hostStarter.BuildAndStartAsync(args, environmentName, startupTimeoutCts.Token),
+            CancellationToken.None);
+
+        try
+        {
+            var completedTask = await Task.WhenAny(startTask, Task.Delay(startupTimeout.Value, cancellationToken));
+            if (completedTask != startTask)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    await startupTimeoutCts.CancelAsync();
+                    _ = ObserveStartupTaskAsync(startTask);
+                    throw new OperationCanceledException(cancellationToken);
+                }
+
+                if (startTask.IsCompleted)
+                {
+                    return await startTask;
+                }
+
+                await startupTimeoutCts.CancelAsync();
+                _ = ObserveStartupTaskAsync(startTask);
+                throw CreateStartupTimeoutException(startupTimeout.Value, innerException: null);
+            }
+
+            return await startTask;
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw CreateStartupTimeoutException(startupTimeout.Value, ex);
+        }
+    }
+
+    private async Task ObserveStartupTaskAsync(Task<IHost> startTask)
+    {
+        try
+        {
+            var startedHost = await startTask.ConfigureAwait(false);
+            await StopAndDisposeHostAsync(startedHost).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+        {
+            if (ex is OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
+    private async Task StopAndDisposeHostAsync(IHost host)
+    {
+        using var disposableHost = host;
+
+        try
+        {
+            await host.StopAsync(CancellationToken.None);
+        }
+        catch (Exception ex) when (ExceptionFilters.IsNonFatal(ex))
+        {
+            _logger.LogWarning(ex, "AppSurface Docs health verification host failed during shutdown.");
+        }
+    }
+
+    private static TimeoutException CreateStartupTimeoutException(TimeSpan startupTimeout, Exception? innerException)
+    {
+        return new TimeoutException(
+            $"AppSurface Docs health verification host did not start within {startupTimeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)} seconds.",
+            innerException);
+    }
+
+    private static string BuildHealthUrl(string baseUrl, string healthJsonPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        ArgumentException.ThrowIfNullOrWhiteSpace(healthJsonPath);
+
+        return new Uri(
+            new Uri(EnsureTrailingSlash(baseUrl)),
+            healthJsonPath.TrimStart('/')).AbsoluteUri;
+    }
+
+    private static AppSurfaceDocsHarvestHealthResponse ParseHealthResponse(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            throw new JsonException("AppSurface Docs harvest health verification returned an empty JSON body.");
+        }
+
+        var health = JsonSerializer.Deserialize<AppSurfaceDocsHarvestHealthResponse>(body, HealthJsonOptions);
+        if (health is null
+            || string.IsNullOrWhiteSpace(health.Status)
+            || health.Verification.HttpStatusCode == 0)
+        {
+            throw new JsonException("AppSurface Docs harvest health verification returned JSON without required status or verification fields.");
+        }
+
+        return health;
+    }
+
+    private static string EnsureTrailingSlash(string value)
+    {
+        return value.EndsWith("/", StringComparison.Ordinal)
+            ? value
+            : value + "/";
+    }
 }
 
 /// <summary>

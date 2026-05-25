@@ -131,6 +131,18 @@ jobs:
         run: |
           dotnet build Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release
 
+      - name: Verify AppSurface Docs harvest health
+        env:
+          AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js
+          AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__1: Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.islands.js
+        run: |
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+            docs verify-health \
+            --repo . \
+            --require-complete-event-doclets \
+            --environment Production \
+            --startup-timeout-seconds 30
+
       - name: Export AppSurface Docs static site with CDN validation
         env:
           AppSurfaceDocs__Contributor__DefaultBranch: ${{ github.head_ref || github.ref_name }}

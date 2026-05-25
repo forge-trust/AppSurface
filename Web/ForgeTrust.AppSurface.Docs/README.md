@@ -934,6 +934,10 @@ static web assets.
   - Defaults to `false`.
   - Keeps broad default JavaScript discovery best-effort for aggregate health: empty results, parse/read diagnostics, and timeouts remain visible but do not mask or cause Markdown/C# strict failures.
   - JavaScript participates in strict aggregate health when this is `true` or JavaScript `IncludeGlobs` is nonempty.
+- `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets`
+  - Defaults to `false`.
+  - When `true`, incomplete public JavaScript event doclets emit `appsurfacedocs.javascript.incomplete_public_event_doclet` with error severity and fail harvest health.
+  - This applies only to public `@event` doclets. Parse failures, oversized files, unsupported shapes, and malformed doclets stay governed by `StrictHealth` or explicit JavaScript include globs.
 - `AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes`
   - Defaults to `262144`.
   - Files above this limit are skipped with a structured harvest diagnostic so generated bundles do not dominate docs snapshot time.
@@ -1030,6 +1034,8 @@ Supported public shapes:
 
 Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
 
+Set `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets=true` when public browser events must be release-blocking. In that mode, each public `@event` must include `@target`, `@firesWhen`, and either at least one valid `detail.*` property or `@detail none`. Valid detail property names are exactly `detail.` plus dot-separated segments. Segments may contain letters, digits, `_`, `$`, `-`, and a trailing `[]`. Optional JSDoc brackets and defaults are accepted, so `detail.message`, `[detail.message]`, `[detail.message="fallback"]`, `detail.items[]`, and `detail.items[].id` are valid. Values such as `detail`, `[detail]`, `detail.`, `detail..message`, `detail. message`, `detail.[x]`, `Detail.message`, `form`, and `message` are invalid. `@detail none` is contradictory when any `detail.*` property is present.
+
 ```js
 /**
  * A RazorWire-enhanced form submission failed and custom UI may handle the failure.
@@ -1063,7 +1069,20 @@ Browser-contract doclets should carry enough fields for readers to use them with
  */
 ```
 
-Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially.
+Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`).
+
+Use the CLI health verifier in CI when degraded docs health should block release output:
+
+```bash
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+  docs verify-health \
+  --repo . \
+  --require-complete-event-doclets \
+  --environment Production \
+  --startup-timeout-seconds 30
+```
+
+The verifier starts the standalone docs host on loopback, reads the same redacted response shape as `{DocsRootPath}/_health.json`, and exits nonzero when `verification.ok=false`. The reported status code matches the health endpoint contract: `200` for `Healthy` or `Empty`, `503` for `Degraded` or `Failed`. `AppSurfaceDocs:Harvest:FailOnFailure` still fails startup only for aggregate `Failed` snapshots; use `docs verify-health` when a `Degraded` snapshot, such as incomplete strict event docs with Markdown still available, should block publication.
 
 Pitfalls:
 
@@ -1071,6 +1090,7 @@ Pitfalls:
 - Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
+- Do not pair `@detail none` with `@property detail.*`; either the event has no payload or its payload shape is documented.
 - Do not put `@public` on classes, default exports, or CommonJS exports until a later harvester slice supports those shapes.
 - Do not treat Acornima as a runtime JavaScript execution engine. AppSurface Docs uses it only to parse configured source for documentation, and `ForgeTrust.AppSurface.Docs` carries `THIRD-PARTY-NOTICES.md` for the redistributed package.
 

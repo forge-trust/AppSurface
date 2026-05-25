@@ -332,7 +332,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         foreach (var item in items)
         {
-            AddCompletenessDiagnostics(item, diagnostics);
+            AddCompletenessDiagnostics(item, options.RequireCompleteEventDoclets, diagnostics);
         }
 
         return items;
@@ -577,6 +577,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             ParseBooleanTag(doclet.TryGetTagValue("bubbles")),
             ParseBooleanTag(doclet.TryGetTagValue("cancelable")),
             IsDetailNone(doclet),
+            HasPublicSignal(doclet),
             doclet.TryGetTagValue("example"),
             doclet.TryGetTagValue("deprecated"),
             relativePath,
@@ -797,6 +798,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static void AddCompletenessDiagnostics(
         JavaScriptApiItem item,
+        bool requireCompleteEventDoclets,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var missing = new List<string>();
@@ -808,6 +810,20 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 if (!item.DetailNone && item.Properties.Count == 0)
                 {
                     missing.Add("@property detail.* or @detail none");
+                }
+
+                foreach (var property in item.Properties)
+                {
+                    if (!IsValidEventDetailPropertyName(property.Name))
+                    {
+                        missing.Add("@property detail.*");
+                        break;
+                    }
+                }
+
+                if (item.DetailNone && item.Properties.Count > 0)
+                {
+                    missing.Add("remove @detail none or detail.* properties");
                 }
 
                 break;
@@ -843,9 +859,16 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return;
         }
 
+        var isStrictEventDiagnostic = item.Kind == JavaScriptApiKind.Event
+                                      && item.IsPublic
+                                      && requireCompleteEventDoclets;
         diagnostics.Add(CreateDiagnostic(
-            DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet,
-            DocHarvestDiagnosticSeverity.Warning,
+            isStrictEventDiagnostic
+                ? DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet
+                : DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet,
+            isStrictEventDiagnostic
+                ? DocHarvestDiagnosticSeverity.Error
+                : DocHarvestDiagnosticSeverity.Warning,
             $"{GetKindLabel(item.Kind)} '{item.Name}' is missing public contract fields.",
             "The item will render, but readers may not know enough about the public browser contract to consume it confidently.",
             "Add " + string.Join(", ", missing) + " to the public JavaScript doclet."));
@@ -857,6 +880,61 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         {
             missing.Add(tagName);
         }
+    }
+
+    private static bool IsValidEventDetailPropertyName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var name = StripOptionalPropertyWrapper(value.Trim());
+        if (!name.StartsWith("detail.", StringComparison.Ordinal) || name.Length == "detail.".Length)
+        {
+            return false;
+        }
+
+        var segments = name["detail.".Length..].Split('.');
+        return segments.Length > 0 && segments.All(IsValidEventDetailPropertySegment);
+    }
+
+    private static string StripOptionalPropertyWrapper(string value)
+    {
+        if (value.Length < 2 || value[0] != '[' || value[^1] != ']')
+        {
+            return value;
+        }
+
+        var inner = value[1..^1].Trim();
+        var defaultSeparator = inner.IndexOf('=', StringComparison.Ordinal);
+        return defaultSeparator < 0
+            ? inner
+            : inner[..defaultSeparator].Trim();
+    }
+
+    private static bool IsValidEventDetailPropertySegment(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var segment = value.EndsWith("[]", StringComparison.Ordinal)
+            ? value[..^2]
+            : value;
+        if (segment.Length == 0)
+        {
+            return false;
+        }
+
+        return segment.All(static character =>
+            (character >= 'A' && character <= 'Z')
+            || (character >= 'a' && character <= 'z')
+            || (character >= '0' && character <= '9')
+            || character == '_'
+            || character == '$'
+            || character == '-');
     }
 
     private static IReadOnlyList<DocNode> BuildDocNodes(IReadOnlyList<JavaScriptApiItem> items)
@@ -1636,7 +1714,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static bool IsDetailNone(JavaScriptDoclet doclet)
     {
-        return doclet.TryGetTagValue("detail")?.Equals("none", StringComparison.OrdinalIgnoreCase) == true;
+        return doclet.TryGetTagValue("detail")?.Trim().Equals("none", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static string? TryGetMemberPath(Node node)
@@ -1859,6 +1937,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string? Bubbles,
         string? Cancelable,
         bool DetailNone,
+        bool IsPublic,
         string? Example,
         string? Deprecated,
         string SourcePath,
