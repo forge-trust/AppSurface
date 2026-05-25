@@ -154,7 +154,7 @@ exposing a raw key path.
 
 ### Collection Traversal API
 
-`ConfigAuditEntryOptions` controls collection expansion for one known entry:
+`ConfigAuditEntryOptions` is an immutable snapshot that controls collection expansion for one known entry:
 
 | Option | Default | Behavior |
 | --- | --- | --- |
@@ -164,7 +164,8 @@ exposing a raw key path.
 | `MaxReportNodes` | `4096` | Bounds total child nodes created for the entry. |
 | `DisplayDictionaryKeys` | `true` | Allows non-sensitive dictionary keys to appear as labels. Sensitive keys are still redacted. |
 
-Use the overload when registering provider-only keys:
+Use the overload when registering provider-only keys. The callback receives a mutable
+`ConfigAuditEntryOptionsBuilder`; AppSurface snapshots the builder into immutable options during registration:
 
 ```csharp
 services.AddConfigAuditKey<Dictionary<string, ServiceEndpoint>>(
@@ -176,7 +177,8 @@ services.AddConfigAuditKey<Dictionary<string, ServiceEndpoint>>(
     });
 ```
 
-`ConfigAuditKnownEntry` also has an options overload for wrapper-discovered or manually constructed entries:
+`ConfigAuditKnownEntry` also has an options overload for wrapper-discovered or manually constructed entries.
+Use an object initializer to create the immutable options snapshot:
 
 ```csharp
 services.AddSingleton(

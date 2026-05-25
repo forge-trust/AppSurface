@@ -22,16 +22,36 @@ public class ConfigAuditModelsTests
         };
 
         var entry = new ConfigAuditKnownEntry("Valid.Key", null, typeof(string), options);
-        options.TraverseCollectionElements = false;
-
-        var snapshot = entry.Options;
-        snapshot.MaxCollectionDepth = 99;
 
         Assert.True(entry.Options.TraverseCollectionElements);
         Assert.Equal(2, entry.Options.MaxCollectionDepth);
         Assert.Equal(3, entry.Options.MaxCollectionElements);
         Assert.Equal(4, entry.Options.MaxReportNodes);
         Assert.False(entry.Options.DisplayDictionaryKeys);
+        Assert.NotSame(options, entry.Options);
+    }
+
+    [Fact]
+    public void ConfigAuditEntryOptionsBuilder_CreatesImmutableSnapshot()
+    {
+        var builder = new ConfigAuditEntryOptionsBuilder
+        {
+            TraverseCollectionElements = true,
+            MaxCollectionDepth = 2,
+            MaxCollectionElements = 3,
+            MaxReportNodes = 4,
+            DisplayDictionaryKeys = false
+        };
+
+        var options = builder.ToOptions();
+        builder.TraverseCollectionElements = false;
+        builder.MaxCollectionDepth = 99;
+
+        Assert.True(options.TraverseCollectionElements);
+        Assert.Equal(2, options.MaxCollectionDepth);
+        Assert.Equal(3, options.MaxCollectionElements);
+        Assert.Equal(4, options.MaxReportNodes);
+        Assert.False(options.DisplayDictionaryKeys);
     }
 
     [Fact]

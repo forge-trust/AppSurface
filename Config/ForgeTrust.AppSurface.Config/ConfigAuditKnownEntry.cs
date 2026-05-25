@@ -57,8 +57,8 @@ public sealed class ConfigAuditKnownEntry
     /// Gets a copy of the audit entry options captured for this known entry.
     /// </summary>
     /// <remarks>
-    /// Mutating the returned object does not change this known entry. Configure options during registration by using
-    /// <see cref="ConfigAuditServiceCollectionExtensions.AddConfigAuditKey{T}(IServiceCollection,string,Action{ConfigAuditEntryOptions})"/>
+    /// The returned options object is immutable. Configure options during registration by using
+    /// <see cref="ConfigAuditServiceCollectionExtensions.AddConfigAuditKey{T}(IServiceCollection,string,Action{ConfigAuditEntryOptionsBuilder})"/>
     /// or the constructor overload that accepts <see cref="ConfigAuditEntryOptions"/>.
     /// </remarks>
     public ConfigAuditEntryOptions Options => new(_options);
@@ -77,8 +77,9 @@ public sealed class ConfigAuditKnownEntry
 /// <remarks>
 /// Defaults preserve the original audit behavior: object members are reported, collection parent values remain opaque,
 /// and collection elements are not traversed unless <see cref="TraverseCollectionElements"/> is enabled. Instances are
-/// copied by <see cref="ConfigAuditKnownEntry"/>, so registration captures a stable snapshot even though this type uses
-/// settable properties for the registration callback pattern.
+/// copied by <see cref="ConfigAuditKnownEntry"/>, so registration captures a stable snapshot. Use
+/// <see cref="ConfigAuditEntryOptionsBuilder"/> with the service-collection registration callback when mutable
+/// callback configuration is more convenient than an object initializer.
 /// </remarks>
 public sealed class ConfigAuditEntryOptions
 {
@@ -108,29 +109,29 @@ public sealed class ConfigAuditEntryOptions
     }
 
     /// <summary>
-    /// Gets or sets a value indicating whether arrays, lists, and dictionaries should emit child element entries.
+    /// Gets a value indicating whether arrays, lists, and dictionaries should emit child element entries.
     /// </summary>
-    public bool TraverseCollectionElements { get; set; }
+    public bool TraverseCollectionElements { get; init; }
 
     /// <summary>
-    /// Gets or sets the maximum nested collection depth traversed when collection traversal is enabled.
+    /// Gets the maximum nested collection depth traversed when collection traversal is enabled.
     /// </summary>
-    public int MaxCollectionDepth { get; set; } = DefaultMaxCollectionDepth;
+    public int MaxCollectionDepth { get; init; } = DefaultMaxCollectionDepth;
 
     /// <summary>
-    /// Gets or sets the maximum number of elements reported from any one traversed collection.
+    /// Gets the maximum number of elements reported from any one traversed collection.
     /// </summary>
-    public int MaxCollectionElements { get; set; } = DefaultMaxCollectionElements;
+    public int MaxCollectionElements { get; init; } = DefaultMaxCollectionElements;
 
     /// <summary>
-    /// Gets or sets the maximum number of child nodes created for this entry before traversal stops.
+    /// Gets the maximum number of child nodes created for this entry before traversal stops.
     /// </summary>
-    public int MaxReportNodes { get; set; } = DefaultMaxReportNodes;
+    public int MaxReportNodes { get; init; } = DefaultMaxReportNodes;
 
     /// <summary>
-    /// Gets or sets a value indicating whether non-sensitive dictionary keys may appear as element labels.
+    /// Gets a value indicating whether non-sensitive dictionary keys may appear as element labels.
     /// </summary>
-    public bool DisplayDictionaryKeys { get; set; } = true;
+    public bool DisplayDictionaryKeys { get; init; } = true;
 
     internal bool HasDefaultValues =>
         !TraverseCollectionElements
@@ -181,6 +182,67 @@ public sealed class ConfigAuditEntryOptions
 }
 
 /// <summary>
+/// Mutable builder used by registration callbacks to create immutable <see cref="ConfigAuditEntryOptions"/>.
+/// </summary>
+/// <remarks>
+/// The builder exists only for configuration ergonomics. AppSurface snapshots it into immutable options when
+/// registering the audit key, so later builder mutations cannot affect reports.
+/// </remarks>
+public sealed class ConfigAuditEntryOptionsBuilder
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConfigAuditEntryOptionsBuilder"/> class with safe defaults.
+    /// </summary>
+    public ConfigAuditEntryOptionsBuilder()
+    {
+    }
+
+    internal ConfigAuditEntryOptionsBuilder(ConfigAuditEntryOptions source)
+    {
+        TraverseCollectionElements = source.TraverseCollectionElements;
+        MaxCollectionDepth = source.MaxCollectionDepth;
+        MaxCollectionElements = source.MaxCollectionElements;
+        MaxReportNodes = source.MaxReportNodes;
+        DisplayDictionaryKeys = source.DisplayDictionaryKeys;
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether arrays, lists, and dictionaries should emit child element entries.
+    /// </summary>
+    public bool TraverseCollectionElements { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum nested collection depth traversed when collection traversal is enabled.
+    /// </summary>
+    public int MaxCollectionDepth { get; set; } = ConfigAuditEntryOptions.DefaultMaxCollectionDepth;
+
+    /// <summary>
+    /// Gets or sets the maximum number of elements reported from any one traversed collection.
+    /// </summary>
+    public int MaxCollectionElements { get; set; } = ConfigAuditEntryOptions.DefaultMaxCollectionElements;
+
+    /// <summary>
+    /// Gets or sets the maximum number of child nodes created for this entry before traversal stops.
+    /// </summary>
+    public int MaxReportNodes { get; set; } = ConfigAuditEntryOptions.DefaultMaxReportNodes;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether non-sensitive dictionary keys may appear as element labels.
+    /// </summary>
+    public bool DisplayDictionaryKeys { get; set; } = true;
+
+    internal ConfigAuditEntryOptions ToOptions() =>
+        new()
+        {
+            TraverseCollectionElements = TraverseCollectionElements,
+            MaxCollectionDepth = MaxCollectionDepth,
+            MaxCollectionElements = MaxCollectionElements,
+            MaxReportNodes = MaxReportNodes,
+            DisplayDictionaryKeys = DisplayDictionaryKeys
+        };
+}
+
+/// <summary>
 /// Extension methods for registering additional configuration audit keys.
 /// </summary>
 public static class ConfigAuditServiceCollectionExtensions
@@ -221,15 +283,15 @@ public static class ConfigAuditServiceCollectionExtensions
     public static IServiceCollection AddConfigAuditKey<T>(
         this IServiceCollection services,
         string key,
-        Action<ConfigAuditEntryOptions>? configure)
+        Action<ConfigAuditEntryOptionsBuilder>? configure)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
-        var options = new ConfigAuditEntryOptions();
+        var options = new ConfigAuditEntryOptionsBuilder();
         configure?.Invoke(options);
 
-        services.AddSingleton(new ConfigAuditKnownEntry(key, configType: null, typeof(T), options));
+        services.AddSingleton(new ConfigAuditKnownEntry(key, configType: null, typeof(T), options.ToOptions()));
         return services;
     }
 }

@@ -570,6 +570,51 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_RedactsSensitiveFileDiagnosticPathsBeforePublicFields()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            File.WriteAllText(
+                Path.Join(tempDir, "appsettings.Production.json"),
+                """
+                {
+                  "Tenants": {
+                    "password": null
+                  }
+                }
+                """);
+
+            var environment = A.Fake<IEnvironmentProvider>();
+            A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+            var services = CreateServices(tempDir, environment);
+            services.AddConfigAuditKey<Dictionary<string, string>>(
+                "Tenants",
+                options => options.TraverseCollectionElements = true);
+
+            var report = services.BuildServiceProvider()
+                .GetRequiredService<IConfigAuditReporter>()
+                .GetReport("Production");
+
+            var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+            var diagnostic = Assert.Single(entry.Diagnostics, item => item.Code == "config-file-null-skipped");
+            var rendered = new ConfigAuditTextRenderer().Render(report);
+
+            Assert.Equal("Tenants.[redacted-key]", diagnostic.ConfigPath);
+            Assert.DoesNotContain("password", diagnostic.ConfigPath, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("password", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("password", rendered, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void GetReport_TraversesNonStringDictionaryKeysAndCanHideLabels()
     {
         var environment = A.Fake<IEnvironmentProvider>();
