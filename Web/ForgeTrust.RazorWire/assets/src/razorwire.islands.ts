@@ -3,6 +3,7 @@
  */
 interface Window {
     RazorWireIslandsInitialized?: boolean;
+    RazorWireIslandModules?: Record<string, string>;
 }
 
 (function () {
@@ -46,6 +47,9 @@ interface Window {
             const modulePath = island.getAttribute('data-rw-module');
             if (!modulePath) continue; // Safety guard
 
+            const resolvedModulePath = resolveIslandModulePath(modulePath);
+            if (!resolvedModulePath) continue;
+
             scheduledElements.add(island);
             const strategy = island.getAttribute('data-rw-strategy') || 'load';
             let props = {};
@@ -60,24 +64,85 @@ interface Window {
             // for one module doesn't block the initialization of subsequent islands on the page.
 
             if (strategy === 'load') {
-                mountIslandSafe(island, modulePath, props);
+                mountIslandSafe(island, resolvedModulePath, props);
             } else if (strategy === 'visible') {
-                setupIntersectionObserver(island, modulePath, props);
+                setupIntersectionObserver(island, resolvedModulePath, props);
             } else if (strategy === 'idle') {
                 if ('requestIdleCallback' in window) {
-                    window.requestIdleCallback(() => mountIslandSafe(island, modulePath, props));
+                    window.requestIdleCallback(() => mountIslandSafe(island, resolvedModulePath, props));
                 } else {
-                    setTimeout(() => mountIslandSafe(island, modulePath, props), 200);
+                    setTimeout(() => mountIslandSafe(island, resolvedModulePath, props), 200);
                 }
             } else if (strategy === 'only') {
                 island.innerHTML = '';
-                mountIslandSafe(island, modulePath, props);
+                mountIslandSafe(island, resolvedModulePath, props);
             } else {
                 // Unknown strategy, cleanup
                 console.warn(`Unknown island strategy: ${strategy}`, island);
                 scheduledElements.delete(island);
             }
         }
+    }
+
+    /**
+     * Resolve a data-rw-module value to a module specifier that is safe to pass to dynamic import().
+     *
+     * App-owned pages may provide `window.RazorWireIslandModules` to map logical module names to approved
+     * URLs. Existing relative, root-relative, https, same-origin http(s), and bare import-map specifiers
+     * remain valid for compatibility. Dangerous direct schemes are rejected before import().
+     */
+    function resolveIslandModulePath(moduleName) {
+        const rawModuleName = moduleName.trim();
+        if (!rawModuleName) return null;
+
+        const manifest = window.RazorWireIslandModules || {};
+        if (Object.prototype.hasOwnProperty.call(manifest, rawModuleName)) {
+            return validateIslandModuleSpecifier(manifest[rawModuleName], rawModuleName, true);
+        }
+
+        return validateIslandModuleSpecifier(rawModuleName, rawModuleName, false);
+    }
+
+    function validateIslandModuleSpecifier(specifier, moduleName, fromManifest) {
+        const value = (specifier || '').trim();
+        if (!value) {
+            console.warn(`RazorWire island module "${moduleName}" resolved to an empty module specifier.`);
+            return null;
+        }
+
+        if (/^(?:javascript|blob|file):/i.test(value)) {
+            console.warn(`RazorWire island module "${moduleName}" uses a blocked module scheme.`, value);
+            return null;
+        }
+
+        if (/^data:/i.test(value)) {
+            if (fromManifest && /^data:text\/javascript[,;]/i.test(value)) {
+                return value;
+            }
+
+            console.warn(`RazorWire island module "${moduleName}" uses a blocked module scheme.`, value);
+            return null;
+        }
+
+        if (hasUrlScheme(value)) {
+            try {
+                const url = new URL(value);
+                if (url.protocol === 'https:' || url.origin === window.location.origin) {
+                    return value;
+                }
+            } catch {
+                // Fall through to the shared warning below.
+            }
+
+            console.warn(`RazorWire island module "${moduleName}" is not an allowed module URL.`, value);
+            return null;
+        }
+
+        return value;
+    }
+
+    function hasUrlScheme(value) {
+        return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value);
     }
 
     /**

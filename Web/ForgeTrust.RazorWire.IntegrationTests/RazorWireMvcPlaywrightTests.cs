@@ -60,12 +60,11 @@ public sealed class RazorWireMvcPlaywrightTests
         await page.EvaluateAsync(
             """
             () => {
-                const moduleUrl = URL.createObjectURL(new Blob([
-                    'export function mount(root, props) { root.textContent = `client:${props.label}`; root.dataset.clientMounted = "true"; }'
-                ], { type: 'text/javascript' }));
+                const moduleUrl = `data:text/javascript,${encodeURIComponent('export function mount(root, props) { root.textContent = `client:${props.label}`; root.dataset.clientMounted = "true"; }')}`;
+                window.RazorWireIslandModules = { PlaywrightClientIsland: moduleUrl };
                 const island = document.createElement('section');
                 island.id = 'playwright-client-island';
-                island.setAttribute('data-rw-module', moduleUrl);
+                island.setAttribute('data-rw-module', 'PlaywrightClientIsland');
                 island.setAttribute('data-rw-strategy', 'only');
                 island.setAttribute('data-rw-props', JSON.stringify({ label: 'ready' }));
                 island.innerHTML = '<p id="server-placeholder">server content</p>';

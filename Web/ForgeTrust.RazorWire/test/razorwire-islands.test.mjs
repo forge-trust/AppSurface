@@ -7,10 +7,14 @@ const islandsPath = new URL('../wwwroot/razorwire/razorwire.islands.js', import.
 
 test('load strategy hydrates generated output and passes parsed props', async () => {
   const island = new FakeElement('div');
-  island.setAttribute('data-rw-module', moduleWithMount('root.setAttribute("data-mounted-props", props.answer);'));
+  island.setAttribute('data-rw-module', 'test-load');
   island.setAttribute('data-rw-props', '{"answer":"42"}');
 
-  loadIslands([island]);
+  loadIslands([island], {
+    islandModules: {
+      'test-load': moduleWithMount('root.setAttribute("data-mounted-props", props.answer);')
+    }
+  });
   await flushHydration();
 
   assert.equal(island.getAttribute('data-rw-hydrated'), 'true');
@@ -20,10 +24,14 @@ test('load strategy hydrates generated output and passes parsed props', async ()
 test('only strategy clears server content before mounting', async () => {
   const island = new FakeElement('div');
   island.innerHTML = '<p>server content</p>';
-  island.setAttribute('data-rw-module', moduleWithMount('root.setAttribute("data-child-count", String(root.children.length));'));
+  island.setAttribute('data-rw-module', 'test-only');
   island.setAttribute('data-rw-strategy', 'only');
 
-  loadIslands([island]);
+  loadIslands([island], {
+    islandModules: {
+      'test-only': moduleWithMount('root.setAttribute("data-child-count", String(root.children.length));')
+    }
+  });
   await flushHydration();
 
   assert.equal(island.getAttribute('data-rw-hydrated'), 'true');
@@ -33,9 +41,13 @@ test('only strategy clears server content before mounting', async () => {
 
 test('missing mount marks island failed and prevents duplicate hydration', async () => {
   const island = new FakeElement('div');
-  island.setAttribute('data-rw-module', 'data:text/javascript,export const value = 1;');
+  island.setAttribute('data-rw-module', 'test-missing-mount');
 
-  const { document } = loadIslands([island]);
+  const { document } = loadIslands([island], {
+    islandModules: {
+      'test-missing-mount': 'data:text/javascript,export const value = 1;'
+    }
+  });
   await flushHydration();
   document.dispatchEvent({ type: 'turbo:load' });
   await flushHydration();
@@ -56,10 +68,14 @@ test('import failure leaves island retryable', async () => {
 
 test('unknown strategy does not hydrate and reports the invalid strategy', async () => {
   const island = new FakeElement('div');
-  island.setAttribute('data-rw-module', moduleWithMount('root.setAttribute("data-mounted", "true");'));
+  island.setAttribute('data-rw-module', 'test-unknown');
   island.setAttribute('data-rw-strategy', 'immediate');
 
-  const { warnings } = loadIslands([island]);
+  const { warnings } = loadIslands([island], {
+    islandModules: {
+      'test-unknown': moduleWithMount('root.setAttribute("data-mounted", "true");')
+    }
+  });
   await flushHydration();
 
   assert.equal(island.hasAttribute('data-rw-hydrated'), false);
@@ -69,11 +85,14 @@ test('unknown strategy does not hydrate and reports the invalid strategy', async
 
 test('idle strategy uses requestIdleCallback when available', async () => {
   const island = new FakeElement('div');
-  island.setAttribute('data-rw-module', moduleWithMount('root.setAttribute("data-mounted", "idle");'));
+  island.setAttribute('data-rw-module', 'test-idle');
   island.setAttribute('data-rw-strategy', 'idle');
   const idleCallbacks = [];
 
   loadIslands([island], {
+    islandModules: {
+      'test-idle': moduleWithMount('root.setAttribute("data-mounted", "idle");')
+    },
     requestIdleCallback: callback => {
       idleCallbacks.push(callback);
     }
@@ -89,11 +108,14 @@ test('idle strategy uses requestIdleCallback when available', async () => {
 
 test('visible strategy waits for intersection before hydrating', async () => {
   const island = new FakeElement('div');
-  island.setAttribute('data-rw-module', moduleWithMount('root.setAttribute("data-mounted", "visible");'));
+  island.setAttribute('data-rw-module', 'test-visible');
   island.setAttribute('data-rw-strategy', 'visible');
   const observers = [];
 
   loadIslands([island], {
+    islandModules: {
+      'test-visible': moduleWithMount('root.setAttribute("data-mounted", "visible");')
+    },
     IntersectionObserver: class {
       constructor(callback) {
         this.callback = callback;
@@ -116,11 +138,23 @@ test('visible strategy waits for intersection before hydrating', async () => {
   assert.equal(island.getAttribute('data-mounted'), 'visible');
 });
 
+test('dangerous direct module schemes are rejected before dynamic import', async () => {
+  const island = new FakeElement('div');
+  island.setAttribute('data-rw-module', 'javascript:alert(1)');
+
+  const { warnings } = loadIslands([island]);
+  await flushHydration();
+
+  assert.equal(island.hasAttribute('data-rw-hydrated'), false);
+  assert.equal(warnings.warns.some(entry => entry[0].startsWith('RazorWire island module')), true);
+});
+
 function loadIslands(islands, overrides = {}) {
   const document = new FakeDocument(islands);
   const warnings = { errors: [], warns: [] };
   const window = {
-    RazorWireIslandsInitialized: false
+    RazorWireIslandsInitialized: false,
+    RazorWireIslandModules: overrides.islandModules
   };
   if (overrides.requestIdleCallback) {
     window.requestIdleCallback = overrides.requestIdleCallback;

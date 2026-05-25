@@ -369,6 +369,8 @@ RazorWire also supports hybrid islands where a server-rendered region mounts a c
 </rw:island>
 ```
 
+`client-module` can be a relative path, root-relative path, same-origin URL, HTTPS URL, or bare import-map specifier. Hosts that prefer logical names can set `window.RazorWireIslandModules = { ChartComponent: "/js/chart-component.js" }` before hydration; RazorWire resolves the rendered `data-rw-module` name through that manifest before calling dynamic `import()`. Direct `javascript:`, `blob:`, `file:`, and unapproved `data:` module specifiers are rejected.
+
 RazorWire serves `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`,
 `razorwire.islands.js`, and the package demo assets as normal Razor Class Library
 static web assets when the host has a static-web-assets manifest. The same files

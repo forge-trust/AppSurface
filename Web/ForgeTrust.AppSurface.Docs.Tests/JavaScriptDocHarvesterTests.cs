@@ -562,8 +562,8 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains("css-hook-data-rw-form-error-generated-true", page.Content, StringComparison.Ordinal);
         Assert.Contains("css-custom-property-rw-form-error-text", page.Content, StringComparison.Ordinal);
         Assert.Contains("global-window-razorwire", page.Content, StringComparison.Ordinal);
-        Assert.Contains("only", page.Content, StringComparison.Ordinal);
-        Assert.DoesNotContain("immediate", page.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("{&quot;load&quot;|&quot;idle&quot;|&quot;visible&quot;|&quot;only&quot;}", page.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("{&quot;load&quot;|&quot;idle&quot;|&quot;visible&quot;|&quot;immediate&quot;}", page.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             page.SymbolSourceProvenance!,
             provenance => provenance.SourcePath == "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"

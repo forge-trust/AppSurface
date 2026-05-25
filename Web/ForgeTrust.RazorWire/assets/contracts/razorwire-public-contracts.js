@@ -8,6 +8,16 @@
 window.RazorWire = window.RazorWire || {};
 
 /**
+ * Optional island module manifest that maps logical `data-rw-module` names to approved module URLs before RazorWire imports them.
+ * @public
+ * @namespace RazorWire
+ * @config window.RazorWireIslandModules
+ * @type {Record<string, string>}
+ * @source host page script or bundled app script
+ * @property {string} moduleName - Logical island module name keyed by the value rendered in `data-rw-module`.
+ */
+
+/**
  * Runtime configuration merged from the `<rw:scripts />` script tag.
  * @public
  * @namespace RazorWire
@@ -27,7 +37,8 @@ window.RazorWire = window.RazorWire || {};
  * @event razorwire:form:submit-start
  * @target form[data-rw-form="true"]
  * @firesWhen Turbo begins submitting a RazorWire-enhanced form and RazorWire marks it busy.
- * @detail none
+ * @property {HTMLFormElement} detail.form - Submitted form.
+ * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
  * @bubbles true
  * @cancelable false
  */
@@ -40,8 +51,13 @@ window.RazorWire = window.RazorWire || {};
  * @target form[data-rw-form="true"]
  * @firesWhen Turbo reports a failed form submission or RazorWire catches a network failure.
  * @property {HTMLFormElement} detail.form - Submitted form.
+ * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
+ * @property {number|null} detail.statusCode - HTTP status code when available.
+ * @property {boolean} detail.handled - Whether the server response already handled the failure.
+ * @property {"turbo-stream"|"html"|"json"|"unknown"|"network"} detail.responseKind - Failure category.
  * @property {Element} detail.target - Stream target or form that should own the failure UI.
  * @property {string} detail.message - Reader-facing fallback message.
+ * @property {Object|null} detail.developmentDiagnostic - Development diagnostic payload when enabled.
  * @bubbles true
  * @cancelable true
  */
@@ -54,8 +70,11 @@ window.RazorWire = window.RazorWire || {};
  * @target form[data-rw-form="true"]
  * @firesWhen development diagnostics are enabled for a failed RazorWire-enhanced form.
  * @property {HTMLFormElement} detail.form - Submitted form.
- * @property {number} detail.statusCode - HTTP status code when available.
+ * @property {number|null} detail.statusCode - HTTP status code when available.
  * @property {string} detail.title - Short diagnostic title.
+ * @property {string} detail.detail - Diagnostic explanation.
+ * @property {string} detail.docsHref - Documentation link target.
+ * @property {string[]} detail.hints - Suggested fixes.
  * @bubbles true
  * @cancelable false
  */
@@ -68,7 +87,10 @@ window.RazorWire = window.RazorWire || {};
  * @target form[data-rw-form="true"]
  * @firesWhen Turbo finishes a RazorWire-enhanced form submission or RazorWire handles a fetch error.
  * @property {HTMLFormElement} detail.form - Submitted form.
+ * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
  * @property {boolean} detail.success - Whether the submission succeeded.
+ * @property {number|null} detail.statusCode - HTTP status code when available.
+ * @property {boolean} detail.handled - Whether the server response already handled the result.
  * @bubbles true
  * @cancelable false
  */
@@ -130,6 +152,7 @@ window.RazorWire = window.RazorWire || {};
  * @attribute data-rw-module
  * @target [data-rw-module]
  * @type {string}
+ * @description Logical module name, import-map specifier, or safe module URL. Hosts may define `window.RazorWireIslandModules` to map logical names to pre-approved module URLs before RazorWire calls dynamic import.
  */
 
 /**

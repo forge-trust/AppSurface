@@ -14,8 +14,8 @@ interface Window {
 }
 
 interface TurboRuntime {
-    connectStreamSource(source: EventSource): void;
-    disconnectStreamSource(source: EventSource): void;
+    connectStreamSource?(source: EventSource): void;
+    disconnectStreamSource?(source: EventSource): void;
     visit?(url: string, options?: { action?: string }): void;
     StreamActions?: Record<string, (this: Element) => void>;
 }
@@ -180,7 +180,7 @@ declare const Turbo: TurboRuntime | undefined;
                 console.log('[ConnectionManager] Creating NEW connection for:', src);
                 // Create new persistent connection
                 const es = new EventSource(src);
-                Turbo.connectStreamSource(es);
+                this.connectStreamSource(es);
 
                 source = {
                     es,
@@ -250,7 +250,7 @@ declare const Turbo: TurboRuntime | undefined;
 
                     console.log('[ConnectionManager] Closing connection:', src);
                     source.es.close();
-                    Turbo.disconnectStreamSource(source.es);
+                    this.disconnectStreamSource(source.es);
                     this.sources.delete(src);
 
                     this.updateSourceState(src, 'disconnected');
@@ -332,6 +332,10 @@ declare const Turbo: TurboRuntime | undefined;
             }
         }
 
+        toAttributeToken(channel) {
+            return channel.replace(/[^A-Za-z0-9_-]/g, '-');
+        }
+
         syncDependentElements(targetChannel = null) {
             const selector = targetChannel
                 ? `[data-rw-requires-stream="${targetChannel}"]`
@@ -353,11 +357,27 @@ declare const Turbo: TurboRuntime | undefined;
         }
 
         updateBodyAttribute(channel, state) {
-            const attr = `data-rw-stream-${channel}`;
+            if (!channel) return;
+
+            const attr = `data-rw-stream-${this.toAttributeToken(channel)}`;
             if (state && state !== 'disconnected') {
                 document.body.setAttribute(attr, state);
             } else {
                 document.body.removeAttribute(attr);
+            }
+        }
+
+        connectStreamSource(source) {
+            const turbo = resolveTurbo();
+            if (typeof turbo?.connectStreamSource === 'function') {
+                turbo.connectStreamSource(source);
+            }
+        }
+
+        disconnectStreamSource(source) {
+            const turbo = resolveTurbo();
+            if (typeof turbo?.disconnectStreamSource === 'function') {
+                turbo.disconnectStreamSource(source);
             }
         }
     }
