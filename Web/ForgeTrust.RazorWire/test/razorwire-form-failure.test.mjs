@@ -346,10 +346,34 @@ test('rw-visit stream action rejects unsupported visit action without throwing',
   assert.deepEqual(turbo.visits, []);
 });
 
+test('stream registration tolerates missing Turbo global', () => {
+  const { context, document } = loadRuntime({ turbo: null });
+  const stream = new FakeElement('rw-stream-source');
+  stream.setAttribute('src', '/streams/orders');
+  document.body.appendChild(stream);
+
+  assert.doesNotThrow(() => context.window.RazorWire.connectionManager.scan());
+  assert.equal(stream.getAttribute('data-rw-registered'), 'true');
+});
+
+test('stream state body attributes use safe channel tokens', () => {
+  const { context, document } = loadRuntime();
+  const stream = new FakeElement('rw-stream-source');
+  stream.setAttribute('src', '/streams/orders?tenant=a#live');
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+  const source = context.window.RazorWire.connectionManager.sources.get('/streams/orders?tenant=a#live');
+  source.es.onopen();
+
+  assert.equal(document.body.getAttribute('data-rw-stream-orders-tenant-a-live'), 'connected');
+  assert.equal(document.body.hasAttribute('data-rw-stream-orders?tenant=a#live'), false);
+});
+
 function loadRuntime(runtimeOptions = {}) {
   const document = new FakeDocument(runtimeOptions);
   const visits = [];
-  const turbo = {
+  const turbo = runtimeOptions.turbo === null ? null : {
     StreamActions: {},
     visits,
     connectStreamSource: () => {},
@@ -373,11 +397,11 @@ function loadRuntime(runtimeOptions = {}) {
     Element: FakeElement,
     HTMLFormElement: FakeForm,
     CustomEvent: FakeCustomEvent,
+    EventSource: FakeEventSource,
     MutationObserver: class {
       observe() {}
       disconnect() {}
     },
-    Turbo: turbo,
     setTimeout,
     clearTimeout,
     setInterval: () => 1,
@@ -386,6 +410,9 @@ function loadRuntime(runtimeOptions = {}) {
     Intl,
     URL
   };
+  if (turbo !== null) {
+    context.Turbo = turbo;
+  }
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(readFileSync(runtimePath, 'utf8'), context);
@@ -436,6 +463,21 @@ class FakeHeaders {
 
   get(name) {
     return this.values.get(String(name).toLowerCase()) || null;
+  }
+}
+
+class FakeEventSource {
+  constructor(url) {
+    this.url = url;
+    this.readyState = 0;
+    this.closed = false;
+    this.onopen = null;
+    this.onerror = null;
+  }
+
+  close() {
+    this.closed = true;
+    this.readyState = 2;
   }
 }
 

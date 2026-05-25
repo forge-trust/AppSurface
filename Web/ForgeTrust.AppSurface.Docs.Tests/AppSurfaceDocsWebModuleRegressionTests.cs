@@ -271,7 +271,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
             Assert.Equal(ReferencedRazorWireScriptPath, referencedAssetResponse.RequestMessage?.RequestUri?.AbsolutePath);
             Assert.Equal("text/javascript", referencedAssetResponse.Content.Headers.ContentType?.MediaType);
             Assert.False(string.IsNullOrWhiteSpace(referencedAsset));
-            Assert.Contains("RazorWire Core Client Runtime", referencedAsset);
+            Assert.Contains("Generated from assets/src/razorwire.ts", referencedAsset);
         }
         finally
         {

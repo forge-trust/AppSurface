@@ -93,7 +93,7 @@ dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Test
 
 | Fixture/file | Size | Parse time | Notes |
 | --- | ---: | ---: | --- |
-| `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js` | 41,380 bytes | 13.434 ms | real RazorWire dogfood file; parsed successfully with 4,380 AST nodes and 2 block comments |
+| `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js` | current generated asset size | measured by test output | real generated RazorWire runtime file; contract harvesting now uses the docs-only manifest instead |
 | `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/outline-client.js` | current authored asset size | measured by test output | AppSurface Docs authored browser asset; generated/minified `search-client.js` is no longer a parser dogfood file |
 | `Web/ForgeTrust.AppSurface.Docs/wwwroot/docs/minisearch.min.js` | current generated asset size | skipped | should stay excluded by `*.min.js` by default |
 | `malformed.js` | 107 bytes | 0.450 ms | failure path; catchable parse exception |

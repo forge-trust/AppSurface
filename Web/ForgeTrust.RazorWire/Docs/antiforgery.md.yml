@@ -5,4 +5,5 @@ order: 30
 related_pages:
   - Web/ForgeTrust.RazorWire/README.md
   - Web/ForgeTrust.RazorWire/Docs/form-failures.md
+  - Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md
   - Web/ForgeTrust.RazorWire/DESIGN.md
