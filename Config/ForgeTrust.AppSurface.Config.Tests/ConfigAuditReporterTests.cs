@@ -1,6 +1,7 @@
 using System.Collections;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -1370,6 +1371,8 @@ public class ConfigAuditReporterTests
                     "Enabled": true,
                     "RetryCount": 3,
                     "Ratio": 42.5,
+                    "LongValue": 9223372036854775807,
+                    "HugeValue": 1e100,
                     "Password": "super-secret",
                     "Items": [1, 2],
                     "TokenList": ["secret-one", "secret-two"],
@@ -1406,6 +1409,12 @@ public class ConfigAuditReporterTests
             AssertDiscovered(report, "App.Enabled", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "True");
             AssertDiscovered(report, "App.RetryCount", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "3");
             AssertDiscovered(report, "App.Ratio", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "42.5");
+            AssertDiscovered(
+                report,
+                "App.LongValue",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                "9223372036854775807");
+            AssertDiscovered(report, "App.HugeValue", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "1E+100");
             var password = AssertDiscovered(
                 report,
                 "App.Password",
@@ -1530,6 +1539,39 @@ public class ConfigAuditReporterTests
                 Directory.Delete(tempDir, true);
             }
         }
+    }
+
+    [Fact]
+    public void FileProviderEnumeration_ReportsOriginFallbackForMissingOriginMetadata()
+    {
+        var environmentConfig = new JsonObject
+        {
+            ["MissingOrigin"] = "value"
+        };
+        var snapshot = new ConfigFileProviderSnapshot(
+            new Dictionary<string, JsonNode>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Staging"] = environmentConfig
+            },
+            new Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Staging"] = new(StringComparer.OrdinalIgnoreCase)
+            },
+            []);
+        var provider = new FileBasedConfigProvider(snapshot);
+
+        var discoveredKey = Assert.Single(((IConfigAuditKeyEnumerator)provider).EnumerateKeys("Staging"));
+
+        Assert.Equal("MissingOrigin", discoveredKey.Key);
+        Assert.Equal("value", discoveredKey.RawValue);
+        var source = Assert.Single(discoveredKey.Sources);
+        Assert.Equal(ConfigAuditSourceKind.File, source.Kind);
+        Assert.Equal(nameof(FileBasedConfigProvider), source.ProviderName);
+        Assert.Equal("MissingOrigin", source.ConfigPath);
+        Assert.Contains(
+            discoveredKey.Diagnostics,
+            diagnostic => diagnostic.Code == "config-provider-discovered-key-origin-missing"
+                          && diagnostic.Source == source);
     }
 
     [Fact]

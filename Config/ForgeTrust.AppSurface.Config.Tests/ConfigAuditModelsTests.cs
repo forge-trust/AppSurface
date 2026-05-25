@@ -151,6 +151,33 @@ public class ConfigAuditModelsTests
                 Enabled = true,
                 Placeholder = "[redacted]"
             },
+            DiscoveredKeys =
+            [
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Discovered.Fallback",
+                    Classification = (ConfigAuditDiscoveredKeyClassification)99,
+                    DisplayValue = "value",
+                    Sources =
+                    [
+                        new ConfigAuditSourceRecord
+                        {
+                            Kind = ConfigAuditSourceKind.Provider,
+                            ProviderName = "ProviderName",
+                            Role = ConfigAuditSourceRole.Base
+                        }
+                    ],
+                    Diagnostics =
+                    [
+                        new ConfigAuditDiagnostic
+                        {
+                            Severity = ConfigAuditDiagnosticSeverity.Warning,
+                            Code = "discovered-warning",
+                            Message = "Discovered diagnostic."
+                        }
+                    ]
+                }
+            ],
             Entries =
             [
                 new ConfigAuditEntry
@@ -213,6 +240,8 @@ public class ConfigAuditModelsTests
         Assert.True(rendered.IndexOf("Root[\"alpha\"]", StringComparison.Ordinal) < rendered.IndexOf("Root[\"zeta\"]", StringComparison.Ordinal));
         Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root.Plain", StringComparison.Ordinal));
         Assert.Contains("Provider", rendered, StringComparison.Ordinal);
+        Assert.Contains("Discovered.Fallback [99] = value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Diagnostic: Discovered diagnostic.", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -250,5 +279,13 @@ public class ConfigAuditModelsTests
         Assert.Equal(0, (int)ConfigAuditDiagnosticSeverity.Info);
         Assert.Equal(1, (int)ConfigAuditDiagnosticSeverity.Warning);
         Assert.Equal(2, (int)ConfigAuditDiagnosticSeverity.Error);
+
+        var providerKey = new ConfigAuditProviderDiscoveredKey(
+            "Discovered.Value",
+            RawValue: null,
+            ConfigAuditDiscoveredValueKind.Array,
+            Sources: [],
+            Diagnostics: []);
+        Assert.Equal(ConfigAuditDiscoveredValueKind.Array, providerKey.ValueKind);
     }
 }

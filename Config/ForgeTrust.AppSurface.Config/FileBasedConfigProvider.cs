@@ -36,6 +36,19 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         _snapshotLazy = new Lazy<ConfigFileProviderSnapshot>(InitializeSnapshot, true);
     }
 
+    /// <summary>
+    /// Initializes a provider around an already-built snapshot for focused audit enumeration tests.
+    /// </summary>
+    /// <param name="snapshot">The snapshot returned by the provider during audit operations.</param>
+    internal FileBasedConfigProvider(ConfigFileProviderSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        _configFileLocationProvider = null!;
+        _logger = null!;
+        _snapshotLazy = new Lazy<ConfigFileProviderSnapshot>(() => snapshot, true);
+    }
+
     /// <inheritdoc />
     public T? GetValue<T>(string environment, string key)
     {
