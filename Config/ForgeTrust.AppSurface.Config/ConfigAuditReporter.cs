@@ -28,8 +28,9 @@ public interface IConfigAuditReporter
 /// <remarks>
 /// This internal reporter treats <see cref="IEnvironmentConfigProvider"/> as the override provider, excludes
 /// manager/internal provider registrations from the displayed provider list, and favors wrapper-discovered audit
-/// entries when duplicate keys are registered manually. Provider failures are converted into diagnostics so one
-/// broken provider does not prevent operators from seeing the rest of the report.
+/// entries when duplicate keys are registered manually. Manual audit option assignments override wrapper-discovered
+/// options per property so callers can intentionally reset a wrapper default for one key. Provider failures are
+/// converted into diagnostics so one broken provider does not prevent operators from seeing the rest of the report.
 /// </remarks>
 internal sealed class ConfigAuditReporter : IConfigAuditReporter
 {
@@ -378,10 +379,13 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     private static ConfigAuditKnownEntry MergeKnownEntries(IGrouping<string, ConfigAuditKnownEntry> group)
     {
         var selected = group.OrderBy(entry => entry.ConfigType == null ? 1 : 0).First();
-        var optionSource = group.FirstOrDefault(entry => entry.HasNonDefaultOptions) ?? selected;
-        return ReferenceEquals(selected, optionSource)
-            ? selected
-            : selected.WithOptions(optionSource.OptionsSnapshot);
+        var mergedOptions = new ConfigAuditEntryOptions(selected.OptionsSnapshot);
+        foreach (var entry in group.Where(entry => entry.ConfigType == null))
+        {
+            mergedOptions = mergedOptions.ApplyAssignedOverrides(entry.OptionsSnapshot);
+        }
+
+        return selected.WithOptions(mergedOptions);
     }
 
     private static ConfigValueResolution CreateProviderExceptionResolution(

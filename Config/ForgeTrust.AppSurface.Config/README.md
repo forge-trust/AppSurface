@@ -18,6 +18,7 @@ AppSurface is preparing the first coordinated `v0.1.0` release. Before installin
 - **`FileBasedConfigProvider`**: Loads configuration from files.
 - **`IConfigAuditReporter`**: Builds source-aware configuration audit reports for known config entries.
 - **`ConfigAuditTextRenderer`**: Renders a safe, human-readable audit report from the structured model.
+- **`ConfigAuditCollectionTraversalAttribute`**: Enables bounded collection element traversal for a discovered config wrapper.
 - **`ConfigDiagnosticsCommandRunner`**: Runs the app-owned text diagnostics workflow for the active AppSurface environment.
 - **`Config<T>` / `ConfigStruct<T>`**: Base types for strongly typed configuration values.
 - **`ConfigKeyAttribute`**: Associates a configuration type or property with a specific key.
@@ -79,12 +80,14 @@ services.AddConfigAuditKey<string>("Billing.Endpoint");
 
 ### Audit Hello World
 
-Register a key, produce the structured report, and render it when humans need a pasteable view:
+Opt in a wrapper, produce the structured report, and render it when humans need a pasteable view:
 
 ```csharp
-services.AddConfigAuditKey<List<ServiceEndpoint>>(
-    "Services",
-    options => options.TraverseCollectionElements = true);
+[ConfigKey("Services", root: true)]
+[ConfigAuditCollectionTraversal]
+public sealed class ServicesConfig : Config<List<ServiceEndpoint>>
+{
+}
 
 var report = auditReporter.GetReport("Production");
 Console.WriteLine(textRenderer.Render(report));
@@ -253,7 +256,17 @@ because they cannot form an unambiguous raw config path.
 | `MaxReportNodes` | `4096` | Bounds total child nodes created for the entry. |
 | `DisplayDictionaryKeys` | `true` | Allows non-sensitive dictionary keys to appear as labels. Sensitive keys are still redacted. |
 
-Use the overload when registering provider-only keys. The callback receives a mutable
+For discovered wrappers, use `ConfigAuditCollectionTraversalAttribute`. Attribute presence enables traversal and its
+named properties mirror the bounded options:
+
+```csharp
+[ConfigAuditCollectionTraversal(MaxCollectionElements = 32, DisplayDictionaryKeys = false)]
+public sealed class ServicesByNameConfig : Config<Dictionary<string, ServiceEndpoint>>
+{
+}
+```
+
+Use the `AddConfigAuditKey<T>()` overload when registering provider-only keys. The callback receives a mutable
 `ConfigAuditEntryOptionsBuilder`; AppSurface snapshots the builder into immutable options during registration:
 
 ```csharp
@@ -282,6 +295,11 @@ Each collection child can include `ConfigAuditEntry.Element`. Array and list ent
 `ArrayItem` or `ListItem` and set `Element.Index`. Dictionary entries set `Element.Kind` to `DictionaryItem` and set
 `Element.KeyLabel` to a display-safe label. Redacted dictionary labels are report-local, for example
 `[redacted-key-1]`; they are not stable identifiers across reports.
+
+When wrapper discovery and manual registration use the same key, the wrapper remains the source of wrapper metadata
+and validation behavior. Explicit manual option assignments override wrapper attribute options per property, including
+assignments back to the default value. For example, a wrapper can hide dictionary keys by default while one manual
+registration sets `DisplayDictionaryKeys = true` for a provider-only report composition.
 
 ### Collection Examples
 
@@ -328,16 +346,21 @@ the text renderer.
 
 ### Migration Note
 
-Existing reports keep the same collection shape unless an entry opts into `TraverseCollectionElements`. Object child
-entries, redacted scalar display values, provider precedence, and wrapper diagnostics continue to work as before. If a
-wrapper-discovered key and a manual key registration use the same config key, wrapper metadata still wins for type and
-validation, while non-default manual audit options are merged into the selected entry.
+Existing reports keep the same collection shape unless an entry opts into collection traversal through
+`ConfigAuditCollectionTraversalAttribute` or manual `TraverseCollectionElements`. Object child entries, redacted scalar
+display values, provider precedence, and wrapper diagnostics continue to work as before. If a wrapper-discovered key
+and a manual key registration use the same config key, wrapper metadata still wins for type and validation, while
+explicit manual audit option assignments are merged into the selected entry.
 
 ### Audit Pitfalls
 
 - Audit reports cover AppSurface-known entries, not every raw process environment variable or every unused file key.
 - Collection display values are intentionally omitted rather than summarized or serialized; opt into element traversal
   for keys where element-level visibility is safe and useful.
+- `ConfigAuditCollectionTraversalAttribute` is inherited. Put a new attribute on a derived wrapper when inherited
+  traversal limits are too broad or too narrow for that derived key.
+- Attribute values are compile-time metadata. Use manual `AddConfigAuditKey<T>()` options when traversal settings must
+  be chosen dynamically at registration time.
 - Sensitive dictionary key labels are report-local. Do not use `[redacted-key-1]` as a durable correlation identifier.
 - Element traversal reports existing provider values. Environment-created missing collection elements, global debug
   expansion, diffing, raw-key drift analysis, and support-bundle export are separate product surfaces.

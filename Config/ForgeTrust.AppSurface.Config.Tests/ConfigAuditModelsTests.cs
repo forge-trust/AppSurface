@@ -55,6 +55,48 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigAuditEntryOptionsBuilder_TracksExplicitDefaultValuedOverrides()
+    {
+        var wrapperOptions = new ConfigAuditCollectionTraversalAttribute
+        {
+            MaxCollectionDepth = 9,
+            MaxCollectionElements = 7,
+            MaxReportNodes = 11,
+            DisplayDictionaryKeys = false
+        }.ToOptions();
+        var builder = new ConfigAuditEntryOptionsBuilder
+        {
+            TraverseCollectionElements = false,
+            MaxCollectionDepth = 4,
+            MaxCollectionElements = 128,
+            MaxReportNodes = 4096,
+            DisplayDictionaryKeys = true
+        };
+
+        var merged = wrapperOptions.ApplyAssignedOverrides(builder.ToOptions());
+
+        Assert.False(merged.TraverseCollectionElements);
+        Assert.Equal(4, merged.MaxCollectionDepth);
+        Assert.Equal(128, merged.MaxCollectionElements);
+        Assert.Equal(4096, merged.MaxReportNodes);
+        Assert.True(merged.DisplayDictionaryKeys);
+    }
+
+    [Fact]
+    public void ConfigAuditCollectionTraversalAttribute_CreatesTraversalOptionsWithSafeDefaults()
+    {
+        var attribute = new ConfigAuditCollectionTraversalAttribute();
+
+        var options = attribute.ToOptions();
+
+        Assert.True(options.TraverseCollectionElements);
+        Assert.Equal(4, options.MaxCollectionDepth);
+        Assert.Equal(128, options.MaxCollectionElements);
+        Assert.Equal(4096, options.MaxReportNodes);
+        Assert.True(options.DisplayDictionaryKeys);
+    }
+
+    [Fact]
     public void ConfigAuditKnownEntry_WithOptionsReturnsIndependentEntry()
     {
         var entry = new ConfigAuditKnownEntry("Valid.Key", null, typeof(string));
