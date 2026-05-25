@@ -11,10 +11,25 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
     [Fact]
     public async Task CanSubscribeAsync_WhenChannelIsNotHarvestProgress_DelegatesToInnerAuthorizer()
     {
-        var authorizer = new AppSurfaceDocsHarvestChannelAuthorizer(
+        var allowedAuthorizer = new AppSurfaceDocsHarvestChannelAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Never),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            new TestChannelAuthorizer(allow: true));
+        var deniedAuthorizer = new AppSurfaceDocsHarvestChannelAuthorizer(
             Options(AppSurfaceDocsHarvestHealthExposure.Never),
             new TestHostEnvironment { EnvironmentName = Environments.Production },
             new TestChannelAuthorizer(allow: false));
+
+        Assert.True(await allowedAuthorizer.CanSubscribeAsync(new DefaultHttpContext(), "app-notifications"));
+        Assert.False(await deniedAuthorizer.CanSubscribeAsync(new DefaultHttpContext(), "app-notifications"));
+    }
+
+    [Fact]
+    public async Task CanSubscribeAsync_WhenChannelIsNotHarvestProgressAndNoInnerAuthorizer_Denies()
+    {
+        var authorizer = new AppSurfaceDocsHarvestChannelAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always),
+            new TestHostEnvironment { EnvironmentName = Environments.Production });
 
         Assert.False(await authorizer.CanSubscribeAsync(new DefaultHttpContext(), "app-notifications"));
     }

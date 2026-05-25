@@ -1,6 +1,6 @@
 namespace: ForgeTrust.RazorWire
 title: ForgeTrust.RazorWire
-summary: Start here for RazorWire registration, endpoint mapping, options, and stream-result entry points.
+summary: Start here for RazorWire registration, endpoint mapping, safe-by-default stream authorization, options, and stream-result entry points.
 aliases:
   - RazorWire namespace
   - RazorWire API entry points
@@ -10,19 +10,19 @@ keywords:
   - RazorWire streams
 entry_points:
   - label: AddRazorWire(...)
-    summary: Register RazorWire options, stream hub services, form handling, and partial rendering.
+    summary: Register RazorWire options, stream hub services, safe default stream authorization, form handling, and partial rendering.
     target: ForgeTrust-RazorWire-RazorWireServiceCollectionExtensions-AddRazorWire-method-group
     keywords:
       - register RazorWire
       - services
   - label: MapRazorWire(...)
-    summary: Map the configured Server-Sent Events stream endpoint for channel subscriptions.
+    summary: Map the configured Server-Sent Events stream endpoint for authorized channel subscriptions.
     target: ForgeTrust-RazorWire-RazorWireEndpointRouteBuilderExtensions-MapRazorWire-method-group
     keywords:
       - endpoint mapping
       - SSE
   - label: RazorWireOptions
-    summary: Configure stream paths, output-cache policy names, and enhanced form behavior.
+    summary: Configure stream paths, stream authorization mode, output-cache policy names, and enhanced form behavior.
     target: ForgeTrust-RazorWire-RazorWireOptions
     keywords:
       - configuration

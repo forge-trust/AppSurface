@@ -167,6 +167,15 @@ public sealed class ConfigAuditEntry
     public bool IsRedacted { get; init; }
 
     /// <summary>
+    /// Gets collection element identity when this entry represents an array/list item or dictionary item.
+    /// </summary>
+    /// <remarks>
+    /// Element labels are already display-safe. Sensitive dictionary keys are replaced before the report object is
+    /// created, so callers must not expect <see cref="ConfigAuditElementIdentity.KeyLabel"/> to be reversible.
+    /// </remarks>
+    public ConfigAuditElementIdentity? Element { get; init; }
+
+    /// <summary>
     /// Gets the source records that contributed to this entry.
     /// </summary>
     public IReadOnlyList<ConfigAuditSourceRecord> Sources { get; init; } = [];
@@ -180,6 +189,37 @@ public sealed class ConfigAuditEntry
     /// Gets diagnostics specific to this entry.
     /// </summary>
     public IReadOnlyList<ConfigAuditDiagnostic> Diagnostics { get; init; } = [];
+}
+
+/// <summary>
+/// Describes the collection element represented by a child audit entry.
+/// </summary>
+/// <remarks>
+/// Array and list entries use zero-based <see cref="Index"/> values. Dictionary entries use <see cref="KeyLabel"/>,
+/// which is either the non-sensitive key label, a display-suppressed placeholder, or an in-report redaction label such
+/// as <c>[redacted-key-1]</c>. Labels are intended for display and comparison within one report only.
+/// </remarks>
+public sealed class ConfigAuditElementIdentity
+{
+    /// <summary>
+    /// Gets the collection element kind.
+    /// </summary>
+    public required ConfigAuditElementKind Kind { get; init; }
+
+    /// <summary>
+    /// Gets the zero-based array or list index, when applicable.
+    /// </summary>
+    public int? Index { get; init; }
+
+    /// <summary>
+    /// Gets the display-safe dictionary key label, when applicable.
+    /// </summary>
+    public string? KeyLabel { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the original dictionary key was redacted or intentionally hidden.
+    /// </summary>
+    public bool IsKeyRedacted { get; init; }
 }
 
 /// <summary>
@@ -347,6 +387,24 @@ public enum ConfigAuditDiscoveredKeyClassification
 
     /// <summary>The discovered key is not known to the AppSurface audit registry.</summary>
     Unknown = 2
+}
+
+/// <summary>
+/// Identifies the kind of collection element represented by an audit child entry.
+/// </summary>
+/// <remarks>
+/// Values are explicit and append-only so serialized reports remain stable across releases.
+/// </remarks>
+public enum ConfigAuditElementKind
+{
+    /// <summary>An item from a one-dimensional array.</summary>
+    ArrayItem = 0,
+
+    /// <summary>An item from a list-like collection.</summary>
+    ListItem = 1,
+
+    /// <summary>An item from a dictionary-like collection.</summary>
+    DictionaryItem = 2
 }
 
 /// <summary>
