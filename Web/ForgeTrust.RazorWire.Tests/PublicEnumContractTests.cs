@@ -16,6 +16,16 @@ public class PublicEnumContractTests
     }
 
     [Theory]
+    [InlineData(RazorWireStreamAuthorizationMode.DenyAll, 0)]
+    [InlineData(RazorWireStreamAuthorizationMode.AllowAll, 1)]
+    public void RazorWireStreamAuthorizationMode_NumericValues_AreStable(
+        RazorWireStreamAuthorizationMode value,
+        int expected)
+    {
+        Assert.Equal(expected, (int)value);
+    }
+
+    [Theory]
     [InlineData(RazorWireVisitAction.Advance, 0)]
     [InlineData(RazorWireVisitAction.Replace, 1)]
     public void RazorWireVisitAction_NumericValues_AreStable(

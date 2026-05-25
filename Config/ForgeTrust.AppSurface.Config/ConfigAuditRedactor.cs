@@ -15,7 +15,7 @@ namespace ForgeTrust.AppSurface.Config;
 /// </remarks>
 internal sealed class ConfigAuditRedactor
 {
-    private const string Placeholder = "[redacted]";
+    internal const string Placeholder = "[redacted]";
 
     private static readonly string[] SensitiveFragments =
     [
@@ -65,7 +65,7 @@ internal sealed class ConfigAuditRedactor
         return new RedactedValue(FormatUnsafe(value), false);
     }
 
-    private static bool IsSensitive(string key, IReadOnlyList<ConfigAuditSourceRecord> sources)
+    internal static bool IsSensitive(string key, IReadOnlyList<ConfigAuditSourceRecord> sources)
     {
         if (ContainsSensitiveFragment(key))
         {
@@ -78,7 +78,7 @@ internal sealed class ConfigAuditRedactor
                                      || ContainsSensitiveFragment(source.EnvironmentVariableName));
     }
 
-    private static bool ContainsSensitiveFragment(string? value) =>
+    internal static bool ContainsSensitiveFragment(string? value) =>
         value != null
         && SensitiveFragments.Any(fragment => value.Contains(fragment, StringComparison.OrdinalIgnoreCase));
 
