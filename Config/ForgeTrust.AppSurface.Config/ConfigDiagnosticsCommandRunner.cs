@@ -1,3 +1,4 @@
+using System.Globalization;
 using ForgeTrust.AppSurface.Core;
 
 namespace ForgeTrust.AppSurface.Config;
@@ -19,6 +20,12 @@ public sealed class ConfigDiagnosticsCommandRunner
 {
     private const string RenderFailureProblem =
         "Configuration diagnostics could not render the active AppSurface configuration report.";
+
+    private const string RenderFailureCauseTemplate =
+        "The {0} path failed while building or rendering the report.";
+
+    private const string RenderFailureFix =
+        "Run diagnostics only after the app can build enough host and DI state to execute commands, then inspect application logs for the underlying failure.";
 
     private readonly IConfigAuditReporter _reporter;
     private readonly ConfigAuditTextRenderer _renderer;
@@ -49,8 +56,8 @@ public sealed class ConfigDiagnosticsCommandRunner
     /// Missing or invalid configuration entries remain successful inspection results.
     /// </returns>
     /// <remarks>
-    /// Runtime failures are converted to display-safe failure details. Raw exception messages are not exposed because
-    /// provider and validation exceptions can contain attempted secret values or environment-specific paths.
+    /// Non-fatal runtime failures are converted to display-safe failure details. Raw exception messages are not exposed
+    /// because provider and validation exceptions can contain attempted secret values or environment-specific paths.
     /// </remarks>
     public ConfigDiagnosticsCommandResult Run(TextWriter output)
     {
@@ -78,48 +85,40 @@ public sealed class ConfigDiagnosticsCommandRunner
         }
         catch (InvalidOperationException ex)
         {
-            return ConfigDiagnosticsCommandResult.Failed(
-                environment,
-                RenderFailureProblem,
-                $"The {ex.GetType().Name} path failed while building or rendering the report.",
-                "Run diagnostics only after the app can build enough host and DI state to execute commands, then inspect application logs for the underlying failure.",
-                ex);
+            return CreateRenderFailure(environment, ex);
         }
         catch (ArgumentException ex)
         {
-            return ConfigDiagnosticsCommandResult.Failed(
-                environment,
-                RenderFailureProblem,
-                $"The {ex.GetType().Name} path failed while building or rendering the report.",
-                "Run diagnostics only after the app can build enough host and DI state to execute commands, then inspect application logs for the underlying failure.",
-                ex);
+            return CreateRenderFailure(environment, ex);
         }
         catch (FormatException ex)
         {
-            return ConfigDiagnosticsCommandResult.Failed(
-                environment,
-                RenderFailureProblem,
-                $"The {ex.GetType().Name} path failed while building or rendering the report.",
-                "Run diagnostics only after the app can build enough host and DI state to execute commands, then inspect application logs for the underlying failure.",
-                ex);
+            return CreateRenderFailure(environment, ex);
         }
         catch (IOException ex)
         {
-            return ConfigDiagnosticsCommandResult.Failed(
-                environment,
-                RenderFailureProblem,
-                $"The {ex.GetType().Name} path failed while building or rendering the report.",
-                "Run diagnostics only after the app can build enough host and DI state to execute commands, then inspect application logs for the underlying failure.",
-                ex);
+            return CreateRenderFailure(environment, ex);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return ConfigDiagnosticsCommandResult.Failed(
-                environment,
-                RenderFailureProblem,
-                $"The {ex.GetType().Name} path failed while building or rendering the report.",
-                "Run diagnostics only after the app can build enough host and DI state to execute commands, then inspect application logs for the underlying failure.",
-                ex);
+            return CreateRenderFailure(environment, ex);
         }
+        catch (Exception ex) when (IsNonFatalDiagnosticsFailure(ex))
+        {
+            return CreateRenderFailure(environment, ex);
+        }
+    }
+
+    private static ConfigDiagnosticsCommandResult CreateRenderFailure(string? environment, Exception exception) =>
+        ConfigDiagnosticsCommandResult.Failed(
+            environment,
+            RenderFailureProblem,
+            string.Format(CultureInfo.InvariantCulture, RenderFailureCauseTemplate, exception.GetType().Name),
+            RenderFailureFix,
+            exception);
+
+    private static bool IsNonFatalDiagnosticsFailure(Exception exception)
+    {
+        return exception is not OutOfMemoryException and not StackOverflowException;
     }
 }

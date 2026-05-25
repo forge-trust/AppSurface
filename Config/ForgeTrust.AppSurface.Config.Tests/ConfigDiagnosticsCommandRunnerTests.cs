@@ -139,7 +139,8 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
             new ArgumentException("provider argument included super-secret"),
             new FormatException("renderer format included super-secret"),
             new IOException("output path included super-secret"),
-            new UnauthorizedAccessException("output permission included super-secret")
+            new UnauthorizedAccessException("output permission included super-secret"),
+            new DiagnosticsProviderException("custom provider failure included super-secret")
         };
 
     [Theory]
@@ -226,4 +227,8 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
                 Placeholder = "[redacted]"
             }
         };
+
+    private sealed class DiagnosticsProviderException(string message) : Exception(message)
+    {
+    }
 }
