@@ -30,7 +30,7 @@ const build = spawnSync(process.execPath, [path.join(scriptRoot, 'build.mjs')], 
 });
 
 if (build.error?.code === 'ENOENT') {
-  console.error('RWASSET001 Could not run Node.js to verify RazorWire generated assets. Problem: the generated runtime freshness check cannot start. Cause: Node.js is missing from PATH. Fix: install the repository Node.js toolchain and run `pnpm --dir Web install --frozen-lockfile`, then `pnpm --dir Web run assets:build`. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md.');
+  console.error(`RWASSET001 Could not start the RazorWire asset verifier. Problem: the generated runtime freshness check cannot spawn the current Node.js executable at ${process.execPath}. Cause: the executable is missing, inaccessible, or blocked by the environment. Fix: rerun from a working Node.js installation, then run \`pnpm --dir Web install --frozen-lockfile\` and \`pnpm --dir Web run assets:build\`. Docs: Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md.`);
   process.exit(1);
 }
 

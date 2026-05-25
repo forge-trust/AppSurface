@@ -20,6 +20,27 @@ interface TurboRuntime {
     StreamActions?: Record<string, (this: Element) => void>;
 }
 
+interface StreamSourceRegistration {
+    es: EventSource;
+    elements: Set<Element>;
+    closeTimer: ReturnType<typeof setTimeout> | null;
+    state: string;
+    channel: string | null;
+}
+
+interface RuntimeConfig {
+    developmentDiagnostics: boolean;
+    failureUxEnabled: boolean;
+    failureMode: string;
+    defaultFailureMessage: string;
+}
+
+interface FormSubmitState {
+    submitter: (HTMLElement & { disabled: boolean }) | null;
+    disabledByRazorWire: boolean;
+    describedById: string | null;
+}
+
 declare const Turbo: TurboRuntime | undefined;
 
 (function () {
@@ -27,7 +48,9 @@ declare const Turbo: TurboRuntime | undefined;
     window.RazorWireInitialized = true;
 
     class ConnectionManager {
-        [key: string]: any;
+        sources: Map<string, StreamSourceRegistration>;
+        channelStates: Map<string, string>;
+        observer: MutationObserver;
 
         constructor() {
             this.sources = new Map(); // src -> { es: EventSource, elements: Set<Element>, closeTimer: int, state: string }
@@ -347,7 +370,12 @@ declare const Turbo: TurboRuntime | undefined;
      * - data-rw-time-tz: "utc" to display in UTC (default: user's local timezone)
      */
     class LocalTimeFormatter {
-        [key: string]: any;
+        observer: MutationObserver;
+        formatter: Intl.RelativeTimeFormat | null;
+        updateInterval: ReturnType<typeof setInterval> | null;
+        isStarted: boolean;
+        visibleElements: Set<Element>;
+        intersectionObserver: IntersectionObserver | null;
 
         constructor() {
             this.observer = new MutationObserver(mutations => this.handleMutations(mutations));
@@ -669,9 +697,12 @@ declare const Turbo: TurboRuntime | undefined;
      * @default #3f3f46
      */
     class FormFailureManager {
-        [key: string]: any;
+        config: RuntimeConfig;
+        state: WeakMap<HTMLFormElement, Partial<FormSubmitState>>;
+        nextId: number;
+        styleId: string;
 
-        constructor(config) {
+        constructor(config: RuntimeConfig) {
             this.config = config;
             this.state = new WeakMap();
             this.nextId = 1;
@@ -834,14 +865,14 @@ declare const Turbo: TurboRuntime | undefined;
             }
         }
 
-        isRazorWireForm(form) {
+        isRazorWireForm(form): form is HTMLFormElement {
             return form instanceof HTMLFormElement
                 && this.config.failureUxEnabled !== false
                 && form.getAttribute('data-rw-form') === 'true'
                 && this.getMode(form) !== 'off';
         }
 
-        getForm(target) {
+        getForm(target): HTMLFormElement | null {
             if (target instanceof HTMLFormElement) return target;
             if (target instanceof Element) return target.closest('form[data-rw-form="true"]');
             return null;

@@ -84,14 +84,10 @@ public class RazorWireScriptsTagHelperTests
     [Fact]
     public void RazorWireProject_DefinesPackOnlyGeneratedAssetGuardWithEmergencyBypass()
     {
-        var repoRoot = Path.GetFullPath(Path.Join(
-            AppContext.BaseDirectory,
-            "..",
-            "..",
-            "..",
-            ".."));
+        var repoRoot = FindRepositoryRoot();
         var projectPath = Path.Join(
             repoRoot,
+            "Web",
             "ForgeTrust.RazorWire",
             "ForgeTrust.RazorWire.csproj");
         var project = File.ReadAllText(projectPath);
@@ -102,6 +98,22 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("RWPACK001", project, StringComparison.Ordinal);
         Assert.Contains("""<Content Remove="assets\**\*" />""", project, StringComparison.Ordinal);
         Assert.Contains("""<None Remove="assets\**\*" />""", project, StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null)
+        {
+            if (File.Exists(Path.Join(directory.FullName, "ForgeTrust.AppSurface.slnx")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new InvalidOperationException("Unable to find repository root from the current test assembly path.");
     }
 
     [Fact]
