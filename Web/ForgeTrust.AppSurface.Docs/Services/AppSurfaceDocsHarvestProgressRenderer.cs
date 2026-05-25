@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
 using ForgeTrust.AppSurface.Docs.Models;
+using Microsoft.AspNetCore.Html;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
@@ -12,7 +13,8 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// The renderer accepts already-redacted progress snapshots and emits bounded markup for full pages and Turbo stream
 /// updates. It HTML-encodes text and attribute values, truncates activity to eight entries and diagnostics to four, and
 /// treats <see cref="AppSurfaceDocsHarvestRunState.Completed"/> and <see cref="AppSurfaceDocsHarvestRunState.Failed"/> as
-/// terminal states. Callers should pass only app-relative return URLs that have already been validated.
+/// terminal states. The renderer intentionally does not accept request-derived return URLs; Razor views should emit those
+/// values through normal attribute or link rendering after validating that they are app-relative.
 /// </remarks>
 internal static class AppSurfaceDocsHarvestProgressRenderer
 {
@@ -22,24 +24,43 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
     /// Renders the observatory fragment for a harvest progress snapshot.
     /// </summary>
     /// <param name="snapshot">The redacted snapshot to render.</param>
-    /// <param name="returnUrl">The app-relative URL used by the completion link and navigation data attributes.</param>
     /// <param name="completionDelayMilliseconds">The completion navigation delay in milliseconds.</param>
-    /// <param name="includeReturnNavigation">Whether to emit the completion return link and return-url data attribute.</param>
     /// <returns>An encoded HTML fragment for the observatory surface.</returns>
     /// <remarks>
-    /// When <paramref name="includeReturnNavigation"/> is <see langword="true"/> and the snapshot is completed, the
-    /// fragment includes data attributes used by the client script to navigate after the configured delay. Failed runs
-    /// render diagnostics but do not auto-navigate. A blank <paramref name="returnUrl"/> falls back to <c>/</c>.
+    /// When the snapshot is completed, the fragment includes the completion marker and delay used by the client script to
+    /// refresh after the configured delay. Failed runs render diagnostics but do not auto-refresh. The containing Razor
+    /// view owns request-derived return links so they are emitted by Razor's encoder rather than this raw fragment.
     /// </remarks>
     internal static string Render(
         AppSurfaceDocsHarvestProgressSnapshot snapshot,
-        string returnUrl,
-        int completionDelayMilliseconds,
-        bool includeReturnNavigation = true)
+        int completionDelayMilliseconds)
+    {
+        return RenderCore(snapshot, completionDelayMilliseconds);
+    }
+
+    /// <summary>
+    /// Renders the observatory fragment as HTML-safe content for Razor views.
+    /// </summary>
+    /// <param name="snapshot">The redacted snapshot to render.</param>
+    /// <param name="completionDelayMilliseconds">The completion navigation delay in milliseconds.</param>
+    /// <returns>HTML-safe observatory markup with all dynamic text encoded.</returns>
+    /// <remarks>
+    /// Use this method from package-owned Razor views instead of <c>Html.Raw</c>. Request-derived navigation values belong
+    /// in the surrounding view model and should be emitted by Razor attributes or anchors after validation.
+    /// </remarks>
+    internal static IHtmlContent RenderHtml(
+        AppSurfaceDocsHarvestProgressSnapshot snapshot,
+        int completionDelayMilliseconds)
+    {
+        return new HtmlString(RenderCore(snapshot, completionDelayMilliseconds));
+    }
+
+    private static string RenderCore(
+        AppSurfaceDocsHarvestProgressSnapshot snapshot,
+        int completionDelayMilliseconds)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        var safeReturnUrl = string.IsNullOrWhiteSpace(returnUrl) ? "/" : returnUrl;
         var elapsed = FormatElapsed(snapshot);
         var isComplete = snapshot.State is AppSurfaceDocsHarvestRunState.Completed or AppSurfaceDocsHarvestRunState.Failed;
         var stateLabel = snapshot.State == AppSurfaceDocsHarvestRunState.Failed ? "Needs attention" :
@@ -58,10 +79,6 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
         {
             sb.Append(" data-appsurface-docs-harvest-complete=\"true\"");
             sb.Append(" data-appsurface-docs-harvest-delay=\"").Append(completionDelayMilliseconds).Append('"');
-            if (includeReturnNavigation)
-            {
-                sb.Append(" data-appsurface-docs-harvest-return-url=\"").Append(EncodeAttribute(safeReturnUrl)).Append('"');
-            }
         }
 
         sb.Append('>');
@@ -135,13 +152,6 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
             sb.Append("</section>");
         }
 
-        if (isComplete && includeReturnNavigation)
-        {
-            sb.Append("<p class=\"docs-harvest-return-link\"><a href=\"")
-                .Append(EncodeAttribute(safeReturnUrl))
-                .Append("\">Continue to your docs page</a></p>");
-        }
-
         sb.Append("</section>");
         return sb.ToString();
     }
@@ -153,15 +163,15 @@ internal static class AppSurfaceDocsHarvestProgressRenderer
     /// <param name="completionDelayMilliseconds">The completion navigation delay in milliseconds.</param>
     /// <returns>A Turbo stream update that replaces the observatory content.</returns>
     /// <remarks>
-    /// This wrapper renders with <c>returnUrl: "/"</c> and disables return navigation because the outer page owns
-    /// navigation timing; the emitted fragment still carries completion state for client-side refresh scheduling.
+    /// The outer page owns navigation timing and request-derived return links; the emitted fragment only carries
+    /// completion state for client-side refresh scheduling.
     /// </remarks>
     internal static string RenderTurboStream(
         AppSurfaceDocsHarvestProgressSnapshot snapshot,
         int completionDelayMilliseconds)
     {
         return "<turbo-stream action=\"update\" target=\"docs-harvest-observatory\"><template>"
-               + Render(snapshot, returnUrl: "/", completionDelayMilliseconds, includeReturnNavigation: false)
+               + Render(snapshot, completionDelayMilliseconds)
                + "</template></turbo-stream>";
     }
 

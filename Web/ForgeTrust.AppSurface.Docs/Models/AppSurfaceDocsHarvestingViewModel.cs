@@ -15,6 +15,11 @@ public sealed record AppSurfaceDocsHarvestingViewModel
     /// <summary>
     /// Gets the app-relative URL the browser should open after harvest completion.
     /// </summary>
+    /// <remarks>
+    /// Controllers must validate this value with <c>DocsController.IsSafeAppRelativeUrl</c> before assigning
+    /// request-derived input. The harvesting Razor view emits this value only through Razor-encoded attributes and links;
+    /// raw progress fragments do not receive it.
+    /// </remarks>
     public string ReturnUrl { get; init; } = "/";
 
     /// <summary>
