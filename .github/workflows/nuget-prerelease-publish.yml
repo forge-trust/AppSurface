@@ -67,7 +67,7 @@ jobs:
       deployments: read
 
     steps:
-      - name: Validate protected NuGet environment
+      - name: Validate protected NuGet environments
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -88,6 +88,24 @@ jobs:
 
           if [[ "${prevent_self_review_rules}" -lt 1 ]]; then
             echo "Environment 'nuget-prerelease' must prevent self-review before prerelease publishing can run." >&2
+            exit 1
+          fi
+
+          if ! smoke_environment_json="$(gh api "repos/${GITHUB_REPOSITORY}/environments/nuget-prerelease-smoke")"; then
+            echo "Environment 'nuget-prerelease-smoke' must exist before prerelease smoke install can run." >&2
+            exit 1
+          fi
+
+          smoke_wait_timer_rules="$(jq '[.protection_rules[]? | select(.type == "wait_timer" and .wait_timer == 25)] | length' <<< "${smoke_environment_json}")"
+          smoke_required_reviewer_rules="$(jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' <<< "${smoke_environment_json}")"
+
+          if [[ "${smoke_wait_timer_rules}" -lt 1 ]]; then
+            echo "Environment 'nuget-prerelease-smoke' must enforce a 25-minute wait timer before prerelease smoke install can run." >&2
+            exit 1
+          fi
+
+          if [[ "${smoke_required_reviewer_rules}" -gt 0 ]]; then
+            echo "Environment 'nuget-prerelease-smoke' must not require reviewers before prerelease smoke install can run." >&2
             exit 1
           fi
 
@@ -251,7 +269,10 @@ jobs:
       - validate-tag
       - publish-nuget
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    environment:
+      name: nuget-prerelease-smoke
+      deployment: false
+    timeout-minutes: 70
 
     steps:
       - name: Checkout tag commit

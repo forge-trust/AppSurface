@@ -82,11 +82,14 @@ API key through GitHub Actions OIDC immediately before it runs
 `publish-prerelease`; do not create or store a long-lived `NUGET_API_KEY` secret
 at the repository, organization, or environment level.
 
-Before creating the first prerelease tag, create the `nuget-prerelease` environment
-in repository settings with required reviewers and prevent self-review enabled. Add
-`NUGET_USER` as an environment or repository variable containing the nuget.org
-profile name, not an email address. On nuget.org, add a Trusted Publishing policy
-for the package owner with these GitHub Actions details:
+Before creating the first prerelease tag, create the GitHub environments used by
+the workflow. Create `nuget-prerelease` with required reviewers and prevent
+self-review enabled. Create `nuget-prerelease-smoke` with a 25-minute wait timer
+and no required reviewers so NuGet validation and indexing can settle before the
+smoke-install runner starts. Add `NUGET_USER` as an environment or repository
+variable containing the nuget.org profile name, not an email address. On
+nuget.org, add a Trusted Publishing policy for the package owner with these
+GitHub Actions details:
 
 - Repository Owner: `forge-trust`
 - Repository: `AppSurface`
@@ -96,8 +99,10 @@ for the package owner with these GitHub Actions details:
 NuGet's policy UI expects only the workflow file name, not the
 `.github/workflows/` path. Keep the policy environment-scoped so a token exchange
 is valid only after the GitHub environment approval gate has passed. The workflow
-fails closed if the environment is missing, has no required-reviewer protection, or
-does not prevent self-review.
+fails closed if `nuget-prerelease` is missing, has no required-reviewer
+protection, or does not prevent self-review. It also fails closed if
+`nuget-prerelease-smoke` is missing, lacks the 25-minute wait timer, or has
+required reviewers configured.
 
 The PackageIndex tool owns the package contract for the workflow:
 
@@ -155,11 +160,17 @@ Fix the defect in source, create the next prerelease tag, and let the workflow
 publish the next package family.
 
 After publishing, the workflow runs `smoke-install` from a fresh NuGet configuration
-that clears inherited sources and points only at nuget.org. It restores every
-direct non-tool `publish` package from `packages/package-index.yml` with a shared
-fresh `NUGET_PACKAGES` directory, isolated `DOTNET_CLI_HOME`, and retry/backoff
-for NuGet indexing delay. Tool packages install with
+that clears inherited sources and points only at nuget.org. It restores all direct
+non-tool `publish` packages from `packages/package-index.yml` in one aggregate
+smoke project with a shared fresh `NUGET_PACKAGES` directory, isolated
+`DOTNET_CLI_HOME`, and retry/backoff for NuGet indexing delay. This keeps the
+post-publish check representative of user installs without multiplying restore
+timeouts by the number of public library packages. Tool packages install with
 `dotnet tool install --tool-path`, then the workflow resolves the declared
-`tool_command_name` shim and runs `<command> --help`. The smoke step fails if the
-installed command exits non-zero or if help output does not identify the command
-users are expected to type.
+`tool_command_name` shim and runs `<command> --help`. The smoke job references
+the `nuget-prerelease-smoke` environment, which must keep a 25-minute wait timer
+so NuGet can finish validation and indexing before the runner starts. The job
+sets a 70-minute timeout so the 25-minute environment wait still leaves up to
+45 minutes for active smoke install work. The
+smoke step fails if the installed command exits non-zero or if help output does
+not identify the command users are expected to type.
