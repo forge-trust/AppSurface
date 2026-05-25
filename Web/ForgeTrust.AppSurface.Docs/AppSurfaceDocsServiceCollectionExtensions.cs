@@ -72,7 +72,9 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// <see cref="AppSurfaceDocsHarvestChannelAuthorizer"/> so its harvest-progress channel rules run before delegating
     /// to the existing authorizer. Register a custom authorizer before calling this method to participate in that
     /// wrapper, or register one after this method when the application intentionally wants to replace the AppSurface Docs
-    /// wrapper. Call this method once during startup; repeated registration can nest authorizer wrappers and obscure the
+    /// wrapper. When no custom authorizer is present, AppSurface Docs authorizes only its own harvest-progress stream
+    /// according to harvest visibility and leaves unrelated RazorWire streams denied. Call this method once during
+    /// startup; repeated registration can nest authorizer wrappers and obscure the
     /// intended channel policy.
     /// Consumers that resolve <see cref="AppSurfaceDocsOptions"/> directly should expect the normalized values rather than
     /// raw configuration text, and applications that need custom routing or catalog paths should provide those values
@@ -205,6 +207,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.TryAddSingleton<AppSurfaceDocsVersionCatalogService>();
         services.AddMemoryCache();
         services.TryAddSingleton<IMemo, Memo>();
+        TryAddHarvestChannelAuthorizer(services);
         services.AddRazorWire();
         services.TryAddSingleton<IAppSurfaceDocsHtmlSanitizer, AppSurfaceDocsHtmlSanitizer>();
         services.TryAddSingleton<AppSurfaceDocsHarvestPathPolicy>();
@@ -215,7 +218,6 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.TryAddSingleton<AppSurfaceDocsHarvestProgressReporter>();
         services.TryAddSingleton<DocAggregator>();
         services.TryAddSingleton<AppSurfaceDocsHarvestCoordinator>();
-        TryAddHarvestChannelAuthorizer(services);
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, AppSurfaceDocsHarvestFailurePreflightService>());
 
@@ -247,29 +249,38 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         IServiceProvider provider,
         ServiceDescriptor? descriptor)
     {
-        if (descriptor is null || descriptor.ImplementationType == typeof(DefaultRazorWireChannelAuthorizer))
+        if (descriptor is null)
         {
             return null;
         }
 
         if (descriptor.ImplementationInstance is IRazorWireChannelAuthorizer instance)
         {
-            return instance;
+            return FilterBuiltInDenyAllAuthorizer(instance);
         }
 
         if (descriptor.ImplementationFactory is not null)
         {
-            return (IRazorWireChannelAuthorizer)descriptor.ImplementationFactory(provider)!;
+            return FilterBuiltInDenyAllAuthorizer(
+                descriptor.ImplementationFactory(provider) as IRazorWireChannelAuthorizer);
         }
 
         if (descriptor.ImplementationType is not null)
         {
-            return (IRazorWireChannelAuthorizer)ActivatorUtilities.CreateInstance(
-                provider,
-                descriptor.ImplementationType);
+            return descriptor.ImplementationType == typeof(DenyAllRazorWireChannelAuthorizer)
+                ? null
+                : (IRazorWireChannelAuthorizer)ActivatorUtilities.CreateInstance(
+                    provider,
+                    descriptor.ImplementationType);
         }
 
         return null;
+    }
+
+    private static IRazorWireChannelAuthorizer? FilterBuiltInDenyAllAuthorizer(
+        IRazorWireChannelAuthorizer? authorizer)
+    {
+        return authorizer is DenyAllRazorWireChannelAuthorizer ? null : authorizer;
     }
 
     private static void TryAddMarkdownHarvester(IServiceCollection services)

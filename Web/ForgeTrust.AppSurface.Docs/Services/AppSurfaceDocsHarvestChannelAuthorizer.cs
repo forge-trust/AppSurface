@@ -20,7 +20,8 @@ internal sealed class AppSurfaceDocsHarvestChannelAuthorizer : IRazorWireChannel
     /// <param name="inner">Optional inner authorizer for existing RazorWire channel rules.</param>
     /// <remarks>
     /// The harvest channel is denied when harvest routes are hidden, even if <paramref name="inner"/> would allow it.
-    /// Non-harvest channels delegate to <paramref name="inner"/> when supplied and otherwise use the default allow path.
+    /// Non-harvest channels delegate to <paramref name="inner"/> when supplied and otherwise remain denied so registering
+    /// AppSurface Docs does not make unrelated RazorWire streams public.
     /// </remarks>
     public AppSurfaceDocsHarvestChannelAuthorizer(
         AppSurfaceDocsOptions options,
@@ -53,7 +54,7 @@ internal sealed class AppSurfaceDocsHarvestChannelAuthorizer : IRazorWireChannel
 
         if (!string.Equals(channel, AppSurfaceDocsHarvestProgressReporter.ChannelName, StringComparison.Ordinal))
         {
-            return _inner is null || await _inner.CanSubscribeAsync(context, channel);
+            return _inner is not null && await _inner.CanSubscribeAsync(context, channel);
         }
 
         if (!AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))

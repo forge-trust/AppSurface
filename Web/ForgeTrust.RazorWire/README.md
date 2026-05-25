@@ -152,9 +152,35 @@ You can customize RazorWire behavior via `RazorWireOptions`:
 services.AddRazorWire(options =>
 {
     options.Streams.BasePath = "/custom-stream-path";
+    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.DenyAll;
     options.Forms.FailureMode = RazorWireFormFailureMode.Auto;
     options.Forms.DefaultFailureMessage = "We could not submit this form. Check your input and try again.";
 });
+```
+
+Stream subscriptions are denied by default. Choose `AllowAll` only for public/demo streams:
+
+```csharp
+services.AddRazorWire(options =>
+{
+    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+});
+```
+
+For user, tenant, or workflow-specific streams, register a custom authorizer instead:
+
+```csharp
+public sealed class TenantStreamAuthorizer : IRazorWireChannelAuthorizer
+{
+    public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+    {
+        var tenantId = context.User.FindFirst("tenant_id")?.Value;
+        return new ValueTask<bool>(tenantId is not null && channel == $"tenant:{tenantId}:updates");
+    }
+}
+
+services.AddSingleton<IRazorWireChannelAuthorizer, TenantStreamAuthorizer>();
+services.AddRazorWire();
 ```
 
 ## Also Possible
@@ -188,6 +214,8 @@ When `EnableFailureUx` is enabled, `form[rw-active]` also marks enhanced form po
 
 Handling anti-forgery tokens correctly is critical when updating forms via Turbo Streams. See [Security & Anti-Forgery](Docs/antiforgery.md) for the detailed patterns and recommendations.
 
+RazorWire stream subscriptions are also safe by default: `RazorWireOptions.Streams.AuthorizationMode` starts at `RazorWireStreamAuthorizationMode.DenyAll`, so `rw:stream-source` receives `403` until the app either opts into `RazorWireStreamAuthorizationMode.AllowAll` for public/demo channels or registers `IRazorWireChannelAuthorizer`. Development responses include a safe plain-text diagnostic; production denials stay generic and logs avoid raw channel names, user identifiers, and claim values.
+
 Development anti-forgery failures from RazorWire forms are rewritten into helpful form-local diagnostics when possible. Production responses stay safe and generic. See [Failed Form UX](Docs/form-failures.md#development-diagnostics).
 
 ## Development Experience
@@ -212,6 +240,19 @@ RazorWire is designed for a fast feedback loop during development:
 - `Subscribe(channel, new RazorWireStreamSubscribeOptions { Replay = true })` receives retained replay messages first, then continues with live messages.
 
 Replay is opt-in and intentionally small. The in-memory hub keeps a bounded per-channel buffer and drops the oldest retained fragments first. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
+
+### `IRazorWireChannelAuthorizer`
+
+- `CanSubscribeAsync(HttpContext, channel)` decides whether the current request may subscribe to a stream channel.
+- The built-in `DenyAllRazorWireChannelAuthorizer` is selected by default through `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.DenyAll`.
+- `AllowAllRazorWireChannelAuthorizer` is selected by `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll` and should only be used for public/demo streams.
+- Register a custom implementation for auth-context-aware decisions based on `HttpContext.User`, claims, tenant membership, workflow state, or route data.
+
+### `RazorWireStreamAuthorizationMode`
+
+- `DenyAll = 0`: default; every subscription returns `403` unless a custom `IRazorWireChannelAuthorizer` is registered.
+- `AllowAll = 1`: permits every subscription; intended for public/demo streams only.
+- Unknown enum values fail with a clear configuration exception instead of falling through to an unsafe mode.
 
 ### `this.RazorWireStream()` (controller extension)
 
@@ -272,6 +313,7 @@ Subscribes the page to a RazorWire stream channel.
 
 - `channel`: required channel name.
 - `permanent`: keeps the stream source alive across Turbo visits.
+- Stream endpoints deny subscriptions by default; configure `RazorWireStreamAuthorizationMode.AllowAll` for public/demo channels or provide a custom `IRazorWireChannelAuthorizer`.
 - `replay`: when `true`, appends `?replay=1` to the stream endpoint so the page receives retained channel messages before live updates.
 
 ```html
