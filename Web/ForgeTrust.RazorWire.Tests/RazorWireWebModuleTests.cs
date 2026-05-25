@@ -213,7 +213,7 @@ public class RazorWireWebModuleTests
             Assert.Equal(HttpStatusCode.OK, runtimeResponse.StatusCode);
             Assert.Equal("text/javascript", runtimeResponse.Content.Headers.ContentType?.MediaType);
             Assert.Contains(
-                "RazorWire Core Client Runtime",
+                "Generated from assets/src/razorwire.ts",
                 await runtimeResponse.Content.ReadAsStringAsync(),
                 StringComparison.Ordinal);
 

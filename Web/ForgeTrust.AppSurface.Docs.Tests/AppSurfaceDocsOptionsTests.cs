@@ -541,8 +541,8 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Harvest:CSharp:IncludeGlobs:0"] = "src\\**",
                         ["AppSurfaceDocs:Harvest:CSharp:DefaultExclusions:DisabledGroups:0"] = " csharpexamplesource ",
                         ["AppSurfaceDocs:Harvest:JavaScript:Enabled"] = "true",
-                        ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:0"] = " Web\\ForgeTrust.RazorWire\\wwwroot\\razorwire\\razorwire.js ",
-                        ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:1"] = "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js",
+                        ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:0"] = " Web\\ForgeTrust.RazorWire\\assets\\contracts\\razorwire-public-contracts.js ",
+                        ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:1"] = "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js",
                         ["AppSurfaceDocs:Harvest:JavaScript:ExcludeGlobs:0"] = " **/*.generated.js ",
                         ["AppSurfaceDocs:Harvest:JavaScript:DefaultExclusions:DisabledGroups:0"] = " buildoutput ",
                         ["AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag"] = "false",
@@ -571,7 +571,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(["src/**"], options.Harvest.CSharp.IncludeGlobs);
         Assert.Equal(["CSharpExampleSource"], options.Harvest.CSharp.DefaultExclusions.DisabledGroups);
         Assert.True(options.Harvest.JavaScript.Enabled);
-        Assert.Equal(["Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js"], options.Harvest.JavaScript.IncludeGlobs);
+        Assert.Equal(["Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"], options.Harvest.JavaScript.IncludeGlobs);
         Assert.Equal(["**/*.min.js", "**/*.generated.js"], options.Harvest.JavaScript.ExcludeGlobs);
         Assert.Equal(["BuildOutput"], options.Harvest.JavaScript.DefaultExclusions.DisabledGroups);
         Assert.False(options.Harvest.JavaScript.RequirePublicTag);

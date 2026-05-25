@@ -28,7 +28,7 @@ pnpm --dir Web run assets:verify
 
 `ForgeTrust.AppSurface.Docs/assets` owns the TypeScript source for generated Docs browser assets. Generated package outputs remain committed under `ForgeTrust.AppSurface.Docs/wwwroot/docs` because Razor Class Library delivery, embedded fallback resources, route aliases, and static export all depend on those paths. Do not edit generated `wwwroot/docs/search-client.js` or `wwwroot/docs/minisearch.min.js` by hand; edit the source or pinned package version, rebuild, then verify.
 
-`ForgeTrust.RazorWire` is represented in the same workspace so its existing `node --test` coverage runs through the shared command vocabulary. Its runtime migration to generated TypeScript assets is tracked separately.
+`ForgeTrust.RazorWire/assets` owns the TypeScript source for the RazorWire browser runtime and island loader. Generated package outputs remain committed at `ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js` and `ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.islands.js` so existing static-web-asset paths, embedded fallback resources, and package consumers keep working without migration. Use `pnpm --dir Web run assets:razorwire:typecheck`, `assets:razorwire:test`, `assets:razorwire:build`, and `assets:razorwire:verify` for focused runtime work; see [RazorWire Runtime Contract Pipeline](./ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md) for ownership, diagnostics, and pack-time guard details.
 
 ---
 [🏠 Back to Root](../README.md)

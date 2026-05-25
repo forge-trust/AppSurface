@@ -4,10 +4,14 @@
   "type": "module",
   "packageManager": "pnpm@11.1.3",
   "scripts": {
-    "assets:typecheck": "pnpm --filter @forge-trust/appsurface-docs-assets run typecheck",
+    "assets:typecheck": "pnpm --filter @forge-trust/appsurface-docs-assets run typecheck && pnpm --filter @forge-trust/razorwire-assets run typecheck",
     "assets:test": "pnpm --filter @forge-trust/appsurface-docs-assets run test && pnpm --filter @forge-trust/razorwire-assets run test",
-    "assets:build": "pnpm --filter @forge-trust/appsurface-docs-assets run build",
-    "assets:verify": "pnpm --filter @forge-trust/appsurface-docs-assets run verify-generated"
+    "assets:build": "pnpm --filter @forge-trust/appsurface-docs-assets run build && pnpm --filter @forge-trust/razorwire-assets run build",
+    "assets:verify": "pnpm --filter @forge-trust/appsurface-docs-assets run verify-generated && pnpm --filter @forge-trust/razorwire-assets run verify-generated",
+    "assets:razorwire:typecheck": "pnpm --filter @forge-trust/razorwire-assets run typecheck",
+    "assets:razorwire:test": "pnpm --filter @forge-trust/razorwire-assets run test",
+    "assets:razorwire:build": "pnpm --filter @forge-trust/razorwire-assets run build",
+    "assets:razorwire:verify": "pnpm --filter @forge-trust/razorwire-assets run verify-generated"
   },
   "devDependencies": {
     "esbuild": "0.27.0",

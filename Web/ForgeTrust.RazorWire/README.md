@@ -328,6 +328,16 @@ are also embedded into the `ForgeTrust.RazorWire` assembly and mapped as endpoin
 fallbacks by `RazorWireWebModule`, so packaged command-line hosts can serve the
 runtime even when only compiled assemblies are present.
 
+The runtime and island loader are authored under `assets/src` and generated into
+the committed `wwwroot/razorwire/*.js` package outputs. Public consumers should
+continue loading the same script URLs or `<rw:scripts />`; the TypeScript asset
+pipeline is maintainer-only and does not require application code changes. The
+docs-only `assets/contracts/razorwire-public-contracts.js` file preserves the
+AppSurface Docs JavaScript API harvest, while `exampleJsInterop.js` stays
+hand-authored and demo-only. For build commands, diagnostics, the pack-time
+freshness guard, and the emergency bypass property, see the
+[Runtime Contract Pipeline](Docs/runtime-contract-pipeline.md).
+
 ## Static Export
 
 RazorWire can generate CDN-ready static output with the installable `razorwire`
@@ -361,4 +371,5 @@ For installation, `dnx`, local-package, and source-run examples, see the
 - [Focused proof path: return Razor fragments](../../examples/razorwire-mvc/README.md#start-here-return-razor-fragments)
 - [Full RazorWire MVC example](../../examples/razorwire-mvc/README.md)
 - [Failed Form UX guide](Docs/form-failures.md)
+- [Runtime Contract Pipeline](Docs/runtime-contract-pipeline.md)
 - [Security & Anti-Forgery](Docs/antiforgery.md)

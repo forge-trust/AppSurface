@@ -896,7 +896,7 @@ static web assets.
   - When enabled, AppSurface Docs scans policy-approved `.js` files for explicit public doclets. Unannotated JavaScript is ignored.
 - `AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Include globs default to an empty list; exclude globs default to `**/*.min.js`; default-exclusion controls mirror the global path option shape.
-  - Use include globs as an optional narrowing or performance boundary, such as `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js`.
+  - Use include globs as an optional narrowing or performance boundary, such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js`.
   - Global path rules apply first, then JavaScript-specific includes, default exclusions, and excludes refine the candidate set.
 - `AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag`
   - Defaults to `true`.
@@ -976,7 +976,7 @@ JavaScript harvesting is for intentional browser runtime contracts: custom event
     "Harvest": {
       "JavaScript": {
         "IncludeGlobs": [
-          "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js"
+          "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"
         ]
       }
     }
@@ -1041,6 +1041,7 @@ Pitfalls:
 
 - Do not add broad `**/*.js` include globs just to turn JavaScript harvesting on. It is already on; include globs are for narrowing default discovery.
 - Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
+- When documenting package browser contracts, prefer a small docs-only contract manifest such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js` over generated runtime outputs.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
 - Do not put `@public` on classes, default exports, or CommonJS exports until a later harvester slice supports those shapes.

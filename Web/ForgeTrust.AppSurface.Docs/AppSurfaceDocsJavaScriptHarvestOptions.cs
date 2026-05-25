@@ -33,7 +33,7 @@ public sealed class AppSurfaceDocsJavaScriptHarvestOptions
     /// </summary>
     /// <remarks>
     /// Patterns use forward-slash <c>Microsoft.Extensions.FileSystemGlobbing</c> matching. Examples include
-    /// <c>Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js</c> for a single file or
+    /// <c>Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js</c> for a single file or
     /// <c>src/widgets/**/*.js</c> for a bounded source tree. Include globs compose with global includes using AND
     /// semantics. Blank entries are ignored during options normalization.
     /// </remarks>
