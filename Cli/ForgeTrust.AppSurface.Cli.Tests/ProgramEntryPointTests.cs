@@ -542,6 +542,7 @@ public sealed class ProgramEntryPointTests
 
     [Theory]
     [InlineData("")]
+    [InlineData("null")]
     [InlineData("{}")]
     public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_Reject_Missing_HealthJson(string body)
     {
@@ -608,6 +609,77 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_DefaultEnvironment_WhenHostArgsOmitEnvironment()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61238");
+        var starter = new ImmediateHealthHostStarter(host);
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            starter);
+
+        var result = await runner.VerifyAsync(
+            CreateHealthVerifyArgs(repository.Path, DefaultHealthVerifyStartupTimeout, environmentName: null),
+            CancellationToken.None);
+
+        Assert.True(result.Health.Verification.Ok);
+        Assert.Equal(Environments.Production, starter.EnvironmentName);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_UseTrailingSlashBaseUrl()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61239/");
+        var client = new CapturingHealthHttpClient(
+            new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}"""));
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            client,
+            new ImmediateHealthHostStarter(host));
+
+        await runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), CancellationToken.None);
+
+        Assert.Equal("http://127.0.0.1:61239/docs/_health.json", client.Url);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_ConvertImmediateStartupCancellationToTimeout()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            new ImmediatelyCanceledHealthHostStarter());
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(
+            () => runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), CancellationToken.None));
+
+        Assert.IsType<OperationCanceledException>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_DisposeHost_WhenStopFails()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61240", throwOnStop: true);
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            new ImmediateHealthHostStarter(host));
+
+        var result = await runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), CancellationToken.None);
+
+        Assert.True(result.Health.Verification.Ok);
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
+    }
+
+    [Fact]
     public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_StopLateStartedHost_WhenCallerCancelsStartup()
     {
         using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
@@ -631,6 +703,27 @@ public sealed class ProgramEntryPointTests
         Assert.True(starter.StartupToken.IsCancellationRequested);
         Assert.True(host.StopCalled);
         Assert.True(host.DisposeCalled);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_IgnoreLateStartupFailure_WhenCallerCancelsStartup()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        using var cancellation = new CancellationTokenSource();
+        var starter = new ControllableHealthHostStarter();
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            starter);
+
+        var verificationTask = runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), cancellation.Token);
+        await starter.Started;
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => verificationTask);
+        starter.Fail(new InvalidOperationException("Late startup failure."));
+        await starter.Finished.WaitAsync(TimeSpan.FromSeconds(1));
     }
 
     [Fact]
@@ -2191,11 +2284,19 @@ public sealed class ProgramEntryPointTests
         string repositoryPath,
         TimeSpan? startupTimeout)
     {
+        return CreateHealthVerifyArgs(repositoryPath, startupTimeout, Environments.Production);
+    }
+
+    private static AppSurfaceDocsHealthVerifyArgs CreateHealthVerifyArgs(
+        string repositoryPath,
+        TimeSpan? startupTimeout,
+        string? environmentName)
+    {
         var hostArgs = new AppSurfaceDocsHostArgs(
             repositoryPath,
             ["--AppSurfaceDocs:Source:RepositoryRoot", repositoryPath],
             startupTimeout,
-            Environments.Production);
+            environmentName);
         return new AppSurfaceDocsHealthVerifyArgs(
             hostArgs,
             "/docs/_health.json",
@@ -2407,12 +2508,26 @@ public sealed class ProgramEntryPointTests
         }
     }
 
+    private sealed class ImmediatelyCanceledHealthHostStarter : IAppSurfaceDocsHealthHostStarter
+    {
+        public Task<IHost> BuildAndStartAsync(
+            AppSurfaceDocsHealthVerifyArgs args,
+            string environmentName,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromException<IHost>(new OperationCanceledException(cancellationToken));
+        }
+    }
+
     private sealed class ControllableHealthHostStarter : IAppSurfaceDocsHealthHostStarter
     {
         private readonly TaskCompletionSource<IHost> _hostCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<object?> _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<object?> _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task Started => _started.Task;
+
+        public Task Finished => _finished.Task;
 
         public CancellationToken StartupToken { get; private set; }
 
@@ -2429,6 +2544,13 @@ public sealed class ProgramEntryPointTests
         public void Complete(IHost host)
         {
             _hostCompletion.TrySetResult(host);
+            _finished.TrySetResult(null);
+        }
+
+        public void Fail(Exception exception)
+        {
+            _hostCompletion.TrySetException(exception);
+            _finished.TrySetResult(null);
         }
     }
 

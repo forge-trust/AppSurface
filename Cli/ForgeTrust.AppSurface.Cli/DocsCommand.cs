@@ -2184,11 +2184,6 @@ internal sealed class AppSurfaceDocsInProcessHealthVerifyRunner : IAppSurfaceDoc
                     throw new OperationCanceledException(cancellationToken);
                 }
 
-                if (startTask.IsCompleted)
-                {
-                    return await startTask;
-                }
-
                 await startupTimeoutCts.CancelAsync();
                 _ = ObserveStartupTaskAsync(startTask);
                 throw CreateStartupTimeoutException(startupTimeout.Value, innerException: null);

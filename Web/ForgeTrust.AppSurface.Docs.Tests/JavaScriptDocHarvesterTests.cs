@@ -126,6 +126,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     [InlineData("detail.items[]")]
     [InlineData("detail.items[].id")]
     [InlineData("detail.$payload-id")]
+    [InlineData("detail.message_2")]
     public async Task HarvestAsync_ShouldAcceptStrictEventDetailPropertyNames(string detailPropertyName)
     {
         await WriteAsync(
@@ -147,6 +148,17 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         _ = await harvester.HarvestAsync(_testRoot);
 
         Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("detail.[]")]
+    [InlineData("detail.message!")]
+    [InlineData("detail.0:")]
+    public void IsValidEventDetailPropertyName_ShouldRejectMalformedNames(string detailPropertyName)
+    {
+        Assert.False(JavaScriptDocHarvester.IsValidEventDetailPropertyName(detailPropertyName));
     }
 
     [Theory]

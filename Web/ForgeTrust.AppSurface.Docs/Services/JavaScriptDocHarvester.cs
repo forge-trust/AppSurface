@@ -878,7 +878,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
-    private static bool IsValidEventDetailPropertyName(string value)
+    internal static bool IsValidEventDetailPropertyName(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -892,7 +892,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         var segments = name["detail.".Length..].Split('.');
-        return segments.Length > 0 && segments.All(IsValidEventDetailPropertySegment);
+        return segments.All(IsValidEventDetailPropertySegment);
     }
 
     private static string StripOptionalPropertyWrapper(string value)
