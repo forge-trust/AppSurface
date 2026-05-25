@@ -76,6 +76,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - Strongly typed config wrappers now validate resolved object values with DataAnnotations during startup, including defaults, and report operator-friendly `ConfigurationValidationException` failures without echoing attempted values.
 - Configuration audits can now produce a source-aware report for discovered wrappers and explicitly registered keys, showing provider order, file and environment provenance, defaults, validation diagnostics, and redacted display-safe values.
 - Configuration audits now omit non-sensitive collection parent display values instead of serializing collection contents, preventing nested fields such as passwords, tokens, secrets, and API keys from leaking through raw collection dumps while preserving redaction for sensitive keys and source metadata.
+- Audit collection traversal now uses immutable per-entry options snapshots with a mutable registration builder, so opt-in traversal settings are stable once an audit key is registered.
 - Nested config validation can now opt into Microsoft Options `[ValidateObjectMembers]` and `[ValidateEnumeratedItems]` markers while AppSurface owns traversal, path formatting, and cycle protection.
 - Scalar config wrappers can now validate resolved primitive values directly with `ConfigValueNotEmpty`, `ConfigValueRange`, and `ConfigValueMinLength` attributes, while wrapper-specific scalar rules can override `ValidateValue`.
 - Config wrappers can now opt into required resolved presence with `ConfigKeyRequired`, so startup fails when no provider value and no default are available while defaults and supplied zero values still count as present.
@@ -189,6 +190,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs search result rows now use one semantic full-row link, so touch users can tap anywhere in a visible result while keyboard focus, copied links, and open-in-new-tab behavior stay native.
 - First localization foundation slice for AppSurface Docs: disabled-by-default locale configuration, localized front matter metadata, inferred `README.fr.md`-style variant grouping, diagnostics for unsupported or ambiguous locale signals, and an internal route/search graph seam for later visible localized pages.
 - AppSurface Docs JavaScript public API harvesting now runs by default for policy-approved `.js` files while still publishing only explicit `@public` browser contracts. Hosts can opt out with `AppSurfaceDocs:Harvest:JavaScript:Enabled=false`, narrow scanning with JavaScript include globs, and keep broad discovery best-effort unless `StrictHealth=true` is enabled.
+- AppSurface Config audit reports now support opt-in safe collection element traversal with bounded depth, element, and node limits, source-aware array/list provenance, redacted dictionary key labels, element identity metadata, deterministic numeric rendering, and diagnostics for unsupported or truncated traversal.
 
 ### RazorWire form UX
 
