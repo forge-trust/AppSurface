@@ -76,7 +76,43 @@ public sealed class ConfigDiagnosticsCommandRunner
 
             return ConfigDiagnosticsCommandResult.Success(environment);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            return ConfigDiagnosticsCommandResult.Failed(
+                environment,
+                RenderFailureProblem,
+                $"The {ex.GetType().Name} path failed while building or rendering the report.",
+                "Run diagnostics only after the app can build enough host and DI state to execute commands, then inspect application logs for the underlying failure.",
+                ex);
+        }
+        catch (ArgumentException ex)
+        {
+            return ConfigDiagnosticsCommandResult.Failed(
+                environment,
+                RenderFailureProblem,
+                $"The {ex.GetType().Name} path failed while building or rendering the report.",
+                "Run diagnostics only after the app can build enough host and DI state to execute commands, then inspect application logs for the underlying failure.",
+                ex);
+        }
+        catch (FormatException ex)
+        {
+            return ConfigDiagnosticsCommandResult.Failed(
+                environment,
+                RenderFailureProblem,
+                $"The {ex.GetType().Name} path failed while building or rendering the report.",
+                "Run diagnostics only after the app can build enough host and DI state to execute commands, then inspect application logs for the underlying failure.",
+                ex);
+        }
+        catch (IOException ex)
+        {
+            return ConfigDiagnosticsCommandResult.Failed(
+                environment,
+                RenderFailureProblem,
+                $"The {ex.GetType().Name} path failed while building or rendering the report.",
+                "Run diagnostics only after the app can build enough host and DI state to execute commands, then inspect application logs for the underlying failure.",
+                ex);
+        }
+        catch (UnauthorizedAccessException ex)
         {
             return ConfigDiagnosticsCommandResult.Failed(
                 environment,

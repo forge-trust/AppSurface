@@ -31,7 +31,7 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
                     }
                 ]
             }));
-        var output = new StringWriter();
+        using var output = new StringWriter();
         var runner = new ConfigDiagnosticsCommandRunner(
             reporter,
             new ConfigAuditTextRenderer(),
@@ -88,7 +88,7 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
                     }
                 ]
             }));
-        var output = new StringWriter();
+        using var output = new StringWriter();
         var runner = new ConfigDiagnosticsCommandRunner(
             reporter,
             new ConfigAuditTextRenderer(),
@@ -119,7 +119,7 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
                 DisplayValue = "[redacted]",
                 IsRedacted = true
             }));
-        var output = new StringWriter();
+        using var output = new StringWriter();
         var runner = new ConfigDiagnosticsCommandRunner(
             reporter,
             new ConfigAuditTextRenderer(),
@@ -140,7 +140,7 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
         A.CallTo(() => environmentProvider.Environment).Returns("Production");
         A.CallTo(() => reporter.GetReport("Production"))
             .Throws(new InvalidOperationException("provider failed with super-secret"));
-        var output = new StringWriter();
+        using var output = new StringWriter();
         var runner = new ConfigDiagnosticsCommandRunner(
             reporter,
             new ConfigAuditTextRenderer(),
@@ -178,7 +178,7 @@ public sealed class ConfigDiagnosticsCommandRunnerTests
         var reporter = A.Fake<IConfigAuditReporter>();
         var environmentProvider = A.Fake<IEnvironmentProvider>();
         A.CallTo(() => environmentProvider.Environment).Returns(" ");
-        var output = new StringWriter();
+        using var output = new StringWriter();
         var runner = new ConfigDiagnosticsCommandRunner(
             reporter,
             new ConfigAuditTextRenderer(),
