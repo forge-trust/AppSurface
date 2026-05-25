@@ -187,6 +187,19 @@ public class ConfigAuditReporterTests
         public string? Password { get; set; }
     }
 
+    [ConfigKey("Default.Services", root: true)]
+    private sealed class DefaultServicesConfig : Config<List<NamedEndpoint>>
+    {
+        public override List<NamedEndpoint>? DefaultValue =>
+        [
+            new()
+            {
+                Name = "fallback",
+                Url = "https://fallback.example"
+            }
+        ];
+    }
+
     [Fact]
     public void GetReport_WithContractFixture_ReportsStatesSourcesPatchesAndRedaction()
     {
@@ -1135,6 +1148,36 @@ public class ConfigAuditReporterTests
                 }
             });
         Assert.Contains("CustomProvider", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_UsesDefaultSourceForDefaultedCollectionChildren()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton(new ConfigAuditKnownEntry(
+            "Default.Services",
+            typeof(DefaultServicesConfig),
+            typeof(List<NamedEndpoint>)));
+        services.AddConfigAuditKey<List<NamedEndpoint>>(
+            "Default.Services",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Default.Services", ConfigAuditEntryState.Defaulted, null);
+        var service = Assert.Single(entry.Children);
+        var name = Assert.Single(service.Children, child => child.Key == "Default.Services[0].Name");
+
+        Assert.All(entry.Sources, source => Assert.Equal(ConfigAuditSourceKind.Default, source.Kind));
+        Assert.All(service.Sources, source => Assert.Equal(ConfigAuditSourceKind.Default, source.Kind));
+        Assert.All(name.Sources, source => Assert.Equal(ConfigAuditSourceKind.Default, source.Kind));
+        Assert.DoesNotContain(service.Sources, source => source.Kind == ConfigAuditSourceKind.Missing);
+        Assert.DoesNotContain(name.Sources, source => source.Kind == ConfigAuditSourceKind.Missing);
     }
 
     [Fact]

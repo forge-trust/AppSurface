@@ -157,12 +157,15 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         var sources = inspection.DefaultSource != null
             ? [inspection.DefaultSource]
             : resolution.Sources;
+        var traversalSources = inspection.DefaultSource != null || resolution.AuditSources.Count == 0
+            ? sources
+            : resolution.AuditSources;
         var optionsDiagnostics = knownEntry.OptionsSnapshot.Validate(knownEntry.Key);
         var options = optionsDiagnostics.Count == 0 ? knownEntry.OptionsSnapshot : knownEntry.OptionsSnapshot.Normalize();
         var traversal = _traverser.BuildChildren(
             ConfigAuditPath.Root(knownEntry.Key),
             rawValue,
-            resolution.AuditSources.Count == 0 ? sources : resolution.AuditSources,
+            traversalSources,
             options,
             new HashSet<object>(ReferenceEqualityComparer.Instance),
             new ConfigAuditDictionaryLabelSet());
