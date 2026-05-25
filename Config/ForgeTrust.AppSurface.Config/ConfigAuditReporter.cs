@@ -174,7 +174,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             .Concat(optionsDiagnostics)
             .Concat(traversal.Diagnostics)
             .ToList();
-        if (traversal.Children.Any(IsPartiallyResolved)
+        if (traversal.Children.Any(ConfigAuditEntryStateHelpers.IsPartiallyResolved)
             && state == ConfigAuditEntryState.Resolved)
         {
             state = ConfigAuditEntryState.PartiallyResolved;
@@ -383,11 +383,6 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             ? selected
             : selected.WithOptions(optionSource.OptionsSnapshot);
     }
-
-    private static bool IsPartiallyResolved(ConfigAuditEntry entry) =>
-        entry.State == ConfigAuditEntryState.PartiallyResolved
-        || entry.Sources.Any(source => source.Role == ConfigAuditSourceRole.Patch)
-        || entry.Children.Any(IsPartiallyResolved);
 
     private static ConfigValueResolution CreateProviderExceptionResolution(
         IConfigProvider provider,

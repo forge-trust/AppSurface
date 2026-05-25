@@ -74,19 +74,27 @@ public sealed class ConfigAuditTextRenderer
 
     private static IEnumerable<ConfigAuditEntry> OrderChildren(IReadOnlyList<ConfigAuditEntry> children)
     {
-        if (children.Any(child => child.Element?.Index != null))
+        if (children.Any(child => child.Element != null))
         {
             return children
                 .Select((child, ordinal) => new { Child = child, Ordinal = ordinal })
-                .OrderBy(item => item.Child.Element?.Index ?? int.MaxValue)
+                .OrderBy(item => GetElementSortGroup(item.Child))
+                .ThenBy(item => item.Child.Element?.Index ?? int.MaxValue)
+                .ThenBy(item => item.Child.Element?.Kind)
+                .ThenBy(item => item.Child.Element?.KeyLabel ?? item.Child.Key, StringComparer.Ordinal)
                 .ThenBy(item => item.Ordinal)
                 .Select(item => item.Child);
         }
 
-        return children.Any(child => child.Element != null)
-            ? children
-            : children.OrderBy(child => child.Key, StringComparer.OrdinalIgnoreCase);
+        return children.OrderBy(child => child.Key, StringComparer.OrdinalIgnoreCase);
     }
+
+    private static int GetElementSortGroup(ConfigAuditEntry child) =>
+        child.Element?.Index != null
+            ? 0
+            : child.Element != null
+                ? 1
+                : 2;
 
     private static string FormatSource(ConfigAuditSourceRecord source) =>
         source.Kind switch

@@ -169,12 +169,22 @@ public class ConfigAuditModelsTests
                     [
                         new ConfigAuditEntry
                         {
-                            Key = "Root[\"name\"]",
+                            Key = "Root[\"zeta\"]",
                             State = ConfigAuditEntryState.Resolved,
                             Element = new ConfigAuditElementIdentity
                             {
                                 Kind = ConfigAuditElementKind.DictionaryItem,
-                                KeyLabel = "name"
+                                KeyLabel = "zeta"
+                            }
+                        },
+                        new ConfigAuditEntry
+                        {
+                            Key = "Root[\"alpha\"]",
+                            State = ConfigAuditEntryState.Resolved,
+                            Element = new ConfigAuditElementIdentity
+                            {
+                                Kind = ConfigAuditElementKind.DictionaryItem,
+                                KeyLabel = "alpha"
                             }
                         },
                         new ConfigAuditEntry
@@ -199,7 +209,8 @@ public class ConfigAuditModelsTests
 
         var rendered = renderer.Render(report);
 
-        Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root[\"name\"]", StringComparison.Ordinal));
+        Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root[\"alpha\"]", StringComparison.Ordinal));
+        Assert.True(rendered.IndexOf("Root[\"alpha\"]", StringComparison.Ordinal) < rendered.IndexOf("Root[\"zeta\"]", StringComparison.Ordinal));
         Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root.Plain", StringComparison.Ordinal));
         Assert.Contains("Provider", rendered, StringComparison.Ordinal);
     }

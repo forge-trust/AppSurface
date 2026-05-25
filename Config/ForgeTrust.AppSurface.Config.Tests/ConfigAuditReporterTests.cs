@@ -900,7 +900,7 @@ public class ConfigAuditReporterTests
         var entry = AssertEntry(report, "Map.Values", ConfigAuditEntryState.Resolved, null);
         var child = Assert.Single(entry.Children);
 
-        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-source-inherited");
+        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-source-unavailable");
     }
 
     [Fact]

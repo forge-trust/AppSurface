@@ -308,7 +308,7 @@ internal sealed class ConfigAuditValueTraverser
         var redacted = _redactor.FormatValue(path.DisplayPath, value, selectedSources.Sources);
         var traversal = BuildChildren(path, value, sources, options, visited, labels, ref budget);
         var diagnostics = selectedSources.Diagnostics.Concat(traversal.Diagnostics).ToList();
-        var state = traversal.Children.Any(IsPartiallyResolved)
+        var state = traversal.Children.Any(ConfigAuditEntryStateHelpers.IsPartiallyResolved)
                     || selectedSources.Sources.Any(source => source.Role == ConfigAuditSourceRole.Patch)
             ? ConfigAuditEntryState.PartiallyResolved
             : ConfigAuditEntryState.Resolved;
@@ -374,7 +374,7 @@ internal sealed class ConfigAuditValueTraverser
     {
         if (path.RequiresInheritedSource)
         {
-            return CreateInheritedSelection(sources, path);
+            return CreateInheritedSelection(sources, path, unknownWhenEmpty: true);
         }
 
         var matches = sources
@@ -469,11 +469,6 @@ internal sealed class ConfigAuditValueTraverser
             ConfigPath = path.DisplayPath,
             Message = message
         };
-
-    private static bool IsPartiallyResolved(ConfigAuditEntry entry) =>
-        entry.State == ConfigAuditEntryState.PartiallyResolved
-        || entry.Sources.Any(source => source.Role == ConfigAuditSourceRole.Patch)
-        || entry.Children.Any(IsPartiallyResolved);
 
     private static bool IsPropertyReadException(Exception ex) =>
         ex is TargetInvocationException

@@ -150,7 +150,8 @@ report does not mutate the provider object being inspected.
 Collection element provenance is opt-in per entry. Arrays and lists use zero-based numeric element paths such as
 `Services.0`. Dictionary items use display labels such as `Routes["primary"]` when the key is non-sensitive and safe to
 display. Dotted, quoted, bracketed, hidden, or sensitive dictionary keys use inherited parent provenance instead of
-exposing a raw key path.
+exposing a raw key path; for example, keys such as `user.name`, `items[0]`, or `"first name"` inherit the parent source
+because they cannot form an unambiguous raw config path.
 
 ### Collection Traversal API
 
