@@ -491,6 +491,14 @@ AppSurface Docs also reads repository-owned Git `.gitignore` files by default. T
 
 VCS ignore rules sit after AppSurface include boundaries and default exclusion groups, but before configured AppSurface excludes. Git negation can only neutralize a previous Git ignore rule. `VcsIgnore:AllowGlobs` can also restore selected VCS-ignored candidates, but those allow globs use AppSurface's normal repository-relative glob syntax, not Git-ignore syntax, and cannot override AppSurface default exclusions or configured excludes.
 
+| Git behavior | AppSurface Docs harvest policy |
+| --- | --- |
+| Repository `.gitignore` files can ignore generated, package-manager, or build output. | Repository-owned `.gitignore` files under the resolved source root are honored during each source snapshot. |
+| `.git/info/exclude` and global excludes are developer- or machine-local. | They are never read, so CI, static export, packaged hosts, and developer machines see the same docs source surface. |
+| Git tracked files can still match ignore rules. | AppSurface Docs ignores matching files even if they are tracked, because docs harvesting is source-policy driven rather than index driven. |
+| Git can vary case behavior through repository and platform settings. | AppSurface Docs uses ordinal, case-sensitive VCS-ignore matching for reproducible Linux, macOS, and Windows harvests. Configured AppSurface globs remain the package's normal case-insensitive repository-relative globs. |
+| Git negation can re-include paths only inside the Git ignore rule stack. | Git negation can neutralize earlier Git ignore rules, and `VcsIgnore:AllowGlobs` can restore selected VCS-only exclusions; neither can bypass AppSurface default exclusions or configured excludes. |
+
 ```json
 {
   "AppSurfaceDocs": {
@@ -524,6 +532,20 @@ Disable VCS ignore integration only when the host intentionally wants pre-existi
 ```
 
 AppSurface Docs reads only repository-owned `.gitignore` files under the resolved source root. It does not read `.git/info/exclude`, global Git excludes, or machine-local ignore state, so source-backed docs are reproducible in CI, static export, and packaged hosts. Tracked files that match `.gitignore` are still ignored by AppSurface Docs; use `VcsIgnore:AllowGlobs` for intentional public docs under ignored paths.
+
+If docs disappear after adopting or upgrading AppSurface Docs, diagnose a single path before changing broad policy:
+
+1. Check the nearest repository-owned `.gitignore` files that cover the missing repository-relative path.
+2. If the path is intentionally public but lives under an ignored tree, restore only that surface with `AppSurfaceDocs:Harvest:Paths:VcsIgnore:AllowGlobs`.
+3. If a host needs the old harvest behavior while migrating, temporarily set `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled=false`.
+4. If the path is still missing, check AppSurface default exclusions and configured `ExcludeGlobs`; those policies still win after VCS-ignore allows.
+5. Inspect harvest health diagnostics for the VCS-ignore summary and sample paths, then run the focused parity test when debugging package behavior:
+
+```bash
+dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj --filter AppSurfaceDocsHarvestVcsIgnorePolicyTests --logger "console;verbosity=normal"
+```
+
+The dedicated `vcs-ignore-parity.yml` workflow runs that parity suite on Linux, macOS, and Windows so case-sensitive ignore behavior and Git oracle traces stay pinned across supported runner families.
 
 Traversal uses the same policy for Markdown and C#. AppSurface Docs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file. The root `LICENSE` file is a Markdown candidate, but when global includes are configured it still needs to match an include such as `LICENSE`.
 
@@ -879,6 +901,7 @@ static web assets.
   - Defaults to `true`.
   - Reads repository-owned Git `.gitignore` files under the resolved source root during each cached docs snapshot.
   - Does not read `.git/info/exclude`, global Git excludes, or machine-local ignore state.
+  - VCS-ignore matching is ordinal and case-sensitive for reproducible Linux, macOS, and Windows harvests.
 - `AppSurfaceDocs:Harvest:Paths:VcsIgnore:AllowGlobs`
   - Defaults to an empty array.
   - Uses AppSurface repository-relative glob syntax, not Git-ignore syntax.

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -554,7 +555,7 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     }
 
     [Fact]
-    public async Task Evaluate_GitParityFixtureMatchesCheckIgnoreWhenGitIsAvailable()
+    public async Task Evaluate_GitParityFixtureMatchesStructuredCheckIgnoreRecordsWhenGitIsAvailable()
     {
         if (!await IsGitAvailableAsync())
         {
@@ -562,12 +563,14 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
         }
 
         await RunGitAsync("init");
+        await WriteAsync(".git/info/exclude", string.Empty);
         await WriteAsync(
             ".gitignore",
             """
             bower_components/
             /dist/**
             *.generated.md
+            CaseSensitive.md
             """);
         var snapshot = CreateSnapshot();
         var paths = new[]
@@ -577,23 +580,219 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
             "dist/app.md",
             "src/dist/app.md",
             "docs/api.generated.md",
-            "docs/public.md"
+            "docs/space name.generated.md",
+            "docs/api+generated.generated.md",
+            "docs/public.md",
+            "casesensitive.md",
+            "CaseSensitive.md"
         };
         foreach (var path in paths)
         {
             await WriteAsync(path, "# candidate");
         }
 
-        foreach (var path in paths)
+        await WriteAsync("docs/tracked.generated.md", "# tracked but still ignored by AppSurface");
+        await RunGitAsync("add -f docs/tracked.generated.md");
+        var allPaths = paths.Append("docs/tracked.generated.md").ToArray();
+        var gitResult = await RunGitCheckIgnoreAsync(allPaths);
+        var gitRecords = gitResult.Records.ToDictionary(record => record.Path, StringComparer.Ordinal);
+
+        foreach (var path in allPaths)
         {
-            var gitIgnored = await IsIgnoredByGitAsync(path);
+            var gitRecord = gitRecords[path];
             var decision = snapshot.Evaluate(path, AppSurfaceDocsHarvestSourceKind.Markdown);
 
             var appSurfaceIgnored = decision.Code == AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore;
             Assert.True(
-                gitIgnored == appSurfaceIgnored,
-                $"Path '{path}' expected Git ignored={gitIgnored} but AppSurface decision was {decision.Code}.");
+                gitRecord.IsIgnored == appSurfaceIgnored,
+                BuildGitParityFailureMessage(gitResult, gitRecord, decision));
+
+            if (!gitRecord.IsIgnored)
+            {
+                Assert.Null(gitRecord.SourcePath);
+                Assert.Null(gitRecord.LineNumber);
+                Assert.Null(gitRecord.Pattern);
+                continue;
+            }
+
+            var trace = Assert.Single(decision.Trace, trace => trace.Code == AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore);
+            Assert.Equal(gitRecord.SourcePath, trace.SourcePath);
+            Assert.Equal(gitRecord.LineNumber, trace.LineNumber);
+            Assert.Equal(gitRecord.Pattern, trace.Pattern);
         }
+
+        Assert.False(gitRecords["casesensitive.md"].IsIgnored);
+        Assert.True(gitRecords["CaseSensitive.md"].IsIgnored);
+        Assert.True(gitRecords["docs/tracked.generated.md"].IsIgnored);
+        Assert.Contains("docs/public.md", gitRecords.Keys);
+        Assert.False(gitRecords["docs/public.md"].IsIgnored);
+    }
+
+    [Fact]
+    public void GitParityFailureMessage_ShouldIncludeDebugContext()
+    {
+        var gitResult = new GitCheckIgnoreResult(
+            "git version 2.test",
+            "git -c core.excludesFile=<empty> check-ignore --verbose --non-matching -z --stdin --no-index",
+            1,
+            "raw-out",
+            "raw-err",
+            [
+                new GitCheckIgnoreRecord("docs/public.md", IsIgnored: false, SourcePath: null, LineNumber: null, Pattern: null)
+            ]);
+        var decision = new AppSurfaceDocsHarvestPathDecision(
+            false,
+            "docs/public.md",
+            AppSurfaceDocsHarvestSourceKind.Markdown,
+            AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore,
+            [
+                new AppSurfaceDocsHarvestPathRuleTrace(
+                    AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore,
+                    "VCS ignore",
+                    "*.md",
+                    null,
+                    true,
+                    ".gitignore",
+                    7)
+            ],
+            []);
+
+        var message = BuildGitParityFailureMessage(gitResult, gitResult.Records[0], decision);
+
+        Assert.Contains("git version 2.test", message, StringComparison.Ordinal);
+        Assert.Contains("check-ignore", message, StringComparison.Ordinal);
+        Assert.Contains("raw-out", message, StringComparison.Ordinal);
+        Assert.Contains("raw-err", message, StringComparison.Ordinal);
+        Assert.Contains("docs/public.md", message, StringComparison.Ordinal);
+        Assert.Contains(".gitignore:7", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenVcsIgnorePatternDiffersOnlyByCaseUsesOrdinalMatching()
+    {
+        await WriteAsync(".gitignore", "Readme.md\n");
+        var snapshot = CreateSnapshot();
+
+        var lowerCaseDecision = snapshot.Evaluate("README.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+        var exactCaseDecision = snapshot.Evaluate("Readme.md", AppSurfaceDocsHarvestSourceKind.Markdown);
+
+        Assert.True(lowerCaseDecision.Included);
+        Assert.False(exactCaseDecision.Included);
+        Assert.Equal(AppSurfaceDocsHarvestPathDecisionCode.ExcludedByVcsIgnore, exactCaseDecision.Code);
+    }
+
+    [Fact]
+    public async Task ShouldPruneDirectory_WhenManyNestedRulesAndBroadAllowGlobsExistKeepsReachableTrees()
+    {
+        await WriteAsync(
+            ".gitignore",
+            """
+            generated/
+            !generated/public/
+            !generated/public/**/*.md
+            """);
+        for (var index = 0; index < 25; index++)
+        {
+            await WriteAsync($"src/level{index}/.gitignore", "cache/\n!cache/public.md\n");
+        }
+
+        var snapshot = CreateSnapshot(options => options.Harvest.Paths.VcsIgnore.AllowGlobs = ["generated/public/**"]);
+
+        Assert.False(snapshot.ShouldPruneDirectory("generated", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.True(snapshot.ShouldPruneDirectory("src/level0/cache", AppSurfaceDocsHarvestSourceKind.Markdown));
+        Assert.False(snapshot.Evaluate("src/level0/cache/private.md", AppSurfaceDocsHarvestSourceKind.Markdown).Included);
+    }
+
+    private async Task<GitCheckIgnoreResult> RunGitCheckIgnoreAsync(IReadOnlyList<string> paths)
+    {
+        var emptyGlobalExcludesPath = Path.Join(_root, ".git", "appsurface-empty-global-excludes");
+        await File.WriteAllTextAsync(emptyGlobalExcludesPath, string.Empty);
+        var gitVersion = await RunProcessAsync(Directory.GetCurrentDirectory(), "git", ["--version"]);
+        var arguments = new[]
+        {
+            "-c",
+            $"core.excludesFile={emptyGlobalExcludesPath}",
+            "-c",
+            "core.ignoreCase=false",
+            "check-ignore",
+            "--verbose",
+            "--non-matching",
+            "-z",
+            "--stdin",
+            "--no-index"
+        };
+        var result = await RunProcessAsync(_root, "git", arguments, string.Join('\0', paths) + '\0');
+        Assert.True(
+            result.ExitCode is 0 or 1,
+            $"git check-ignore failed with exit code {result.ExitCode}.\nCommand: git {string.Join(' ', arguments)}\nstdout:\n{result.Output}\nstderr:\n{result.Error}");
+
+        return new GitCheckIgnoreResult(
+            gitVersion.Output.Trim(),
+            $"git {string.Join(' ', arguments)}",
+            result.ExitCode,
+            result.Output,
+            result.Error,
+            ParseGitCheckIgnoreRecords(result.Output));
+    }
+
+    private static IReadOnlyList<GitCheckIgnoreRecord> ParseGitCheckIgnoreRecords(string output)
+    {
+        var fields = output.Split('\0');
+        var records = new List<GitCheckIgnoreRecord>();
+        for (var index = 0; index + 3 < fields.Length; index += 4)
+        {
+            var sourcePath = fields[index];
+            var lineText = fields[index + 1];
+            var pattern = fields[index + 2];
+            var path = fields[index + 3];
+            if (path.Length == 0)
+            {
+                continue;
+            }
+
+            var ignored = sourcePath.Length > 0;
+            records.Add(
+                new GitCheckIgnoreRecord(
+                    path,
+                    ignored,
+                    ignored ? sourcePath : null,
+                    ignored ? int.Parse(lineText, System.Globalization.CultureInfo.InvariantCulture) : null,
+                    ignored ? pattern : null));
+        }
+
+        return records;
+    }
+
+    private static string BuildGitParityFailureMessage(
+        GitCheckIgnoreResult gitResult,
+        GitCheckIgnoreRecord gitRecord,
+        AppSurfaceDocsHarvestPathDecision decision)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"Path '{gitRecord.Path}' diverged between Git and AppSurface VCS-ignore decisions.");
+        builder.AppendLine($"Git ignored: {gitRecord.IsIgnored}");
+        builder.AppendLine($"AppSurface decision: {decision.Code}, included: {decision.Included}");
+        builder.AppendLine($"Git version: {gitResult.GitVersion}");
+        builder.AppendLine($"Git command: {gitResult.Command}");
+        builder.AppendLine($"Git exit code: {gitResult.ExitCode}");
+        builder.AppendLine($"Git record: source={gitRecord.SourcePath ?? "<none>"}, line={gitRecord.LineNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<none>"}, pattern={gitRecord.Pattern ?? "<none>"}");
+        builder.AppendLine("AppSurface trace:");
+        foreach (var trace in decision.Trace)
+        {
+            builder.AppendLine($"- {trace.Code}: {trace.SourcePath}:{trace.LineNumber} {trace.Pattern}");
+        }
+
+        builder.AppendLine("All Git records:");
+        foreach (var record in gitResult.Records)
+        {
+            builder.AppendLine($"- {record.Path}: ignored={record.IsIgnored}, source={record.SourcePath ?? "<none>"}, line={record.LineNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "<none>"}, pattern={record.Pattern ?? "<none>"}");
+        }
+
+        builder.AppendLine("stdout:");
+        builder.AppendLine(gitResult.Output);
+        builder.AppendLine("stderr:");
+        builder.AppendLine(gitResult.Error);
+        return builder.ToString();
     }
 
     private AppSurfaceDocsHarvestPathPolicySnapshot CreateSnapshot(Action<AppSurfaceDocsOptions>? configure = null)
@@ -626,7 +825,7 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
     {
         try
         {
-            var result = await RunProcessAsync(Directory.GetCurrentDirectory(), "git", "--version");
+            var result = await RunProcessAsync(Directory.GetCurrentDirectory(), "git", ["--version"]);
             return result.ExitCode == 0;
         }
         catch (InvalidOperationException)
@@ -641,30 +840,77 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
 
     private async Task RunGitAsync(string arguments)
     {
-        var result = await RunProcessAsync(_root, "git", arguments);
+        var result = await RunProcessAsync(_root, "git", arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         Assert.Equal(0, result.ExitCode);
     }
 
-    private async Task<bool> IsIgnoredByGitAsync(string relativePath)
+    private static async Task<ProcessResult> RunProcessAsync(
+        string workingDirectory,
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string? standardInput = null)
     {
-        var result = await RunProcessAsync(_root, "git", $"check-ignore --verbose -- {relativePath}");
-        return result.ExitCode == 0;
-    }
-
-    private static async Task<(int ExitCode, string Output)> RunProcessAsync(string workingDirectory, string fileName, string arguments)
-    {
-        var startInfo = new ProcessStartInfo(fileName, arguments)
+        var startInfo = new ProcessStartInfo(fileName)
         {
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
+            RedirectStandardInput = standardInput is not null,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
         };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start process.");
-        var output = await process.StandardOutput.ReadToEndAsync();
-        output += await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        return (process.ExitCode, output);
+        if (standardInput is not null)
+        {
+            await process.StandardInput.WriteAsync(standardInput);
+            process.StandardInput.Close();
+        }
+
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+                // Process already exited between timeout observation and kill.
+            }
+
+            throw new TimeoutException($"Process '{fileName}' exceeded the 10 second test timeout.");
+        }
+
+        return new ProcessResult(process.ExitCode, await outputTask, await errorTask);
     }
+
+    private sealed record GitCheckIgnoreRecord(
+        string Path,
+        bool IsIgnored,
+        string? SourcePath,
+        int? LineNumber,
+        string? Pattern);
+
+    private sealed record GitCheckIgnoreResult(
+        string GitVersion,
+        string Command,
+        int ExitCode,
+        string Output,
+        string Error,
+        IReadOnlyList<GitCheckIgnoreRecord> Records);
+
+    private sealed record ProcessResult(int ExitCode, string Output, string Error);
 
     public void Dispose()
     {
