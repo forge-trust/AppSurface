@@ -696,6 +696,211 @@ public class ConfigAuditReporterTests
         Assert.DoesNotContain("not-password", second.MatchedFragments);
     }
 
+    [Fact]
+    public void GetReport_IncludesProviderDiscoveredFileKeysWithClassificationsAndRedaction()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDir, "appsettings.Staging.json"),
+                """
+                {
+                  "KnownExact": "registered",
+                  "App": {
+                    "Mode": "file",
+                    "Enabled": true,
+                    "RetryCount": 3,
+                    "Ratio": 42.5,
+                    "Password": "super-secret",
+                    "Items": [1, 2],
+                    "TokenList": ["secret-one", "secret-two"],
+                    "NullValue": null
+                  },
+                  "Application": {
+                    "Name": "lookalike"
+                  },
+                  "UnknownNull": null
+                }
+                """);
+            File.WriteAllText(
+                Path.Combine(tempDir, "appsettings.Development.json"),
+                """
+                {
+                  "OtherEnvironmentNull": null
+                }
+                """);
+
+            var environment = A.Fake<IEnvironmentProvider>();
+            A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+            var services = CreateServices(tempDir, environment);
+            services.AddConfigAuditKey<string>("KnownExact");
+            services.AddConfigAuditKey<AppSettings>("App");
+            services.AddConfigAuditKey<string>("App.Mode");
+
+            var provider = services.BuildServiceProvider();
+            var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Staging");
+
+            AssertDiscovered(report, "KnownExact", ConfigAuditDiscoveredKeyClassification.Known, "registered");
+            AssertDiscovered(report, "App", ConfigAuditDiscoveredKeyClassification.Known, null);
+            AssertDiscovered(report, "App.Mode", ConfigAuditDiscoveredKeyClassification.Known, "file");
+            AssertDiscovered(report, "App.Enabled", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "True");
+            AssertDiscovered(report, "App.RetryCount", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "3");
+            AssertDiscovered(report, "App.Ratio", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "42.5");
+            var password = AssertDiscovered(
+                report,
+                "App.Password",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                "[redacted]");
+            Assert.True(password.IsRedacted);
+            var items = AssertDiscovered(report, "App.Items", ConfigAuditDiscoveredKeyClassification.KnownDescendant, null);
+            Assert.False(items.IsRedacted);
+            var tokenList = AssertDiscovered(
+                report,
+                "App.TokenList",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                "[redacted]");
+            Assert.True(tokenList.IsRedacted);
+            AssertDiscovered(
+                report,
+                "Application.Name",
+                ConfigAuditDiscoveredKeyClassification.Unknown,
+                "lookalike");
+            Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "App.NullValue");
+            Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "UnknownNull");
+            Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "OtherEnvironmentNull");
+            var app = report.Entries.Single(entry => entry.Key == "App");
+            Assert.Contains(
+                app.Diagnostics,
+                diagnostic => diagnostic.Code == "config-file-null-skipped"
+                              && diagnostic.ConfigPath == "App.NullValue");
+            Assert.DoesNotContain(
+                report.Diagnostics,
+                diagnostic => diagnostic.Code == "config-file-null-skipped"
+                              && diagnostic.ConfigPath == "App.NullValue");
+            Assert.Contains(
+                report.Diagnostics,
+                diagnostic => diagnostic.Code == "config-file-null-skipped"
+                              && diagnostic.ConfigPath == "UnknownNull");
+            Assert.DoesNotContain(
+                report.Diagnostics.Concat(report.Entries.SelectMany(entry => entry.Diagnostics)),
+                diagnostic => diagnostic.Code == "config-file-null-skipped"
+                              && diagnostic.ConfigPath == "OtherEnvironmentNull");
+
+            var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
+            Assert.Contains("Discovered file keys:", rendered, StringComparison.Ordinal);
+            Assert.Contains("KnownExact [Known] = registered", rendered, StringComparison.Ordinal);
+            Assert.Contains("App.Mode [Known] = file", rendered, StringComparison.Ordinal);
+            Assert.Contains(
+                "Application.Name [Unknown to AppSurface audit registry] = lookalike",
+                rendered,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("Unused", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("super-secret", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("secret-one", rendered, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void GetReport_UsesEffectiveObjectOriginsForDiscoveredFileKeys()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDir, "appsettings.Staging.json"),
+                """
+                {
+                  "Composite": {
+                    "Base": "from-base"
+                  }
+                }
+                """);
+            File.WriteAllText(
+                Path.Combine(tempDir, "config_Override.Staging.json"),
+                """
+                {
+                  "Composite": {
+                    "Override": "from-override"
+                  }
+                }
+                """);
+
+            var environment = A.Fake<IEnvironmentProvider>();
+            A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+            var report = CreateServices(tempDir, environment)
+                .BuildServiceProvider()
+                .GetRequiredService<IConfigAuditReporter>()
+                .GetReport("Staging");
+
+            var parent = AssertDiscovered(report, "Composite", ConfigAuditDiscoveredKeyClassification.Unknown, null);
+            Assert.Contains(
+                parent.Sources,
+                source => source.FilePath?.EndsWith("config_Override.Staging.json", StringComparison.Ordinal) == true);
+            var baseChild = AssertDiscovered(
+                report,
+                "Composite.Base",
+                ConfigAuditDiscoveredKeyClassification.Unknown,
+                "from-base");
+            Assert.Contains(
+                baseChild.Sources,
+                source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
+            var overrideChild = AssertDiscovered(
+                report,
+                "Composite.Override",
+                ConfigAuditDiscoveredKeyClassification.Unknown,
+                "from-override");
+            Assert.Contains(
+                overrideChild.Sources,
+                source => source.FilePath?.EndsWith("config_Override.Staging.json", StringComparison.Ordinal) == true);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void GetReport_ConvertsDiscoveredEnumerationExceptionsToDiagnostics()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IEnvironmentConfigProvider>(new EmptyEnvironmentConfigProvider());
+        services.AddSingleton<IConfigProvider>(new ThrowingKeyEnumeratorProvider());
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Ignored.Key", "ignored"));
+        services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddSingleton<ConfigAuditRedactor>();
+        services.AddSingleton<ConfigAuditTextRenderer>();
+
+        var provider = services.BuildServiceProvider();
+        var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
+
+        Assert.Empty(report.DiscoveredKeys);
+        Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "config-provider-enumerate-keys-threw");
+        Assert.DoesNotContain(
+            report.Diagnostics,
+            diagnostic => diagnostic.Message.Contains("super-secret", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            "Discovered file keys:",
+            provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report),
+            StringComparison.Ordinal);
+    }
+
     private static ServiceCollection CreateServices(string configDirectory, IEnvironmentProvider environment)
     {
         var services = new ServiceCollection();
@@ -725,6 +930,18 @@ public class ConfigAuditReporterTests
         return entry;
     }
 
+    private static ConfigAuditDiscoveredKey AssertDiscovered(
+        ConfigAuditReport report,
+        string key,
+        ConfigAuditDiscoveredKeyClassification classification,
+        string? displayValue)
+    {
+        var discoveredKey = Assert.Single(report.DiscoveredKeys, discoveredKey => discoveredKey.Key == key);
+        Assert.Equal(classification, discoveredKey.Classification);
+        Assert.Equal(displayValue, discoveredKey.DisplayValue);
+        return discoveredKey;
+    }
+
     private sealed class StaticConfigProvider : IConfigProvider
     {
         private readonly string _key;
@@ -749,6 +966,33 @@ public class ConfigAuditReporterTests
 
             return (T)_value;
         }
+    }
+
+    private sealed class EmptyEnvironmentConfigProvider : IEnvironmentConfigProvider
+    {
+        public string Environment => "Production";
+
+        public bool IsDevelopment => false;
+
+        public int Priority => int.MaxValue;
+
+        public string Name => nameof(EmptyEnvironmentConfigProvider);
+
+        public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
+
+        public T? GetValue<T>(string environment, string key) => default;
+    }
+
+    private sealed class ThrowingKeyEnumeratorProvider : IConfigProvider, IConfigAuditKeyEnumerator
+    {
+        public int Priority => 10;
+
+        public string Name => nameof(ThrowingKeyEnumeratorProvider);
+
+        public T? GetValue<T>(string environment, string key) => default;
+
+        public IReadOnlyList<ConfigAuditProviderDiscoveredKey> EnumerateKeys(string environment) =>
+            throw new InvalidOperationException("super-secret enumeration failure");
     }
 
     private sealed class DictionaryConfigProvider : IConfigProvider, IConfigDiagnosticProvider

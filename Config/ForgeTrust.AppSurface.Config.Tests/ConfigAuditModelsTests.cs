@@ -18,6 +18,10 @@ public class ConfigAuditModelsTests
         Assert.Equal(3, (int)ConfigAuditEntryState.Missing);
         Assert.Equal(4, (int)ConfigAuditEntryState.Invalid);
 
+        Assert.Equal(0, (int)ConfigAuditDiscoveredKeyClassification.Known);
+        Assert.Equal(1, (int)ConfigAuditDiscoveredKeyClassification.KnownDescendant);
+        Assert.Equal(2, (int)ConfigAuditDiscoveredKeyClassification.Unknown);
+
         Assert.Equal(0, (int)ConfigAuditSourceKind.Provider);
         Assert.Equal(1, (int)ConfigAuditSourceKind.File);
         Assert.Equal(2, (int)ConfigAuditSourceKind.EnvironmentVariable);

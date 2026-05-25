@@ -32,6 +32,18 @@ public sealed class ConfigAuditTextRenderer
             RenderEntry(builder, entry, indent: "  ");
         }
 
+        if (report.DiscoveredKeys.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Discovered file keys:");
+            foreach (var discoveredKey in report.DiscoveredKeys
+                         .OrderBy(key => key.Classification)
+                         .ThenBy(key => key.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                RenderDiscoveredKey(builder, discoveredKey);
+            }
+        }
+
         if (report.Diagnostics.Count > 0)
         {
             builder.AppendLine();
@@ -72,6 +84,27 @@ public sealed class ConfigAuditTextRenderer
         }
     }
 
+    private static void RenderDiscoveredKey(StringBuilder builder, ConfigAuditDiscoveredKey discoveredKey)
+    {
+        var value = discoveredKey.DisplayValue == null ? string.Empty : $" = {discoveredKey.DisplayValue}";
+        builder.AppendLine(
+            $"  {discoveredKey.Key} [{FormatDiscoveredClassification(discoveredKey.Classification)}]{value}");
+        if (discoveredKey.IsRedacted)
+        {
+            builder.AppendLine("    Redacted: true");
+        }
+
+        foreach (var source in discoveredKey.Sources)
+        {
+            builder.AppendLine($"    Source: {FormatSource(source)}");
+        }
+
+        foreach (var diagnostic in discoveredKey.Diagnostics)
+        {
+            builder.AppendLine($"    Diagnostic: {diagnostic.Message}");
+        }
+    }
+
     private static string FormatSource(ConfigAuditSourceRecord source) =>
         source.Kind switch
         {
@@ -80,5 +113,14 @@ public sealed class ConfigAuditTextRenderer
             ConfigAuditSourceKind.Default => $"Default value on {source.ProviderName}",
             ConfigAuditSourceKind.Missing => "none",
             _ => source.ProviderName ?? source.Kind.ToString()
+        };
+
+    private static string FormatDiscoveredClassification(ConfigAuditDiscoveredKeyClassification classification) =>
+        classification switch
+        {
+            ConfigAuditDiscoveredKeyClassification.Known => "Known",
+            ConfigAuditDiscoveredKeyClassification.KnownDescendant => "Under known entry",
+            ConfigAuditDiscoveredKeyClassification.Unknown => "Unknown to AppSurface audit registry",
+            _ => classification.ToString()
         };
 }

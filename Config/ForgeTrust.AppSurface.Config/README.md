@@ -76,6 +76,44 @@ Explicit registrations are useful for keys that are read directly through `IConf
 services.AddConfigAuditKey<string>("Billing.Endpoint");
 ```
 
+The report also includes `DiscoveredKeys` for effective merged file-backed configuration visible to enumerable
+providers. The built-in v1 surface discovers keys from `FileBasedConfigProvider`; it does not enumerate environment
+variables, secret providers, shadowed lower-priority file values, or every raw key a custom provider may know about.
+Classifications are relative to the AppSurface audit registry: `Unknown` means unknown to `Config<T>` wrappers and
+`AddConfigAuditKey<T>()`, not globally unused.
+
+For example, this file-backed configuration:
+
+```json
+{
+  "Billing": {
+    "Endpoint": "https://billing.example",
+    "Password": "super-secret"
+  },
+  "BillingEndpiont": "https://typo.example"
+}
+```
+
+with this registration:
+
+```csharp
+services.AddConfigAuditKey<BillingOptions>("Billing");
+services.AddConfigAuditKey<string>("Billing.Endpoint");
+```
+
+renders discovered file keys like this:
+
+```text
+Discovered file keys:
+  Billing.Endpoint [Known] = https://billing.example
+    Source: FileBasedConfigProvider appsettings.Staging.json :: Billing.Endpoint
+  Billing.Password [Under known entry] = [redacted]
+    Redacted: true
+    Source: FileBasedConfigProvider appsettings.Staging.json :: Billing.Password
+  BillingEndpiont [Unknown to AppSurface audit registry] = https://typo.example
+    Source: FileBasedConfigProvider appsettings.Staging.json :: BillingEndpiont
+```
+
 Audit entry states are intentionally small:
 
 | State | Meaning |
@@ -111,8 +149,9 @@ variable names render as `[redacted]`. The built-in fragments include `password`
 `connectionstring`, `credential`, and `private`.
 
 Redaction is deliberately conservative. It does not expose string lengths, sensitive collection counts, or sensitive
-nested values. Source metadata remains visible unless a provider marks the source metadata itself as sensitive. This
-keeps reports safe to paste into support issues while still showing where a value came from.
+nested values. Display values are redacted before entering `ConfigAuditReport`; source metadata such as file paths,
+provider names, environment variable names, and config paths may still be support-sensitive. Review source records
+before pasting full reports into public support issues.
 
 Collection parent values are omitted instead of serialized when the collection key and source metadata are not
 sensitive. This avoids leaking nested element fields such as `Password`, `Token`, `Secret`, or `ApiKey` through a raw
@@ -121,10 +160,16 @@ structure; collection element traversal is intentionally outside the first audit
 
 ### Audit Pitfalls
 
-- Audit reports cover AppSurface-known entries, not every raw process environment variable or every unused file key.
+- Known audit entries cover AppSurface-registered keys. `DiscoveredKeys` adds the effective merged file-backed keys
+  visible to enumerable providers, but it is not a complete raw file inventory and does not include shadowed
+  lower-priority file keys in v1.
+- `Unknown to AppSurface audit registry` means the key is outside known `Config<T>` wrappers and
+  `AddConfigAuditKey<T>()` registrations. It can be a typo, stale setting, or a value consumed outside AppSurface; it
+  is not proof that the key is globally unused.
 - Collection display values are intentionally omitted rather than summarized or serialized; register more specific
   keys when element-level audit visibility is required.
-- Provider-discovered raw key enumeration is intentionally separate from the first audit surface.
+- Environment variables, secret providers, source-metadata redaction modes, shadowed raw file inventory, and strict
+  drift gates are outside the first discovered-key surface.
 - File origins include file path and config path. Line and column origins are not part of the first report.
 - Validation diagnostics name keys and rules; they do not include attempted secret values.
 - A direct environment object value replaces the whole object, while child environment variables produce member-level
