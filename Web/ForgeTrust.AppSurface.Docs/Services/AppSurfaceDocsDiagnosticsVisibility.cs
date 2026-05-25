@@ -8,6 +8,23 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 internal static class AppSurfaceDocsDiagnosticsVisibility
 {
     /// <summary>
+    /// Resolves whether the built-in sidebar should show route-inspector diagnostics chrome for the current host.
+    /// </summary>
+    /// <remarks>
+    /// The default follows local-development ergonomics: Development hosts show route-inspector discovery by default,
+    /// while non-development hosts must opt in explicitly. This method controls only docs chrome. It does not expose or
+    /// authorize the route-inspector response; use <see cref="IsRouteInspectorExposed"/> for route response policy.
+    /// </remarks>
+    public static bool ShouldShowChrome(AppSurfaceDocsOptions options, IHostEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        var exposure = options.Diagnostics?.ShowChrome ?? AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly;
+        return IsExposed(exposure, environment);
+    }
+
+    /// <summary>
     /// Resolves whether the route-inspector controller routes should return responses for the current host.
     /// </summary>
     /// <remarks>
@@ -22,6 +39,11 @@ internal static class AppSurfaceDocsDiagnosticsVisibility
         ArgumentNullException.ThrowIfNull(environment);
 
         var exposure = options.Diagnostics?.ExposeRouteInspector ?? AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly;
+        return IsExposed(exposure, environment);
+    }
+
+    private static bool IsExposed(AppSurfaceDocsHarvestHealthExposure exposure, IHostEnvironment environment)
+    {
         return exposure switch
         {
             AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly => environment.IsDevelopment(),
