@@ -33,6 +33,7 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
     {
         services.AddSingleton<IConfigManager, DefaultConfigManager>();
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddSingleton<ConfigDiagnosticsCommandRunner>();
         services.AddSingleton<ConfigAuditRedactor>();
         services.AddSingleton<ConfigAuditTextRenderer>();
         services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();

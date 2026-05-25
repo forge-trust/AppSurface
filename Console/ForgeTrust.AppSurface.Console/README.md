@@ -79,6 +79,8 @@ public sealed partial class GreetCommand : ICommand
 - Use `set` on command-bound properties. CliFx 3 generated binders assign parsed values after construction.
 - Use C# `required` for required options and parameters. The older CliFx `IsRequired` attribute property is not part of CliFx 3.
 - Keep constructors DI-friendly. AppSurface still resolves command instances from the application service provider.
+- For an app-owned `config diagnostics` command that renders the active AppSurface configuration audit report, use the
+  copy-paste wrapper in [ForgeTrust.AppSurface.Config](../../Config/ForgeTrust.AppSurface.Config/README.md#app-owned-diagnostics-command).
 
 ## ConsoleOptions
 

@@ -130,6 +130,10 @@ public class AppSurfaceConfigModuleTests
         Assert.Contains(
             services,
             d => d.ServiceType == typeof(IConfigProvider) && d.ImplementationType == typeof(FileBasedConfigProvider));
+        Assert.Contains(
+            services,
+            d => d.ServiceType == typeof(ConfigDiagnosticsCommandRunner)
+                 && d.ImplementationType == typeof(ConfigDiagnosticsCommandRunner));
 
         // One registration for the module's assembly scanning task
         Assert.Single(context.CustomRegistrations);
