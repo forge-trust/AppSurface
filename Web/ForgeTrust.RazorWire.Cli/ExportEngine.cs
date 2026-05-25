@@ -46,7 +46,7 @@ public class ExportEngine
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex AppSurfaceDocsDiagnosticsChromeRegex = new(
-        @"<(?<tag>[a-z][a-z0-9:-]*)\b(?=[^>]*\s" + AppSurfaceDocsDiagnosticsChromeAttributeName + @"(?:\s*=\s*(?:""true""|'true'|true))?(?=\s|/?>))[^>]*>.*?</\k<tag>>",
+        @"<(?<tag>[a-z][a-z0-9:-]*)\b(?=[^>]*\s" + AppSurfaceDocsDiagnosticsChromeAttributeName + @"(?:\s*=\s*(?:""true""|'true'|true))?(?=\s|/?>))[^>]*>.*?</\k<tag>\s*>",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
 
     private static readonly Regex TurboFrameSrcRegex = new(
@@ -1032,7 +1032,7 @@ public class ExportEngine
             }
 
             const string route = "/404.html";
-            var html = await response.Content.ReadAsStringAsync(cancellationToken);
+            var html = StripAppSurfaceDocsDiagnosticsChrome(await response.Content.ReadAsStringAsync(cancellationToken));
             var filePath = MapRouteToFilePath(route, context.OutputPath, isHtml: true);
             var artifactUrl = MapFilePathToArtifactUrl(filePath, context.OutputPath, route);
             context.ArtifactUrls[route] = artifactUrl;

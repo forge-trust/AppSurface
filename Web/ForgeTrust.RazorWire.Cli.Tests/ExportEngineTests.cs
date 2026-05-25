@@ -589,7 +589,8 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new ConventionalNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            var handler = new ConventionalNotFoundPageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -598,9 +599,15 @@ public class ExportEngineTests
             var notFoundFile = Path.Combine(tempDir, "404.html");
             Assert.True(File.Exists(notFoundFile));
             var html = await File.ReadAllTextAsync(notFoundFile);
+            var decodedHtml = Uri.UnescapeDataString(html);
             Assert.Contains("Exported 404 page", html);
             Assert.Contains("href=\"/about.html\"", html);
             Assert.Contains("src=\"/img/error.png\"", html);
+            Assert.DoesNotContain("Diagnostics", html, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("_health", decodedHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("_routes", decodedHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_health", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_routes", StringComparison.OrdinalIgnoreCase));
             Assert.False(File.Exists(Path.Combine(tempDir, "_appsurface", "errors", "404.html")));
             Assert.False(File.Exists(Path.Combine(tempDir, "401.html")));
             Assert.False(File.Exists(Path.Combine(tempDir, "403.html")));
@@ -2098,6 +2105,11 @@ public class ExportEngineTests
                     <a href="/docs/%5Froutes">Encoded routes</a>
                   </details>
                   <a href="/docs/start">Start</a>
+                  <details data-docs-diagnostics-chrome="true">
+                    <summary>More diagnostics</summary>
+                    <a href="/docs/_routes.json">Routes JSON</a>
+                  </details>
+                  <a href="/docs/next">Next</a>
                 </nav>
               </body>
             </html>
@@ -2110,6 +2122,7 @@ public class ExportEngineTests
         Assert.DoesNotContain("_health", decoded, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("_routes", decoded, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("href=\"/docs/start\"", stripped);
+        Assert.Contains("href=\"/docs/next\"", stripped);
     }
 
     [Fact]
@@ -2712,7 +2725,7 @@ public class ExportEngineTests
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var path = request.RequestUri?.AbsolutePath ?? "/";
+            var path = Uri.UnescapeDataString(request.RequestUri?.AbsolutePath ?? "/");
             RequestPaths.Add(path);
             if (path == "/docs")
             {
@@ -2813,15 +2826,31 @@ public class ExportEngineTests
 
     private sealed class ConventionalNotFoundPageHandler : HttpMessageHandler
     {
+        public List<string> RequestPaths { get; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var path = request.RequestUri?.AbsolutePath ?? "/";
+            var path = Uri.UnescapeDataString(request.RequestUri?.AbsolutePath ?? "/");
+            RequestPaths.Add(path);
             if (path == BrowserStatusPageDefaults.ReservedNotFoundRoute)
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(
-                        """<html><body><h1>Exported 404 page</h1><a href="/about">About</a><img src="/img/error.png"></body></html>""",
+                        """
+                        <html>
+                          <body>
+                            <h1>Exported 404 page</h1>
+                            <details data-docs-diagnostics-chrome="true">
+                              <summary>Diagnostics</summary>
+                              <a href="/docs/_health">Harvest health</a>
+                              <a href="/docs/%5Froutes">Encoded routes</a>
+                            </details>
+                            <a href="/about">About</a>
+                            <img src="/img/error.png">
+                          </body>
+                        </html>
+                        """,
                         Encoding.UTF8,
                         "text/html")
                 });
