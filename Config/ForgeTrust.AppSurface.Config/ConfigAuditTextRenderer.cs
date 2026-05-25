@@ -89,12 +89,21 @@ public sealed class ConfigAuditTextRenderer
         return children.OrderBy(child => child.Key, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static int GetElementSortGroup(ConfigAuditEntry child) =>
-        child.Element?.Index != null
-            ? 0
-            : child.Element != null
-                ? 1
-                : 2;
+    private static int GetElementSortGroup(ConfigAuditEntry child)
+    {
+        var element = child.Element;
+        if (element == null)
+        {
+            return 2;
+        }
+
+        if (element.Index != null)
+        {
+            return 0;
+        }
+
+        return 1;
+    }
 
     private static string FormatSource(ConfigAuditSourceRecord source) =>
         source.Kind switch
