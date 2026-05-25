@@ -23,6 +23,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs and RazorWire runtime assets are now embedded into their assemblies and served through endpoint fallbacks, so packaged CLI hosts can serve docs UI assets without relying on static web asset manifests.
 - AppSurface Web startup watchdog failures now include sandbox markers and startup phase context so Codex-hosted local web runs point operators toward an unsandboxed retry first.
 - AppSurface now has a repo-level release contract: a public release hub, an unreleased proof artifact, a pre-1.0 upgrade policy, and a tagged-release template for future versioned notes.
+- AppSurface now has a repository-owned release cockpit at `./eng/release` that checks release readiness, prepares coordinated release PR artifacts, records release manifests, updates package release-note paths, and validates tag-based GitHub Release publishing without allowing stable GitHub-only releases.
 - RazorWire now has a package-level generated UI design contract that defines ownership scope, data-attribute and CSS custom-property styling surfaces, accessibility expectations, override levels, and anti-patterns for package-owned UI.
 - AppSurface Docs pages can now render a top-of-page trust bar from structured metadata so release notes and upgrade guidance can show status, safety context, and provenance without custom page code.
 - AppSurface Docs now supports metadata-driven page wayfinding: harvested outlines, explicit proof-path previous/next links, related pages, and sidebar anchor navigation.
@@ -48,6 +49,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface now treats the whole monorepo as one coordinated release surface. Packages, CLI tools, examples, and docs-facing behavior all roll into the same upcoming version.
 - AppSurface NuGet packages now point their project website metadata at `https://appsurface.dev` while keeping repository metadata linked to GitHub.
 - Pull requests are expected to use Conventional Commits titles and to update `releases/unreleased.md` unless maintainers explicitly opt out.
+- Release preparation now flows through generated release notes, sidecar metadata, manifest evidence, changelog rollover, package release-note path updates, and read-only PR review checks instead of hand-copying the release story into each surface.
 - Markdown-only changes on `main` now trigger the build-and-export workflow so release-note and policy updates publish with the docs surface.
 - AppSurface Docs search result rows now expose the whole visible result as one semantic link, making mobile taps easier while preserving keyboard focus, copied links, and open-in-new-tab browser behavior.
 - AppSurface Docs homepage navigation rows now use title-led scan paths with quiet decorative chevron affordances instead of repeated "Open..." labels.

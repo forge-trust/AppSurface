@@ -1,0 +1,152 @@
+name: Release Prep
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without leading v.
+        required: true
+      date:
+        description: Release date in YYYY-MM-DD form.
+        required: true
+      base-ref:
+        description: Branch or ref to prepare from.
+        required: false
+        default: main
+  pull_request:
+    paths:
+      - CHANGELOG.md
+      - releases/**
+      - packages/package-index.yml
+      - tools/ForgeTrust.AppSurface.Release/**
+      - eng/release
+      - .github/workflows/release-prep.yml
+
+concurrency:
+  group: release-prep-${{ github.event.inputs.version || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'forge-trust/AppSurface' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Validate release bot token
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RELEASE_BOT_TOKEN}" ]]; then
+            echo "RELEASE_BOT_TOKEN is required so release preparation can push a branch and open a pull request." >&2
+            exit 1
+          fi
+
+      - name: Checkout base
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.base-ref }}
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_BOT_TOKEN }}
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Verify base is current
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          expected_main="$(git rev-parse origin/main)"
+          actual_head="$(git rev-parse HEAD)"
+          if [[ "${actual_head}" != "${expected_main}" ]]; then
+            echo "Release prep must run from the current origin/main commit. HEAD=${actual_head}; origin/main=${expected_main}." >&2
+            exit 1
+          fi
+
+      - name: Prepare release files
+        env:
+          VERSION: ${{ inputs.version }}
+          RELEASE_DATE: ${{ inputs.date }}
+        run: |
+          set -euo pipefail
+          ./eng/release prepare \
+            --version "${VERSION}" \
+            --date "${RELEASE_DATE}" \
+            --report "${RUNNER_TEMP}/release-prep-report.md"
+
+      - name: Create release pull request
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          branch="release/v${VERSION}"
+          git config user.name "appsurface-release-bot"
+          git config user.email "appsurface-release-bot@users.noreply.github.com"
+          git checkout -b "${branch}"
+          git add CHANGELOG.md releases packages/package-index.yml
+          git commit -m "chore(release): prepare v${VERSION}"
+          git push --force-with-lease origin "${branch}"
+          existing_pr="$(gh pr list --head "${branch}" --json number --jq '.[0].number // ""')"
+          if [[ -n "${existing_pr}" ]]; then
+            gh pr edit "${existing_pr}" --title "chore(release): prepare v${VERSION}" --body-file "${RUNNER_TEMP}/release-prep-report.md"
+          else
+            gh pr create \
+              --base main \
+              --head "${branch}" \
+              --title "chore(release): prepare v${VERSION}" \
+              --body-file "${RUNNER_TEMP}/release-prep-report.md"
+          fi
+
+  release-prep-review:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+        with:
+          dotnet-version: |
+            10.0.x
+
+      - name: Recompute release warnings
+        run: |
+          set -euo pipefail
+          git fetch origin "${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
+          mapfile -t release_artifacts < <(git diff --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- \
+            ':(glob)releases/v*.md' \
+            ':(glob)releases/v*.md.yml' \
+            ':(glob)releases/v*.release.json')
+          if [[ "${#release_artifacts[@]}" -eq 0 ]]; then
+            echo "No versioned release artifacts changed; validating release tooling instead."
+            dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj
+            exit 0
+          fi
+
+          mapfile -t manifests < <(git diff --name-only --diff-filter=AM "origin/${GITHUB_BASE_REF}...HEAD" -- ':(glob)releases/v*.release.json')
+          if [[ "${#manifests[@]}" -ne 1 ]]; then
+            echo "Expected exactly one added or modified release manifest in this release preparation pull request; found ${#manifests[@]}." >&2
+            exit 1
+          fi
+          manifest="${manifests[0]}"
+          version="$(jq -r '.version' "${manifest}")"
+          ./eng/release check --version "${version}" --fail-on-warnings --allow-existing-targets
