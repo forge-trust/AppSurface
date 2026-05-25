@@ -132,18 +132,23 @@ public sealed class AppSurfaceWebScalarModuleTests
     }
 
     [Theory]
-    [InlineData(AppSurfaceApiDocumentationEndpointExposure.DevelopmentOnly, AppSurfaceApiDocumentationEndpointExposure.Always, false, false)]
-    [InlineData(AppSurfaceApiDocumentationEndpointExposure.Always, AppSurfaceApiDocumentationEndpointExposure.DevelopmentOnly, true, false)]
-    [InlineData(AppSurfaceApiDocumentationEndpointExposure.Never, AppSurfaceApiDocumentationEndpointExposure.Always, false, false)]
-    [InlineData(AppSurfaceApiDocumentationEndpointExposure.Always, AppSurfaceApiDocumentationEndpointExposure.Never, true, false)]
-    public async Task ConfigureEndpoints_RequiresScalarAndOpenApiExposureOutsideDevelopment(
+    [InlineData("Development", AppSurfaceApiDocumentationEndpointExposure.Always, AppSurfaceApiDocumentationEndpointExposure.Never, true, false)]
+    [InlineData("Development", AppSurfaceApiDocumentationEndpointExposure.Never, AppSurfaceApiDocumentationEndpointExposure.Always, false, false)]
+    [InlineData("Development", AppSurfaceApiDocumentationEndpointExposure.DevelopmentOnly, AppSurfaceApiDocumentationEndpointExposure.Never, true, false)]
+    [InlineData("Development", AppSurfaceApiDocumentationEndpointExposure.Never, AppSurfaceApiDocumentationEndpointExposure.DevelopmentOnly, false, false)]
+    [InlineData("Production", AppSurfaceApiDocumentationEndpointExposure.DevelopmentOnly, AppSurfaceApiDocumentationEndpointExposure.Always, false, false)]
+    [InlineData("Production", AppSurfaceApiDocumentationEndpointExposure.Always, AppSurfaceApiDocumentationEndpointExposure.DevelopmentOnly, true, false)]
+    [InlineData("Production", AppSurfaceApiDocumentationEndpointExposure.Never, AppSurfaceApiDocumentationEndpointExposure.Always, false, false)]
+    [InlineData("Production", AppSurfaceApiDocumentationEndpointExposure.Always, AppSurfaceApiDocumentationEndpointExposure.Never, true, false)]
+    public async Task ConfigureEndpoints_RequiresScalarAndOpenApiExposureInCurrentEnvironment(
+        string environment,
         AppSurfaceApiDocumentationEndpointExposure openApiExposure,
         AppSurfaceApiDocumentationEndpointExposure scalarExposure,
         bool expectedOpenApiMapped,
         bool expectedScalarMapped)
     {
         var routePatterns = await GetMappedDocumentationRoutePatternsAsync(
-            CreateContext(new AppSurfaceWebScalarModule(), Environments.Production),
+            CreateContext(new AppSurfaceWebScalarModule(), environment),
             services =>
             {
                 services.Configure<AppSurfaceWebOpenApiOptions>(options =>
