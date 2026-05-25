@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,6 +49,58 @@ public class InvalidRegisteredOptions
 }
 
 public class InvalidRegisteredConfig : Config<InvalidRegisteredOptions>
+{
+}
+
+public sealed class AuditEndpoint
+{
+    public string? Name { get; set; }
+
+    public string? Password { get; set; }
+}
+
+[ConfigKey("Audit.Services", root: true)]
+[ConfigAuditCollectionTraversal]
+public sealed class AuditServicesConfig : Config<List<AuditEndpoint>>
+{
+}
+
+[ConfigKey("Audit.OpaqueServices", root: true)]
+public sealed class AuditOpaqueServicesConfig : Config<List<AuditEndpoint>>
+{
+}
+
+[ConfigKey("Audit.LimitedServices", root: true)]
+[ConfigAuditCollectionTraversal(MaxCollectionElements = 1)]
+public sealed class AuditLimitedServicesConfig : Config<List<AuditEndpoint>>
+{
+}
+
+[ConfigKey("Audit.InvalidServices", root: true)]
+[ConfigAuditCollectionTraversal(MaxCollectionDepth = -1, MaxCollectionElements = -1, MaxReportNodes = 0)]
+public sealed class AuditInvalidServicesConfig : Config<List<AuditEndpoint>>
+{
+}
+
+[ConfigAuditCollectionTraversal(MaxCollectionElements = 1)]
+public abstract class AuditInheritedServicesConfig : Config<List<AuditEndpoint>>
+{
+}
+
+[ConfigKey("Audit.InheritedServices", root: true)]
+public sealed class AuditInheritedChildServicesConfig : AuditInheritedServicesConfig
+{
+}
+
+[ConfigKey("Audit.OverrideServices", root: true)]
+[ConfigAuditCollectionTraversal(MaxCollectionElements = 2)]
+public sealed class AuditOverrideServicesConfig : AuditInheritedServicesConfig
+{
+}
+
+[ConfigKey("Audit.HiddenDictionary", root: true)]
+[ConfigAuditCollectionTraversal(DisplayDictionaryKeys = false)]
+public sealed class AuditHiddenDictionaryConfig : Config<Dictionary<string, string>>
 {
 }
 
@@ -165,5 +218,173 @@ public class AppSurfaceConfigModuleTests
 
         Assert.Equal("InvalidRegisteredConfig", exception.Key);
         Assert.Contains(exception.Failures, failure => failure.MemberNames.SequenceEqual(["Name"]));
+    }
+
+    [Fact]
+    public void CustomRegistrationTask_AppliesWrapperTraversalAttributeOptions()
+    {
+        var reporter = CreateReporter(
+            new Dictionary<string, object?>
+            {
+                ["Audit.Services"] = CreateEndpoints("billing", "search"),
+                ["Audit.OpaqueServices"] = CreateEndpoints("opaque"),
+                ["Audit.LimitedServices"] = CreateEndpoints("first", "second"),
+                ["Audit.InvalidServices"] = CreateEndpoints("first", "second"),
+                ["Audit.InheritedServices"] = CreateEndpoints("first", "second"),
+                ["Audit.OverrideServices"] = CreateEndpoints("first", "second")
+            });
+
+        var report = reporter.GetReport("Production");
+
+        var services = AssertEntry(report, "Audit.Services", ConfigAuditEntryState.Resolved);
+        Assert.Equal(["Audit.Services[0]", "Audit.Services[1]"], services.Children.Select(child => child.Key));
+        Assert.True(services.Children[0].Children.Single(child => child.Key == "Audit.Services[0].Password").IsRedacted);
+        var serialized = JsonSerializer.Serialize(report);
+        Assert.DoesNotContain("billing-secret", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("search-secret", serialized, StringComparison.Ordinal);
+
+        Assert.Empty(AssertEntry(report, "Audit.OpaqueServices", ConfigAuditEntryState.Resolved).Children);
+
+        var limited = AssertEntry(report, "Audit.LimitedServices", ConfigAuditEntryState.Resolved);
+        Assert.Single(limited.Children);
+        Assert.Contains(limited.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
+
+        var invalid = AssertEntry(report, "Audit.InvalidServices", ConfigAuditEntryState.Resolved);
+        Assert.Equal(2, invalid.Children.Count);
+        Assert.Equal(3, invalid.Diagnostics.Count(diagnostic => diagnostic.Code == "config-audit-options-invalid"));
+
+        var inherited = AssertEntry(report, "Audit.InheritedServices", ConfigAuditEntryState.Resolved);
+        Assert.Single(inherited.Children);
+        Assert.Contains(inherited.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
+
+        var overridden = AssertEntry(report, "Audit.OverrideServices", ConfigAuditEntryState.Resolved);
+        Assert.Equal(["Audit.OverrideServices[0]", "Audit.OverrideServices[1]"], overridden.Children.Select(child => child.Key));
+        Assert.DoesNotContain(overridden.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
+    }
+
+    [Fact]
+    public void CustomRegistrationTask_ManualDefaultValuedOptionsOverrideWrapperAttribute()
+    {
+        var reporter = CreateReporter(
+            new Dictionary<string, object?>
+            {
+                ["Audit.HiddenDictionary"] = new Dictionary<string, string>
+                {
+                    ["public-name"] = "visible"
+                }
+            },
+            services => services.AddConfigAuditKey<Dictionary<string, string>>(
+                "audit.hiddendictionary",
+                options => options.DisplayDictionaryKeys = true));
+
+        var report = reporter.GetReport("Production");
+
+        var entry = AssertEntry(report, "Audit.HiddenDictionary", ConfigAuditEntryState.Resolved);
+        var child = Assert.Single(entry.Children);
+        Assert.Equal("Audit.HiddenDictionary[\"public-name\"]", child.Key);
+        Assert.Equal("public-name", child.Element?.KeyLabel);
+        Assert.False(child.Element?.IsKeyRedacted);
+    }
+
+    private static IConfigAuditReporter CreateReporter(
+        IReadOnlyDictionary<string, object?> values,
+        Action<IServiceCollection>? afterDiscovery = null)
+    {
+        var discoveryServices = new ServiceCollection();
+        var rootModule = new TestHostModule();
+        var context = new StartupContext([], rootModule)
+        {
+            OverrideEntryPointAssembly = typeof(AppSurfaceConfigModuleTests).Assembly
+        };
+        context.Dependencies.AddModule<TestHostModule>();
+
+        var module = new AppSurfaceConfigModule();
+        module.ConfigureServices(context, discoveryServices);
+        context.CustomRegistrations[0](discoveryServices);
+        afterDiscovery?.Invoke(discoveryServices);
+
+        var targetKeys = values.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var discoveredEntries = discoveryServices
+            .Where(descriptor => descriptor.ImplementationInstance is ConfigAuditKnownEntry entry
+                                 && targetKeys.Contains(entry.Key))
+            .Select(descriptor => (ConfigAuditKnownEntry)descriptor.ImplementationInstance!)
+            .ToList();
+
+        var services = new ServiceCollection();
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        services.AddSingleton(environment);
+        services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();
+        services.AddSingleton<IConfigProvider>(new DictionaryConfigProvider(values));
+        services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddSingleton<ConfigAuditRedactor>();
+        services.AddSingleton<ConfigAuditTextRenderer>();
+        foreach (var entry in discoveredEntries)
+        {
+            services.AddSingleton(entry);
+        }
+
+        return services.BuildServiceProvider().GetRequiredService<IConfigAuditReporter>();
+    }
+
+    private static List<AuditEndpoint> CreateEndpoints(params string[] names) =>
+        names.Select(name => new AuditEndpoint { Name = name, Password = $"{name}-secret" }).ToList();
+
+    private static ConfigAuditEntry AssertEntry(
+        ConfigAuditReport report,
+        string key,
+        ConfigAuditEntryState state)
+    {
+        var entry = Assert.Single(report.Entries, entry => entry.Key == key);
+        Assert.Equal(state, entry.State);
+        return entry;
+    }
+
+    private sealed class DictionaryConfigProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        private readonly IReadOnlyDictionary<string, object?> _values;
+
+        public DictionaryConfigProvider(IReadOnlyDictionary<string, object?> values)
+        {
+            _values = values;
+        }
+
+        public int Priority => 20;
+
+        public string Name => nameof(DictionaryConfigProvider);
+
+        public T? GetValue<T>(string environment, string key) =>
+            _values.TryGetValue(key, out var value) ? (T?)value : default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!_values.TryGetValue(key, out var value))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                value,
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.Provider,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        ConfigPath = key,
+                        AppliedToPath = key,
+                        Role = role
+                    }
+                ],
+                []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
     }
 }

@@ -65,8 +65,6 @@ public sealed class ConfigAuditKnownEntry
 
     internal ConfigAuditEntryOptions OptionsSnapshot => _options;
 
-    internal bool HasNonDefaultOptions => !_options.HasDefaultValues;
-
     internal ConfigAuditKnownEntry WithOptions(ConfigAuditEntryOptions options) =>
         new(Key, ConfigType, ValueType, options);
 }
@@ -79,13 +77,20 @@ public sealed class ConfigAuditKnownEntry
 /// and collection elements are not traversed unless <see cref="TraverseCollectionElements"/> is enabled. Instances are
 /// copied by <see cref="ConfigAuditKnownEntry"/>, so registration captures a stable snapshot. Use
 /// <see cref="ConfigAuditEntryOptionsBuilder"/> with the service-collection registration callback when mutable
-/// callback configuration is more convenient than an object initializer.
+/// callback configuration is more convenient than an object initializer. When entries with the same key are merged,
+/// explicitly assigned manual options override wrapper-discovered options one property at a time.
 /// </remarks>
 public sealed class ConfigAuditEntryOptions
 {
     internal const int DefaultMaxCollectionDepth = 4;
     internal const int DefaultMaxCollectionElements = 128;
     internal const int DefaultMaxReportNodes = 4096;
+
+    private bool _traverseCollectionElements;
+    private int _maxCollectionDepth = DefaultMaxCollectionDepth;
+    private int _maxCollectionElements = DefaultMaxCollectionElements;
+    private int _maxReportNodes = DefaultMaxReportNodes;
+    private bool _displayDictionaryKeys = true;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigAuditEntryOptions"/> class with safe defaults.
@@ -101,37 +106,96 @@ public sealed class ConfigAuditEntryOptions
             return;
         }
 
-        TraverseCollectionElements = source.TraverseCollectionElements;
-        MaxCollectionDepth = source.MaxCollectionDepth;
-        MaxCollectionElements = source.MaxCollectionElements;
-        MaxReportNodes = source.MaxReportNodes;
-        DisplayDictionaryKeys = source.DisplayDictionaryKeys;
+        _traverseCollectionElements = source.TraverseCollectionElements;
+        _maxCollectionDepth = source.MaxCollectionDepth;
+        _maxCollectionElements = source.MaxCollectionElements;
+        _maxReportNodes = source.MaxReportNodes;
+        _displayDictionaryKeys = source.DisplayDictionaryKeys;
+        AssignedOptions = source.AssignedOptions;
+    }
+
+    internal ConfigAuditEntryOptions(
+        bool traverseCollectionElements,
+        int maxCollectionDepth,
+        int maxCollectionElements,
+        int maxReportNodes,
+        bool displayDictionaryKeys,
+        ConfigAuditEntryOptionAssignments assignedOptions)
+    {
+        _traverseCollectionElements = traverseCollectionElements;
+        _maxCollectionDepth = maxCollectionDepth;
+        _maxCollectionElements = maxCollectionElements;
+        _maxReportNodes = maxReportNodes;
+        _displayDictionaryKeys = displayDictionaryKeys;
+        AssignedOptions = assignedOptions;
     }
 
     /// <summary>
     /// Gets a value indicating whether arrays, lists, and dictionaries should emit child element entries.
     /// </summary>
-    public bool TraverseCollectionElements { get; init; }
+    public bool TraverseCollectionElements
+    {
+        get => _traverseCollectionElements;
+        init
+        {
+            _traverseCollectionElements = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.TraverseCollectionElements;
+        }
+    }
 
     /// <summary>
     /// Gets the maximum nested collection depth traversed when collection traversal is enabled.
     /// </summary>
-    public int MaxCollectionDepth { get; init; } = DefaultMaxCollectionDepth;
+    public int MaxCollectionDepth
+    {
+        get => _maxCollectionDepth;
+        init
+        {
+            _maxCollectionDepth = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxCollectionDepth;
+        }
+    }
 
     /// <summary>
     /// Gets the maximum number of elements reported from any one traversed collection.
     /// </summary>
-    public int MaxCollectionElements { get; init; } = DefaultMaxCollectionElements;
+    public int MaxCollectionElements
+    {
+        get => _maxCollectionElements;
+        init
+        {
+            _maxCollectionElements = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxCollectionElements;
+        }
+    }
 
     /// <summary>
     /// Gets the maximum number of child nodes created for this entry before traversal stops.
     /// </summary>
-    public int MaxReportNodes { get; init; } = DefaultMaxReportNodes;
+    public int MaxReportNodes
+    {
+        get => _maxReportNodes;
+        init
+        {
+            _maxReportNodes = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxReportNodes;
+        }
+    }
 
     /// <summary>
     /// Gets a value indicating whether non-sensitive dictionary keys may appear as element labels.
     /// </summary>
-    public bool DisplayDictionaryKeys { get; init; } = true;
+    public bool DisplayDictionaryKeys
+    {
+        get => _displayDictionaryKeys;
+        init
+        {
+            _displayDictionaryKeys = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.DisplayDictionaryKeys;
+        }
+    }
+
+    internal ConfigAuditEntryOptionAssignments AssignedOptions { get; init; }
 
     internal bool HasDefaultValues =>
         !TraverseCollectionElements
@@ -164,11 +228,36 @@ public sealed class ConfigAuditEntryOptions
     internal ConfigAuditEntryOptions Normalize() =>
         Validate("unused").Count == 0
             ? new ConfigAuditEntryOptions(this)
-            : new ConfigAuditEntryOptions
-            {
-                TraverseCollectionElements = TraverseCollectionElements,
-                DisplayDictionaryKeys = DisplayDictionaryKeys
-            };
+            : new ConfigAuditEntryOptions(
+                TraverseCollectionElements,
+                DefaultMaxCollectionDepth,
+                DefaultMaxCollectionElements,
+                DefaultMaxReportNodes,
+                DisplayDictionaryKeys,
+                AssignedOptions);
+
+    internal ConfigAuditEntryOptions ApplyAssignedOverrides(ConfigAuditEntryOptions overrides)
+    {
+        ArgumentNullException.ThrowIfNull(overrides);
+
+        return new ConfigAuditEntryOptions(
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.TraverseCollectionElements)
+                ? overrides.TraverseCollectionElements
+                : TraverseCollectionElements,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.MaxCollectionDepth)
+                ? overrides.MaxCollectionDepth
+                : MaxCollectionDepth,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.MaxCollectionElements)
+                ? overrides.MaxCollectionElements
+                : MaxCollectionElements,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.MaxReportNodes)
+                ? overrides.MaxReportNodes
+                : MaxReportNodes,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.DisplayDictionaryKeys)
+                ? overrides.DisplayDictionaryKeys
+                : DisplayDictionaryKeys,
+            AssignedOptions | overrides.AssignedOptions);
+    }
 
     private static ConfigAuditDiagnostic CreateInvalidOptionDiagnostic(string key, string optionName, string rule) =>
         new()
@@ -186,10 +275,18 @@ public sealed class ConfigAuditEntryOptions
 /// </summary>
 /// <remarks>
 /// The builder exists only for configuration ergonomics. AppSurface snapshots it into immutable options when
-/// registering the audit key, so later builder mutations cannot affect reports.
+/// registering the audit key, so later builder mutations cannot affect reports. Property setters are also tracked as
+/// explicit assignments, allowing manual registrations to override wrapper attribute options even when the assigned
+/// value is the option's default.
 /// </remarks>
 public sealed class ConfigAuditEntryOptionsBuilder
 {
+    private bool _traverseCollectionElements;
+    private int _maxCollectionDepth = ConfigAuditEntryOptions.DefaultMaxCollectionDepth;
+    private int _maxCollectionElements = ConfigAuditEntryOptions.DefaultMaxCollectionElements;
+    private int _maxReportNodes = ConfigAuditEntryOptions.DefaultMaxReportNodes;
+    private bool _displayDictionaryKeys = true;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigAuditEntryOptionsBuilder"/> class with safe defaults.
     /// </summary>
@@ -200,37 +297,90 @@ public sealed class ConfigAuditEntryOptionsBuilder
     /// <summary>
     /// Gets or sets a value indicating whether arrays, lists, and dictionaries should emit child element entries.
     /// </summary>
-    public bool TraverseCollectionElements { get; set; }
+    public bool TraverseCollectionElements
+    {
+        get => _traverseCollectionElements;
+        set
+        {
+            _traverseCollectionElements = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.TraverseCollectionElements;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the maximum nested collection depth traversed when collection traversal is enabled.
     /// </summary>
-    public int MaxCollectionDepth { get; set; } = ConfigAuditEntryOptions.DefaultMaxCollectionDepth;
+    public int MaxCollectionDepth
+    {
+        get => _maxCollectionDepth;
+        set
+        {
+            _maxCollectionDepth = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxCollectionDepth;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the maximum number of elements reported from any one traversed collection.
     /// </summary>
-    public int MaxCollectionElements { get; set; } = ConfigAuditEntryOptions.DefaultMaxCollectionElements;
+    public int MaxCollectionElements
+    {
+        get => _maxCollectionElements;
+        set
+        {
+            _maxCollectionElements = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxCollectionElements;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the maximum number of child nodes created for this entry before traversal stops.
     /// </summary>
-    public int MaxReportNodes { get; set; } = ConfigAuditEntryOptions.DefaultMaxReportNodes;
+    public int MaxReportNodes
+    {
+        get => _maxReportNodes;
+        set
+        {
+            _maxReportNodes = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.MaxReportNodes;
+        }
+    }
 
     /// <summary>
     /// Gets or sets a value indicating whether non-sensitive dictionary keys may appear as element labels.
     /// </summary>
-    public bool DisplayDictionaryKeys { get; set; } = true;
+    public bool DisplayDictionaryKeys
+    {
+        get => _displayDictionaryKeys;
+        set
+        {
+            _displayDictionaryKeys = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.DisplayDictionaryKeys;
+        }
+    }
+
+    internal ConfigAuditEntryOptionAssignments AssignedOptions { get; private set; }
 
     internal ConfigAuditEntryOptions ToOptions() =>
-        new()
-        {
-            TraverseCollectionElements = TraverseCollectionElements,
-            MaxCollectionDepth = MaxCollectionDepth,
-            MaxCollectionElements = MaxCollectionElements,
-            MaxReportNodes = MaxReportNodes,
-            DisplayDictionaryKeys = DisplayDictionaryKeys
-        };
+        new(
+            TraverseCollectionElements,
+            MaxCollectionDepth,
+            MaxCollectionElements,
+            MaxReportNodes,
+            DisplayDictionaryKeys,
+            AssignedOptions);
+}
+
+[Flags]
+internal enum ConfigAuditEntryOptionAssignments
+{
+    None = 0,
+    TraverseCollectionElements = 1 << 0,
+    MaxCollectionDepth = 1 << 1,
+    MaxCollectionElements = 1 << 2,
+    MaxReportNodes = 1 << 3,
+    DisplayDictionaryKeys = 1 << 4,
+    All = TraverseCollectionElements | MaxCollectionDepth | MaxCollectionElements | MaxReportNodes | DisplayDictionaryKeys
 }
 
 /// <summary>
@@ -264,7 +414,9 @@ public static class ConfigAuditServiceCollectionExtensions
     /// <remarks>
     /// Use <paramref name="configure"/> to opt into collection element traversal for this key only. Options are
     /// snapshotted when the registration is created; collection traversal remains disabled by default so existing
-    /// reports keep their previous shape unless callers explicitly enable it.
+    /// reports keep their previous shape unless callers explicitly enable it. If this key is also discovered from a
+    /// config wrapper, the wrapper supplies metadata and validation while explicitly assigned manual options override
+    /// wrapper audit options per property.
     /// </remarks>
     /// <typeparam name="T">The expected value type.</typeparam>
     /// <param name="services">The service collection.</param>
