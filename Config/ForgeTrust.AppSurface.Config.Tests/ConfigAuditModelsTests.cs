@@ -10,6 +10,212 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigAuditKnownEntry_SnapshotsOptions()
+    {
+        var options = new ConfigAuditEntryOptions
+        {
+            TraverseCollectionElements = true,
+            MaxCollectionDepth = 2,
+            MaxCollectionElements = 3,
+            MaxReportNodes = 4,
+            DisplayDictionaryKeys = false
+        };
+
+        var entry = new ConfigAuditKnownEntry("Valid.Key", null, typeof(string), options);
+
+        Assert.True(entry.Options.TraverseCollectionElements);
+        Assert.Equal(2, entry.Options.MaxCollectionDepth);
+        Assert.Equal(3, entry.Options.MaxCollectionElements);
+        Assert.Equal(4, entry.Options.MaxReportNodes);
+        Assert.False(entry.Options.DisplayDictionaryKeys);
+        Assert.NotSame(options, entry.Options);
+    }
+
+    [Fact]
+    public void ConfigAuditEntryOptionsBuilder_CreatesImmutableSnapshot()
+    {
+        var builder = new ConfigAuditEntryOptionsBuilder
+        {
+            TraverseCollectionElements = true,
+            MaxCollectionDepth = 2,
+            MaxCollectionElements = 3,
+            MaxReportNodes = 4,
+            DisplayDictionaryKeys = false
+        };
+
+        var options = builder.ToOptions();
+        builder.TraverseCollectionElements = false;
+        builder.MaxCollectionDepth = 99;
+
+        Assert.True(options.TraverseCollectionElements);
+        Assert.Equal(2, options.MaxCollectionDepth);
+        Assert.Equal(3, options.MaxCollectionElements);
+        Assert.Equal(4, options.MaxReportNodes);
+        Assert.False(options.DisplayDictionaryKeys);
+    }
+
+    [Fact]
+    public void ConfigAuditKnownEntry_WithOptionsReturnsIndependentEntry()
+    {
+        var entry = new ConfigAuditKnownEntry("Valid.Key", null, typeof(string));
+        var updated = entry.WithOptions(
+            new ConfigAuditEntryOptions
+            {
+                TraverseCollectionElements = true,
+                MaxCollectionElements = 2
+            });
+
+        Assert.False(entry.Options.TraverseCollectionElements);
+        Assert.True(updated.Options.TraverseCollectionElements);
+        Assert.Equal(2, updated.Options.MaxCollectionElements);
+    }
+
+    [Fact]
+    public void ConfigAuditEntryOptions_DefaultsPreserveOpaqueCollectionBehavior()
+    {
+        var options = new ConfigAuditEntryOptions();
+
+        Assert.False(options.TraverseCollectionElements);
+        Assert.Equal(4, options.MaxCollectionDepth);
+        Assert.Equal(128, options.MaxCollectionElements);
+        Assert.Equal(4096, options.MaxReportNodes);
+        Assert.True(options.DisplayDictionaryKeys);
+    }
+
+    [Fact]
+    public void ConfigAuditEntryOptions_NormalizePreservesValidOptions()
+    {
+        var options = new ConfigAuditEntryOptions
+        {
+            TraverseCollectionElements = true,
+            MaxCollectionDepth = 2,
+            MaxCollectionElements = 3,
+            MaxReportNodes = 4,
+            DisplayDictionaryKeys = false
+        };
+
+        var normalized = options.Normalize();
+
+        Assert.True(normalized.TraverseCollectionElements);
+        Assert.Equal(2, normalized.MaxCollectionDepth);
+        Assert.Equal(3, normalized.MaxCollectionElements);
+        Assert.Equal(4, normalized.MaxReportNodes);
+        Assert.False(normalized.DisplayDictionaryKeys);
+    }
+
+    [Fact]
+    public void ConfigAuditDictionaryLabelSet_ReusesLabelsForDuplicateRawKeys()
+    {
+        var labels = new ConfigAuditDictionaryLabelSet();
+
+        var first = labels.GetRedactedLabel("secret-key");
+        var duplicate = labels.GetRedactedLabel("secret-key");
+        var second = labels.GetRedactedLabel("other-secret-key");
+
+        Assert.Equal(first, duplicate);
+        Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void ConfigAuditPath_SeparatesDisplayLabelsFromSourceSegments()
+    {
+        var labels = new ConfigAuditDictionaryLabelSet();
+        var root = ConfigAuditPath.Root("Root");
+
+        var safe = root.AppendDictionaryKey("tenant-1", new ConfigAuditEntryOptions(), labels);
+        var empty = root.AppendDictionaryKey(null, new ConfigAuditEntryOptions(), labels);
+        var inherited = empty.AppendDictionaryKey("safe", new ConfigAuditEntryOptions(), labels);
+
+        Assert.Equal("Root[\"tenant-1\"]", safe.DisplayPath);
+        Assert.Equal("Root.tenant-1", safe.SourcePath);
+        Assert.False(safe.RequiresInheritedSource);
+
+        Assert.Equal("Root[\"\"]", empty.DisplayPath);
+        Assert.Equal("Root", empty.SourcePath);
+        Assert.True(empty.RequiresInheritedSource);
+
+        Assert.Equal("Root.safe", inherited.SourcePath);
+        Assert.True(inherited.RequiresInheritedSource);
+    }
+
+    [Fact]
+    public void ConfigAuditTextRenderer_OrdersMixedElementsAndFormatsUnknownProviders()
+    {
+        var renderer = new ConfigAuditTextRenderer();
+        var report = new ConfigAuditReport
+        {
+            Environment = "Production",
+            GeneratedAt = DateTimeOffset.UnixEpoch,
+            Redaction = new ConfigAuditRedaction
+            {
+                Enabled = true,
+                Placeholder = "[redacted]"
+            },
+            Entries =
+            [
+                new ConfigAuditEntry
+                {
+                    Key = "Root",
+                    State = ConfigAuditEntryState.Resolved,
+                    Sources =
+                    [
+                        new ConfigAuditSourceRecord
+                        {
+                            Kind = ConfigAuditSourceKind.Provider,
+                            Role = ConfigAuditSourceRole.Base
+                        }
+                    ],
+                    Children =
+                    [
+                        new ConfigAuditEntry
+                        {
+                            Key = "Root[\"zeta\"]",
+                            State = ConfigAuditEntryState.Resolved,
+                            Element = new ConfigAuditElementIdentity
+                            {
+                                Kind = ConfigAuditElementKind.DictionaryItem,
+                                KeyLabel = "zeta"
+                            }
+                        },
+                        new ConfigAuditEntry
+                        {
+                            Key = "Root[\"alpha\"]",
+                            State = ConfigAuditEntryState.Resolved,
+                            Element = new ConfigAuditElementIdentity
+                            {
+                                Kind = ConfigAuditElementKind.DictionaryItem,
+                                KeyLabel = "alpha"
+                            }
+                        },
+                        new ConfigAuditEntry
+                        {
+                            Key = "Root[0]",
+                            State = ConfigAuditEntryState.Resolved,
+                            Element = new ConfigAuditElementIdentity
+                            {
+                                Kind = ConfigAuditElementKind.ArrayItem,
+                                Index = 0
+                            }
+                        },
+                        new ConfigAuditEntry
+                        {
+                            Key = "Root.Plain",
+                            State = ConfigAuditEntryState.Resolved
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var rendered = renderer.Render(report);
+
+        Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root[\"alpha\"]", StringComparison.Ordinal));
+        Assert.True(rendered.IndexOf("Root[\"alpha\"]", StringComparison.Ordinal) < rendered.IndexOf("Root[\"zeta\"]", StringComparison.Ordinal));
+        Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root.Plain", StringComparison.Ordinal));
+        Assert.Contains("Provider", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PublicEnums_KeepStableOrdinals()
     {
         Assert.Equal(0, (int)ConfigAuditEntryState.Resolved);
@@ -17,6 +223,10 @@ public class ConfigAuditModelsTests
         Assert.Equal(2, (int)ConfigAuditEntryState.Defaulted);
         Assert.Equal(3, (int)ConfigAuditEntryState.Missing);
         Assert.Equal(4, (int)ConfigAuditEntryState.Invalid);
+
+        Assert.Equal(0, (int)ConfigAuditElementKind.ArrayItem);
+        Assert.Equal(1, (int)ConfigAuditElementKind.ListItem);
+        Assert.Equal(2, (int)ConfigAuditElementKind.DictionaryItem);
 
         Assert.Equal(0, (int)ConfigAuditSourceKind.Provider);
         Assert.Equal(1, (int)ConfigAuditSourceKind.File);
