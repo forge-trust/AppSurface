@@ -837,7 +837,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("href=\"/about.html\"", indexHtml);
             Assert.Contains("data-copy=\"/about\" href=\"/about.html\"", indexHtml);
             Assert.Contains("href=\"/docs/start.html#intro\"", indexHtml);
@@ -910,7 +910,7 @@ public class ExportEngineTests
             Assert.Contains("background:URL(/about.html)", indexHtml, StringComparison.Ordinal);
             Assert.Contains("srcset=\"data:image/svg+xml,%3Csvg%3E,%3C/svg%3E 1x, /img/logo-2x.png?v=1 2x\"", indexHtml, StringComparison.Ordinal);
 
-            var stylesheet = await File.ReadAllTextAsync(Path.Combine(tempDir, "styles", "app"));
+            var stylesheet = await File.ReadAllTextAsync(Path.Join(tempDir, "styles", "app"));
             Assert.Contains("url('/about.html')", stylesheet, StringComparison.Ordinal);
         }
         finally
