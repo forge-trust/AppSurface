@@ -1,3 +1,4 @@
+using System.Text;
 using FakeItEasy;
 using Microsoft.Extensions.Logging;
 
@@ -579,5 +580,392 @@ public class FileBasedConfigProviderTests
         {
             Directory.Delete(tempDir, true);
         }
+    }
+
+    [Fact]
+    public void Resolve_AttachesLocationsForScalarAndObjectFileValues()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDir, "appsettings.json"),
+                """
+                {
+                  "Feature": {
+                    "Enabled": true
+                  }
+                }
+                """);
+
+            var provider = CreateProvider(tempDir);
+
+            var parent = AssertFileSource(Resolve(provider, "Feature", typeof(Dictionary<string, bool>)));
+            var child = AssertFileSource(Resolve(provider, "Feature.Enabled", typeof(bool)));
+
+            AssertLocation(parent, lineNumber: 2, byteColumnNumber: 3);
+            AssertLocation(child, lineNumber: 3, byteColumnNumber: 5);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_AttachesCollectionParentLocationWithoutArrayDescendantOrigins()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDir, "appsettings.json"),
+                """
+                {
+                  "Items": [
+                    {
+                      "Name": "one"
+                    }
+                  ]
+                }
+                """);
+
+            var provider = CreateProvider(tempDir);
+
+            var parent = AssertFileSource(Resolve(provider, "Items", typeof(List<NamedItem>)));
+            var descendant = Resolve(provider, "Items.0.Name", typeof(string));
+
+            AssertLocation(parent, lineNumber: 2, byteColumnNumber: 3);
+            Assert.Equal(ConfigAuditEntryState.Missing, descendant.State);
+            Assert.Contains(descendant.Sources, source => source.Kind == ConfigAuditSourceKind.Missing);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_SuppressesLocationForCaseInsensitivePathCollisions()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDir, "appsettings.json"),
+                """
+                {
+                  "Feature": {
+                    "Enabled": true
+                  },
+                  "feature": {
+                    "Enabled": false
+                  }
+                }
+                """);
+
+            var provider = CreateProvider(tempDir);
+
+            var source = AssertFileSource(Resolve(provider, "feature.Enabled", typeof(bool)));
+
+            Assert.Null(source.Location);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_TreatsDottedJsonPropertyNamesAsUnsupportedPaths()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), """{"Feature.Enabled":true}""");
+
+            var provider = CreateProvider(tempDir);
+
+            var resolution = Resolve(provider, "Feature.Enabled", typeof(bool));
+
+            Assert.Equal(ConfigAuditEntryState.Missing, resolution.State);
+            Assert.Contains(resolution.Sources, source => source.Kind == ConfigAuditSourceKind.Missing);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_SuppressesLocationWhenDottedLiteralCollidesWithNestedPath()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDir, "appsettings.json"),
+                """
+                {
+                  "Feature": {
+                    "Enabled": false
+                  },
+                  "Feature.Enabled": true
+                }
+                """);
+
+            var provider = CreateProvider(tempDir);
+
+            var resolution = Resolve(provider, "Feature.Enabled", typeof(bool));
+            var source = AssertFileSource(resolution);
+
+            Assert.Equal(false, resolution.Value);
+            Assert.Null(source.Location);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_SuppressesDescendantLocationWhenDottedLiteralObjectCollidesWithNestedPath()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDir, "appsettings.json"),
+                """
+                {
+                  "Feature": {
+                    "Enabled": {
+                      "Nested": false
+                    }
+                  },
+                  "Feature.Enabled": {
+                    "Nested": true
+                  }
+                }
+                """);
+
+            var provider = CreateProvider(tempDir);
+
+            var resolution = Resolve(provider, "Feature.Enabled.Nested", typeof(bool));
+            var source = AssertFileSource(resolution);
+
+            Assert.Equal(false, resolution.Value);
+            Assert.Null(source.Location);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_UsesByteColumnsForBomCrLfAndNonAsciiContent()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            const string json = "{\r\n  \"é\": 1,\r\n  \"Port\": 5\r\n}";
+            var path = Path.Combine(tempDir, "appsettings.json");
+            File.WriteAllBytes(path, [0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes(json)]);
+
+            var provider = CreateProvider(tempDir);
+
+            var source = AssertFileSource(Resolve(provider, "Port", typeof(int)));
+
+            AssertLocation(source, lineNumber: 3, byteColumnNumber: 3);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_ReportsByteColumnAfterNonAsciiCharactersOnSameLine()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            const string json = """{"é":1,"Port":5}""";
+            File.WriteAllText(Path.Combine(tempDir, "appsettings.json"), json);
+
+            var expectedColumn = Encoding.UTF8.GetByteCount(json[..json.IndexOf("\"Port\"", StringComparison.Ordinal)]) + 1;
+            var provider = CreateProvider(tempDir);
+
+            var source = AssertFileSource(Resolve(provider, "Port", typeof(int)));
+
+            AssertLocation(source, lineNumber: 1, expectedColumn);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void SourceLocationMap_UsesLastDuplicateExactPathLocation()
+    {
+        var map = ConfigFileSourceLocationMap.Create(Encoding.UTF8.GetBytes(
+            """
+            {
+              "Port": 5,
+              "Port": 6
+            }
+            """));
+
+        var location = map.GetLocation("Port");
+
+        Assert.NotNull(location);
+        Assert.Equal(3, location.LineNumber);
+        Assert.Equal(3, location.ByteColumnNumber);
+    }
+
+    [Fact]
+    public void SourceLocationMap_ReturnsNoLocationsForMalformedJson()
+    {
+        var map = ConfigFileSourceLocationMap.Create(Encoding.UTF8.GetBytes("""{"Port": }"""));
+
+        Assert.Null(map.GetLocation("Port"));
+    }
+
+    [Fact]
+    public void SourceLocationMap_KeepsCaseInsensitiveAmbiguityAfterLaterExactDuplicate()
+    {
+        var map = ConfigFileSourceLocationMap.Create(Encoding.UTF8.GetBytes(
+            """
+            {
+              "Feature": {
+                "Enabled": true
+              },
+              "feature": {
+                "Enabled": false
+              },
+              "Feature": {
+                "Enabled": true
+              }
+            }
+            """));
+
+        Assert.Null(map.GetLocation("Feature"));
+        Assert.Null(map.GetLocation("Feature.Enabled"));
+    }
+
+    [Fact]
+    public void Resolve_UsesOverrideLocationWhenParentIsReplaced()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDir, "appsettings.json"),
+                """
+                {
+                  "Shape": {
+                    "Nested": "base"
+                  }
+                }
+                """);
+            File.WriteAllText(
+                Path.Combine(tempDir, "config_override.json"),
+                """
+                {
+                  "Shape": "scalar"
+                }
+                """);
+
+            var provider = CreateProvider(tempDir);
+
+            var source = AssertFileSource(Resolve(provider, "Shape", typeof(string)));
+            var child = Resolve(provider, "Shape.Nested", typeof(string));
+
+            AssertLocation(source, lineNumber: 2, byteColumnNumber: 3);
+            Assert.Equal("config_override.json", Path.GetFileName(source.FilePath));
+            Assert.Equal(ConfigAuditEntryState.Missing, child.State);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Resolve_ReusesCachedLocationsAfterSnapshotInitialization()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var configPath = Path.Combine(tempDir, "appsettings.json");
+            File.WriteAllText(
+                configPath,
+                """
+                {
+                  "Port": 5
+                }
+                """);
+
+            var provider = CreateProvider(tempDir);
+
+            var first = AssertFileSource(Resolve(provider, "Port", typeof(int)));
+            File.WriteAllText(
+                configPath,
+                """
+                {
+
+
+
+                  "Port": 6
+                }
+                """);
+            var second = AssertFileSource(Resolve(provider, "Port", typeof(int)));
+
+            AssertLocation(first, lineNumber: 2, byteColumnNumber: 3);
+            AssertLocation(second, lineNumber: 2, byteColumnNumber: 3);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    private static FileBasedConfigProvider CreateProvider(string tempDir)
+    {
+        var locationProvider = A.Fake<IConfigFileLocationProvider>();
+        A.CallTo(() => locationProvider.Directory).Returns(tempDir);
+        var logger = A.Fake<ILogger<FileBasedConfigProvider>>();
+        return new FileBasedConfigProvider(locationProvider, logger);
+    }
+
+    private static ConfigValueResolution Resolve(FileBasedConfigProvider provider, string key, Type valueType) =>
+        ((IConfigDiagnosticProvider)provider)
+        .Resolve("Production", key, valueType, ConfigAuditSourceRole.Base);
+
+    private static ConfigAuditSourceRecord AssertFileSource(ConfigValueResolution resolution) =>
+        Assert.Single(resolution.Sources, source => source.Kind == ConfigAuditSourceKind.File);
+
+    private static void AssertLocation(ConfigAuditSourceRecord source, int lineNumber, int byteColumnNumber)
+    {
+        Assert.NotNull(source.Location);
+        Assert.Equal(lineNumber, source.Location.LineNumber);
+        Assert.Equal(byteColumnNumber, source.Location.ByteColumnNumber);
+    }
+
+    private sealed class NamedItem
+    {
+        public string? Name { get; set; }
     }
 }

@@ -76,6 +76,55 @@ Explicit registrations are useful for keys that are read directly through `IConf
 services.AddConfigAuditKey<string>("Billing.Endpoint");
 ```
 
+### Config audit source locations in 5 minutes
+
+File-backed source records can include an optional `Location` when AppSurface can confidently map the merged JSON value
+back to a property token in the same file content used to initialize the file provider snapshot:
+
+```csharp
+var report = auditReporter.GetReport("Staging");
+var source = report.Entries
+    .Single(entry => entry.Key == "MyApp.Settings")
+    .Sources
+    .Single(source => source.Kind == ConfigAuditSourceKind.File);
+
+Console.WriteLine($"{source.FilePath}:{source.Location?.LineNumber}:{source.Location?.ByteColumnNumber}");
+```
+
+The structured model keeps the coordinate separate from the path:
+
+```json
+{
+  "Kind": "File",
+  "FilePath": "/app/appsettings.Staging.json",
+  "ConfigPath": "MyApp.Settings.Database.Host",
+  "Location": {
+    "LineNumber": 9,
+    "ByteColumnNumber": 9
+  }
+}
+```
+
+The text renderer includes the coordinate when it is present and preserves the previous shape when it is absent:
+
+```text
+Source: FileBasedConfigProvider appsettings.Staging.json:9:9 :: MyApp.Settings.Database.Host
+Source: FileBasedConfigProvider appsettings.Staging.json :: Legacy.Unlocated
+```
+
+`ByteColumnNumber` is one-based and counts UTF-8 bytes from the start of the physical line, not Unicode characters or
+editor display cells. A property after `é`, emoji, or other non-ASCII text can have a byte column larger than the
+column shown by an editor.
+
+`Location` can be `null` even for a file source. AppSurface omits coordinates when it cannot prove that the coordinate
+would point at the same value the existing JSON parse and merge produced. Common causes include ambiguous
+case-insensitive path collisions, unsupported dotted property paths, parser mismatch, collection element descendants,
+or source metadata from a provider that is not file-backed. No location is better than a misleading location.
+
+File paths and line/byte coordinates are operational metadata. Treat rendered audit reports as support-bundle material:
+review them before sharing outside the operational trust boundary, especially when deployment paths reveal tenant names,
+repository layout, or host filesystem conventions.
+
 Audit entry states are intentionally small:
 
 | State | Meaning |
@@ -125,7 +174,8 @@ structure; collection element traversal is intentionally outside the first audit
 - Collection display values are intentionally omitted rather than summarized or serialized; register more specific
   keys when element-level audit visibility is required.
 - Provider-discovered raw key enumeration is intentionally separate from the first audit surface.
-- File origins include file path and config path. Line and column origins are not part of the first report.
+- File origins include file path and config path. File source locations are optional and only appear when AppSurface can
+  map a source record to an exact property token without ambiguity.
 - Validation diagnostics name keys and rules; they do not include attempted secret values.
 - A direct environment object value replaces the whole object, while child environment variables produce member-level
   patch provenance.

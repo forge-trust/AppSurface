@@ -219,7 +219,9 @@ public class ConfigAuditReporterTests
             var report = reporter.GetReport("Staging");
 
             Assert.Contains(report.Diagnostics, diagnostic => diagnostic.Code == "config-file-malformed");
-            AssertEntry(report, "Feature.Enabled", ConfigAuditEntryState.Resolved, "True");
+            var feature = AssertEntry(report, "Feature.Enabled", ConfigAuditEntryState.Resolved, "True");
+            var featureSource = Assert.Single(feature.Sources, source => source.Kind == ConfigAuditSourceKind.File);
+            AssertLocation(featureSource, lineNumber: 3, byteColumnNumber: 5);
             Assert.DoesNotContain(
                 report.Entries.SelectMany(entry => entry.Diagnostics),
                 diagnostic => diagnostic.Code == "config-file-null-skipped");
@@ -231,10 +233,17 @@ public class ConfigAuditReporterTests
             Assert.Contains(settings.Sources, source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
             Assert.Contains(settings.Sources, source => source.EnvironmentVariableName == "MYAPP__SETTINGS__DATABASE__PORT");
             Assert.Contains(settings.Diagnostics, diagnostic => diagnostic.Message.Contains("MYAPP__SETTINGS__DATABASE__TIMEOUTSECONDS", StringComparison.Ordinal));
+            var settingsFileSource = Assert.Single(
+                settings.Sources,
+                source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
+            AssertLocation(settingsFileSource, lineNumber: 6, byteColumnNumber: 5);
 
             var database = settings.Children
                 .Single(child => child.Key == "MyApp.Settings.Database");
             Assert.Equal(ConfigAuditEntryState.PartiallyResolved, database.State);
+            var host = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Host");
+            var hostFileSource = Assert.Single(host.Sources, source => source.Kind == ConfigAuditSourceKind.File);
+            Assert.Null(hostFileSource.Location);
 
             var port = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Port");
             Assert.Equal("6543", port.DisplayValue);
@@ -256,6 +265,7 @@ public class ConfigAuditReporterTests
 
             var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
             Assert.Contains("Environment: Staging", rendered, StringComparison.Ordinal);
+            Assert.Contains("appsettings.Staging.json:6:5 :: MyApp.Settings", rendered, StringComparison.Ordinal);
             Assert.Contains("Payment.ApiKey = [redacted]", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("super-secret", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("soon", rendered, StringComparison.Ordinal);
@@ -645,6 +655,65 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void TextRenderer_UsesFileLocationsWhenPresentAndFallsBackWhenNull()
+    {
+        var rendered = new ConfigAuditTextRenderer().Render(
+            new ConfigAuditReport
+            {
+                Environment = "Production",
+                GeneratedAt = DateTimeOffset.UtcNow,
+                Providers = [],
+                Entries =
+                [
+                    new ConfigAuditEntry
+                    {
+                        Key = "Located.Value",
+                        State = ConfigAuditEntryState.Resolved,
+                        Sources =
+                        [
+                            new ConfigAuditSourceRecord
+                            {
+                                Kind = ConfigAuditSourceKind.File,
+                                ProviderName = "Files",
+                                FilePath = "/tmp/appsettings.json",
+                                ConfigPath = "Located.Value",
+                                AppliedToPath = "Located.Value",
+                                Location = new ConfigAuditSourceLocation(4, 12),
+                                Role = ConfigAuditSourceRole.Base
+                            }
+                        ]
+                    },
+                    new ConfigAuditEntry
+                    {
+                        Key = "Unlocated.Value",
+                        State = ConfigAuditEntryState.Resolved,
+                        Sources =
+                        [
+                            new ConfigAuditSourceRecord
+                            {
+                                Kind = ConfigAuditSourceKind.File,
+                                ProviderName = "Files",
+                                FilePath = "/tmp/appsettings.json",
+                                ConfigPath = "Unlocated.Value",
+                                AppliedToPath = "Unlocated.Value",
+                                Role = ConfigAuditSourceRole.Base
+                            }
+                        ]
+                    }
+                ],
+                Redaction = new ConfigAuditRedaction
+                {
+                    Enabled = true,
+                    MatchedFragments = [],
+                    Placeholder = "[redacted]"
+                }
+            });
+
+        Assert.Contains("Files appsettings.json:4:12 :: Located.Value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Files appsettings.json :: Unlocated.Value", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GetReport_MarksResolvedEntryPartialWhenChildSourcesContainPatch()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -723,6 +792,13 @@ public class ConfigAuditReporterTests
         Assert.Equal(state, entry.State);
         Assert.Equal(displayValue, entry.DisplayValue);
         return entry;
+    }
+
+    private static void AssertLocation(ConfigAuditSourceRecord source, int lineNumber, int byteColumnNumber)
+    {
+        Assert.NotNull(source.Location);
+        Assert.Equal(lineNumber, source.Location.LineNumber);
+        Assert.Equal(byteColumnNumber, source.Location.ByteColumnNumber);
     }
 
     private sealed class StaticConfigProvider : IConfigProvider

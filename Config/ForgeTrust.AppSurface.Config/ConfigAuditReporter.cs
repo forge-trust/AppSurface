@@ -454,15 +454,40 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             .ToList();
         if (matches.Count == 0)
         {
-            return parentSources.FirstOrDefault() is { } fallback ? [fallback] : [];
+            return parentSources.FirstOrDefault() is { } fallback ? [PrepareChildSource(fallback, childKey)] : [];
         }
 
         var maxSpecificity = matches.Max(match => match.Specificity);
         return matches
             .Where(match => match.Specificity == maxSpecificity)
-            .Select(match => match.Source)
+            .Select(match => PrepareChildSource(match.Source, childKey))
             .ToList();
     }
+
+    private static ConfigAuditSourceRecord PrepareChildSource(ConfigAuditSourceRecord source, string childKey)
+    {
+        if (source.Location == null || SourceRepresentsExactPath(source, childKey))
+        {
+            return source;
+        }
+
+        return new ConfigAuditSourceRecord
+        {
+            Kind = source.Kind,
+            ProviderName = source.ProviderName,
+            ProviderPriority = source.ProviderPriority,
+            FilePath = source.FilePath,
+            EnvironmentVariableName = source.EnvironmentVariableName,
+            ConfigPath = source.ConfigPath,
+            AppliedToPath = source.AppliedToPath,
+            Role = source.Role,
+            Sensitivity = source.Sensitivity
+        };
+    }
+
+    private static bool SourceRepresentsExactPath(ConfigAuditSourceRecord source, string childKey) =>
+        string.Equals(source.AppliedToPath, childKey, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(source.ConfigPath, childKey, StringComparison.OrdinalIgnoreCase);
 
     private static int GetSourceSpecificity(ConfigAuditSourceRecord source, string childKey) =>
         Math.Max(

@@ -126,12 +126,52 @@ public sealed class ConfigAuditEntry
 }
 
 /// <summary>
+/// Describes a source coordinate inside a configuration file.
+/// </summary>
+/// <remarks>
+/// Both values are one-based. <see cref="ByteColumnNumber"/> counts UTF-8 bytes from the start of the physical line,
+/// so it can differ from an editor's character column when a line contains non-ASCII characters before the source token.
+/// </remarks>
+public sealed class ConfigAuditSourceLocation
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConfigAuditSourceLocation"/> class.
+    /// </summary>
+    /// <param name="lineNumber">The one-based physical line number containing the source token.</param>
+    /// <param name="byteColumnNumber">The one-based UTF-8 byte column containing the source token.</param>
+    public ConfigAuditSourceLocation(int lineNumber, int byteColumnNumber)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(lineNumber, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(byteColumnNumber, 1);
+
+        LineNumber = lineNumber;
+        ByteColumnNumber = byteColumnNumber;
+    }
+
+    /// <summary>
+    /// Gets the one-based physical line number containing the source token.
+    /// </summary>
+    public int LineNumber { get; }
+
+    /// <summary>
+    /// Gets the one-based UTF-8 byte column containing the source token.
+    /// </summary>
+    /// <remarks>
+    /// This is a byte coordinate over the UTF-8 file content, not a Unicode scalar, text element, or editor display
+    /// column. A non-ASCII character earlier on the same line can increase this value by more than one.
+    /// </remarks>
+    public int ByteColumnNumber { get; }
+}
+
+/// <summary>
 /// Describes one source that contributed to a configuration entry.
 /// </summary>
 /// <remarks>
 /// Source records identify where a value came from and how it was applied. File paths, environment variable names, and
-/// config paths are optional because not every provider exposes the same provenance. The source role is especially
-/// important for mixed values: a base source can be combined with patch sources from higher-priority providers.
+/// config paths are optional because not every provider exposes the same provenance. File sources can also include
+/// <see cref="Location"/> when the provider can truthfully map the parsed value back to an exact file coordinate. The
+/// source role is especially important for mixed values: a base source can be combined with patch sources from
+/// higher-priority providers.
 /// </remarks>
 public sealed class ConfigAuditSourceRecord
 {
@@ -169,6 +209,16 @@ public sealed class ConfigAuditSourceRecord
     /// Gets the target config path affected by this source.
     /// </summary>
     public string? AppliedToPath { get; init; }
+
+    /// <summary>
+    /// Gets the exact file coordinate for this source when the provider can prove one.
+    /// </summary>
+    /// <remarks>
+    /// A <see langword="null"/> value means the source is still known but no truthful coordinate is available, such as
+    /// for non-file sources, ambiguous case-insensitive file paths, unsupported paths, parser mismatches, or collection
+    /// element descendants.
+    /// </remarks>
+    public ConfigAuditSourceLocation? Location { get; init; }
 
     /// <summary>
     /// Gets the role this source played in resolution.
