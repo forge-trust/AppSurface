@@ -26,6 +26,7 @@ AppSurface is still before `v1.0.0`, so rapid change is expected. That does not 
 - private maintainer-only recovery notes
 - secret or credential handling details
 - repo maintenance that does not affect adopters
+- maintainer-only generated asset pipeline details that preserve public package paths and require no consumer action
 
 Those belong outside harvested public docs.
 

@@ -369,12 +369,24 @@ RazorWire also supports hybrid islands where a server-rendered region mounts a c
 </rw:island>
 ```
 
+`client-module` can be a relative path, root-relative path, same-origin URL, HTTPS URL, or bare import-map specifier. Hosts that prefer logical names can set `window.RazorWireIslandModules = { ChartComponent: "/js/chart-component.js" }` before hydration; RazorWire resolves the rendered `data-rw-module` name through that manifest before calling dynamic `import()`. Direct `javascript:`, `blob:`, `file:`, and unapproved `data:` module specifiers are rejected.
+
 RazorWire serves `/_content/ForgeTrust.RazorWire/razorwire/razorwire.js`,
 `razorwire.islands.js`, and the package demo assets as normal Razor Class Library
 static web assets when the host has a static-web-assets manifest. The same files
 are also embedded into the `ForgeTrust.RazorWire` assembly and mapped as endpoint
 fallbacks by `RazorWireWebModule`, so packaged command-line hosts can serve the
 runtime even when only compiled assemblies are present.
+
+The runtime and island loader are authored under `assets/src` and generated into
+the committed `wwwroot/razorwire/*.js` package outputs. Public consumers should
+continue loading the same script URLs or `<rw:scripts />`; the TypeScript asset
+pipeline is maintainer-only and does not require application code changes. The
+docs-only `assets/contracts/razorwire-public-contracts.js` file preserves the
+AppSurface Docs JavaScript API harvest, while `exampleJsInterop.js` stays
+hand-authored and demo-only. For build commands, diagnostics, the pack-time
+freshness guard, and the emergency bypass property, see the
+[Runtime Contract Pipeline](Docs/runtime-contract-pipeline.md).
 
 ## Static Export
 
@@ -418,4 +430,5 @@ For installation, `dnx`, local-package, and source-run examples, see the
 - [Focused proof path: return Razor fragments](../../examples/razorwire-mvc/README.md#start-here-return-razor-fragments)
 - [Full RazorWire MVC example](../../examples/razorwire-mvc/README.md)
 - [Failed Form UX guide](Docs/form-failures.md)
+- [Runtime Contract Pipeline](Docs/runtime-contract-pipeline.md)
 - [Security & Anti-Forgery](Docs/antiforgery.md)

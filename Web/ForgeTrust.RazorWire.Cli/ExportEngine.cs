@@ -18,6 +18,35 @@ public class ExportEngine
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ExportReferenceProcessor _referenceProcessor;
 
+    /// <summary>
+    /// Attribute emitted by AppSurface Docs to mark maintainer diagnostics chrome that RazorWire strips from exports.
+    /// </summary>
+    /// <remarks>
+    /// The value is <c>data-docs-diagnostics-chrome</c>. It is a cross-component marker between the AppSurface Docs
+    /// sidebar and <see cref="ExportEngine"/> only; consumers should not rely on it for production behavior or as a
+    /// public styling hook.
+    /// </remarks>
+    private const string AppSurfaceDocsDiagnosticsChromeAttributeName = "data-docs-diagnostics-chrome";
+
+    /// <summary>
+    /// Matches marked <c>&lt;details&gt;</c> elements that contain <see cref="AppSurfaceDocsDiagnosticsChromeAttributeName"/>.
+    /// </summary>
+    /// <remarks>
+    /// The pattern strips AppSurface Docs diagnostics disclosures whose opening <c>&lt;details&gt;</c> tag contains the
+    /// marker attribute, optionally set to <c>true</c>. It uses case-insensitive, single-line matching so ordering,
+    /// whitespace, and quote style variations are accepted, and the compiled static instance is safe to share across
+    /// export operations.
+    /// <para>
+    /// This is a raw-HTML convenience regex, not an HTML parser. It assumes non-nested diagnostics
+    /// <c>&lt;details&gt;</c> elements, relies on the marker being present on the opening tag, and removes through the
+    /// first matching <c>&lt;/details&gt;</c>. Malformed HTML, nested details blocks, or marker-like text outside the
+    /// intended diagnostics disclosure can produce incomplete stripping or false positives.
+    /// </para>
+    /// </remarks>
+    private static readonly Regex AppSurfaceDocsDiagnosticsChromeRegex = new(
+        @"<details\b(?=[^>]*\s" + AppSurfaceDocsDiagnosticsChromeAttributeName + @"(?:\s*=\s*(?:""true""|'true'|true))?(?=\s|/?>))[^>]*>.*?</details\s*>",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
     private const string DocsStaticPartialsMetaName = "rw-docs-static-partials";
     private const string DocsStaticPartialsMetaTag = "<meta name=\"rw-docs-static-partials\" content=\"1\" />";
     private const string AppSurfaceDocsClientConfigMarker = "window.__appSurfaceDocsConfig";
@@ -147,7 +176,7 @@ public class ExportEngine
 
             if (isHtml)
             {
-                var html = await response.Content.ReadAsStringAsync(cancellationToken);
+                var html = StripAppSurfaceDocsDiagnosticsChrome(await response.Content.ReadAsStringAsync(cancellationToken));
                 var docContentFrame = ExtractDocContentFrame(html);
                 context.RouteOutcomes[route] = context.Mode == ExportMode.Cdn
                     ? ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, html)
@@ -462,6 +491,7 @@ public class ExportEngine
         bool rewriteManagedReferences,
         CancellationToken cancellationToken)
     {
+        body = StripAppSurfaceDocsDiagnosticsChrome(body);
         var docContentFrame = ExtractDocContentFrame(body);
         var isDocsPage = IsDocsExportPage(route, body, docContentFrame);
         var htmlForWrite = isDocsPage
@@ -476,6 +506,40 @@ public class ExportEngine
             filePath,
             ExtractDocContentFrame(htmlForWrite),
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes AppSurface Docs maintainer diagnostics chrome from export HTML before link discovery or artifact writes.
+    /// </summary>
+    /// <remarks>
+    /// AppSurface Docs diagnostics links are useful in live maintainer hosts but must not become reader-facing static
+    /// artifacts. The marker is owned by the AppSurface Docs sidebar view and allows the generic RazorWire exporter to
+    /// suppress the whole diagnostics disclosure even when exporting from a URL source whose host has diagnostics chrome
+    /// enabled.
+    /// <para>
+    /// <see cref="StripAppSurfaceDocsDiagnosticsChrome"/> returns null or empty input unchanged, then performs an
+    /// ordinal case-insensitive marker precheck against <see cref="AppSurfaceDocsDiagnosticsChromeAttributeName"/> before
+    /// applying a global <see cref="Regex.Replace(string, string)"/> with
+    /// <see cref="AppSurfaceDocsDiagnosticsChromeRegex"/>. All matching diagnostics disclosures are removed.
+    /// </para>
+    /// <para>
+    /// The method operates on raw HTML rather than a parsed DOM, so marker-like text in unexpected locations can be
+    /// removed. The static compiled regex is thread-safe for concurrent exports, but it intentionally trades parser-level
+    /// correctness for lightweight export-time cleanup and inherits the regex constraints documented on
+    /// <see cref="AppSurfaceDocsDiagnosticsChromeRegex"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="html">The fetched or staged HTML document.</param>
+    /// <returns>The HTML with marked AppSurface Docs diagnostics chrome removed.</returns>
+    internal static string StripAppSurfaceDocsDiagnosticsChrome(string html)
+    {
+        if (string.IsNullOrEmpty(html)
+            || !html.Contains(AppSurfaceDocsDiagnosticsChromeAttributeName, StringComparison.OrdinalIgnoreCase))
+        {
+            return html;
+        }
+
+        return AppSurfaceDocsDiagnosticsChromeRegex.Replace(html, string.Empty);
     }
 
     private async Task WriteCssRouteAsync(
@@ -946,7 +1010,7 @@ public class ExportEngine
             }
 
             const string route = "/404.html";
-            var html = await response.Content.ReadAsStringAsync(cancellationToken);
+            var html = StripAppSurfaceDocsDiagnosticsChrome(await response.Content.ReadAsStringAsync(cancellationToken));
             var filePath = MapRouteToFilePath(route, context.OutputPath, isHtml: true);
             var artifactUrl = MapFilePathToArtifactUrl(filePath, context.OutputPath, route);
             context.ArtifactUrls[route] = artifactUrl;

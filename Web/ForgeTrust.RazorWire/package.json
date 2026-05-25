@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "typecheck": "tsc --noEmit -p assets/tsconfig.json",
+    "test": "node assets/scripts/build.mjs && node --test test/*.test.mjs",
+    "build": "node assets/scripts/build.mjs",
+    "verify-generated": "node assets/scripts/verify-generated.mjs"
   }
 }

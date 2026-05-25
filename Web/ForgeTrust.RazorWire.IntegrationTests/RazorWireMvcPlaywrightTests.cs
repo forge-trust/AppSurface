@@ -20,6 +20,74 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task RuntimeScripts_LoadFromPackagePathsAndExposeBrowserGlobals()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync(_fixture.ReactivityUrl);
+
+        var contract = await page.EvaluateAsync<RuntimeContractProbe>(
+            """
+            () => ({
+                RuntimeInitialized: window.RazorWireInitialized === true,
+                IslandsInitialized: window.RazorWireIslandsInitialized === true,
+                HasRuntimeGlobal: Boolean(window.RazorWire),
+                FailureMode: window.RazorWire?.config?.failureMode,
+                HasFormFailureManager: Boolean(window.RazorWire?.formFailureManager),
+                RuntimeScriptPath: document.querySelector('script[src*="/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"]')?.getAttribute('src') || '',
+                IslandsScriptPath: document.querySelector('script[src*="/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js"]')?.getAttribute('src') || ''
+            })
+            """);
+
+        Assert.True(contract.RuntimeInitialized);
+        Assert.True(contract.IslandsInitialized);
+        Assert.True(contract.HasRuntimeGlobal);
+        Assert.True(contract.HasFormFailureManager);
+        Assert.Equal("auto", contract.FailureMode);
+        Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/razorwire.js", contract.RuntimeScriptPath, StringComparison.Ordinal);
+        Assert.Contains("/_content/ForgeTrust.RazorWire/razorwire/razorwire.islands.js", contract.IslandsScriptPath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RuntimeIslands_OnlyStrategyHydratesClientModuleAndClearsServerContent()
+    {
+        await using var context = await _fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync(_fixture.ReactivityUrl);
+
+        await page.EvaluateAsync(
+            """
+            () => {
+                const moduleUrl = `data:text/javascript,${encodeURIComponent('export function mount(root, props) { root.textContent = `client:${props.label}`; root.dataset.clientMounted = "true"; }')}`;
+                window.RazorWireIslandModules = { PlaywrightClientIsland: moduleUrl };
+                const island = document.createElement('section');
+                island.id = 'playwright-client-island';
+                island.setAttribute('data-rw-module', 'PlaywrightClientIsland');
+                island.setAttribute('data-rw-strategy', 'only');
+                island.setAttribute('data-rw-props', JSON.stringify({ label: 'ready' }));
+                island.innerHTML = '<p id="server-placeholder">server content</p>';
+                document.body.appendChild(island);
+                document.dispatchEvent(new Event('turbo:load'));
+            }
+            """);
+
+        await page.WaitForFunctionAsync(
+            """
+            () => {
+                const island = document.getElementById('playwright-client-island');
+                return island?.getAttribute('data-rw-hydrated') === 'true'
+                    && island?.dataset.clientMounted === 'true'
+                    && island?.textContent === 'client:ready'
+                    && document.getElementById('server-placeholder') === null;
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    [Fact]
     public async Task PublishMessage_BroadcastsToOtherSession()
     {
         var unique = Guid.NewGuid().ToString("N")[..8];
@@ -428,6 +496,15 @@ public sealed class RazorWireMvcPlaywrightTests
         Assert.Null(await response.HeaderValueAsync("X-RazorWire-Form-Handled"));
         await WaitForTextAsync(page, "#authorization-errors", "Session may have expired");
         await WaitForTextAsync(page, "#authorization-errors", "You may need to refresh or sign in again before submitting this form.");
+        var generatedError = page.Locator("#authorization-errors [data-rw-form-error-generated='true']");
+        await Assertions.Expect(generatedError).ToHaveAttributeAsync("role", "status");
+        await Assertions.Expect(generatedError).ToHaveAttributeAsync("aria-live", "polite");
+        await Assertions.Expect(generatedError).ToHaveAttributeAsync("tabindex", "-1");
+        var generatedErrorId = await generatedError.GetAttributeAsync("id");
+        Assert.False(string.IsNullOrWhiteSpace(generatedErrorId));
+        var describedBy = await page.Locator("form[data-rw-form-failure-target='authorization-errors']").GetAttributeAsync("aria-describedby");
+        Assert.NotNull(describedBy);
+        Assert.Contains(generatedErrorId!, describedBy, StringComparison.Ordinal);
         await AssertNoPageRefreshAsync(page, _fixture.FormFailuresUrl);
     }
 
@@ -477,6 +554,23 @@ public sealed class RazorWireMvcPlaywrightTests
             "() => document.body.getAttribute('data-rw-stream-reactivity') === 'connected'",
             null,
             new PageWaitForFunctionOptions { Timeout = 15_000 });
+    }
+
+    private sealed class RuntimeContractProbe
+    {
+        public bool RuntimeInitialized { get; set; }
+
+        public bool IslandsInitialized { get; set; }
+
+        public bool HasRuntimeGlobal { get; set; }
+
+        public string? FailureMode { get; set; }
+
+        public bool HasFormFailureManager { get; set; }
+
+        public string RuntimeScriptPath { get; set; } = string.Empty;
+
+        public string IslandsScriptPath { get; set; } = string.Empty;
     }
 
     private static async Task WaitForMessageAsync(IPage page, string token)

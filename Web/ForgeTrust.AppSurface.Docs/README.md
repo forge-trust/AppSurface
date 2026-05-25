@@ -355,13 +355,119 @@ Route inspector exposure is configured separately from harvest health:
 {
   "AppSurfaceDocs": {
     "Diagnostics": {
-      "ExposeRouteInspector": "DevelopmentOnly"
+      "ExposeRouteInspector": "DevelopmentOnly",
+      "ShowChrome": "DevelopmentOnly"
     }
   }
 }
 ```
 
-`AppSurfaceDocs:Diagnostics:ExposeRouteInspector` accepts `DevelopmentOnly`, `Always`, and `Never`. The default is `DevelopmentOnly`, which makes the inspector available to local development hosts without adding maintainer tooling to public reader navigation. Set it to `Always` only for operator-owned environments that have host-level protection. Set it to `Never` when a development or preview host should reserve the route names but return `404`.
+`AppSurfaceDocs:Diagnostics:ExposeRouteInspector` and `AppSurfaceDocs:Diagnostics:ShowChrome` accept `DevelopmentOnly`, `Always`, and `Never`. The defaults are `DevelopmentOnly`, which make the inspector available and discoverable from the sidebar for local development hosts without adding maintainer tooling to public reader navigation. Set `ExposeRouteInspector=Always` only for operator-owned environments that have host-level protection. Set it to `Never` when a development or preview host should reserve the route names but return `404`.
+
+The mental model is:
+
+- `ShowChrome` controls whether the sidebar can advertise diagnostics.
+- `ExposeRoutes` and `ExposeRouteInspector` control whether HTTP endpoints respond.
+- Chrome never creates a route.
+- Route exposure never implies sidebar discovery.
+
+The built-in sidebar renders a compact `Diagnostics` disclosure when at least one diagnostics row is available for the current host. Human pages are primary: `Harvest health` links to `_health`, and `Route inspector` links to `_routes`. JSON actions stay secondary as `Health JSON` and `Routes JSON`. Static exports and published reader artifacts must not contain the diagnostics disclosure or links to `_health`, `_health.json`, `_routes`, or `_routes.json`.
+
+#### See diagnostics locally
+
+Development defaults need no configuration. Start the docs preview and open the configured docs root:
+
+```bash
+appsurface docs preview --repo . --port 5189
+```
+
+Open `http://localhost:5189/docs`. The sidebar should show `Diagnostics` above the public docs sections. Opening it should show `Harvest health`, `Health JSON`, `Route inspector`, and `Routes JSON` when the default Development routes are enabled. Run the same host with a Production environment to verify the default reader surface: `Diagnostics` should be absent unless you explicitly opt in.
+
+#### Common diagnostics configurations
+
+Development defaults:
+
+```json
+{}
+```
+
+Production route-only direct access, without sidebar discovery:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Diagnostics": {
+      "ExposeRouteInspector": "Always",
+      "ShowChrome": "Never"
+    }
+  }
+}
+```
+
+Production chrome plus routes for a protected operator host:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Health": {
+        "ExposeRoutes": "Always",
+        "ShowChrome": "Always"
+      }
+    },
+    "Diagnostics": {
+      "ExposeRouteInspector": "Always",
+      "ShowChrome": "Always"
+    }
+  }
+}
+```
+
+Health chrome only, with no health route links:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Health": {
+        "ExposeRoutes": "Never",
+        "ShowChrome": "Always"
+      }
+    }
+  }
+}
+```
+
+Disable every built-in diagnostics surface explicitly:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Health": {
+        "ExposeRoutes": "Never",
+        "ShowChrome": "Never"
+      }
+    },
+    "Diagnostics": {
+      "ExposeRouteInspector": "Never",
+      "ShowChrome": "Never"
+    }
+  }
+}
+```
+
+Production exposure does not add authentication or authorization. Protect diagnostics routes at the host, reverse proxy, or network boundary before setting any Production exposure value to `Always`.
+
+Troubleshooting:
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `Diagnostics` is absent in Production | Chrome defaults to `DevelopmentOnly` | Set the relevant `ShowChrome=Always` only in a protected host |
+| `_routes` returns `404` | Route inspector responses are hidden | Set `AppSurfaceDocs:Diagnostics:ExposeRouteInspector=Always` in a protected host |
+| Health row has no link | Health chrome is visible but health routes are hidden | Set `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always`, or keep status-only intentionally |
+| JSON action is absent | The corresponding route response is hidden | Expose the route or leave the JSON action hidden |
+| Static export contains diagnostics links | Reader artifact leakage | Treat this as a release blocker and fix rendering/export tests before publishing |
 
 The JSON response uses the camelCase wire form of `AppSurfaceDocsRouteInspectorResponse`:
 
@@ -887,6 +993,11 @@ static web assets.
   - AppSurface Docs always reserves the endpoint patterns before the docs catch-all route so route-inspector URLs do not fall through to document lookup.
   - `Always` exposes route-manifest diagnostics in non-development environments; protect the endpoints at the host boundary when they are publicly reachable.
   - `Never` keeps the reserved endpoints returning `404`, including in development.
+- `AppSurfaceDocs:Diagnostics:ShowChrome`
+  - Defaults to `DevelopmentOnly`.
+  - Controls whether the built-in sidebar can show route-inspector discovery inside the `Diagnostics` disclosure.
+  - This is independent from `ExposeRouteInspector` so route responses can stay direct-access only, or hidden routes can stay absent from the sidebar.
+  - If route inspector responses are hidden for the current environment, AppSurface Docs does not render dead `_routes` or `_routes.json` links.
 - `AppSurfaceDocs:Harvest:Paths:IncludeGlobs`
   - Defaults to an empty array, which means every built-in harvester starts from its normal candidate set.
   - When nonempty, this is the global source boundary for all built-in harvesters. Markdown, C#, and JavaScript source-specific includes can narrow it but cannot bypass it.
@@ -924,7 +1035,7 @@ static web assets.
   - When enabled, AppSurface Docs scans policy-approved `.js` files for explicit public doclets. Unannotated JavaScript is ignored.
 - `AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Include globs default to an empty list; exclude globs default to `**/*.min.js`; default-exclusion controls mirror the global path option shape.
-  - Use include globs as an optional narrowing or performance boundary, such as `Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js`.
+  - Use include globs as an optional narrowing or performance boundary, such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js`.
   - Global path rules apply first, then JavaScript-specific includes, default exclusions, and excludes refine the candidate set.
 - `AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag`
   - Defaults to `true`.
@@ -1004,7 +1115,7 @@ JavaScript harvesting is for intentional browser runtime contracts: custom event
     "Harvest": {
       "JavaScript": {
         "IncludeGlobs": [
-          "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js"
+          "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"
         ]
       }
     }
@@ -1069,6 +1180,7 @@ Pitfalls:
 
 - Do not add broad `**/*.js` include globs just to turn JavaScript harvesting on. It is already on; include globs are for narrowing default discovery.
 - Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
+- When documenting package browser contracts, prefer a small docs-only contract manifest such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js` over generated runtime outputs.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
 - Do not put `@public` on classes, default exports, or CommonJS exports until a later harvester slice supports those shapes.

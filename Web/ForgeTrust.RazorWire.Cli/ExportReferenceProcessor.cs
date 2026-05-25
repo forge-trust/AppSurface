@@ -122,7 +122,7 @@ internal sealed partial class ExportReferenceProcessor
 
             return resolvedUri.AbsolutePath + resolvedUri.Query + resolvedUri.Fragment;
         }
-        catch (Exception ex)
+        catch (UriFormatException ex)
         {
             _logger.LogWarning(ex, "Failed to resolve relative URL: {Url} against {BaseRoute}", url, baseRoute);
 
@@ -199,6 +199,7 @@ internal sealed partial class ExportReferenceProcessor
     {
         var references = new List<ExportReference>();
         var document = _htmlParser.ParseDocument(html);
+        var attributeLookup = CreateHtmlAttributeLookup(html);
 
         foreach (var element in document.QuerySelectorAll("a[href]"))
         {
@@ -209,37 +210,35 @@ internal sealed partial class ExportReferenceProcessor
                 continue;
             }
 
-            AddReference(references, href, ExportReferenceKind.AnchorHref, currentRoute, CreateHtmlProvenance(html, element, "href"));
+            AddReference(references, href, ExportReferenceKind.AnchorHref, currentRoute, CreateHtmlProvenance(element, "href", attributeLookup));
         }
 
         foreach (var element in document.QuerySelectorAll("turbo-frame[src]"))
         {
-            AddReference(references, element.GetAttribute("src") ?? string.Empty, ExportReferenceKind.TurboFrameSrc, currentRoute, CreateHtmlProvenance(html, element, "src"));
+            AddReference(references, element.GetAttribute("src") ?? string.Empty, ExportReferenceKind.TurboFrameSrc, currentRoute, CreateHtmlProvenance(element, "src", attributeLookup));
         }
 
         foreach (var element in document.QuerySelectorAll("script[src]"))
         {
-            AddReference(references, element.GetAttribute("src") ?? string.Empty, ExportReferenceKind.ScriptSrc, currentRoute, CreateHtmlProvenance(html, element, "src"));
+            AddReference(references, element.GetAttribute("src") ?? string.Empty, ExportReferenceKind.ScriptSrc, currentRoute, CreateHtmlProvenance(element, "src", attributeLookup));
         }
 
-        foreach (var element in document.QuerySelectorAll("link[href]"))
+        foreach (var element in document.QuerySelectorAll("link[href]")
+            .Where(element => IsSupportedLinkRel(element.GetAttribute("rel") ?? string.Empty)))
         {
-            if (IsSupportedLinkRel(element.GetAttribute("rel") ?? string.Empty))
-            {
-                AddReference(references, element.GetAttribute("href") ?? string.Empty, ExportReferenceKind.LinkHref, currentRoute, CreateHtmlProvenance(html, element, "href"));
-            }
+            AddReference(references, element.GetAttribute("href") ?? string.Empty, ExportReferenceKind.LinkHref, currentRoute, CreateHtmlProvenance(element, "href", attributeLookup));
         }
 
         foreach (var element in document.QuerySelectorAll("img[src]"))
         {
-            AddReference(references, element.GetAttribute("src") ?? string.Empty, ExportReferenceKind.ImgSrc, currentRoute, CreateHtmlProvenance(html, element, "src"));
+            AddReference(references, element.GetAttribute("src") ?? string.Empty, ExportReferenceKind.ImgSrc, currentRoute, CreateHtmlProvenance(element, "src", attributeLookup));
         }
 
         foreach (var element in document.QuerySelectorAll("[srcset]"))
         {
             foreach (var candidate in ParseSrcSetCandidates(element.GetAttribute("srcset") ?? string.Empty))
             {
-                AddReference(references, candidate.Url, ExportReferenceKind.ImgSrcSet, currentRoute, CreateHtmlProvenance(html, element, "srcset", "srcset candidate"));
+                AddReference(references, candidate.Url, ExportReferenceKind.ImgSrcSet, currentRoute, CreateHtmlProvenance(element, "srcset", attributeLookup, "srcset candidate"));
             }
         }
 
@@ -669,6 +668,17 @@ internal sealed partial class ExportReferenceProcessor
         }
     }
 
+    private static IReadOnlyDictionary<HtmlAttributeLookupKey, HtmlAttributeSpan> CreateHtmlAttributeLookup(string html)
+    {
+        var lookup = new Dictionary<HtmlAttributeLookupKey, HtmlAttributeSpan>();
+        foreach (var attribute in EnumerateTags(html).SelectMany(tag => ParseAttributes(html, tag)))
+        {
+            lookup.TryAdd(CreateHtmlAttributeLookupKey(attribute.ElementName, attribute.Name, attribute.Value), attribute);
+        }
+
+        return lookup;
+    }
+
     private static IReadOnlyList<SrcSetCandidate> ParseSrcSetCandidates(string srcSet)
     {
         var candidates = new List<SrcSetCandidate>();
@@ -1015,12 +1025,9 @@ internal sealed partial class ExportReferenceProcessor
 
     private static HtmlAttributeSpan? GetAttribute(IReadOnlyList<HtmlAttributeSpan> attributes, string name)
     {
-        foreach (var attribute in attributes)
+        foreach (var attribute in attributes.Where(attribute => attribute.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
         {
-            if (attribute.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-            {
-                return attribute;
-            }
+            return attribute;
         }
 
         return null;
@@ -1180,19 +1187,19 @@ internal sealed partial class ExportReferenceProcessor
     }
 
     private static ExportReferenceProvenance CreateHtmlProvenance(
-        string html,
         IElement element,
         string attributeName,
+        IReadOnlyDictionary<HtmlAttributeLookupKey, HtmlAttributeSpan> attributes,
         string? tokenType = null)
     {
-        var offset = FindAttributeOffset(html, element.LocalName, attributeName, element.GetAttribute(attributeName));
+        var attribute = FindHtmlAttribute(attributes, element.LocalName, attributeName, element.GetAttribute(attributeName));
         return new ExportReferenceProvenance(
             "html",
             element.LocalName,
             attributeName,
             tokenType ?? $"{element.LocalName} {attributeName}",
-            offset,
-            offset.HasValue ? CalculateLine(html, offset.Value) : null);
+            attribute?.NameStart,
+            attribute?.Line);
     }
 
     private static ExportReferenceProvenance CreateAttributeProvenance(HtmlAttributeSpan attribute, string? tokenType = null)
@@ -1222,26 +1229,23 @@ internal sealed partial class ExportReferenceProcessor
             CalculateLine(css, token.ValueStart));
     }
 
-    private static int? FindAttributeOffset(string html, string elementName, string attributeName, string? value)
+    private static HtmlAttributeSpan? FindHtmlAttribute(
+        IReadOnlyDictionary<HtmlAttributeLookupKey, HtmlAttributeSpan> attributes,
+        string elementName,
+        string attributeName,
+        string? value)
     {
-        foreach (var tag in EnumerateTags(html))
-        {
-            if (!tag.Name.Equals(elementName, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+        return attributes.TryGetValue(CreateHtmlAttributeLookupKey(elementName, attributeName, value), out var attribute)
+            ? attribute
+            : null;
+    }
 
-            foreach (var attribute in ParseAttributes(html, tag))
-            {
-                if (attribute.Name.Equals(attributeName, StringComparison.OrdinalIgnoreCase)
-                    && (value is null || string.Equals(attribute.Value, value, StringComparison.Ordinal)))
-                {
-                    return attribute.NameStart;
-                }
-            }
-        }
-
-        return null;
+    private static HtmlAttributeLookupKey CreateHtmlAttributeLookupKey(string elementName, string attributeName, string? value)
+    {
+        return new HtmlAttributeLookupKey(
+            elementName.ToUpperInvariant(),
+            attributeName.ToUpperInvariant(),
+            value);
     }
 
     private static int CalculateLine(string content, int offset)
@@ -1269,6 +1273,8 @@ internal sealed partial class ExportReferenceProcessor
         int? ValueLength,
         int NameStart,
         int Line);
+
+    private readonly record struct HtmlAttributeLookupKey(string ElementName, string AttributeName, string? Value);
 
     private readonly record struct SrcSetCandidate(string Url, int Start, int Length);
 

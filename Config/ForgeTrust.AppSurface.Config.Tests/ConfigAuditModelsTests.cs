@@ -55,6 +55,48 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigAuditEntryOptionsBuilder_TracksExplicitDefaultValuedOverrides()
+    {
+        var wrapperOptions = new ConfigAuditCollectionTraversalAttribute
+        {
+            MaxCollectionDepth = 9,
+            MaxCollectionElements = 7,
+            MaxReportNodes = 11,
+            DisplayDictionaryKeys = false
+        }.ToOptions();
+        var builder = new ConfigAuditEntryOptionsBuilder
+        {
+            TraverseCollectionElements = false,
+            MaxCollectionDepth = 4,
+            MaxCollectionElements = 128,
+            MaxReportNodes = 4096,
+            DisplayDictionaryKeys = true
+        };
+
+        var merged = wrapperOptions.ApplyAssignedOverrides(builder.ToOptions());
+
+        Assert.False(merged.TraverseCollectionElements);
+        Assert.Equal(4, merged.MaxCollectionDepth);
+        Assert.Equal(128, merged.MaxCollectionElements);
+        Assert.Equal(4096, merged.MaxReportNodes);
+        Assert.True(merged.DisplayDictionaryKeys);
+    }
+
+    [Fact]
+    public void ConfigAuditCollectionTraversalAttribute_CreatesTraversalOptionsWithSafeDefaults()
+    {
+        var attribute = new ConfigAuditCollectionTraversalAttribute();
+
+        var options = attribute.ToOptions();
+
+        Assert.True(options.TraverseCollectionElements);
+        Assert.Equal(4, options.MaxCollectionDepth);
+        Assert.Equal(128, options.MaxCollectionElements);
+        Assert.Equal(4096, options.MaxReportNodes);
+        Assert.True(options.DisplayDictionaryKeys);
+    }
+
+    [Fact]
     public void ConfigAuditKnownEntry_WithOptionsReturnsIndependentEntry()
     {
         var entry = new ConfigAuditKnownEntry("Valid.Key", null, typeof(string));
@@ -151,6 +193,33 @@ public class ConfigAuditModelsTests
                 Enabled = true,
                 Placeholder = "[redacted]"
             },
+            DiscoveredKeys =
+            [
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Discovered.Fallback",
+                    Classification = (ConfigAuditDiscoveredKeyClassification)99,
+                    DisplayValue = "value",
+                    Sources =
+                    [
+                        new ConfigAuditSourceRecord
+                        {
+                            Kind = ConfigAuditSourceKind.Provider,
+                            ProviderName = "ProviderName",
+                            Role = ConfigAuditSourceRole.Base
+                        }
+                    ],
+                    Diagnostics =
+                    [
+                        new ConfigAuditDiagnostic
+                        {
+                            Severity = ConfigAuditDiagnosticSeverity.Warning,
+                            Code = "discovered-warning",
+                            Message = "Discovered diagnostic."
+                        }
+                    ]
+                }
+            ],
             Entries =
             [
                 new ConfigAuditEntry
@@ -213,6 +282,9 @@ public class ConfigAuditModelsTests
         Assert.True(rendered.IndexOf("Root[\"alpha\"]", StringComparison.Ordinal) < rendered.IndexOf("Root[\"zeta\"]", StringComparison.Ordinal));
         Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root.Plain", StringComparison.Ordinal));
         Assert.Contains("Provider", rendered, StringComparison.Ordinal);
+        Assert.Contains("Discovered keys:", rendered, StringComparison.Ordinal);
+        Assert.Contains("Discovered.Fallback [99] = value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Diagnostic: Discovered diagnostic.", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -223,6 +295,10 @@ public class ConfigAuditModelsTests
         Assert.Equal(2, (int)ConfigAuditEntryState.Defaulted);
         Assert.Equal(3, (int)ConfigAuditEntryState.Missing);
         Assert.Equal(4, (int)ConfigAuditEntryState.Invalid);
+
+        Assert.Equal(0, (int)ConfigAuditDiscoveredKeyClassification.Known);
+        Assert.Equal(1, (int)ConfigAuditDiscoveredKeyClassification.KnownDescendant);
+        Assert.Equal(2, (int)ConfigAuditDiscoveredKeyClassification.Unknown);
 
         Assert.Equal(0, (int)ConfigAuditElementKind.ArrayItem);
         Assert.Equal(1, (int)ConfigAuditElementKind.ListItem);
@@ -246,5 +322,13 @@ public class ConfigAuditModelsTests
         Assert.Equal(0, (int)ConfigAuditDiagnosticSeverity.Info);
         Assert.Equal(1, (int)ConfigAuditDiagnosticSeverity.Warning);
         Assert.Equal(2, (int)ConfigAuditDiagnosticSeverity.Error);
+
+        var providerKey = new ConfigAuditProviderDiscoveredKey(
+            "Discovered.Value",
+            RawValue: null,
+            ConfigAuditDiscoveredValueKind.Array,
+            Sources: [],
+            Diagnostics: []);
+        Assert.Equal(ConfigAuditDiscoveredValueKind.Array, providerKey.ValueKind);
     }
 }

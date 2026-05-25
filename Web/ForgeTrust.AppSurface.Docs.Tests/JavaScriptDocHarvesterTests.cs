@@ -542,12 +542,11 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
-    public async Task HarvestAsync_ShouldDogfoodRazorWireRuntimeWhenConfiguredWithIncludes()
+    public async Task HarvestAsync_ShouldDogfoodRazorWirePublicContractManifestWhenConfiguredWithIncludes()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var harvester = CreateHarvester(CreateEnabledOptions(
-            "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js",
-            "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.islands.js"));
+            "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"));
 
         var docs = await harvester.HarvestAsync(repoRoot);
 
@@ -557,14 +556,17 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains("event-razorwire-form-diagnostic", page.Content, StringComparison.Ordinal);
         Assert.Contains("event-razorwire-form-submit-end", page.Content, StringComparison.Ordinal);
         Assert.Contains("attribute-data-rw-form", page.Content, StringComparison.Ordinal);
-        Assert.Contains("config-defaultfailuremessage", page.Content, StringComparison.Ordinal);
+        Assert.Contains("attribute-data-rw-strategy", page.Content, StringComparison.Ordinal);
+        Assert.Contains("config-window-razorwire-config", page.Content, StringComparison.Ordinal);
         Assert.Contains("module-contract-mount", page.Content, StringComparison.Ordinal);
         Assert.Contains("css-hook-data-rw-form-error-generated-true", page.Content, StringComparison.Ordinal);
         Assert.Contains("css-custom-property-rw-form-error-text", page.Content, StringComparison.Ordinal);
         Assert.Contains("global-window-razorwire", page.Content, StringComparison.Ordinal);
+        Assert.Contains("{&quot;load&quot;|&quot;idle&quot;|&quot;visible&quot;|&quot;only&quot;}", page.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("{&quot;load&quot;|&quot;idle&quot;|&quot;visible&quot;|&quot;immediate&quot;}", page.Content, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
             page.SymbolSourceProvenance!,
-            provenance => provenance.SourcePath == "Web/ForgeTrust.RazorWire/wwwroot/razorwire/razorwire.js"
+            provenance => provenance.SourcePath == "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"
                           && provenance.AnchorId == "event-razorwire-form-failure");
         Assert.Empty(GetDiagnostics(harvester));
     }

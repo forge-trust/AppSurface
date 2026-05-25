@@ -1,0 +1,175 @@
+/**
+ * Browser global that exposes RazorWire runtime managers and runtime configuration for diagnostics and advanced integrations.
+ * @public
+ * @namespace RazorWire
+ * @global
+ * @name window.RazorWire
+ */
+window.RazorWire = window.RazorWire || {};
+
+/**
+ * Optional island module manifest that maps logical `data-rw-module` names to approved module URLs before RazorWire imports them.
+ * @public
+ * @namespace RazorWire
+ * @config window.RazorWireIslandModules
+ * @type {Record<string, string>}
+ * @source host page script or bundled app script
+ * @property {string} moduleName - Logical island module name keyed by the value rendered in `data-rw-module`.
+ */
+
+/**
+ * Runtime configuration merged from the `<rw:scripts />` script tag.
+ * @public
+ * @namespace RazorWire
+ * @config window.RazorWire.config
+ * @type {object}
+ * @source <rw:scripts />
+ * @property {boolean} developmentDiagnostics - Whether development diagnostics can be exposed.
+ * @property {boolean} failureUxEnabled - Whether failed-form request markers, events, fallback rendering, and diagnostics are enabled.
+ * @property {"auto"|"manual"|"off"} failureMode - Default failed-form behavior.
+ * @property {string} defaultFailureMessage - Reader-facing fallback copy for unhandled form failures.
+ */
+
+/**
+ * A RazorWire-enhanced form started submitting through Turbo.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form:submit-start
+ * @target form[data-rw-form="true"]
+ * @firesWhen Turbo begins submitting a RazorWire-enhanced form and RazorWire marks it busy.
+ * @property {HTMLFormElement} detail.form - Submitted form.
+ * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
+ * @bubbles true
+ * @cancelable false
+ */
+
+/**
+ * A RazorWire-enhanced form submission failed and custom UI may handle the failure.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form:failure
+ * @target form[data-rw-form="true"]
+ * @firesWhen Turbo reports a failed form submission or RazorWire catches a network failure.
+ * @property {HTMLFormElement} detail.form - Submitted form.
+ * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
+ * @property {number|null} detail.statusCode - HTTP status code when available.
+ * @property {boolean} detail.handled - Whether the server response already handled the failure.
+ * @property {"turbo-stream"|"html"|"json"|"unknown"|"network"} detail.responseKind - Failure category.
+ * @property {Element} detail.target - Stream target or form that should own the failure UI.
+ * @property {string} detail.message - Reader-facing fallback message.
+ * @property {Object|null} detail.developmentDiagnostic - Development diagnostic payload when enabled.
+ * @bubbles true
+ * @cancelable true
+ */
+
+/**
+ * Development diagnostics are available for a failed RazorWire-enhanced form submission.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form:diagnostic
+ * @target form[data-rw-form="true"]
+ * @firesWhen development diagnostics are enabled for a failed RazorWire-enhanced form.
+ * @property {HTMLFormElement} detail.form - Submitted form.
+ * @property {number|null} detail.statusCode - HTTP status code when available.
+ * @property {string} detail.title - Short diagnostic title.
+ * @property {string} detail.detail - Diagnostic explanation.
+ * @property {string} detail.docsHref - Documentation link target.
+ * @property {string[]} detail.hints - Suggested fixes.
+ * @bubbles true
+ * @cancelable false
+ */
+
+/**
+ * A RazorWire-enhanced form finished submitting.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:form:submit-end
+ * @target form[data-rw-form="true"]
+ * @firesWhen Turbo finishes a RazorWire-enhanced form submission or RazorWire handles a fetch error.
+ * @property {HTMLFormElement} detail.form - Submitted form.
+ * @property {HTMLElement|null} detail.submitter - Button or submit control that initiated the submission.
+ * @property {boolean} detail.success - Whether the submission succeeded.
+ * @property {number|null} detail.statusCode - HTTP status code when available.
+ * @property {boolean} detail.handled - Whether the server response already handled the result.
+ * @bubbles true
+ * @cancelable false
+ */
+
+/**
+ * Enables RazorWire form failure handling on a form.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form
+ * @target form
+ * @type {"true"}
+ */
+
+/**
+ * Selects how RazorWire renders unhandled form failures.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form-failure
+ * @target form[data-rw-form="true"]
+ * @type {"auto"|"manual"|"off"}
+ * @default auto
+ */
+
+/**
+ * Stable selector for generated form failure UI.
+ * @public
+ * @namespace RazorWire
+ * @cssHook [data-rw-form-error-generated="true"]
+ * @hookKind data-attribute
+ * @target generated form failure UI
+ * @stability stable
+ */
+
+/**
+ * Controls generated form failure text color.
+ * @public
+ * @namespace RazorWire
+ * @cssCustomProperty --rw-form-error-text
+ * @target [data-rw-form-error-generated="true"]
+ * @syntax <color>
+ * @default #3f3f46
+ */
+
+/**
+ * Island modules may export mount to hydrate a server-rendered root.
+ * @public
+ * @namespace RazorWire
+ * @moduleContract mount
+ * @target module referenced by data-rw-module
+ * @signature mount(root, props)
+ * @param {HTMLElement} root - Island root element.
+ * @param {Record<string, unknown>} props - Parsed island props.
+ */
+
+/**
+ * Names the browser module that should hydrate an island root.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-module
+ * @target [data-rw-module]
+ * @type {string}
+ * @description Logical module name, import-map specifier, or safe module URL. Hosts may define `window.RazorWireIslandModules` to map logical names to pre-approved module URLs before RazorWire calls dynamic import.
+ */
+
+/**
+ * Selects when an island module hydrates.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-strategy
+ * @target [data-rw-module]
+ * @type {"load"|"idle"|"visible"|"only"}
+ * @default load
+ */
+
+/**
+ * JSON props passed to an island module's mount function.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-props
+ * @target [data-rw-module]
+ * @type {string}
+ */

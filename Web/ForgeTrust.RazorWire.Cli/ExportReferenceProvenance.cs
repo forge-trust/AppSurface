@@ -17,12 +17,31 @@ internal sealed record ExportReferenceProvenance(
     int? Line)
 {
     /// <summary>
-    /// Gets a compact developer-facing description such as <c>&lt;img src&gt;</c> or <c>CSS url()</c>.
+    /// Gets a compact developer-facing description such as <c>&lt;img src&gt;</c> or <c>style url() &lt;style&gt;</c>.
     /// </summary>
     public string DisplaySource
     {
         get
         {
+            if (!Surface.Equals("html", StringComparison.OrdinalIgnoreCase))
+            {
+                var source = Surface.Equals("stylesheet", StringComparison.OrdinalIgnoreCase)
+                    ? $"stylesheet {TokenType}"
+                    : $"{Surface} {TokenType}";
+
+                if (!string.IsNullOrWhiteSpace(ElementName) && !string.IsNullOrWhiteSpace(AttributeName))
+                {
+                    return $"{source} <{ElementName} {AttributeName}>";
+                }
+
+                if (!string.IsNullOrWhiteSpace(ElementName))
+                {
+                    return $"{source} <{ElementName}>";
+                }
+
+                return source;
+            }
+
             if (!string.IsNullOrWhiteSpace(ElementName) && !string.IsNullOrWhiteSpace(AttributeName))
             {
                 return $"<{ElementName} {AttributeName}>";
@@ -32,10 +51,7 @@ internal sealed record ExportReferenceProvenance(
             {
                 return $"<{ElementName}>";
             }
-
-            return Surface.Equals("stylesheet", StringComparison.OrdinalIgnoreCase)
-                ? $"stylesheet {TokenType}"
-                : $"{Surface} {TokenType}";
+            return $"{Surface} {TokenType}";
         }
     }
 }
