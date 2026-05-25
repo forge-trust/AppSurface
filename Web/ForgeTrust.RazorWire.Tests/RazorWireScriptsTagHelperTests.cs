@@ -84,13 +84,13 @@ public class RazorWireScriptsTagHelperTests
     [Fact]
     public void RazorWireProject_DefinesPackOnlyGeneratedAssetGuardWithEmergencyBypass()
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(
+        var repoRoot = Path.GetFullPath(Path.Join(
             AppContext.BaseDirectory,
             "..",
             "..",
             "..",
             ".."));
-        var projectPath = Path.Combine(
+        var projectPath = Path.Join(
             repoRoot,
             "ForgeTrust.RazorWire",
             "ForgeTrust.RazorWire.csproj");
