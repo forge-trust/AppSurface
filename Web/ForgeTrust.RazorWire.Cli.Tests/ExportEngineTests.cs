@@ -890,7 +890,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.StartsWith("<!DOCTYPE html>\n<HTML data-kind=raw>", indexHtml, StringComparison.Ordinal);
             Assert.Contains("<!-- keep me -->", indexHtml, StringComparison.Ordinal);
             Assert.Contains("<A HREF=/about.html data-extra='keep'>About</A>", indexHtml, StringComparison.Ordinal);
