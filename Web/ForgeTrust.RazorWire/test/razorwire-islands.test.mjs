@@ -149,6 +149,21 @@ test('dangerous direct module schemes are rejected before dynamic import', async
   assert.equal(warnings.warns.some(entry => entry[0].startsWith('RazorWire island module')), true);
 });
 
+test('non-string manifest module mappings are skipped without throwing', async () => {
+  const island = new FakeElement('div');
+  island.setAttribute('data-rw-module', 'bad-mapping');
+
+  const { warnings } = loadIslands([island], {
+    islandModules: {
+      'bad-mapping': { path: moduleWithMount('root.setAttribute("data-mounted", "true");') }
+    }
+  });
+  await flushHydration();
+
+  assert.equal(island.hasAttribute('data-rw-hydrated'), false);
+  assert.equal(warnings.warns.some(entry => entry[0] === 'RazorWire island module "bad-mapping" resolved to an empty module specifier.'), true);
+});
+
 function loadIslands(islands, overrides = {}) {
   const document = new FakeDocument(islands);
   const warnings = { errors: [], warns: [] };

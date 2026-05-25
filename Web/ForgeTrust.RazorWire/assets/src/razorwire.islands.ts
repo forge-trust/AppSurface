@@ -104,7 +104,7 @@ interface Window {
     }
 
     function validateIslandModuleSpecifier(specifier, moduleName, fromManifest) {
-        const value = (specifier || '').trim();
+        const value = typeof specifier === 'string' ? specifier.trim() : '';
         if (!value) {
             console.warn(`RazorWire island module "${moduleName}" resolved to an empty module specifier.`);
             return null;
