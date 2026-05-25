@@ -876,7 +876,7 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
-    public void GetReport_ReportsInheritedSourceForRedactedDictionaryKeysWithoutProviderSources()
+    public void GetReport_ReportsSourceUnavailableForRedactedDictionaryKeysWithoutProviderSources()
     {
         var environment = A.Fake<IEnvironmentProvider>();
         A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);

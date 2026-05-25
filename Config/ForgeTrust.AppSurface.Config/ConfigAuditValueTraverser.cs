@@ -279,6 +279,7 @@ internal sealed class ConfigAuditValueTraverser
 
         foreach (var field in value.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public))
         {
+            // Public readonly fields are immutable/non-configurable for audit and patch operations.
             if (field.IsInitOnly)
             {
                 continue;
