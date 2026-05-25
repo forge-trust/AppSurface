@@ -32,6 +32,18 @@ public sealed class ConfigAuditTextRenderer
             RenderEntry(builder, entry, indent: "  ");
         }
 
+        if (report.DiscoveredKeys.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine(FormatDiscoveredKeysHeading(report.DiscoveredKeys));
+            foreach (var discoveredKey in report.DiscoveredKeys
+                         .OrderBy(key => key.Classification)
+                         .ThenBy(key => key.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                RenderDiscoveredKey(builder, discoveredKey);
+            }
+        }
+
         if (report.Diagnostics.Count > 0)
         {
             builder.AppendLine();
@@ -43,6 +55,15 @@ public sealed class ConfigAuditTextRenderer
         }
 
         return builder.ToString();
+    }
+
+    private static string FormatDiscoveredKeysHeading(IReadOnlyList<ConfigAuditDiscoveredKey> discoveredKeys)
+    {
+        var allSourcesAreFileBacked = discoveredKeys.All(discoveredKey =>
+            discoveredKey.Sources.Count > 0
+            && discoveredKey.Sources.All(source => source.Kind == ConfigAuditSourceKind.File));
+
+        return allSourcesAreFileBacked ? "Discovered file keys:" : "Discovered keys:";
     }
 
     private static void RenderEntry(StringBuilder builder, ConfigAuditEntry entry, string indent)
@@ -69,6 +90,27 @@ public sealed class ConfigAuditTextRenderer
         foreach (var child in OrderChildren(entry.Children))
         {
             RenderEntry(builder, child, indent + "    ");
+        }
+    }
+
+    private static void RenderDiscoveredKey(StringBuilder builder, ConfigAuditDiscoveredKey discoveredKey)
+    {
+        var value = discoveredKey.DisplayValue == null ? string.Empty : $" = {discoveredKey.DisplayValue}";
+        builder.AppendLine(
+            $"  {discoveredKey.Key} [{FormatDiscoveredClassification(discoveredKey.Classification)}]{value}");
+        if (discoveredKey.IsRedacted)
+        {
+            builder.AppendLine("    Redacted: true");
+        }
+
+        foreach (var source in discoveredKey.Sources)
+        {
+            builder.AppendLine($"    Source: {FormatSource(source)}");
+        }
+
+        foreach (var diagnostic in discoveredKey.Diagnostics)
+        {
+            builder.AppendLine($"    Diagnostic: {diagnostic.Message}");
         }
     }
 
@@ -115,5 +157,14 @@ public sealed class ConfigAuditTextRenderer
             ConfigAuditSourceKind.Default => $"Default value on {source.ProviderName}",
             ConfigAuditSourceKind.Missing => "none",
             _ => source.ProviderName ?? source.Kind.ToString()
+        };
+
+    private static string FormatDiscoveredClassification(ConfigAuditDiscoveredKeyClassification classification) =>
+        classification switch
+        {
+            ConfigAuditDiscoveredKeyClassification.Known => "Known",
+            ConfigAuditDiscoveredKeyClassification.KnownDescendant => "Under known entry",
+            ConfigAuditDiscoveredKeyClassification.Unknown => "Unknown to AppSurface audit registry",
+            _ => classification.ToString()
         };
 }

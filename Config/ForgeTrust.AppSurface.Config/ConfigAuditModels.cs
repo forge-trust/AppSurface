@@ -6,7 +6,9 @@ namespace ForgeTrust.AppSurface.Config;
 /// <remarks>
 /// Reports are immutable snapshots from the caller's perspective: provider order, entries, diagnostics, and redaction
 /// policy describe one audit run and should not be treated as live configuration. Use <see cref="Entries"/> for
-/// machine inspection and <see cref="ConfigAuditTextRenderer"/> when operators need a deterministic text dump.
+/// machine inspection and <see cref="DiscoveredKeys"/> for effective provider-discovered configuration keys that are
+/// not necessarily represented by known entries. Use <see cref="ConfigAuditTextRenderer"/> when operators need a
+/// deterministic text dump.
 /// </remarks>
 public sealed class ConfigAuditReport
 {
@@ -31,6 +33,19 @@ public sealed class ConfigAuditReport
     public IReadOnlyList<ConfigAuditEntry> Entries { get; init; } = [];
 
     /// <summary>
+    /// Gets effective configuration keys discovered directly from enumerable providers.
+    /// </summary>
+    /// <remarks>
+    /// Discovered keys describe the effective merged configuration visible to AppSurface providers that implement
+    /// audit enumeration. They are not a complete raw inventory: providers that cannot enumerate keys are omitted,
+    /// shadowed lower-priority file keys are not included, and environment variables or secret providers are not
+    /// enumerated by the built-in v1 surface. <see cref="ConfigAuditDiscoveredKey.DisplayValue"/> is redacted before
+    /// it enters the public report, but source metadata such as file paths, provider names, and config paths may still
+    /// be support-sensitive.
+    /// </remarks>
+    public IReadOnlyList<ConfigAuditDiscoveredKey> DiscoveredKeys { get; init; } = [];
+
+    /// <summary>
     /// Gets report-level diagnostics that are not tied to a single entry.
     /// </summary>
     public IReadOnlyList<ConfigAuditDiagnostic> Diagnostics { get; init; } = [];
@@ -39,6 +54,48 @@ public sealed class ConfigAuditReport
     /// Gets the redaction policy applied before this report was returned.
     /// </summary>
     public required ConfigAuditRedaction Redaction { get; init; }
+}
+
+/// <summary>
+/// Describes one effective provider-discovered configuration key in an audit report.
+/// </summary>
+/// <remarks>
+/// Classifications are relative to the AppSurface audit registry, not to all application code. An
+/// <see cref="ConfigAuditDiscoveredKeyClassification.Unknown"/> key can be a typo, stale setting, or a value consumed
+/// outside AppSurface's known-entry registry; it is not proof that no code uses the key. Object and array parent values
+/// may omit <see cref="DisplayValue"/> unless the path is sensitive, in which case the redaction placeholder is shown.
+/// </remarks>
+public sealed class ConfigAuditDiscoveredKey
+{
+    /// <summary>
+    /// Gets the discovered configuration key path.
+    /// </summary>
+    public required string Key { get; init; }
+
+    /// <summary>
+    /// Gets the key's relationship to the AppSurface audit registry.
+    /// </summary>
+    public required ConfigAuditDiscoveredKeyClassification Classification { get; init; }
+
+    /// <summary>
+    /// Gets the display-safe value, or <see langword="null"/> when a non-sensitive complex parent value is omitted.
+    /// </summary>
+    public string? DisplayValue { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="DisplayValue"/> was replaced by the redaction placeholder.
+    /// </summary>
+    public bool IsRedacted { get; init; }
+
+    /// <summary>
+    /// Gets source records associated with this effective discovered key.
+    /// </summary>
+    public IReadOnlyList<ConfigAuditSourceRecord> Sources { get; init; } = [];
+
+    /// <summary>
+    /// Gets diagnostics specific to this discovered key.
+    /// </summary>
+    public IReadOnlyList<ConfigAuditDiagnostic> Diagnostics { get; init; } = [];
 }
 
 /// <summary>
@@ -360,6 +417,26 @@ public enum ConfigAuditEntryState
 
     /// <summary>Resolution found a value or validation result that was invalid.</summary>
     Invalid = 4
+}
+
+/// <summary>
+/// Identifies how a provider-discovered key relates to the AppSurface audit registry.
+/// </summary>
+/// <remarks>
+/// Values are explicit and append-only so serialized reports remain stable across releases. These classifications are
+/// registry-relative: <see cref="Unknown"/> does not mean globally unused, and <see cref="KnownDescendant"/> is based
+/// on dotted-path segment matching rather than schema validation of a wrapper type.
+/// </remarks>
+public enum ConfigAuditDiscoveredKeyClassification
+{
+    /// <summary>The discovered key exactly matches a known audit entry.</summary>
+    Known = 0,
+
+    /// <summary>The discovered key is under a known entry path using dotted-path segment matching.</summary>
+    KnownDescendant = 1,
+
+    /// <summary>The discovered key is not known to the AppSurface audit registry.</summary>
+    Unknown = 2
 }
 
 /// <summary>

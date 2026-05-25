@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Config;
 /// <summary>
 /// A configuration provider that reads settings from JSON files (e.g., appsettings.json, config_*.json).
 /// </summary>
-public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvider
+public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvider, IConfigAuditKeyEnumerator
 {
     private readonly IConfigFileLocationProvider _configFileLocationProvider;
     private readonly ILogger<FileBasedConfigProvider> _logger;
@@ -37,6 +37,19 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         _snapshotLazy = new Lazy<ConfigFileProviderSnapshot>(InitializeSnapshot, true);
     }
 
+    /// <summary>
+    /// Initializes a provider around an already-built snapshot for focused audit enumeration tests.
+    /// </summary>
+    /// <param name="snapshot">The snapshot returned by the provider during audit operations.</param>
+    internal FileBasedConfigProvider(ConfigFileProviderSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        _configFileLocationProvider = null!;
+        _logger = null!;
+        _snapshotLazy = new Lazy<ConfigFileProviderSnapshot>(() => snapshot, true);
+    }
+
     /// <inheritdoc />
     public T? GetValue<T>(string environment, string key)
     {
@@ -56,8 +69,9 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
     {
         var snapshot = _snapshotLazy.Value;
         var diagnostics = snapshot.Diagnostics
-            .Where(diagnostic => IsDiagnosticForKey(diagnostic, key))
-            .Select(ToPublicDiagnostic)
+            .Where(diagnostic => IsDiagnosticInEnvironment(diagnostic, environment)
+                                 && IsDiagnosticForKey(diagnostic.Diagnostic, key))
+            .Select(diagnostic => ToPublicDiagnostic(diagnostic.Diagnostic))
             .ToList();
         if (!snapshot.Environments.TryGetValue(environment, out var envConfig)
             || !TryGetNode(envConfig, key, out var node))
@@ -67,7 +81,7 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
 
         var source = snapshot.Origins.TryGetValue(environment, out var origins)
                      && origins.TryGetValue(key, out var origin)
-            ? origin
+            ? AttachSourceLocation(snapshot, origin)
             : new ConfigAuditSourceRecord
             {
                 Kind = ConfigAuditSourceKind.File,
@@ -85,7 +99,7 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                 .Where(origin => string.Equals(origin.Key, key, StringComparison.OrdinalIgnoreCase)
                                  || origin.Key.StartsWith($"{key}.", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(origin => origin.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(origin => origin.Value.WithRole(role))
+                .Select(origin => AttachSourceLocation(snapshot, origin.Value).WithRole(role))
                 .DefaultIfEmpty(source)
                 .ToList();
         try
@@ -137,20 +151,44 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
 
     IReadOnlyList<ConfigAuditDiagnostic> IConfigDiagnosticProvider.GetReportDiagnostics(string environment) =>
         _snapshotLazy.Value.Diagnostics
-            .Where(diagnostic => diagnostic.Key == null && diagnostic.ConfigPath == null)
-            .Select(ToPublicDiagnostic)
+            .Where(diagnostic => IsDiagnosticInEnvironment(diagnostic, environment)
+                                 && diagnostic.Diagnostic.Key == null
+                                 && (diagnostic.Diagnostic.ConfigPath == null
+                                     || diagnostic.Diagnostic.Code == "config-file-null-skipped"))
+            .Select(diagnostic => ToPublicDiagnostic(diagnostic.Diagnostic))
             .ToList();
+
+    IReadOnlyList<ConfigAuditProviderDiscoveredKey> IConfigAuditKeyEnumerator.EnumerateKeys(string environment)
+    {
+        var snapshot = _snapshotLazy.Value;
+        if (!snapshot.Environments.TryGetValue(environment, out var envConfig)
+            || envConfig is not JsonObject envObject)
+        {
+            return [];
+        }
+
+        var origins = snapshot.Origins.TryGetValue(environment, out var environmentOrigins)
+            ? environmentOrigins
+            : new Dictionary<string, ConfigAuditSourceRecord>(StringComparer.OrdinalIgnoreCase);
+        var discoveredKeys = new List<ConfigAuditProviderDiscoveredKey>();
+        EnumerateObject(envObject, snapshot, origins, parentPath: null, discoveredKeys);
+
+        return discoveredKeys
+            .OrderBy(key => key.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     private ConfigFileProviderSnapshot InitializeSnapshot()
     {
         var environments = new Dictionary<string, JsonNode>(StringComparer.OrdinalIgnoreCase);
         var origins = new Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>>(StringComparer.OrdinalIgnoreCase);
-        var diagnostics = new List<ConfigAuditDiagnostic>();
+        var diagnostics = new List<ConfigFileProviderDiagnostic>();
+        var sourceLocationMaps = new Dictionary<string, Lazy<ConfigFileSourceLocationMap>>(StringComparer.OrdinalIgnoreCase);
 
         var directory = _configFileLocationProvider.Directory;
         if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
         {
-            return new ConfigFileProviderSnapshot(environments, origins, diagnostics);
+            return new ConfigFileProviderSnapshot(environments, origins, diagnostics, sourceLocationMaps);
         }
 
         // Collect matching files
@@ -163,6 +201,9 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         // Deterministic order so merges are predictable; later files override earlier ones when keys collide
         foreach (var file in files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
         {
+            var fileName = Path.GetFileNameWithoutExtension(file);
+            var environment = ExtractEnvironment(fileName);
+            var displayFileName = Path.GetFileName(file);
             JsonNode? root;
             try
             {
@@ -174,21 +215,22 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                 }
 
                 root = JsonNode.Parse(text);
-                var sourceLocations = ConfigFileSourceLocationMap.Create(bytes);
+                sourceLocationMaps[file] = new Lazy<ConfigFileSourceLocationMap>(
+                    () => ConfigFileSourceLocationMap.Create(bytes),
+                    isThreadSafe: true);
 
                 if (root is not JsonObject obj)
                 {
-                    diagnostics.Add(new ConfigAuditDiagnostic
-                    {
-                        Severity = ConfigAuditDiagnosticSeverity.Warning,
-                        Code = "config-file-non-object-root",
-                        Message = $"Skipping config file {Path.GetFileName(file)} because the root is not a JSON object."
-                    });
+                    diagnostics.Add(new ConfigFileProviderDiagnostic(
+                        environment,
+                        new ConfigAuditDiagnostic
+                        {
+                            Severity = ConfigAuditDiagnosticSeverity.Warning,
+                            Code = "config-file-non-object-root",
+                            Message = $"Skipping config file {displayFileName} because the root is not a JSON object."
+                        }));
                     continue; // Only merge JSON objects at the root
                 }
-
-                var fileName = Path.GetFileNameWithoutExtension(file);
-                var environment = ExtractEnvironment(fileName);
 
                 if (!environments.TryGetValue(environment, out var existing))
                 {
@@ -199,24 +241,26 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
 
                 if (existing is JsonObject targetObj)
                 {
-                    MergeJsonObjects(targetObj, obj, origins[environment], file, sourceLocations, parentPath: null, diagnostics);
+                    MergeJsonObjects(targetObj, obj, origins[environment], file, environment, parentPath: null, diagnostics);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Skipping malformed config file {FileName}", Path.GetFileName(file));
-                diagnostics.Add(new ConfigAuditDiagnostic
-                {
-                    Severity = ConfigAuditDiagnosticSeverity.Warning,
-                    Code = "config-file-malformed",
-                    Message = $"Skipping malformed config file {Path.GetFileName(file)}."
-                });
+                _logger.LogWarning(ex, "Skipping malformed config file {FileName}", displayFileName);
+                diagnostics.Add(new ConfigFileProviderDiagnostic(
+                    environment,
+                    new ConfigAuditDiagnostic
+                    {
+                        Severity = ConfigAuditDiagnosticSeverity.Warning,
+                        Code = "config-file-malformed",
+                        Message = $"Skipping malformed config file {displayFileName}."
+                    }));
 
                 continue;
             }
         }
 
-        return new ConfigFileProviderSnapshot(environments, origins, diagnostics);
+        return new ConfigFileProviderSnapshot(environments, origins, diagnostics, sourceLocationMaps);
     }
 
     private static string ReadFileText(byte[] bytes)
@@ -285,6 +329,108 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         return true;
     }
 
+    private void EnumerateObject(
+        JsonObject obj,
+        ConfigFileProviderSnapshot snapshot,
+        Dictionary<string, ConfigAuditSourceRecord> origins,
+        string? parentPath,
+        List<ConfigAuditProviderDiscoveredKey> discoveredKeys)
+    {
+        foreach (var kvp in obj.OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            if (kvp.Value == null)
+            {
+                continue;
+            }
+
+            var path = string.IsNullOrWhiteSpace(parentPath) ? kvp.Key : $"{parentPath}.{kvp.Key}";
+            switch (kvp.Value)
+            {
+                case JsonObject childObject:
+                    discoveredKeys.Add(CreateDiscoveredKey(path, null, ConfigAuditDiscoveredValueKind.Object, snapshot, origins));
+                    EnumerateObject(childObject, snapshot, origins, path, discoveredKeys);
+                    break;
+                case JsonArray:
+                    discoveredKeys.Add(CreateDiscoveredKey(path, null, ConfigAuditDiscoveredValueKind.Array, snapshot, origins));
+                    break;
+                case JsonValue scalar:
+                    discoveredKeys.Add(CreateDiscoveredKey(
+                        path,
+                        ConvertJsonScalar(scalar),
+                        ConfigAuditDiscoveredValueKind.Scalar,
+                        snapshot,
+                        origins));
+                    break;
+            }
+        }
+    }
+
+    private ConfigAuditProviderDiscoveredKey CreateDiscoveredKey(
+        string path,
+        object? rawValue,
+        ConfigAuditDiscoveredValueKind valueKind,
+        ConfigFileProviderSnapshot snapshot,
+        Dictionary<string, ConfigAuditSourceRecord> origins)
+    {
+        var diagnostics = new List<ConfigAuditDiagnostic>();
+        var source = origins.TryGetValue(path, out var origin)
+            ? AttachSourceLocation(snapshot, origin)
+            : new ConfigAuditSourceRecord
+            {
+                Kind = ConfigAuditSourceKind.File,
+                ProviderName = Name,
+                ProviderPriority = Priority,
+                ConfigPath = path,
+                AppliedToPath = path,
+                Role = ConfigAuditSourceRole.Base
+            };
+
+        if (!origins.ContainsKey(path))
+        {
+            diagnostics.Add(new ConfigAuditDiagnostic
+            {
+                Severity = ConfigAuditDiagnosticSeverity.Warning,
+                Code = "config-provider-discovered-key-origin-missing",
+                Key = path,
+                ConfigPath = path,
+                Source = source,
+                Message = $"Discovered file configuration key '{path}' did not have source origin metadata."
+            });
+        }
+
+        return new ConfigAuditProviderDiscoveredKey(path, rawValue, valueKind, [source], diagnostics);
+    }
+
+    private static object? ConvertJsonScalar(JsonValue scalar)
+    {
+        if (scalar.TryGetValue<string>(out var stringValue))
+        {
+            return stringValue;
+        }
+
+        if (scalar.TryGetValue<bool>(out var boolValue))
+        {
+            return boolValue;
+        }
+
+        if (scalar.TryGetValue<int>(out var intValue))
+        {
+            return intValue;
+        }
+
+        if (scalar.TryGetValue<long>(out var longValue))
+        {
+            return longValue;
+        }
+
+        if (scalar.TryGetValue<decimal>(out var decimalValue))
+        {
+            return decimalValue;
+        }
+
+        return scalar.TryGetValue<double>(out var doubleValue) ? doubleValue : null;
+    }
+
     private static bool IsDiagnosticForKey(ConfigAuditDiagnostic diagnostic, string key)
     {
         if (string.Equals(diagnostic.Key, key, StringComparison.Ordinal))
@@ -297,14 +443,18 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                    || diagnostic.ConfigPath.StartsWith($"{key}.", StringComparison.Ordinal));
     }
 
+    private static bool IsDiagnosticInEnvironment(ConfigFileProviderDiagnostic diagnostic, string environment) =>
+        diagnostic.Environment == null
+        || string.Equals(diagnostic.Environment, environment, StringComparison.OrdinalIgnoreCase);
+
     private void MergeJsonObjects(
         JsonObject target,
         JsonObject source,
         Dictionary<string, ConfigAuditSourceRecord> origins,
         string file,
-        ConfigFileSourceLocationMap sourceLocations,
+        string environment,
         string? parentPath,
-        List<ConfigAuditDiagnostic> diagnostics)
+        List<ConfigFileProviderDiagnostic> diagnostics)
     {
         foreach (var kvp in source)
         {
@@ -312,22 +462,24 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
             if (kvp.Value == null)
             {
                 // Skip null values in source
-                diagnostics.Add(new ConfigAuditDiagnostic
-                {
-                    Severity = ConfigAuditDiagnosticSeverity.Info,
-                    Code = "config-file-null-skipped",
-                    ConfigPath = path,
-                    Message = $"Skipping null file value at '{path}'."
-                });
+                diagnostics.Add(new ConfigFileProviderDiagnostic(
+                    environment,
+                    new ConfigAuditDiagnostic
+                    {
+                        Severity = ConfigAuditDiagnosticSeverity.Info,
+                        Code = "config-file-null-skipped",
+                        ConfigPath = path,
+                        Message = $"Skipping null file value at '{path}'."
+                    }));
                 continue;
             }
 
-            origins[path] = CreateFileSource(file, path, sourceLocations);
+            origins[path] = CreateFileSource(file, path);
             if (target.ContainsKey(kvp.Key))
             {
                 if (target[kvp.Key] is JsonObject targetObj && kvp.Value is JsonObject sourceObj)
                 {
-                    MergeJsonObjects(targetObj, sourceObj, origins, file, sourceLocations, path, diagnostics);
+                    MergeJsonObjects(targetObj, sourceObj, origins, file, environment, path, diagnostics);
                 }
                 else
                 {
@@ -337,7 +489,7 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                     target[kvp.Key] = kvp.Value.DeepClone();
                     if (kvp.Value is JsonObject or JsonArray)
                     {
-                        RecordOrigins(kvp.Value, origins, file, sourceLocations, path, diagnostics);
+                        RecordOrigins(kvp.Value, origins, file, environment, path, diagnostics);
                     }
                 }
             }
@@ -346,7 +498,7 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                 target[kvp.Key] = kvp.Value.DeepClone();
                 if (kvp.Value is JsonObject or JsonArray)
                 {
-                    RecordOrigins(kvp.Value, origins, file, sourceLocations, path, diagnostics);
+                    RecordOrigins(kvp.Value, origins, file, environment, path, diagnostics);
                 }
             }
         }
@@ -364,9 +516,9 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
         JsonNode source,
         Dictionary<string, ConfigAuditSourceRecord> origins,
         string file,
-        ConfigFileSourceLocationMap sourceLocations,
+        string environment,
         string parentPath,
-        List<ConfigAuditDiagnostic> diagnostics)
+        List<ConfigFileProviderDiagnostic> diagnostics)
     {
         if (source is JsonObject obj)
         {
@@ -375,20 +527,22 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                 var path = $"{parentPath}.{kvp.Key}";
                 if (kvp.Value == null)
                 {
-                    diagnostics.Add(new ConfigAuditDiagnostic
-                    {
-                        Severity = ConfigAuditDiagnosticSeverity.Info,
-                        Code = "config-file-null-skipped",
-                        ConfigPath = path,
-                        Message = $"Skipping null file value at '{path}'."
-                    });
+                    diagnostics.Add(new ConfigFileProviderDiagnostic(
+                        environment,
+                        new ConfigAuditDiagnostic
+                        {
+                            Severity = ConfigAuditDiagnosticSeverity.Info,
+                            Code = "config-file-null-skipped",
+                            ConfigPath = path,
+                            Message = $"Skipping null file value at '{path}'."
+                        }));
                     continue;
                 }
 
-                origins[path] = CreateFileSource(file, path, sourceLocations);
+                origins[path] = CreateFileSource(file, path);
                 if (kvp.Value is JsonObject or JsonArray)
                 {
-                    RecordOrigins(kvp.Value, origins, file, sourceLocations, path, diagnostics);
+                    RecordOrigins(kvp.Value, origins, file, environment, path, diagnostics);
                 }
             }
         }
@@ -400,23 +554,20 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
                 var item = array[i];
                 if (item == null)
                 {
-                    origins[path] = CreateFileSource(file, path, sourceLocations);
+                    origins[path] = CreateFileSource(file, path);
                     continue;
                 }
 
-                origins[path] = CreateFileSource(file, path, sourceLocations);
+                origins[path] = CreateFileSource(file, path);
                 if (item is JsonObject or JsonArray)
                 {
-                    RecordOrigins(item, origins, file, sourceLocations, path, diagnostics);
+                    RecordOrigins(item, origins, file, environment, path, diagnostics);
                 }
             }
         }
     }
 
-    private ConfigAuditSourceRecord CreateFileSource(
-        string file,
-        string path,
-        ConfigFileSourceLocationMap sourceLocations) =>
+    private ConfigAuditSourceRecord CreateFileSource(string file, string path) =>
         new()
         {
             Kind = ConfigAuditSourceKind.File,
@@ -425,9 +576,37 @@ public class FileBasedConfigProvider : IConfigProvider, IConfigDiagnosticProvide
             FilePath = file,
             ConfigPath = path,
             AppliedToPath = path,
-            Location = sourceLocations.GetLocation(path),
             Role = ConfigAuditSourceRole.Base
         };
+
+    private static ConfigAuditSourceRecord AttachSourceLocation(ConfigFileProviderSnapshot snapshot, ConfigAuditSourceRecord source)
+    {
+        if (source.Location != null
+            || source.Kind != ConfigAuditSourceKind.File
+            || string.IsNullOrEmpty(source.FilePath)
+            || string.IsNullOrEmpty(source.ConfigPath)
+            || !snapshot.SourceLocationMaps.TryGetValue(source.FilePath, out var locationMap))
+        {
+            return source;
+        }
+
+        var location = locationMap.Value.GetLocation(source.ConfigPath);
+        return location == null
+            ? source
+            : new ConfigAuditSourceRecord
+            {
+                Kind = source.Kind,
+                ProviderName = source.ProviderName,
+                ProviderPriority = source.ProviderPriority,
+                FilePath = source.FilePath,
+                EnvironmentVariableName = source.EnvironmentVariableName,
+                ConfigPath = source.ConfigPath,
+                AppliedToPath = source.AppliedToPath,
+                Location = location,
+                Role = source.Role,
+                Sensitivity = source.Sensitivity
+            };
+    }
 
     private static ConfigAuditDiagnostic ToPublicDiagnostic(ConfigAuditDiagnostic diagnostic)
     {
@@ -726,7 +905,23 @@ internal sealed class ConfigFileSourceLocationMap
 internal sealed record ConfigFileProviderSnapshot(
     Dictionary<string, JsonNode> Environments,
     Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>> Origins,
-    IReadOnlyList<ConfigAuditDiagnostic> Diagnostics);
+    IReadOnlyList<ConfigFileProviderDiagnostic> Diagnostics,
+    IReadOnlyDictionary<string, Lazy<ConfigFileSourceLocationMap>> SourceLocationMaps)
+{
+    public ConfigFileProviderSnapshot(
+        Dictionary<string, JsonNode> environments,
+        Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>> origins,
+        IReadOnlyList<ConfigFileProviderDiagnostic> diagnostics)
+        : this(
+            environments,
+            origins,
+            diagnostics,
+            new Dictionary<string, Lazy<ConfigFileSourceLocationMap>>(StringComparer.OrdinalIgnoreCase))
+    {
+    }
+}
+
+internal sealed record ConfigFileProviderDiagnostic(string? Environment, ConfigAuditDiagnostic Diagnostic);
 
 internal static class ConfigAuditSourceRecordExtensions
 {

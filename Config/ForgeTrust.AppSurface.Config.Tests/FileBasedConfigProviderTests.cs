@@ -1,5 +1,7 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using FakeItEasy;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.AppSurface.Config.Tests;
@@ -883,6 +885,64 @@ public class FileBasedConfigProviderTests
 
         Assert.Null(map.GetLocation("Feature"));
         Assert.Null(map.GetLocation("Feature.Enabled"));
+    }
+
+    [Fact]
+    public void Resolve_CreatesSourceLocationMapLazilyForAuditRequests()
+    {
+        var mapCreationCount = 0;
+        var filePath = Path.Join(CreateTempDirectoryPath(), "appsettings.json");
+        var snapshot = new ConfigFileProviderSnapshot(
+            new Dictionary<string, JsonNode>(StringComparer.OrdinalIgnoreCase)
+            {
+                [Environments.Production] = new JsonObject
+                {
+                    ["Port"] = 5
+                }
+            },
+            new Dictionary<string, Dictionary<string, ConfigAuditSourceRecord>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [Environments.Production] = new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Port"] = new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.File,
+                        ProviderName = nameof(FileBasedConfigProvider),
+                        ProviderPriority = 1,
+                        FilePath = filePath,
+                        ConfigPath = "Port",
+                        AppliedToPath = "Port",
+                        Role = ConfigAuditSourceRole.Base
+                    }
+                }
+            },
+            [],
+            new Dictionary<string, Lazy<ConfigFileSourceLocationMap>>(StringComparer.OrdinalIgnoreCase)
+            {
+                [filePath] = new(
+                    () =>
+                    {
+                        mapCreationCount++;
+                        return ConfigFileSourceLocationMap.Create(Encoding.UTF8.GetBytes(
+                            """
+                            {
+                              "Port": 5
+                            }
+                            """));
+                    },
+                    isThreadSafe: true)
+            });
+        var provider = new FileBasedConfigProvider(snapshot);
+
+        Assert.Equal(5, provider.GetValue<int>(Environments.Production, "Port"));
+        Assert.Equal(0, mapCreationCount);
+
+        var source = AssertFileSource(Resolve(provider, "Port", typeof(int)));
+        AssertLocation(source, lineNumber: 2, byteColumnNumber: 3);
+        Assert.Equal(1, mapCreationCount);
+
+        _ = Resolve(provider, "Port", typeof(int));
+        Assert.Equal(1, mapCreationCount);
     }
 
     [Fact]
