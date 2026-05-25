@@ -18,6 +18,7 @@ AppSurface is preparing the first coordinated `v0.1.0` release. Before installin
 - **`FileBasedConfigProvider`**: Loads configuration from files.
 - **`IConfigAuditReporter`**: Builds source-aware configuration audit reports for known config entries.
 - **`ConfigAuditTextRenderer`**: Renders a safe, human-readable audit report from the structured model.
+- **`ConfigDiagnosticsCommandRunner`**: Runs the app-owned text diagnostics workflow for the active AppSurface environment.
 - **`Config<T>` / `ConfigStruct<T>`**: Base types for strongly typed configuration values.
 - **`ConfigKeyAttribute`**: Associates a configuration type or property with a specific key.
 - **`ConfigKeyRequiredAttribute`**: Requires a config wrapper to resolve a provider or default value during startup.
@@ -76,6 +77,76 @@ Explicit registrations are useful for keys that are read directly through `IConf
 services.AddConfigAuditKey<string>("Billing.Endpoint");
 ```
 
+### App-Owned Diagnostics Command
+
+Use `ConfigDiagnosticsCommandRunner` when an AppSurface console app should expose an operator command that prints the
+same audit report from inside the app's own DI graph. The runner is registered by `AppSurfaceConfigModule` and stays
+console-agnostic; your app owns the small CliFx wrapper:
+
+```csharp
+using CliFx;
+using CliFx.Binding;
+using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Config;
+
+namespace MyApp;
+
+[Command("config diagnostics", Description = "Prints the active AppSurface configuration audit report.")]
+public sealed partial class ConfigDiagnosticsCommand(ConfigDiagnosticsCommandRunner runner) : ICommand
+{
+    public ValueTask ExecuteAsync(IConsole console)
+    {
+        var result = runner.Run(console.Output);
+        if (!result.Succeeded)
+        {
+            throw new CommandException(result.Failure?.ToDisplayString() ?? "Configuration diagnostics failed.");
+        }
+
+        return default;
+    }
+}
+```
+
+Run the command from the app project:
+
+```bash
+dotnet run --project src/MyApp -- config diagnostics
+```
+
+The command audits the active AppSurface environment selected during host startup. It does not define a command-level
+`--environment` option; AppSurface already treats `--environment` as host startup input. A typical report starts like:
+
+```text
+Environment: Staging
+Providers:
+  0. EnvironmentConfigProvider (override)
+  1. FileBasedConfigProvider (priority 0)
+
+Entries:
+  Billing.Endpoint = https://billing.internal
+    State: Resolved
+    Source: FileBasedConfigProvider appsettings.Staging.json :: Billing.Endpoint
+  Billing.ApiKey = [redacted]
+    State: Resolved
+    Source: Environment variable BILLING__APIKEY
+  Retry.Count = 10
+    State: Invalid
+    Diagnostic: The configuration value must be between 1 and 5.
+```
+
+Known AppSurface audit entries only: the report includes discovered `Config<T>` / `ConfigStruct<T>` wrappers and
+entries registered with `AddConfigAuditKey<T>()`. It does not enumerate every raw environment variable, unused JSON key,
+or typo in a provider.
+
+Place the wrapper where AppSurface Console command discovery can see it. By default, `ConsoleStartup<TModule>` scans
+`StartupContext.EntryPointAssembly`, which is normally the root module assembly. If your command lives elsewhere, set
+`StartupContext.OverrideEntryPointAssembly` from a custom startup path.
+
+Diagnostics run after the app host and command service can start. They are not a diagnostic startup mode for apps that
+fail during host construction or eager validation before commands execute. AppSurface console commands also run inside
+the normal Generic Host lifecycle, so unrelated hosted services can start unless your app owns a separate command-only
+startup path.
+
 Audit entry states are intentionally small:
 
 | State | Meaning |
@@ -112,7 +183,9 @@ variable names render as `[redacted]`. The built-in fragments include `password`
 
 Redaction is deliberately conservative. It does not expose string lengths, sensitive collection counts, or sensitive
 nested values. Source metadata remains visible unless a provider marks the source metadata itself as sensitive. This
-keeps reports safe to paste into support issues while still showing where a value came from.
+keeps values redacted while still showing where a value came from. Treat rendered reports as internal support data:
+provider names, file names, environment variable names, key names, and the existence of redacted values can still be
+operationally sensitive.
 
 Collection parent values are omitted instead of serialized when the collection key and source metadata are not
 sensitive. This avoids leaking nested element fields such as `Password`, `Token`, `Secret`, or `ApiKey` through a raw
