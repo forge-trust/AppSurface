@@ -532,10 +532,10 @@ internal sealed partial class ExportReferenceProcessor
             }
 
             var tagName = html[nameStart..nameEnd];
-            yield return new TagSpan(tagName, index, tagEnd - index + 1, nameEnd, tagEnd);
+            var tag = new TagSpan(tagName, index, tagEnd - index + 1, nameEnd, tagEnd);
+            yield return tag;
             if (IsRawTextElement(tagName) && !IsSelfClosingTag(html, index, tagEnd))
             {
-                var tag = new TagSpan(tagName, index, tagEnd - index + 1, nameEnd, tagEnd);
                 if (TryFindRawTextClose(html, tag, out _, out var closeEnd))
                 {
                     index = closeEnd;
@@ -1025,12 +1025,10 @@ internal sealed partial class ExportReferenceProcessor
 
     private static HtmlAttributeSpan? GetAttribute(IReadOnlyList<HtmlAttributeSpan> attributes, string name)
     {
-        foreach (var attribute in attributes.Where(attribute => attribute.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
-        {
-            return attribute;
-        }
-
-        return null;
+        return attributes
+            .Where(attribute => attribute.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            .Select<HtmlAttributeSpan, HtmlAttributeSpan?>(attribute => attribute)
+            .FirstOrDefault();
     }
 
     private static string? GetAttributeValue(IReadOnlyList<HtmlAttributeSpan> attributes, string name)
