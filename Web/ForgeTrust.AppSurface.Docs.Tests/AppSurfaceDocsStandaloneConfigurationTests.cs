@@ -8,11 +8,9 @@ public sealed class AppSurfaceDocsStandaloneConfigurationTests
     public void StandaloneHarvestIncludeGlobs_ShouldExposeRootChangelog()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
-        var appSettingsPath = Path.Combine(
-            repoRoot,
-            "Web",
-            "ForgeTrust.AppSurface.Docs.Standalone",
-            "appsettings.json");
+        var appSettingsPath = Path.GetFullPath(
+            Path.Join("Web", "ForgeTrust.AppSurface.Docs.Standalone", "appsettings.json"),
+            repoRoot);
 
         using var document = JsonDocument.Parse(File.ReadAllText(appSettingsPath));
         var includeGlobs = document.RootElement

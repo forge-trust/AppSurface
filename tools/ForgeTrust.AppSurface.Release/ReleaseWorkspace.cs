@@ -87,7 +87,16 @@ internal sealed class ReleaseWorkspace
     /// </summary>
     /// <param name="relativePath">Repository-relative path using slash separators.</param>
     /// <returns>Absolute path.</returns>
-    internal string PathFor(string relativePath) => Path.Combine(RepositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+    internal string PathFor(string relativePath)
+    {
+        var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedRelativePath))
+        {
+            throw new ArgumentException("Release workspace paths must be repository-relative.", nameof(relativePath));
+        }
+
+        return Path.Join(RepositoryRoot, normalizedRelativePath);
+    }
 
     /// <summary>
     /// Formats an absolute path as a slash-normalized repository-relative path.

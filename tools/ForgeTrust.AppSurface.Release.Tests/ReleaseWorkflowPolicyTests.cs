@@ -51,7 +51,13 @@ public sealed class ReleaseWorkflowPolicyTests
     private static async Task<string> ReadRepositoryFileAsync(string relativePath)
     {
         var root = FindRepositoryRoot();
-        return await File.ReadAllTextAsync(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedRelativePath))
+        {
+            throw new ArgumentException("Repository file paths must be relative.", nameof(relativePath));
+        }
+
+        return await File.ReadAllTextAsync(Path.Join(root, normalizedRelativePath));
     }
 
     private static string FindRepositoryRoot()

@@ -63,9 +63,20 @@ internal sealed class ReleasePublishing
 
         var notePathInTag = $"releases/v{options.Version}.md";
         var note = await RequireCommandOutputAsync("git", ["show", $"{tag}:{notePathInTag}"], "release-note-missing-from-tag", cancellationToken);
-        var tempDirectory = Path.Combine(Path.GetTempPath(), "appsurface-release", tag);
+        var safeTagSegment = Path.GetFileName(tag);
+        if (string.IsNullOrWhiteSpace(safeTagSegment))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-tag-invalid-temp-path",
+                $"Tag '{tag}' cannot be used for release output paths.",
+                "The tag does not contain a file-name-safe segment for the temporary release notes path.",
+                "Use the canonical release tag form `v{version}` and retry.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+        }
+
+        var tempDirectory = Path.Join(Path.GetTempPath(), "appsurface-release", safeTagSegment);
         Directory.CreateDirectory(tempDirectory);
-        var notesFile = Path.Combine(tempDirectory, "release-notes.md");
+        var notesFile = Path.Join(tempDirectory, "release-notes.md");
         await File.WriteAllTextAsync(notesFile, note, cancellationToken);
 
         return new PublishOutputs(

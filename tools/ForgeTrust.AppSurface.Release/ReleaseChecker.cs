@@ -48,17 +48,14 @@ internal sealed class ReleaseChecker
         var warnings = new List<ReleaseDiagnostic>();
         var generatedFiles = GeneratedFiles(options.Version);
 
-        foreach (var requiredPath in RequiredPaths())
+        foreach (var requiredPath in RequiredPaths().Where(requiredPath => !File.Exists(requiredPath)))
         {
-            if (!File.Exists(requiredPath))
-            {
-                errors.Add(ReleaseDiagnostic.Error(
-                    "release-required-file-missing",
-                    $"Required release input '{_workspace.DisplayPath(requiredPath)}' is missing.",
-                    "Release preparation needs the living note, sidecar metadata, changelog, tagged template, and package manifest.",
-                    "Restore the file or run from the repository root before retrying.",
-                    "releases/release-authoring-checklist.md"));
-            }
+            errors.Add(ReleaseDiagnostic.Error(
+                "release-required-file-missing",
+                $"Required release input '{_workspace.DisplayPath(requiredPath)}' is missing.",
+                "Release preparation needs the living note, sidecar metadata, changelog, tagged template, and package manifest.",
+                "Restore the file or run from the repository root before retrying.",
+                "releases/release-authoring-checklist.md"));
         }
 
         if (options.AllowExistingTargets && string.Equals(options.Command, "check", StringComparison.Ordinal))

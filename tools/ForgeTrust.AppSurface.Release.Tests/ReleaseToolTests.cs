@@ -1,5 +1,8 @@
 using System.Text.Json;
+using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Release;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.AppSurface.Release.Tests;
 
@@ -105,11 +108,35 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task PrepareWritesExternalReportDuringDryRun()
+    {
+        await SeedRepositoryAsync();
+        var reportPath = Path.Combine(Path.GetTempPath(), "ReleaseToolReports", Guid.NewGuid().ToString("N"), "prepare-report.md");
+
+        var result = await RunAsync(
+            [
+                "prepare",
+                "--version",
+                "0.1.0-preview.1",
+                "--date",
+                "2026-05-25",
+                "--dry-run",
+                "--report",
+                reportPath
+            ],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(reportPath));
+        Assert.Contains("# Release readiness report", await File.ReadAllTextAsync(reportPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PrepareWritesReleaseArtifactsAndUpdatesPublicPublishedPackagePaths()
     {
         await SeedRepositoryAsync();
-        var stdout = new StringWriter();
-        var stderr = new StringWriter();
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
 
         var exitCode = await Program.RunAsync(
             ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
@@ -170,6 +197,22 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(reportPath));
         Assert.Contains("# Release readiness report", await File.ReadAllTextAsync(reportPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckReportsReportWriteFailuresThroughDiagnosticEnvelope()
+    {
+        await SeedRepositoryAsync();
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-preview.1", "--report", _repositoryRoot],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.True(
+            result.Stderr.Contains("Code: release-io-failure", StringComparison.Ordinal)
+                || result.Stderr.Contains("Code: release-path-permission-denied", StringComparison.Ordinal),
+            result.Stderr);
     }
 
     [Fact]
@@ -431,6 +474,182 @@ public sealed class ReleaseToolTests : IDisposable
             """,
             "releases/v0.1.0-preview.1.md");
         Assert.Contains("release_notes_path: releases/v0.1.0-preview.1.md", packageIndex, StringComparison.Ordinal);
+
+        var appendedChangelog = ChangelogEditor.RollForward(
+            "# Changelog\n",
+            version,
+            new DateOnly(2026, 5, 25),
+            "releases/v0.1.0-preview.1.md");
+        Assert.Contains("## 0.1.0-preview.1 - 2026-05-25", appendedChangelog, StringComparison.Ordinal);
+
+        var terminalUnreleasedChangelog = ChangelogEditor.RollForward(
+            "# Changelog\n\n## Unreleased\n\n- Current work.\n",
+            version,
+            new DateOnly(2026, 5, 25),
+            "releases/v0.1.0-preview.1.md");
+        Assert.Contains("- Current work.", terminalUnreleasedChangelog, StringComparison.Ordinal);
+        Assert.Contains("## 0.1.0-preview.1 - 2026-05-25", terminalUnreleasedChangelog, StringComparison.Ordinal);
+
+        var multiReleaseChangelog = ChangelogEditor.RollForward(
+            "# Changelog\n\n## Unreleased\n\n## 0.0.1 - 2026-01-01\n\n- Previous work.\n",
+            version,
+            new DateOnly(2026, 5, 25),
+            "releases/v0.1.0-preview.1.md");
+        Assert.Matches("## Unreleased[\\s\\S]*## 0\\.1\\.0-preview\\.1 - 2026-05-25[\\s\\S]*## 0\\.0\\.1 - 2026-01-01", multiReleaseChangelog);
+
+        var packageIndexWithoutOrder = PackageIndexEditor.UpdatePublicPublishedReleaseNotes(
+            """
+            packages:
+              - project: Core.csproj
+                classification: public
+                publish_decision: publish
+            """,
+            "releases/v0.1.0-preview.1.md");
+        Assert.EndsWith("    release_notes_path: releases/v0.1.0-preview.1.md" + Environment.NewLine, packageIndexWithoutOrder, StringComparison.Ordinal);
+
+        var placeholderWithFollowingRelease = ChangelogEditor.RollForward(
+            """
+            # Changelog
+
+            ## Unreleased
+
+            ## No tagged releases yet
+
+            Placeholder.
+
+            ## 0.0.1 - 2026-01-01
+
+            - Previous work.
+            """,
+            version,
+            new DateOnly(2026, 5, 25),
+            "releases/v0.1.0-preview.1.md");
+        Assert.DoesNotContain("Placeholder.", placeholderWithFollowingRelease, StringComparison.Ordinal);
+        Assert.Contains("## 0.0.1 - 2026-01-01", placeholderWithFollowingRelease, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ModuleRegistersReleaseServicesAndNoOpHooks()
+    {
+        var module = new ReleaseCliModule();
+        var context = new StartupContext([], module);
+        var services = new ServiceCollection();
+
+        module.ConfigureServices(context, services);
+        module.ConfigureHostBeforeServices(context, Host.CreateDefaultBuilder());
+        module.ConfigureHostAfterServices(context, Host.CreateDefaultBuilder());
+        module.RegisterDependentModules(new ModuleDependencyBuilder());
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Equal(Directory.GetCurrentDirectory(), provider.GetRequiredService<ReleaseExecutionContext>().CurrentDirectory);
+        Assert.IsType<ProcessCommandRunner>(provider.GetRequiredService<ICommandRunner>());
+        Assert.IsType<SystemReleaseClock>(provider.GetRequiredService<IReleaseClock>());
+    }
+
+    [Fact]
+    public void WorkspaceRejectsRootedRepositoryRelativePaths()
+    {
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+
+        var exception = Assert.Throws<ArgumentException>(() => workspace.PathFor(Path.GetTempPath()));
+
+        Assert.Equal("relativePath", exception.ParamName);
+    }
+
+    [Fact]
+    public async Task PublishReportsPrereleasePackageWorkflowErrors()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        runner.Add(
+            "gh run list --workflow nuget-prerelease-publish.yml --commit abc123 --json conclusion,headBranch,status,url --jq [.[] | select(.headBranch == \"v0.1.0-preview.1\" and .status == \"completed\" and .conclusion == \"success\")][0].url // \"\"",
+            new CommandResult(1, "", "workflow query failed"));
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-prerelease-packages-not-published", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("workflow query failed", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishReportsCommandStdoutWhenStderrIsEmpty()
+    {
+        await SeedRepositoryAsync();
+        var runner = CreateSuccessfulPublishRunner();
+        runner.Add("git rev-parse refs/tags/v0.1.0-preview.1^{commit}", new CommandResult(1, "stdout failure", ""));
+
+        var result = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--dry-run"],
+            runner);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("stdout failure", result.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsTagsThatCannotCreateTempPath()
+    {
+        await SeedRepositoryAsync();
+        var runner = new FakeCommandRunner();
+        runner.Add("git cat-file -t refs/tags//", new CommandResult(0, "tag\n", ""));
+        runner.Add("git rev-parse refs/tags//^{commit}", new CommandResult(0, "abc123\n", ""));
+        runner.Add("git merge-base --is-ancestor abc123 origin/main", new CommandResult(0, "", ""));
+        runner.Add("gh run list --workflow nuget-prerelease-publish.yml --commit abc123 --json conclusion,headBranch,status,url --jq [.[] | select(.headBranch == \"/\" and .status == \"completed\" and .conclusion == \"success\")][0].url // \"\"", new CommandResult(0, "https://github.com/example/actions/runs/1\n", ""));
+        runner.Add("gh release view / --json url", new CommandResult(1, "", "not found"));
+        runner.Add("git show /:releases/v0.1.0-preview.1.md", new CommandResult(0, "# Release 0.1.0-preview.1\n", ""));
+        var publishing = new ReleasePublishing(new ReleaseWorkspace(_repositoryRoot), runner);
+        var options = new ReleaseOptions(
+            "publish",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            "/",
+            Date: null,
+            DryRun: true,
+            ReportPath: null,
+            GitHubOutputPath: null,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => publishing.PublishAsync(options, CancellationToken.None));
+
+        Assert.Equal("release-tag-invalid-temp-path", exception.Diagnostic.Code);
+    }
+
+    [Fact]
+    public async Task PublishWritesMultilineGithubOutputs()
+    {
+        await SeedRepositoryAsync();
+        var githubOutput = Path.Combine(_repositoryRoot, "artifacts", "github-output.txt");
+        var publishing = new ReleasePublishing(new ReleaseWorkspace(_repositoryRoot), new FakeCommandRunner());
+        var options = new ReleaseOptions(
+            "publish",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            "v0.1.0-preview.1",
+            Date: null,
+            DryRun: true,
+            ReportPath: null,
+            GitHubOutputPath: githubOutput,
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+        var outputs = new PublishOutputs(
+            "0.1.0-preview.1",
+            "v0.1.0-preview.1",
+            "abc123",
+            "releases/v0.1.0-preview.1.md",
+            "first\nsecond",
+            "prerelease",
+            Prerelease: true,
+            DryRun: true);
+
+        await publishing.WriteOutputsAsync(outputs, options, CancellationToken.None);
+
+        var output = await File.ReadAllTextAsync(githubOutput);
+        Assert.Contains("notes_file<<EOF_", output, StringComparison.Ordinal);
+        Assert.Contains("first\nsecond", output, StringComparison.Ordinal);
     }
 
     public void Dispose()
@@ -525,8 +744,8 @@ public sealed class ReleaseToolTests : IDisposable
 
     private async Task<CliResult> RunAsync(string[] args, FakeCommandRunner runner)
     {
-        var stdout = new StringWriter();
-        var stderr = new StringWriter();
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
         var exitCode = await Program.RunAsync(
             args,
             stdout,

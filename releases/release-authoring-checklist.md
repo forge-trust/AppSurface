@@ -14,7 +14,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 
 - run `./eng/release prepare --version x.y.z --date YYYY-MM-DD` from an up-to-date `main` branch
 - review the generated `releases/vx.y.z.md`, `releases/vx.y.z.md.yml`, and `releases/vx.y.z.release.json`
-- confirm the generated package path updates in [`packages/package-index.yml`](../packages/package-index.yml) point every `classification: public` plus `publish_decision: publish` package at the tagged note
+- confirm the generated package path updates described in the [package registry](../packages/README.md) point every `classification: public` plus `publish_decision: publish` package at the tagged note
 - keep the trust bar accurate for the release state and archive location
 - link the tagged note from [`CHANGELOG.md`](../CHANGELOG.md)
 
