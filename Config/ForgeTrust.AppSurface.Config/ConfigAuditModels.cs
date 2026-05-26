@@ -140,7 +140,8 @@ public sealed class ConfigAuditEntry
 /// <remarks>
 /// Array and list entries use zero-based <see cref="Index"/> values. Dictionary entries use <see cref="KeyLabel"/>,
 /// which is either the non-sensitive key label, a display-suppressed placeholder, or an in-report redaction label such
-/// as <c>[redacted-key-1]</c>. Labels are intended for display and comparison within one report only.
+/// as <c>[redacted-key-1]</c>. Labels are intended for display and comparison within one report only. When configured,
+/// <see cref="KeyCorrelationId"/> is the separate opaque value for comparing dictionary keys across reports.
 /// </remarks>
 public sealed class ConfigAuditElementIdentity
 {
@@ -163,6 +164,16 @@ public sealed class ConfigAuditElementIdentity
     /// Gets a value indicating whether the original dictionary key was redacted or intentionally hidden.
     /// </summary>
     public bool IsKeyRedacted { get; init; }
+
+    /// <summary>
+    /// Gets the opt-in opaque identifier for correlating the same dictionary key across reports.
+    /// </summary>
+    /// <remarks>
+    /// This value is populated only when entry options enable dictionary key correlation and global correlation key
+    /// material is valid. It is not reversible, is not part of the display path, and should still be treated as
+    /// sensitive support metadata because it reveals equality and churn across reports.
+    /// </remarks>
+    public string? KeyCorrelationId { get; init; }
 }
 
 /// <summary>
@@ -268,7 +279,8 @@ public sealed class ConfigAuditDiagnostic
 /// <remarks>
 /// The built-in policy is always enabled and uses fragment matching before values are exposed through
 /// <see cref="ConfigAuditEntry.DisplayValue"/>. <see cref="MatchedFragments"/> is a snapshot for explanation, not a
-/// mutable policy hook.
+/// mutable policy hook. Dictionary key correlation metadata describes the configured report policy without exposing
+/// the secret key used for scoped HMAC derivation.
 /// </remarks>
 public sealed class ConfigAuditRedaction
 {
@@ -286,6 +298,36 @@ public sealed class ConfigAuditRedaction
     /// Gets the display placeholder used for redacted values.
     /// </summary>
     public required string Placeholder { get; init; }
+
+    /// <summary>
+    /// Gets the configured dictionary key correlation mode for the report.
+    /// </summary>
+    public ConfigAuditDictionaryKeyCorrelationMode DictionaryKeyCorrelationMode { get; init; } = ConfigAuditDictionaryKeyCorrelationMode.None;
+
+    /// <summary>
+    /// Gets the display-safe correlation key id when configured.
+    /// </summary>
+    public string? DictionaryKeyCorrelationKeyId { get; init; }
+
+    /// <summary>
+    /// Gets the configured application or product scope when configured.
+    /// </summary>
+    public string? DictionaryKeyCorrelationApplicationScope { get; init; }
+}
+
+/// <summary>
+/// Identifies how dictionary keys should receive cross-report correlation identifiers.
+/// </summary>
+/// <remarks>
+/// Values are explicit and append-only so serialized reports remain stable across releases.
+/// </remarks>
+public enum ConfigAuditDictionaryKeyCorrelationMode
+{
+    /// <summary>Dictionary keys use display labels only; redacted labels are report-local.</summary>
+    None = 0,
+
+    /// <summary>Dictionary keys receive scoped HMAC identifiers when global correlation key material is configured.</summary>
+    ScopedHmac = 1
 }
 
 /// <summary>

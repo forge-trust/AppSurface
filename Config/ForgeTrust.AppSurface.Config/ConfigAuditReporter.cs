@@ -1,6 +1,7 @@
 using System.Reflection;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace ForgeTrust.AppSurface.Config;
 
@@ -54,6 +55,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     private readonly IReadOnlyList<ConfigAuditKnownEntry> _knownEntries;
     private readonly IServiceProvider _serviceProvider;
     private readonly ConfigAuditRedactor _redactor;
+    private readonly ConfigAuditDictionaryKeyCorrelationOptions _correlationOptions;
     private readonly ConfigAuditValueTraverser _traverser;
 
     public ConfigAuditReporter(
@@ -61,7 +63,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         IEnumerable<IConfigProvider>? providers,
         IEnumerable<ConfigAuditKnownEntry>? knownEntries,
         IServiceProvider serviceProvider,
-        ConfigAuditRedactor redactor)
+        ConfigAuditRedactor redactor,
+        IOptions<ConfigAuditDictionaryKeyCorrelationOptions> correlationOptions)
     {
         _environmentProvider = environmentProvider;
         _otherProviders = providers?
@@ -77,6 +80,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                         ?? [];
         _serviceProvider = serviceProvider;
         _redactor = redactor;
+        _correlationOptions = correlationOptions.Value;
         _traverser = new ConfigAuditValueTraverser(redactor);
     }
 
@@ -85,6 +89,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         ArgumentException.ThrowIfNullOrWhiteSpace(environment);
 
         var entries = _knownEntries.Select(entry => BuildEntry(environment, entry)).ToList();
+        var dictionaryKeyCorrelationRequested = _knownEntries.Any(entry =>
+            entry.OptionsSnapshot.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac);
         return new ConfigAuditReport
         {
             Environment = environment,
@@ -92,7 +98,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             Providers = BuildProviderList(),
             Entries = entries,
             Diagnostics = BuildReportDiagnostics(environment),
-            Redaction = _redactor.CreatePolicy()
+            Redaction = _redactor.CreatePolicy(_correlationOptions, dictionaryKeyCorrelationRequested)
         };
     }
 
@@ -163,13 +169,16 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             : resolution.AuditSources;
         var optionsDiagnostics = knownEntry.OptionsSnapshot.Validate(knownEntry.Key);
         var options = optionsDiagnostics.Count == 0 ? knownEntry.OptionsSnapshot : knownEntry.OptionsSnapshot.Normalize();
+        var correlation = new ConfigAuditDictionaryKeyCorrelator(_correlationOptions)
+            .CreateContext(environment, knownEntry.Key);
         var traversal = _traverser.BuildChildren(
             ConfigAuditPath.Root(knownEntry.Key),
             rawValue,
             traversalSources,
             options,
             new HashSet<object>(ReferenceEqualityComparer.Instance),
-            new ConfigAuditDictionaryLabelSet());
+            new ConfigAuditDictionaryLabelSet(),
+            correlation);
         var diagnostics = resolution.Diagnostics
             .Concat(inspection.Diagnostics)
             .Concat(optionsDiagnostics)

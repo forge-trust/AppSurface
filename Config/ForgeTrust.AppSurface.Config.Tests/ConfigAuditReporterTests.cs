@@ -10,6 +10,9 @@ namespace ForgeTrust.AppSurface.Config.Tests;
 
 public class ConfigAuditReporterTests
 {
+    private const string CorrelationSecretA = "0123456789abcdef0123456789abcdef";
+    private const string CorrelationSecretB = "abcdef0123456789abcdef0123456789";
+
     [ConfigKey("Region", root: true)]
     private sealed class RegionConfig : Config<string>
     {
@@ -580,6 +583,255 @@ public class ConfigAuditReporterTests
         Assert.DoesNotContain("tenant-password", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("alpha", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("beta", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_LeavesDictionaryKeyCorrelationAbsentByDefault()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            enableEntryCorrelation: false);
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+
+        Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, report.Redaction.DictionaryKeyCorrelationMode);
+        Assert.Null(report.Redaction.DictionaryKeyCorrelationKeyId);
+        Assert.Null(report.Redaction.DictionaryKeyCorrelationApplicationScope);
+    }
+
+    [Fact]
+    public void GetReport_CreatesStableScopedDictionaryKeyCorrelationIds()
+    {
+        var firstReport = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token");
+        var first = GetSingleCorrelationId(firstReport);
+        var duplicate = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token"));
+        var differentKey = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-password"));
+
+        Assert.Equal(first, duplicate);
+        Assert.NotEqual(first, differentKey);
+        Assert.StartsWith("v1:kid-a:", first, StringComparison.Ordinal);
+        Assert.Equal("v1:kid-a:".Length + 24, first.Length);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac, firstReport.Redaction.DictionaryKeyCorrelationMode);
+        Assert.Equal("kid-a", firstReport.Redaction.DictionaryKeyCorrelationKeyId);
+        Assert.Equal("app-a", firstReport.Redaction.DictionaryKeyCorrelationApplicationScope);
+    }
+
+    [Fact]
+    public void GetReport_ScopesDictionaryKeyCorrelationIds()
+    {
+        var baseline = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token"));
+        var changedEnvironment = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Staging",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token"));
+        var changedRootKey = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Accounts",
+            rawDictionaryKey: "tenant-secret-token"));
+        var changedScope = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            applicationScope: "other-app"));
+        var changedKeyId = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            keyId: "kid-b"));
+        var changedSecret = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            secretKey: CorrelationSecretB));
+
+        Assert.NotEqual(baseline, changedEnvironment);
+        Assert.NotEqual(baseline, changedRootKey);
+        Assert.NotEqual(baseline, changedScope);
+        Assert.NotEqual(baseline, changedKeyId);
+        Assert.NotEqual(baseline, changedSecret);
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationReportsMissingGlobalKeyMaterial()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            configureGlobalOptions: false,
+            enableEntryCorrelation: true);
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+
+        Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-key-correlation-unavailable");
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationReportsInvalidGlobalKeyMaterial()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            secretKey: "too-short");
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+
+        Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Contains(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Code == "config-audit-key-correlation-unavailable"
+                          && diagnostic.Message.Contains("at least 32 UTF-8 bytes", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationRejectsUnsafeKeyIds()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            keyId: "kid-a\nforged-line");
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+        var rendered = new ConfigAuditTextRenderer().Render(report);
+
+        Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Null(report.Redaction.DictionaryKeyCorrelationKeyId);
+        Assert.Contains(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Code == "config-audit-key-correlation-unavailable"
+                          && diagnostic.Message.Contains("ASCII letters", StringComparison.Ordinal));
+        Assert.DoesNotContain("forged-line", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationUsesTrimmedMetadata()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            applicationScope: " app-a ",
+            keyId: " kid-a ");
+        var correlationId = GetSingleCorrelationId(report);
+
+        Assert.StartsWith("v1:kid-a:", correlationId, StringComparison.Ordinal);
+        Assert.Equal("kid-a", report.Redaction.DictionaryKeyCorrelationKeyId);
+        Assert.Equal("app-a", report.Redaction.DictionaryKeyCorrelationApplicationScope);
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationDoesNotExposeRawKeys()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token");
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+        var correlationId = child.Element?.KeyCorrelationId;
+        Assert.NotNull(correlationId);
+        var rendered = new ConfigAuditTextRenderer().Render(report);
+        var serialized = JsonSerializer.Serialize(report);
+
+        Assert.DoesNotContain(correlationId!, child.Key, StringComparison.Ordinal);
+        Assert.Contains($"Key correlation: {correlationId}", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-token", child.Key, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-token", child.Element?.KeyLabel, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-token", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-token", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha-secret-value", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha-secret-value", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationWorksWhenDictionaryKeyDisplayIsDisabled()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-a",
+            displayDictionaryKeys: false);
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+        var correlationId = child.Element?.KeyCorrelationId;
+        Assert.NotNull(correlationId);
+        var rendered = new ConfigAuditTextRenderer().Render(report);
+        var serialized = JsonSerializer.Serialize(report);
+
+        Assert.Equal("Tenants[[key]]", child.Key);
+        Assert.Equal("[key]", child.Element?.KeyLabel);
+        Assert.True(child.Element?.IsKeyRedacted);
+        Assert.Contains($"Key correlation: {correlationId}", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-a", child.Key, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-a", child.Element?.KeyLabel, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-a", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-a", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_ManualOptionOverridesWrapperDictionaryCorrelationPolicy()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
+        {
+            options.SecretKey = CorrelationSecretA;
+            options.KeyId = "kid-a";
+            options.ApplicationScope = "app-a";
+        });
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Tenants"] = new Dictionary<string, string>
+                    {
+                        ["tenant-secret-token"] = "alpha-secret-value"
+                    }
+                }));
+        services.AddSingleton(new ConfigAuditKnownEntry(
+            "Tenants",
+            typeof(object),
+            typeof(Dictionary<string, string>),
+            new ConfigAuditEntryOptions
+            {
+                TraverseCollectionElements = true,
+                DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.None
+            }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "tenants",
+            options => options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        Assert.NotNull(GetSingleCorrelationId(report));
     }
 
     [Fact]
@@ -1265,6 +1517,7 @@ public class ConfigAuditReporterTests
                 Mode = "file"
             }));
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigAuditRedactor>();
         services.AddConfigAuditKey<AppSettings>("MyApp.Settings");
 
@@ -1364,9 +1617,69 @@ public class ConfigAuditReporterTests
         services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();
         services.AddSingleton<IConfigProvider, FileBasedConfigProvider>();
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigAuditRedactor>();
         services.AddSingleton<ConfigAuditTextRenderer>();
         return services;
+    }
+
+    private static ConfigAuditReport CreateCorrelationReport(
+        string environmentName,
+        string rootKey,
+        string rawDictionaryKey,
+        string applicationScope = "app-a",
+        string keyId = "kid-a",
+        string secretKey = CorrelationSecretA,
+        bool configureGlobalOptions = true,
+        bool enableEntryCorrelation = true,
+        bool displayDictionaryKeys = true)
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        if (configureGlobalOptions)
+        {
+            services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
+            {
+                options.SecretKey = secretKey;
+                options.KeyId = keyId;
+                options.ApplicationScope = applicationScope;
+            });
+        }
+
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    [rootKey] = new Dictionary<string, string>
+                    {
+                        [rawDictionaryKey] = "alpha-secret-value"
+                    }
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            rootKey,
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.DisplayDictionaryKeys = displayDictionaryKeys;
+                if (enableEntryCorrelation)
+                {
+                    options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac;
+                }
+            });
+
+        return services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport(environmentName);
+    }
+
+    private static string GetSingleCorrelationId(ConfigAuditReport report)
+    {
+        var entry = Assert.Single(report.Entries);
+        var child = Assert.Single(entry.Children);
+        Assert.NotNull(child.Element?.KeyCorrelationId);
+        return child.Element!.KeyCorrelationId!;
     }
 
     private static ConfigAuditEntry AssertEntry(

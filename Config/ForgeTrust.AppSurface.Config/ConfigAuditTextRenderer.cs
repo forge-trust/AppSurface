@@ -55,6 +55,11 @@ public sealed class ConfigAuditTextRenderer
             builder.AppendLine($"{indent}  Source: {FormatSource(source)}");
         }
 
+        if (entry.Element?.KeyCorrelationId != null)
+        {
+            builder.AppendLine($"{indent}  Key correlation: {entry.Element.KeyCorrelationId}");
+        }
+
         foreach (var diagnostic in entry.Diagnostics)
         {
             builder.AppendLine($"{indent}  Diagnostic: {diagnostic.Message}");

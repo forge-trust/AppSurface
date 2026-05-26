@@ -19,6 +19,7 @@ AppSurface is preparing the first coordinated `v0.1.0` release. Before installin
 - **`IConfigAuditReporter`**: Builds source-aware configuration audit reports for known config entries.
 - **`ConfigAuditTextRenderer`**: Renders a safe, human-readable audit report from the structured model.
 - **`ConfigAuditCollectionTraversalAttribute`**: Enables bounded collection element traversal for a discovered config wrapper.
+- **`ConfigAuditDictionaryKeyCorrelationOptions`**: Supplies opt-in scoped HMAC key material for dictionary key correlation ids.
 - **`ConfigDiagnosticsCommandRunner`**: Runs the app-owned text diagnostics workflow for the active AppSurface environment.
 - **`Config<T>` / `ConfigStruct<T>`**: Base types for strongly typed configuration values.
 - **`ConfigKeyAttribute`**: Associates a configuration type or property with a specific key.
@@ -255,12 +256,16 @@ because they cannot form an unambiguous raw config path.
 | `MaxCollectionElements` | `128` | Stops after this many elements from any one collection. |
 | `MaxReportNodes` | `4096` | Bounds total child nodes created for the entry. |
 | `DisplayDictionaryKeys` | `true` | Allows non-sensitive dictionary keys to appear as labels. Sensitive keys are still redacted. |
+| `DictionaryKeyCorrelationMode` | `None` | Adds no durable dictionary key metadata unless explicitly set to `ScopedHmac`. |
 
 For discovered wrappers, use `ConfigAuditCollectionTraversalAttribute`. Attribute presence enables traversal and its
 named properties mirror the bounded options:
 
 ```csharp
-[ConfigAuditCollectionTraversal(MaxCollectionElements = 32, DisplayDictionaryKeys = false)]
+[ConfigAuditCollectionTraversal(
+    MaxCollectionElements = 32,
+    DisplayDictionaryKeys = false,
+    DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac)]
 public sealed class ServicesByNameConfig : Config<Dictionary<string, ServiceEndpoint>>
 {
 }
@@ -276,6 +281,7 @@ services.AddConfigAuditKey<Dictionary<string, ServiceEndpoint>>(
     {
         options.TraverseCollectionElements = true;
         options.MaxCollectionElements = 32;
+        options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac;
     });
 ```
 
@@ -294,12 +300,45 @@ services.AddSingleton(
 Each collection child can include `ConfigAuditEntry.Element`. Array and list entries set `Element.Kind` to
 `ArrayItem` or `ListItem` and set `Element.Index`. Dictionary entries set `Element.Kind` to `DictionaryItem` and set
 `Element.KeyLabel` to a display-safe label. Redacted dictionary labels are report-local, for example
-`[redacted-key-1]`; they are not stable identifiers across reports.
+`[redacted-key-1]`; they are not stable identifiers across reports. When dictionary key correlation is explicitly
+enabled and configured, dictionary entries also set `Element.KeyCorrelationId` to a separate opaque identifier. The
+correlation id is metadata; it is never part of `ConfigAuditEntry.Key` or `Element.KeyLabel`.
 
 When wrapper discovery and manual registration use the same key, the wrapper remains the source of wrapper metadata
 and validation behavior. Explicit manual option assignments override wrapper attribute options per property, including
 assignments back to the default value. For example, a wrapper can hide dictionary keys by default while one manual
 registration sets `DisplayDictionaryKeys = true` for a provider-only report composition.
+
+### Dictionary Key Correlation
+
+Dictionary key correlation is an opt-in support workflow for comparing hidden dictionary keys across reports. It does
+not reveal raw keys and does not make `[redacted-key-1]` durable. Enable it per audit entry with
+`DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac`, then configure global key material
+with `ConfigAuditDictionaryKeyCorrelationOptions`:
+
+```csharp
+services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
+{
+    options.SecretKey = configuration["ConfigAudit:CorrelationSecret"];
+    options.KeyId = "config-audit-2026-05";
+    options.ApplicationScope = "billing-service";
+});
+```
+
+The secret key is interpreted as UTF-8 and must contain at least 32 bytes. AppSurface derives ids with HMAC-SHA256 over
+the algorithm version, application scope, report environment, root audit key, and raw dictionary key, then truncates the
+result to 96 bits. Rendered ids look like `v1:{keyId}:{24-hex-chars}`. The key id is trimmed and can contain only ASCII
+letters, digits, `.`, `_`, and `-` so rendered reports remain line-safe. Changing the secret key, key id, application
+scope, environment, or root audit key intentionally changes the id.
+
+If correlation is enabled for an entry but global key material is missing or invalid, the report keeps current
+report-local labels, omits `KeyCorrelationId`, and emits `config-audit-key-correlation-unavailable`. Support bundles may
+include correlation ids, key id, and application scope, but must never include the secret key or a raw-key mapping.
+
+Treat correlation ids as sensitive support metadata. They reveal equality, absence, recurrence, and churn across
+reports. If an attacker can choose dictionary keys and obtain reports, they can still test chosen inputs against
+correlation output even though HMAC prevents offline guessing without the secret. Keep correlation disabled unless a
+support or operator workflow needs it.
 
 ### Collection Examples
 
@@ -307,6 +346,7 @@ registration sets `DisplayDictionaryKeys = true` for a provider-only report comp
 | --- | --- |
 | `string[]` or `List<T>` | Children render as `Key[0]`, `Key[1]`, preserving numeric order in text output. |
 | `Dictionary<string,T>` | Non-sensitive keys render as `Key["name"]`; sensitive keys render as `Key[[redacted-key-1]]`. |
+| dictionary correlation enabled | Dictionary elements include `Element.KeyCorrelationId`; text output renders it as entry metadata. |
 | null element | Emits an element child with a `null` display value and no grandchildren. |
 | object element | Emits the element and then ordinary public property/field children below it. |
 | non-string dictionary key | Uses the invariant string label when it is non-sensitive and display is enabled. |
@@ -343,6 +383,7 @@ the text renderer.
 | `config-audit-source-inherited` | Info | An element inherited parent provenance because an exact safe source path was unavailable. |
 | `config-audit-source-unavailable` | Info | No provider source record was available for an element. |
 | `config-audit-options-invalid` | Error | Entry options were invalid; safe defaults were used for bounded traversal values. |
+| `config-audit-key-correlation-unavailable` | Warning | Dictionary key correlation was requested, but global key material was missing or invalid. |
 
 ### Migration Note
 
@@ -362,6 +403,10 @@ explicit manual audit option assignments are merged into the selected entry.
 - Attribute values are compile-time metadata. Use manual `AddConfigAuditKey<T>()` options when traversal settings must
   be chosen dynamically at registration time.
 - Sensitive dictionary key labels are report-local. Do not use `[redacted-key-1]` as a durable correlation identifier.
+- Dictionary key correlation ids are separate from labels and still sensitive. They are useful for support comparison,
+  not public logging, analytics, or user-facing output.
+- Key rotation is explicit: changing the correlation secret or key id breaks historical correlation. V1 does not
+  dual-read old keys during a migration window.
 - Element traversal reports existing provider values. Environment-created missing collection elements, global debug
   expansion, diffing, raw-key drift analysis, and support-bundle export are separate product surfaces.
 - Provider-discovered raw key enumeration is intentionally separate from the first audit surface.
