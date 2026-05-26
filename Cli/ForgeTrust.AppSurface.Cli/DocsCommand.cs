@@ -2267,7 +2267,10 @@ internal sealed class AppSurfaceDocsInProcessHealthVerifyRunner : IAppSurfaceDoc
             throw new JsonException("AppSurface Docs harvest health verification returned an empty JSON body.");
         }
 
-        var health = JsonSerializer.Deserialize<AppSurfaceDocsHarvestHealthResponse>(body, HealthJsonOptions);
+        using var document = JsonDocument.Parse(body);
+        ValidateRequiredHealthResponseFields(document.RootElement);
+
+        var health = document.RootElement.Deserialize<AppSurfaceDocsHarvestHealthResponse>(HealthJsonOptions);
         if (health is null
             || string.IsNullOrWhiteSpace(health.Status)
             || health.Verification.HttpStatusCode == 0)
@@ -2276,6 +2279,25 @@ internal sealed class AppSurfaceDocsInProcessHealthVerifyRunner : IAppSurfaceDoc
         }
 
         return health;
+    }
+
+    private static void ValidateRequiredHealthResponseFields(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("status", out var status)
+            || status.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(status.GetString())
+            || !root.TryGetProperty("verification", out var verification)
+            || verification.ValueKind != JsonValueKind.Object
+            || !verification.TryGetProperty("ok", out var ok)
+            || ok.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+            || !verification.TryGetProperty("httpStatusCode", out var httpStatusCode)
+            || httpStatusCode.ValueKind != JsonValueKind.Number
+            || !httpStatusCode.TryGetInt32(out var statusCode)
+            || statusCode == 0)
+        {
+            throw new JsonException("AppSurface Docs harvest health verification returned JSON without required status or verification fields.");
+        }
     }
 
     private static string EnsureTrailingSlash(string value)

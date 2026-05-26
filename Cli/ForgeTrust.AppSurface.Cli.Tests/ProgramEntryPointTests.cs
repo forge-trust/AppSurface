@@ -584,6 +584,10 @@ public sealed class ProgramEntryPointTests
     [InlineData("")]
     [InlineData("null")]
     [InlineData("{}")]
+    [InlineData("""{"status":"Healthy","verification":{"httpStatusCode":200}}""")]
+    [InlineData("""{"status":"Healthy","verification":{"ok":true}}""")]
+    [InlineData("""{"status":"Healthy","verification":{"ok":"true","httpStatusCode":200}}""")]
+    [InlineData("""{"status":"Healthy","verification":{"ok":true,"httpStatusCode":"200"}}""")]
     public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_Reject_Missing_HealthJson(string body)
     {
         using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
