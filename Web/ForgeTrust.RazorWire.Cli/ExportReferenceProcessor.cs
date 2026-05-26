@@ -534,13 +534,12 @@ internal sealed partial class ExportReferenceProcessor
             var tagName = html[nameStart..nameEnd];
             var tag = new TagSpan(tagName, index, tagEnd - index + 1, nameEnd, tagEnd);
             yield return tag;
-            if (IsRawTextElement(tagName) && !IsSelfClosingTag(html, index, tagEnd))
+            if (IsRawTextElement(tagName)
+                && !IsSelfClosingTag(html, index, tagEnd)
+                && TryFindRawTextClose(html, tag, out _, out var closeEnd))
             {
-                if (TryFindRawTextClose(html, tag, out _, out var closeEnd))
-                {
-                    index = closeEnd;
-                    continue;
-                }
+                index = closeEnd;
+                continue;
             }
 
             index = tagEnd;
