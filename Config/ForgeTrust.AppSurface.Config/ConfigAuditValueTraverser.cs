@@ -392,7 +392,7 @@ internal sealed class ConfigAuditValueTraverser
         return new ConfigAuditSourceSelection(
             matches
                 .Where(match => match.Specificity == maxSpecificity)
-                .Select(match => match.Source)
+                .Select(match => PrepareChildSource(match.Source, path.SourcePath))
                 .ToList(),
             []);
     }
@@ -412,11 +412,11 @@ internal sealed class ConfigAuditValueTraverser
 
         if (path.Element == null)
         {
-            return new ConfigAuditSourceSelection([fallback], []);
+            return new ConfigAuditSourceSelection([PrepareChildSource(fallback, path.SourcePath)], []);
         }
 
         return new ConfigAuditSourceSelection(
-            [fallback],
+            [PrepareChildSource(fallback, path.SourcePath)],
             [
                 CreateSourceDiagnostic(
                     path,
@@ -424,6 +424,31 @@ internal sealed class ConfigAuditValueTraverser
                     "This collection element inherits provenance from its parent because an exact display-safe source path was not available.")
             ]);
     }
+
+    private static ConfigAuditSourceRecord PrepareChildSource(ConfigAuditSourceRecord source, string childSourcePath)
+    {
+        if (source.Location == null || SourceRepresentsExactPath(source, childSourcePath))
+        {
+            return source;
+        }
+
+        return new ConfigAuditSourceRecord
+        {
+            Kind = source.Kind,
+            ProviderName = source.ProviderName,
+            ProviderPriority = source.ProviderPriority,
+            FilePath = source.FilePath,
+            EnvironmentVariableName = source.EnvironmentVariableName,
+            ConfigPath = source.ConfigPath,
+            AppliedToPath = source.AppliedToPath,
+            Role = source.Role,
+            Sensitivity = source.Sensitivity
+        };
+    }
+
+    private static bool SourceRepresentsExactPath(ConfigAuditSourceRecord source, string childSourcePath) =>
+        string.Equals(source.AppliedToPath, childSourcePath, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(source.ConfigPath, childSourcePath, StringComparison.OrdinalIgnoreCase);
 
     private static int GetSourceSpecificity(ConfigAuditSourceRecord source, string childSourcePath) =>
         Math.Max(

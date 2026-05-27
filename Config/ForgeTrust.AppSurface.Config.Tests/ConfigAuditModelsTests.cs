@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace ForgeTrust.AppSurface.Config.Tests;
 
 public class ConfigAuditModelsTests
@@ -7,6 +9,65 @@ public class ConfigAuditModelsTests
     {
         Assert.Throws<ArgumentException>(() => new ConfigAuditKnownEntry("", null, typeof(string)));
         Assert.Throws<ArgumentNullException>(() => new ConfigAuditKnownEntry("Valid.Key", null, null!));
+    }
+
+    [Fact]
+    public void ConfigAuditSourceLocation_RejectsInvalidConstructorArguments()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigAuditSourceLocation(0, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigAuditSourceLocation(1, 0));
+    }
+
+    [Fact]
+    public void ConfigAuditSourceRecord_DefaultsLocationToNull()
+    {
+        var source = new ConfigAuditSourceRecord
+        {
+            Kind = ConfigAuditSourceKind.File,
+            Role = ConfigAuditSourceRole.Base
+        };
+
+        Assert.Null(source.Location);
+    }
+
+    [Fact]
+    public void ConfigAuditSourceRecord_WithRolePreservesLocation()
+    {
+        var location = new ConfigAuditSourceLocation(12, 34);
+        var source = new ConfigAuditSourceRecord
+        {
+            Kind = ConfigAuditSourceKind.File,
+            ProviderName = "Files",
+            FilePath = "/tmp/appsettings.json",
+            ConfigPath = "Feature.Enabled",
+            AppliedToPath = "Feature.Enabled",
+            Location = location,
+            Role = ConfigAuditSourceRole.Base
+        };
+
+        var patched = source.WithRole(ConfigAuditSourceRole.Patch);
+
+        Assert.Same(location, patched.Location);
+        Assert.Equal(ConfigAuditSourceRole.Patch, patched.Role);
+    }
+
+    [Fact]
+    public void ConfigAuditSourceRecord_SerializesLocationShape()
+    {
+        var source = new ConfigAuditSourceRecord
+        {
+            Kind = ConfigAuditSourceKind.File,
+            ConfigPath = "Feature.Enabled",
+            AppliedToPath = "Feature.Enabled",
+            Location = new ConfigAuditSourceLocation(2, 7),
+            Role = ConfigAuditSourceRole.Base
+        };
+
+        var json = JsonSerializer.Serialize(source);
+
+        Assert.Contains(@"""Location"":", json, StringComparison.Ordinal);
+        Assert.Contains(@"""LineNumber"":2", json, StringComparison.Ordinal);
+        Assert.Contains(@"""ByteColumnNumber"":7", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -253,6 +314,33 @@ public class ConfigAuditModelsTests
                 Enabled = true,
                 Placeholder = "[redacted]"
             },
+            DiscoveredKeys =
+            [
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Discovered.Fallback",
+                    Classification = (ConfigAuditDiscoveredKeyClassification)99,
+                    DisplayValue = "value",
+                    Sources =
+                    [
+                        new ConfigAuditSourceRecord
+                        {
+                            Kind = ConfigAuditSourceKind.Provider,
+                            ProviderName = "ProviderName",
+                            Role = ConfigAuditSourceRole.Base
+                        }
+                    ],
+                    Diagnostics =
+                    [
+                        new ConfigAuditDiagnostic
+                        {
+                            Severity = ConfigAuditDiagnosticSeverity.Warning,
+                            Code = "discovered-warning",
+                            Message = "Discovered diagnostic."
+                        }
+                    ]
+                }
+            ],
             Entries =
             [
                 new ConfigAuditEntry
@@ -315,6 +403,9 @@ public class ConfigAuditModelsTests
         Assert.True(rendered.IndexOf("Root[\"alpha\"]", StringComparison.Ordinal) < rendered.IndexOf("Root[\"zeta\"]", StringComparison.Ordinal));
         Assert.True(rendered.IndexOf("Root[0]", StringComparison.Ordinal) < rendered.IndexOf("Root.Plain", StringComparison.Ordinal));
         Assert.Contains("Provider", rendered, StringComparison.Ordinal);
+        Assert.Contains("Discovered keys:", rendered, StringComparison.Ordinal);
+        Assert.Contains("Discovered.Fallback [99] = value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Diagnostic: Discovered diagnostic.", rendered, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -325,6 +416,10 @@ public class ConfigAuditModelsTests
         Assert.Equal(2, (int)ConfigAuditEntryState.Defaulted);
         Assert.Equal(3, (int)ConfigAuditEntryState.Missing);
         Assert.Equal(4, (int)ConfigAuditEntryState.Invalid);
+
+        Assert.Equal(0, (int)ConfigAuditDiscoveredKeyClassification.Known);
+        Assert.Equal(1, (int)ConfigAuditDiscoveredKeyClassification.KnownDescendant);
+        Assert.Equal(2, (int)ConfigAuditDiscoveredKeyClassification.Unknown);
 
         Assert.Equal(0, (int)ConfigAuditElementKind.ArrayItem);
         Assert.Equal(1, (int)ConfigAuditElementKind.ListItem);
@@ -348,5 +443,13 @@ public class ConfigAuditModelsTests
         Assert.Equal(0, (int)ConfigAuditDiagnosticSeverity.Info);
         Assert.Equal(1, (int)ConfigAuditDiagnosticSeverity.Warning);
         Assert.Equal(2, (int)ConfigAuditDiagnosticSeverity.Error);
+
+        var providerKey = new ConfigAuditProviderDiscoveredKey(
+            "Discovered.Value",
+            RawValue: null,
+            ConfigAuditDiscoveredValueKind.Array,
+            Sources: [],
+            Diagnostics: []);
+        Assert.Equal(ConfigAuditDiscoveredValueKind.Array, providerKey.ValueKind);
     }
 }

@@ -85,12 +85,24 @@ internal sealed record ConfigAuditPath(
             return string.Empty;
         }
 
+        if (key is string stringKey)
+        {
+            truncated = stringKey.Length > MaxDictionaryKeyLabelLength;
+            return stringKey;
+        }
+
+        if (key is not IFormattable and not IConvertible)
+        {
+            conversionFailed = true;
+            return string.Empty;
+        }
+
         string label;
         try
         {
             label = Convert.ToString(key, CultureInfo.InvariantCulture) ?? string.Empty;
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
         {
             conversionFailed = true;
             return string.Empty;

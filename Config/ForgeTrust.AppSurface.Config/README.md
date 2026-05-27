@@ -89,6 +89,103 @@ services.AddConfigAuditKey<string>(
     options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
 ```
 
+### Config audit source locations in 5 minutes
+
+File-backed source records can include an optional `Location` when AppSurface can confidently map the merged JSON value
+back to a property token in the same file content used to initialize the file provider snapshot:
+
+```csharp
+var report = auditReporter.GetReport("Staging");
+var source = report.Entries
+    .Single(entry => entry.Key == "MyApp.Settings")
+    .Sources
+    .Single(source => source.Kind == ConfigAuditSourceKind.File);
+
+var coordinate = source.Location is { } location
+    ? $"{source.FilePath}:{location.LineNumber}:{location.ByteColumnNumber}"
+    : source.FilePath;
+
+Console.WriteLine(coordinate);
+```
+
+The structured model keeps the coordinate separate from the path:
+
+```json
+{
+  "Kind": "File",
+  "FilePath": "/app/appsettings.Staging.json",
+  "ConfigPath": "MyApp.Settings.Database.Host",
+  "Location": {
+    "LineNumber": 9,
+    "ByteColumnNumber": 9
+  }
+}
+```
+
+Default `System.Text.Json` options serialize enum values such as `Kind` numerically. Enable a string-enum converter if
+you want the enum names shown above in exported support data.
+
+The text renderer includes the coordinate when it is present and preserves the previous shape when it is absent:
+
+```text
+Source: FileBasedConfigProvider appsettings.Staging.json:9:9 :: MyApp.Settings.Database.Host
+Source: FileBasedConfigProvider appsettings.Staging.json :: Legacy.Unlocated
+```
+
+`ByteColumnNumber` is one-based and counts UTF-8 bytes from the start of the physical line, not Unicode characters or
+editor display cells. A property after `é`, emoji, or other non-ASCII text can have a byte column larger than the
+column shown by an editor.
+
+`Location` can be `null` even for a file source. AppSurface omits coordinates when it cannot prove that the coordinate
+would point at the same value the existing JSON parse and merge produced. Common causes include ambiguous
+case-insensitive path collisions, unsupported dotted property paths, parser mismatch, collection element descendants,
+or source metadata from a provider that is not file-backed. No location is better than a misleading location.
+
+File paths and line/byte coordinates are operational metadata. Treat rendered audit reports as support-bundle material:
+review them before sharing outside the operational trust boundary, especially when deployment paths reveal tenant names,
+repository layout, or host filesystem conventions.
+
+### Discovered file keys in 5 minutes
+
+The report also includes `DiscoveredKeys` for effective merged configuration visible to enumerable providers. The
+built-in v1 surface discovers file-backed keys from `FileBasedConfigProvider`, so the text renderer labels that section
+`Discovered file keys:` when all discovered sources are files. It does not enumerate environment variables, secret
+providers, shadowed lower-priority file values, or every raw key a custom provider may know about. Classifications are
+relative to the AppSurface audit registry: `Unknown` means unknown to `Config<T>` wrappers and
+`AddConfigAuditKey<T>()`, not globally unused.
+
+For example, this file-backed configuration:
+
+```json
+{
+  "Billing": {
+    "Endpoint": "https://billing.example",
+    "Password": "super-secret"
+  },
+  "BillingEndpiont": "https://typo.example"
+}
+```
+
+with this registration:
+
+```csharp
+services.AddConfigAuditKey<BillingOptions>("Billing");
+services.AddConfigAuditKey<string>("Billing.Endpoint");
+```
+
+renders discovered file keys like this:
+
+```text
+Discovered file keys:
+  Billing.Endpoint [Known] = https://billing.example
+    Source: FileBasedConfigProvider appsettings.Staging.json :: Billing.Endpoint
+  Billing.Password [Under known entry] = [redacted]
+    Redacted: true
+    Source: FileBasedConfigProvider appsettings.Staging.json :: Billing.Password
+  BillingEndpiont [Unknown to AppSurface audit registry] = https://typo.example
+    Source: FileBasedConfigProvider appsettings.Staging.json :: BillingEndpiont
+```
+
 ### Audit Hello World
 
 Opt in a wrapper, produce the structured report, and render it when humans need a pasteable view:
@@ -208,9 +305,10 @@ Entries:
     Diagnostic: The configuration value must be between 1 and 5.
 ```
 
-Known AppSurface audit entries only: the report includes discovered `Config<T>` / `ConfigStruct<T>` wrappers and
-entries registered with `AddConfigAuditKey<T>()`. It does not enumerate every raw environment variable, unused JSON key,
-or typo in a provider.
+Known AppSurface audit entries include discovered `Config<T>` / `ConfigStruct<T>` wrappers and entries registered with
+`AddConfigAuditKey<T>()`. `DiscoveredKeys` separately exposes effective merged file-backed keys visible to enumerable
+providers. The report still does not enumerate every raw environment variable or every raw key a custom provider may
+know about.
 
 Place the wrapper where AppSurface Console command discovery can see it. By default, `ConsoleStartup<TModule>` scans
 `StartupContext.EntryPointAssembly`, which is normally the root module assembly. If your command lives elsewhere, set
@@ -337,7 +435,7 @@ services.AddConfigAuditKey<List<ServiceEndpoint>>(
 | `Dictionary<string,T>` | Non-sensitive keys render as `Key["name"]`; sensitive keys render as `Key[[redacted-key-1]]`. |
 | null element | Emits an element child with a `null` display value and no grandchildren. |
 | object element | Emits the element and then ordinary public property/field children below it. |
-| non-string dictionary key | Uses the invariant string label when it is non-sensitive and display is enabled. |
+| non-string dictionary key | Uses the invariant string label for convertible keys when non-sensitive and display is enabled; arbitrary object keys are hidden. |
 | dotted or bracketed dictionary key | Uses a display label but inherits parent provenance because no safe exact source path is available. |
 | unsupported enumerable | Emits a traversal diagnostic instead of enumerating. |
 | multidimensional array | Emits a traversal diagnostic; only one-dimensional arrays are expanded. |
@@ -357,10 +455,11 @@ and `sas` are accepted because audit reports are operator diagnostics, not a pub
 never downgrades redaction from `Sensitive`, built-in fragments, provider source sensitivity, or sensitive-looking
 source paths.
 
-Source metadata remains visible unless a provider marks the source metadata itself as sensitive. This keeps values
-redacted while still showing where a value came from. Treat rendered reports as internal support data: provider names,
-file names, environment variable names, key names, and the existence of redacted values can still be operationally
-sensitive.
+Redaction does not expose string lengths, sensitive collection counts, or sensitive nested values. Display values are
+redacted before entering `ConfigAuditReport`. Source metadata remains visible unless a provider marks the source
+metadata itself as sensitive, which keeps values redacted while still showing where a value came from. Treat rendered
+reports as internal support data: provider names, file names, environment variable names, key names, config paths, and
+the existence of redacted values can still be operationally sensitive.
 
 Collection parent values are omitted instead of serialized when the collection key and source metadata are not
 sensitive. This avoids leaking nested element fields such as `Password`, `Token`, `Secret`, or `ApiKey` through a raw
@@ -404,7 +503,14 @@ release notes for fragment changes when audit output shape matters to operators.
 
 ### Audit Pitfalls
 
-- Audit reports cover AppSurface-known entries, not every raw process environment variable or every unused file key.
+- Known audit entries cover AppSurface-registered keys. `DiscoveredKeys` adds the effective merged file-backed keys
+  visible to enumerable providers, but it is not a complete raw file inventory and does not include shadowed
+  lower-priority file keys in v1.
+- `Unknown to AppSurface audit registry` means the key is outside known `Config<T>` wrappers and
+  `AddConfigAuditKey<T>()` registrations. It can be a typo, stale setting, or a value consumed outside AppSurface; it
+  is not proof that the key is globally unused.
+- Environment variables, secret providers, source-metadata redaction modes, shadowed raw file inventory, and strict
+  drift gates are outside the first discovered-key surface.
 - Collection display values are intentionally omitted rather than summarized or serialized; opt into element traversal
   for keys where element-level visibility is safe and useful.
 - `ConfigAuditCollectionTraversalAttribute` is inherited. Put a new attribute on a derived wrapper when inherited
@@ -418,7 +524,8 @@ release notes for fragment changes when audit output shape matters to operators.
 - Element traversal reports existing provider values. Environment-created missing collection elements, global debug
   expansion, diffing, raw-key drift analysis, and support-bundle export are separate product surfaces.
 - Provider-discovered raw key enumeration is intentionally separate from the first audit surface.
-- File origins include file path and config path. Line and column origins are not part of the first report.
+- File origins include file path and config path. File source locations are optional and only appear when AppSurface can
+  map a source record to an exact property token without ambiguity.
 - Validation diagnostics name keys and rules; they do not include attempted secret values.
 - A direct environment object value replaces the whole object, while child environment variables produce member-level
   patch provenance.

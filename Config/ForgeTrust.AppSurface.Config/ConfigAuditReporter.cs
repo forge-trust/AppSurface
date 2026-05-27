@@ -85,16 +85,116 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         ArgumentException.ThrowIfNullOrWhiteSpace(environment);
 
         var entries = _knownEntries.Select(entry => BuildEntry(environment, entry)).ToList();
+        var diagnostics = BuildReportDiagnostics(environment).ToList();
+        RemoveEntryLevelDiagnostics(diagnostics, entries);
+        var discoveredKeys = BuildDiscoveredKeys(environment, diagnostics);
         return new ConfigAuditReport
         {
             Environment = environment,
             GeneratedAt = DateTimeOffset.UtcNow,
             Providers = BuildProviderList(),
             Entries = entries,
-            Diagnostics = BuildReportDiagnostics(environment),
+            DiscoveredKeys = discoveredKeys,
+            Diagnostics = diagnostics,
             Redaction = _redactor.CreatePolicy()
         };
     }
+
+    private IReadOnlyList<ConfigAuditDiscoveredKey> BuildDiscoveredKeys(
+        string environment,
+        List<ConfigAuditDiagnostic> reportDiagnostics)
+    {
+        var discoveredKeys = new List<ConfigAuditDiscoveredKey>();
+        foreach (var provider in new IConfigProvider[] { _environmentProvider }.Concat(_otherProviders))
+        {
+            if (provider is not IConfigAuditKeyEnumerator keyEnumerator)
+            {
+                continue;
+            }
+
+            IReadOnlyList<ConfigAuditProviderDiscoveredKey> providerKeys;
+            try
+            {
+                providerKeys = keyEnumerator.EnumerateKeys(environment);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or System.IO.IOException)
+            {
+                reportDiagnostics.Add(CreateProviderExceptionDiagnostic(
+                    provider,
+                    "config-provider-enumerate-keys-threw",
+                    key: null,
+                    configPath: null,
+                    ex));
+                continue;
+            }
+
+            foreach (var providerKey in providerKeys)
+            {
+                var redacted = _redactor.FormatValue(providerKey.Key, providerKey.RawValue, providerKey.Sources);
+                discoveredKeys.Add(new ConfigAuditDiscoveredKey
+                {
+                    Key = providerKey.Key,
+                    Classification = ClassifyDiscoveredKey(providerKey.Key),
+                    DisplayValue = redacted.DisplayValue,
+                    IsRedacted = redacted.IsRedacted,
+                    Sources = providerKey.Sources,
+                    Diagnostics = providerKey.Diagnostics
+                });
+            }
+        }
+
+        return discoveredKeys
+            .OrderBy(key => key.Classification)
+            .ThenBy(key => key.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private ConfigAuditDiscoveredKeyClassification ClassifyDiscoveredKey(string key)
+    {
+        if (_knownEntries.Any(knownEntry => string.Equals(knownEntry.Key, key, StringComparison.OrdinalIgnoreCase)))
+        {
+            return ConfigAuditDiscoveredKeyClassification.Known;
+        }
+
+        if (_knownEntries.Any(knownEntry => key.StartsWith($"{knownEntry.Key}.", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ConfigAuditDiscoveredKeyClassification.KnownDescendant;
+        }
+
+        return ConfigAuditDiscoveredKeyClassification.Unknown;
+    }
+
+    private static void RemoveEntryLevelDiagnostics(
+        List<ConfigAuditDiagnostic> reportDiagnostics,
+        IReadOnlyList<ConfigAuditEntry> entries)
+    {
+        var entryDiagnostics = entries.SelectMany(FlattenEntryDiagnostics).ToList();
+        reportDiagnostics.RemoveAll(reportDiagnostic =>
+            entryDiagnostics.Any(entryDiagnostic => IsSameDiagnostic(entryDiagnostic, reportDiagnostic)));
+    }
+
+    private static IEnumerable<ConfigAuditDiagnostic> FlattenEntryDiagnostics(ConfigAuditEntry entry)
+    {
+        foreach (var diagnostic in entry.Diagnostics)
+        {
+            yield return diagnostic;
+        }
+
+        foreach (var child in entry.Children)
+        {
+            foreach (var diagnostic in FlattenEntryDiagnostics(child))
+            {
+                yield return diagnostic;
+            }
+        }
+    }
+
+    private static bool IsSameDiagnostic(ConfigAuditDiagnostic left, ConfigAuditDiagnostic right) =>
+        left.Severity == right.Severity
+        && string.Equals(left.Code, right.Code, StringComparison.Ordinal)
+        && string.Equals(left.Key, right.Key, StringComparison.Ordinal)
+        && string.Equals(left.ConfigPath, right.ConfigPath, StringComparison.Ordinal)
+        && string.Equals(left.Message, right.Message, StringComparison.Ordinal);
 
     private IReadOnlyList<ConfigAuditDiagnostic> BuildReportDiagnostics(string environment)
     {
@@ -524,6 +624,56 @@ internal interface IConfigDiagnosticProvider
     /// <param name="environment">The environment being audited.</param>
     /// <returns>Report-level diagnostics. Return an empty list when there are none.</returns>
     IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment);
+}
+
+/// <summary>
+/// Allows providers to expose their effective keys for audit reporting.
+/// </summary>
+/// <remarks>
+/// This contract is internal in v1 so provider-specific enumeration semantics can settle before AppSurface exposes a
+/// public extension API. Implementations should enumerate the provider's effective view for the requested environment
+/// and return diagnostics instead of throwing for expected source problems.
+/// </remarks>
+internal interface IConfigAuditKeyEnumerator
+{
+    /// <summary>
+    /// Enumerates effective provider-discovered configuration keys for <paramref name="environment"/>.
+    /// </summary>
+    /// <param name="environment">The environment being audited.</param>
+    /// <returns>Discovered provider keys with redaction-ready scalar values and source metadata.</returns>
+    IReadOnlyList<ConfigAuditProviderDiscoveredKey> EnumerateKeys(string environment);
+}
+
+/// <summary>
+/// Describes one provider-discovered key before public classification and redaction.
+/// </summary>
+/// <param name="Key">The discovered configuration key.</param>
+/// <param name="RawValue">
+/// The scalar CLR value used for display redaction, or <see langword="null"/> for object/array parents.
+/// </param>
+/// <param name="ValueKind">The provider value shape.</param>
+/// <param name="Sources">Sources associated with the effective key.</param>
+/// <param name="Diagnostics">Diagnostics specific to this discovered key.</param>
+internal sealed record ConfigAuditProviderDiscoveredKey(
+    string Key,
+    object? RawValue,
+    ConfigAuditDiscoveredValueKind ValueKind,
+    IReadOnlyList<ConfigAuditSourceRecord> Sources,
+    IReadOnlyList<ConfigAuditDiagnostic> Diagnostics);
+
+/// <summary>
+/// Identifies the provider value shape used while building discovered-key reports.
+/// </summary>
+internal enum ConfigAuditDiscoveredValueKind
+{
+    /// <summary>A scalar JSON value.</summary>
+    Scalar = 0,
+
+    /// <summary>A JSON object parent.</summary>
+    Object = 1,
+
+    /// <summary>A JSON array parent.</summary>
+    Array = 2
 }
 
 /// <summary>
