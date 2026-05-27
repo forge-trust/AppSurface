@@ -36,6 +36,7 @@ public sealed class DocsExportWorkflowContractTests
             "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js",
             GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"));
         var verifyRun = GetScalar(verifyStep, "run");
+        Assert.Contains("--no-build", verifyRun, StringComparison.Ordinal);
         Assert.Contains("docs verify-health", verifyRun, StringComparison.Ordinal);
         Assert.Contains("--repo .", verifyRun, StringComparison.Ordinal);
         Assert.Contains("--require-complete-event-doclets", verifyRun, StringComparison.Ordinal);
@@ -65,6 +66,7 @@ public sealed class DocsExportWorkflowContractTests
         var exportRun = GetScalar(exportStep, "run");
         Assert.Contains("printf '%s\\n' '/' '/docs' > \"$RUNNER_TEMP/appsurface-docs-seeds.txt\"", exportRun, StringComparison.Ordinal);
         Assert.Contains("dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", exportRun, StringComparison.Ordinal);
+        Assert.Contains("--no-build", exportRun, StringComparison.Ordinal);
         Assert.Contains("docs export", exportRun, StringComparison.Ordinal);
         Assert.Contains("--repo .", exportRun, StringComparison.Ordinal);
         Assert.Contains("--mode cdn", exportRun, StringComparison.Ordinal);

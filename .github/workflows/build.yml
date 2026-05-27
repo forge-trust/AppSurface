@@ -137,7 +137,7 @@ jobs:
         env:
           AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js
         run: |
-          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build -- \
             docs verify-health \
             --repo . \
             --require-complete-event-doclets \
@@ -162,7 +162,7 @@ jobs:
         run: |
           printf '%s\n' '/' '/docs' > "$RUNNER_TEMP/appsurface-docs-seeds.txt"
           # CI docs export can spend just over 10s in cold host startup while generating the first harvest snapshot.
-          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build -- \
             docs export \
             --repo . \
             --mode cdn \

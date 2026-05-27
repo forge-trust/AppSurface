@@ -194,7 +194,9 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var diagnostic = Assert.Single(
             GetDiagnostics(harvester),
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
-        Assert.Contains("@property detail.*", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("has invalid or contradictory public contract fields", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Fix @property names to use valid detail.* paths", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add @property detail.*", diagnostic.Fix, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -222,8 +224,39 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var diagnostic = Assert.Single(
             GetDiagnostics(harvester),
             diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
-        Assert.Contains("Remove @detail none or detail.* properties", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("has invalid or contradictory public contract fields", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Remove @detail none or remove the event detail @property tags", diagnostic.Fix, StringComparison.Ordinal);
         Assert.DoesNotContain("Add remove", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldAvoidContradictoryFix_WhenDetailNoneHasInvalidProperty()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:conflict-invalid
+             * @target document
+             * @firesWhen a contradictory and invalid detail shape is documented.
+             * @detail none
+             * @property {string} message - Invalid detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Contains("Fix @property names to use valid detail.* paths", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("Remove @detail none or remove the event detail @property tags", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add @property detail.*", diagnostic.Fix, StringComparison.Ordinal);
     }
 
     [Fact]

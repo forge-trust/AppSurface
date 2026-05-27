@@ -802,6 +802,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var missing = new List<string>();
+        var hasInvalidDetailProperties = false;
+        var hasDetailNoneConflict = false;
         switch (item.Kind)
         {
             case JavaScriptApiKind.Event:
@@ -814,12 +816,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
                 if (item.Properties.Any(property => !IsValidEventDetailPropertyName(property.Name)))
                 {
-                    missing.Add("@property detail.*");
+                    hasInvalidDetailProperties = true;
                 }
 
                 if (item.DetailNone && item.Properties.Count > 0)
                 {
-                    missing.Add("remove @detail none or detail.* properties");
+                    hasDetailNoneConflict = true;
                 }
 
                 break;
@@ -850,7 +852,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 break;
         }
 
-        if (missing.Count == 0)
+        if (missing.Count == 0 && !hasInvalidDetailProperties && !hasDetailNoneConflict)
         {
             return;
         }
@@ -865,9 +867,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             isStrictEventDiagnostic
                 ? DocHarvestDiagnosticSeverity.Error
                 : DocHarvestDiagnosticSeverity.Warning,
-            $"{GetKindLabel(item.Kind)} '{item.Name}' is missing public contract fields.",
+            BuildCompletenessProblem(item, missing.Count > 0, hasInvalidDetailProperties, hasDetailNoneConflict),
             "The item will render, but readers may not know enough about the public browser contract to consume it confidently.",
-            BuildCompletenessFix(missing)));
+            BuildCompletenessFix(missing, hasInvalidDetailProperties, hasDetailNoneConflict)));
     }
 
     private static void AddMissing(ICollection<string> missing, string? value, string tagName)
@@ -878,24 +880,45 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
-    private static string BuildCompletenessFix(IReadOnlyCollection<string> missing)
+    private static string BuildCompletenessProblem(
+        JavaScriptApiItem item,
+        bool hasMissingFields,
+        bool hasInvalidDetailProperties,
+        bool hasDetailNoneConflict)
     {
-        var additions = missing
-            .Where(item => !item.StartsWith("remove ", StringComparison.Ordinal))
-            .ToArray();
-        var removals = missing
-            .Where(item => item.StartsWith("remove ", StringComparison.Ordinal))
-            .Select(item => item["remove ".Length..])
-            .ToArray();
-        var clauses = new List<string>();
-        if (additions.Length > 0)
+        var kindLabel = GetKindLabel(item.Kind);
+        if (hasMissingFields && (hasInvalidDetailProperties || hasDetailNoneConflict))
         {
-            clauses.Add("Add " + string.Join(", ", additions) + " to the public JavaScript doclet.");
+            return $"{kindLabel} '{item.Name}' is missing or has invalid public contract fields.";
         }
 
-        foreach (var removal in removals)
+        if (hasInvalidDetailProperties || hasDetailNoneConflict)
         {
-            clauses.Add("Remove " + removal + " from the public JavaScript doclet.");
+            return $"{kindLabel} '{item.Name}' has invalid or contradictory public contract fields.";
+        }
+
+        return $"{kindLabel} '{item.Name}' is missing public contract fields.";
+    }
+
+    private static string BuildCompletenessFix(
+        IReadOnlyCollection<string> missing,
+        bool hasInvalidDetailProperties,
+        bool hasDetailNoneConflict)
+    {
+        var clauses = new List<string>();
+        if (missing.Count > 0)
+        {
+            clauses.Add("Add " + string.Join(", ", missing) + " to the public JavaScript doclet.");
+        }
+
+        if (hasInvalidDetailProperties)
+        {
+            clauses.Add("Fix @property names to use valid detail.* paths, or remove invalid event detail properties.");
+        }
+
+        if (hasDetailNoneConflict)
+        {
+            clauses.Add("Remove @detail none or remove the event detail @property tags.");
         }
 
         return string.Join(" ", clauses);

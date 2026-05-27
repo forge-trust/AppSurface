@@ -74,7 +74,7 @@ internal sealed partial class DocsPreviewCommand : AppSurfaceDocsPreviewCommand
 /// validation, and materialization to the RazorWire export engine.
 /// </remarks>
 [Command("docs export", Description = "Export AppSurface Docs for a repository to static files.")]
-internal sealed partial class DocsExportCommand : AppSurfaceDocsRepositoryCommand, ICommand
+internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepositoryCommand, ICommand
 {
     private const string DefaultExportUrl = "http://127.0.0.1:0";
     private const string DefaultOutputPath = "dist/docs";
@@ -319,6 +319,11 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
         try
         {
             var result = await _verifyRunner.VerifyAsync(args, cancellationToken);
+            if ((int)result.HttpStatusCode != result.Health.Verification.HttpStatusCode)
+            {
+                throw new CommandException(BuildHttpStatusMismatchMessage(result));
+            }
+
             if (!result.Health.Verification.Ok)
             {
                 throw new CommandException(BuildFailureMessage(result));
@@ -353,11 +358,6 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
     /// <returns>The health verification runner arguments.</returns>
     internal AppSurfaceDocsHealthVerifyArgs BuildVerifyArgs()
     {
-        if (StrictHarvest)
-        {
-            throw new CommandException("The docs verify-health command does not accept --strict because it keeps AppSurfaceDocs:Harvest:FailOnFailure=false and evaluates verification.ok instead.");
-        }
-
         var hostArgs = BuildHostArgs(defaultEnvironmentName: Environments.Production);
         var forwardedArgs = hostArgs.Args.ToList();
         forwardedArgs.Add("--AppSurfaceDocs:Harvest:StartupMode");
@@ -424,6 +424,13 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
 
         return builder.ToString();
     }
+
+    private static string BuildHttpStatusMismatchMessage(AppSurfaceDocsHealthVerificationResult result)
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"AppSurface Docs harvest health verification returned inconsistent HTTP status: response HTTP {(int)result.HttpStatusCode}, verification.httpStatusCode {result.Health.Verification.HttpStatusCode}, status {result.Health.Status}.");
+    }
 }
 
 /// <summary>
@@ -433,7 +440,7 @@ internal sealed partial class DocsVerifyHealthCommand : AppSurfaceDocsRepository
 /// The base command translates CLI options into AppSurface Docs standalone host arguments. It keeps command parsing separate
 /// from process hosting so tests can verify validation and argument forwarding without starting Kestrel.
 /// </remarks>
-internal abstract class AppSurfaceDocsPreviewCommand : AppSurfaceDocsRepositoryCommand, ICommand
+internal abstract class AppSurfaceDocsPreviewCommand : AppSurfaceDocsStrictRepositoryCommand, ICommand
 {
     private readonly ILogger _logger;
     private readonly IAppSurfaceDocsHostRunner _hostRunner;
@@ -512,7 +519,7 @@ internal abstract class AppSurfaceDocsPreviewCommand : AppSurfaceDocsRepositoryC
 }
 
 /// <summary>
-/// Shared repository, routing, strict-harvest, environment, and startup-timeout options for AppSurface docs commands.
+/// Shared repository, routing, environment, and startup-timeout options for AppSurface docs commands.
 /// </summary>
 /// <remarks>
 /// Preview and export share these options so route and source configuration cannot drift. Preview adds listener binding
@@ -533,12 +540,7 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     /// <summary>
     /// Gets a value indicating whether startup should fail when every configured AppSurface Docs harvester fails.
     /// </summary>
-    /// <remarks>
-    /// This is a source-harvest fail-closed gate. Static artifact validation is controlled separately by
-    /// <c>docs export --mode cdn</c>.
-    /// </remarks>
-    [CommandOption("strict", Description = "Fail startup when every configured AppSurface Docs harvester fails.")]
-    public bool StrictHarvest { get; set; }
+    protected virtual bool StrictHarvest => false;
 
     /// <summary>
     /// Gets the route-family root for AppSurface Docs version and archive routes.
@@ -736,6 +738,26 @@ internal abstract class AppSurfaceDocsRepositoryCommand
             Directory.SetCurrentDirectory(_previousDirectory);
         }
     }
+}
+
+/// <summary>
+/// Shared repository command options for AppSurface docs commands that expose strict harvest startup behavior.
+/// </summary>
+internal abstract class AppSurfaceDocsStrictRepositoryCommand : AppSurfaceDocsRepositoryCommand
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether startup should fail when every configured AppSurface Docs harvester fails.
+    /// </summary>
+    /// <remarks>
+    /// This is a source-harvest fail-closed gate. Static artifact validation is controlled separately by
+    /// <c>docs export --mode cdn</c>. The option is intentionally omitted from <c>docs verify-health</c>, which keeps
+    /// startup permissive and evaluates the health endpoint response instead.
+    /// </remarks>
+    [CommandOption("strict", Description = "Fail startup when every configured AppSurface Docs harvester fails.")]
+    public bool StrictHarvestEnabled { get; set; }
+
+    /// <inheritdoc />
+    protected override bool StrictHarvest => StrictHarvestEnabled;
 }
 
 /// <summary>
@@ -2224,8 +2246,11 @@ internal sealed class AppSurfaceDocsInProcessHealthVerifyRunner : IAppSurfaceDoc
         {
             if (ex is OperationCanceledException)
             {
+                _logger.LogDebug("Late AppSurface Docs health verification startup task canceled after verification stopped.");
                 return;
             }
+
+            _logger.LogDebug(ex, "Late AppSurface Docs health verification startup task failed after verification stopped.");
         }
     }
 

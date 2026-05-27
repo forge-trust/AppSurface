@@ -1194,7 +1194,7 @@ dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csp
   --startup-timeout-seconds 30
 ```
 
-The verifier starts the standalone docs host on loopback, reads the same redacted response shape as `{DocsRootPath}/_health.json`, and exits nonzero when `verification.ok=false`. The reported status code matches the health endpoint contract: `200` for `Healthy` or `Empty`, `503` for `Degraded` or `Failed`. `docs verify-health --startup-timeout-seconds` defaults to 10 seconds when omitted; pass `0` to disable the startup watchdog instead of waiting indefinitely. `AppSurfaceDocs:Harvest:FailOnFailure` still fails startup only for aggregate `Failed` snapshots; use `docs verify-health` when a `Degraded` snapshot, such as incomplete strict event docs with Markdown still available, should block publication.
+The verifier starts the standalone docs host on loopback, reads the same redacted response shape as `{DocsRootPath}/_health.json`, and exits nonzero when `verification.ok=false`. The reported status code matches the health endpoint contract: `200` for `Healthy` or `Empty`, `503` for `Degraded` or `Failed`; `docs verify-health` also fails when the HTTP response status and `verification.httpStatusCode` disagree. `docs verify-health --startup-timeout-seconds` defaults to 10 seconds when omitted; pass `0` to disable the startup watchdog instead of waiting indefinitely. `AppSurfaceDocs:Harvest:FailOnFailure` still fails startup only for aggregate `Failed` snapshots; use `docs verify-health` when a `Degraded` snapshot, such as incomplete strict event docs with Markdown still available, should block publication.
 
 Pitfalls:
 

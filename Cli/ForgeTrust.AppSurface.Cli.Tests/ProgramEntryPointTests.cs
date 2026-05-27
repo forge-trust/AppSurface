@@ -333,6 +333,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("--require-complete-event-doclets", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--repo", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--startup-timeout-seconds", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--strict", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--port", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--urls", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
@@ -437,7 +438,7 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
-    public async Task DocsVerifyHealthCommand_Should_Reject_StrictHarvest()
+    public async Task DocsVerifyHealthCommand_Should_Reject_Unsupported_StrictOption()
     {
         using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
         var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
@@ -450,7 +451,6 @@ public sealed class ProgramEntryPointTests
             options => RegisterRunner(options, runner));
 
         Assert.NotEqual(0, result.ExitCode);
-        Assert.Contains("docs verify-health command does not accept --strict", result.AllText, StringComparison.Ordinal);
         Assert.Null(runner.Args);
     }
 
@@ -486,6 +486,35 @@ public sealed class ProgramEntryPointTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("verification host did not start", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Fail_WhenHttpStatusDiffersFromHealthJson()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Result = new AppSurfaceDocsHealthVerificationResult(
+                new AppSurfaceDocsHarvestHealthResponse
+                {
+                    Status = nameof(DocHarvestHealthStatus.Healthy),
+                    Verification = new AppSurfaceDocsHarvestHealthVerification
+                    {
+                        Ok = true,
+                        HttpStatusCode = 200
+                    }
+                },
+                HttpStatusCode.ServiceUnavailable)
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("inconsistent HTTP status", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("response HTTP 503", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("verification.httpStatusCode 200", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -754,9 +783,15 @@ public sealed class ProgramEntryPointTests
     {
         using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
         using var cancellation = new CancellationTokenSource();
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Debug);
+            builder.AddProvider(loggerProvider);
+        });
         var starter = new ControllableHealthHostStarter();
         var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
-            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            loggerFactory.CreateLogger<AppSurfaceDocsInProcessHealthVerifyRunner>(),
             new CapturingHealthHttpClient(
                 new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
             starter);
@@ -768,6 +803,9 @@ public sealed class ProgramEntryPointTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => verificationTask);
         starter.Fail(new InvalidOperationException("Late startup failure."));
         await starter.Finished.WaitAsync(TimeSpan.FromSeconds(1));
+        await WaitForLogMessageAsync(
+            loggerProvider,
+            "Late AppSurface Docs health verification startup task failed after verification stopped.");
     }
 
     [Fact]
