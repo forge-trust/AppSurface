@@ -150,6 +150,8 @@ public sealed class ConfigAuditTextRenderer
     private static string FormatSource(ConfigAuditSourceRecord source) =>
         source.Kind switch
         {
+            ConfigAuditSourceKind.File when source.Location != null =>
+                $"{source.ProviderName} {Path.GetFileName(source.FilePath)}:{source.Location.LineNumber}:{source.Location.ByteColumnNumber} :: {source.ConfigPath}",
             ConfigAuditSourceKind.File => $"{source.ProviderName} {Path.GetFileName(source.FilePath)} :: {source.ConfigPath}",
             ConfigAuditSourceKind.EnvironmentVariable => $"Environment variable {source.EnvironmentVariableName}",
             ConfigAuditSourceKind.Default => $"Default value on {source.ProviderName}",

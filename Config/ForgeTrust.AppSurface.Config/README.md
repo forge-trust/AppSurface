@@ -78,6 +78,64 @@ Explicit registrations are useful for keys that are read directly through `IConf
 services.AddConfigAuditKey<string>("Billing.Endpoint");
 ```
 
+### Config audit source locations in 5 minutes
+
+File-backed source records can include an optional `Location` when AppSurface can confidently map the merged JSON value
+back to a property token in the same file content used to initialize the file provider snapshot:
+
+```csharp
+var report = auditReporter.GetReport("Staging");
+var source = report.Entries
+    .Single(entry => entry.Key == "MyApp.Settings")
+    .Sources
+    .Single(source => source.Kind == ConfigAuditSourceKind.File);
+
+var coordinate = source.Location is { } location
+    ? $"{source.FilePath}:{location.LineNumber}:{location.ByteColumnNumber}"
+    : source.FilePath;
+
+Console.WriteLine(coordinate);
+```
+
+The structured model keeps the coordinate separate from the path:
+
+```json
+{
+  "Kind": "File",
+  "FilePath": "/app/appsettings.Staging.json",
+  "ConfigPath": "MyApp.Settings.Database.Host",
+  "Location": {
+    "LineNumber": 9,
+    "ByteColumnNumber": 9
+  }
+}
+```
+
+Default `System.Text.Json` options serialize enum values such as `Kind` numerically. Enable a string-enum converter if
+you want the enum names shown above in exported support data.
+
+The text renderer includes the coordinate when it is present and preserves the previous shape when it is absent:
+
+```text
+Source: FileBasedConfigProvider appsettings.Staging.json:9:9 :: MyApp.Settings.Database.Host
+Source: FileBasedConfigProvider appsettings.Staging.json :: Legacy.Unlocated
+```
+
+`ByteColumnNumber` is one-based and counts UTF-8 bytes from the start of the physical line, not Unicode characters or
+editor display cells. A property after `é`, emoji, or other non-ASCII text can have a byte column larger than the
+column shown by an editor.
+
+`Location` can be `null` even for a file source. AppSurface omits coordinates when it cannot prove that the coordinate
+would point at the same value the existing JSON parse and merge produced. Common causes include ambiguous
+case-insensitive path collisions, unsupported dotted property paths, parser mismatch, collection element descendants,
+or source metadata from a provider that is not file-backed. No location is better than a misleading location.
+
+File paths and line/byte coordinates are operational metadata. Treat rendered audit reports as support-bundle material:
+review them before sharing outside the operational trust boundary, especially when deployment paths reveal tenant names,
+repository layout, or host filesystem conventions.
+
+### Discovered file keys in 5 minutes
+
 The report also includes `DiscoveredKeys` for effective merged configuration visible to enumerable providers. The
 built-in v1 surface discovers file-backed keys from `FileBasedConfigProvider`, so the text renderer labels that section
 `Discovered file keys:` when all discovered sources are files. It does not enumerate environment variables, secret
@@ -411,7 +469,9 @@ explicit manual audit option assignments are merged into the selected entry.
 - Sensitive dictionary key labels are report-local. Do not use `[redacted-key-1]` as a durable correlation identifier.
 - Element traversal reports existing provider values. Environment-created missing collection elements, global debug
   expansion, diffing, raw-key drift analysis, and support-bundle export are separate product surfaces.
-- File origins include file path and config path. Line and column origins are not part of the first report.
+- Provider-discovered raw key enumeration is intentionally separate from the first audit surface.
+- File origins include file path and config path. File source locations are optional and only appear when AppSurface can
+  map a source record to an exact property token without ambiguity.
 - Validation diagnostics name keys and rules; they do not include attempted secret values.
 - A direct environment object value replaces the whole object, while child environment variables produce member-level
   patch provenance.

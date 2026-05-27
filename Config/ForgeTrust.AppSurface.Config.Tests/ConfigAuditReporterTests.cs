@@ -280,7 +280,9 @@ public class ConfigAuditReporterTests
                 report.Diagnostics,
                 diagnostic => diagnostic.Message.Contains("appsettings.Development.Broken.json", StringComparison.Ordinal)
                               || diagnostic.Message.Contains("appsettings.Development.Array.json", StringComparison.Ordinal));
-            AssertEntry(report, "Feature.Enabled", ConfigAuditEntryState.Resolved, "True");
+            var feature = AssertEntry(report, "Feature.Enabled", ConfigAuditEntryState.Resolved, "True");
+            var featureSource = Assert.Single(feature.Sources, source => source.Kind == ConfigAuditSourceKind.File);
+            AssertLocation(featureSource, lineNumber: 3, byteColumnNumber: 5);
             Assert.DoesNotContain(
                 report.Entries.SelectMany(entry => entry.Diagnostics),
                 diagnostic => diagnostic.Code == "config-file-null-skipped");
@@ -292,10 +294,17 @@ public class ConfigAuditReporterTests
             Assert.Contains(settings.Sources, source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
             Assert.Contains(settings.Sources, source => source.EnvironmentVariableName == "MYAPP__SETTINGS__DATABASE__PORT");
             Assert.Contains(settings.Diagnostics, diagnostic => diagnostic.Message.Contains("MYAPP__SETTINGS__DATABASE__TIMEOUTSECONDS", StringComparison.Ordinal));
+            var settingsFileSource = Assert.Single(
+                settings.Sources,
+                source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
+            AssertLocation(settingsFileSource, lineNumber: 6, byteColumnNumber: 5);
 
             var database = settings.Children
                 .Single(child => child.Key == "MyApp.Settings.Database");
             Assert.Equal(ConfigAuditEntryState.PartiallyResolved, database.State);
+            var host = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Host");
+            var hostFileSource = Assert.Single(host.Sources, source => source.Kind == ConfigAuditSourceKind.File);
+            AssertLocation(hostFileSource, lineNumber: 9, byteColumnNumber: 9);
 
             var port = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Port");
             Assert.Equal("6543", port.DisplayValue);
@@ -317,6 +326,7 @@ public class ConfigAuditReporterTests
 
             var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
             Assert.Contains("Environment: Staging", rendered, StringComparison.Ordinal);
+            Assert.Contains("appsettings.Staging.json:6:5 :: MyApp.Settings", rendered, StringComparison.Ordinal);
             Assert.Contains("Payment.ApiKey = [redacted]", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("super-secret", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("soon", rendered, StringComparison.Ordinal);
@@ -1308,6 +1318,90 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void TextRenderer_UsesFileLocationsWhenPresentAndFallsBackWhenNull()
+    {
+        var rendered = new ConfigAuditTextRenderer().Render(
+            new ConfigAuditReport
+            {
+                Environment = "Production",
+                GeneratedAt = DateTimeOffset.UtcNow,
+                Providers = [],
+                Entries =
+                [
+                    new ConfigAuditEntry
+                    {
+                        Key = "Located.Value",
+                        State = ConfigAuditEntryState.Resolved,
+                        Sources =
+                        [
+                            new ConfigAuditSourceRecord
+                            {
+                                Kind = ConfigAuditSourceKind.File,
+                                ProviderName = "Files",
+                                FilePath = "/tmp/appsettings.json",
+                                ConfigPath = "Located.Value",
+                                AppliedToPath = "Located.Value",
+                                Location = new ConfigAuditSourceLocation(4, 12),
+                                Role = ConfigAuditSourceRole.Base
+                            }
+                        ]
+                    },
+                    new ConfigAuditEntry
+                    {
+                        Key = "Unlocated.Value",
+                        State = ConfigAuditEntryState.Resolved,
+                        Sources =
+                        [
+                            new ConfigAuditSourceRecord
+                            {
+                                Kind = ConfigAuditSourceKind.File,
+                                ProviderName = "Files",
+                                FilePath = "/tmp/appsettings.json",
+                                ConfigPath = "Unlocated.Value",
+                                AppliedToPath = "Unlocated.Value",
+                                Role = ConfigAuditSourceRole.Base
+                            }
+                        ]
+                    }
+                ],
+                Redaction = new ConfigAuditRedaction
+                {
+                    Enabled = true,
+                    MatchedFragments = [],
+                    Placeholder = "[redacted]"
+                }
+            });
+
+        Assert.Contains("Files appsettings.json:4:12 :: Located.Value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Files appsettings.json :: Unlocated.Value", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_RemovesInheritedParentLocationFromChildSource()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new ParentLocatedSourceProvider());
+        services.AddConfigAuditKey<AppSettings>("Located.Parent");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Located.Parent", ConfigAuditEntryState.Resolved, null);
+        var parentSource = Assert.Single(entry.Sources, source => source.ProviderName == nameof(ParentLocatedSourceProvider));
+        AssertLocation(parentSource, lineNumber: 10, byteColumnNumber: 4);
+
+        var mode = Assert.Single(entry.Children, child => child.Key == "Located.Parent.Mode");
+        var childSource = Assert.Single(mode.Sources, source => source.ProviderName == nameof(ParentLocatedSourceProvider));
+        Assert.Equal("Located.Parent", childSource.ConfigPath);
+        Assert.Equal("Located.Parent", childSource.AppliedToPath);
+        Assert.Null(childSource.Location);
+    }
+
+    [Fact]
     public void GetReport_MarksResolvedEntryPartialWhenChildSourcesContainPatch()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -1760,6 +1854,13 @@ public class ConfigAuditReporterTests
         return entry;
     }
 
+    private static void AssertLocation(ConfigAuditSourceRecord source, int lineNumber, int byteColumnNumber)
+    {
+        Assert.NotNull(source.Location);
+        Assert.Equal(lineNumber, source.Location.LineNumber);
+        Assert.Equal(byteColumnNumber, source.Location.ByteColumnNumber);
+    }
+
     private static ConfigAuditDiscoveredKey AssertDiscovered(
         ConfigAuditReport report,
         string key,
@@ -2114,6 +2215,51 @@ public class ConfigAuditReporterTests
                         ConfigPath = "Patch.Source.Mode",
                         AppliedToPath = "Patch.Source.Mode",
                         Role = ConfigAuditSourceRole.Patch
+                    }
+                ],
+                []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
+    private sealed class ParentLocatedSourceProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        public int Priority => 40;
+
+        public string Name => nameof(ParentLocatedSourceProvider);
+
+        public T? GetValue<T>(string environment, string key) => default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(key, "Located.Parent", StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                new AppSettings
+                {
+                    Mode = "located"
+                },
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.File,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        FilePath = "/tmp/appsettings.json",
+                        ConfigPath = key,
+                        AppliedToPath = key,
+                        Location = new ConfigAuditSourceLocation(10, 4),
+                        Role = role
                     }
                 ],
                 []);
