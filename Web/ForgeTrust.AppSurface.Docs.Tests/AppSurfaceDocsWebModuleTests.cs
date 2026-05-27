@@ -401,6 +401,7 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("docs", routePatterns);
         Assert.Contains("docs/search", routePatterns);
         Assert.Contains("docs/search-index.json", routePatterns);
+        Assert.Contains("docs/_search-index/refresh", routePatterns);
         Assert.Contains("docs/_health", routePatterns);
         Assert.Contains("docs/_health.json", routePatterns);
         Assert.Contains("docs/_routes", routePatterns);
@@ -418,22 +419,70 @@ public class AppSurfaceDocsWebModuleTests
             .ToList();
 
         var searchIndex = prioritizedPatterns.IndexOf("docs/search");
+        var searchIndexRefresh = prioritizedPatterns.IndexOf("docs/_search-index/refresh");
         var healthIndex = prioritizedPatterns.IndexOf("docs/_health");
         var healthJsonIndex = prioritizedPatterns.IndexOf("docs/_health.json");
         var routeInspectorIndex = prioritizedPatterns.IndexOf("docs/_routes");
         var routeInspectorJsonIndex = prioritizedPatterns.IndexOf("docs/_routes.json");
         var catchAllIndex = prioritizedPatterns.IndexOf("docs/{*path}");
         Assert.True(searchIndex >= 0, "Expected docs/search route declaration.");
+        Assert.True(searchIndexRefresh >= 0, "Expected docs/_search-index/refresh route declaration.");
         Assert.True(healthIndex >= 0, "Expected docs/_health route declaration.");
         Assert.True(healthJsonIndex >= 0, "Expected docs/_health.json route declaration.");
         Assert.True(routeInspectorIndex >= 0, "Expected docs/_routes route declaration.");
         Assert.True(routeInspectorJsonIndex >= 0, "Expected docs/_routes.json route declaration.");
         Assert.True(catchAllIndex >= 0, "Expected docs/{*path} route declaration.");
         Assert.True(searchIndex < catchAllIndex, "docs/search must be prioritized before docs/{*path}.");
+        Assert.True(searchIndexRefresh < catchAllIndex, "docs/_search-index/refresh must be prioritized before docs/{*path}.");
         Assert.True(healthIndex < catchAllIndex, "docs/_health must be prioritized before docs/{*path}.");
         Assert.True(healthJsonIndex < catchAllIndex, "docs/_health.json must be prioritized before docs/{*path}.");
         Assert.True(routeInspectorIndex < catchAllIndex, "docs/_routes must be prioritized before docs/{*path}.");
         Assert.True(routeInspectorJsonIndex < catchAllIndex, "docs/_routes.json must be prioritized before docs/{*path}.");
+    }
+
+    [Fact]
+    public void ConfigureEndpoints_ShouldMapSearchIndexRefreshWithPostOnlyOperatorRoute()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var refreshEndpoints = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => endpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_search-index/refresh")
+            .ToList();
+
+        Assert.NotEmpty(refreshEndpoints);
+        Assert.Contains(
+            refreshEndpoints,
+            endpoint =>
+            {
+                var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                return methods is not null
+                    && methods.Count == 1
+                    && methods.Contains(HttpMethods.Post);
+            });
+
+        Assert.Contains(
+            refreshEndpoints,
+            endpoint =>
+            {
+                var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                return methods is not null
+                    && methods.Contains(HttpMethods.Get)
+                    && methods.Contains(HttpMethods.Head)
+                    && methods.Contains(HttpMethods.Put)
+                    && methods.Contains(HttpMethods.Patch)
+                    && methods.Contains(HttpMethods.Delete)
+                    && methods.Contains(HttpMethods.Options)
+                    && !methods.Contains(HttpMethods.Post);
+            });
     }
 
     [Fact]
@@ -747,6 +796,7 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains("docs/next", routePatterns);
         Assert.Contains("docs/next/search", routePatterns);
         Assert.Contains("docs/next/search-index.json", routePatterns);
+        Assert.Contains("docs/next/_search-index/refresh", routePatterns);
         Assert.Contains("docs/next/_health", routePatterns);
         Assert.Contains("docs/next/_health.json", routePatterns);
         Assert.Contains("docs/next/{*path}", routePatterns);
@@ -784,6 +834,7 @@ public class AppSurfaceDocsWebModuleTests
         Assert.Contains(string.Empty, routePatterns);
         Assert.Contains("search", routePatterns);
         Assert.Contains("search-index.json", routePatterns);
+        Assert.Contains("_search-index/refresh", routePatterns);
         Assert.Contains("_health", routePatterns);
         Assert.Contains("_health.json", routePatterns);
         Assert.Contains("sections/{sectionSlug}", routePatterns);

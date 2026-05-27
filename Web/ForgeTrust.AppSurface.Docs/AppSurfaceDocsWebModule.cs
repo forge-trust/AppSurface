@@ -7,7 +7,10 @@ using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
@@ -426,6 +429,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var currentRootPattern = docsUrlBuilder.CurrentDocsRootPath.TrimStart('/');
         var currentSearchPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchUrl());
         var currentSearchIndexPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexUrl());
+        var currentSearchIndexRefreshPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexRefreshUrl());
         var currentHealthPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthUrl());
         var currentHealthJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthJsonUrl());
         var currentRouteInspectorPattern = TrimLeadingSlash(docsUrlBuilder.BuildRouteInspectorUrl());
@@ -465,6 +469,45 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "SearchIndex"
             });
+
+        endpoints.MapMethods(
+                currentSearchIndexRefreshPattern,
+                [
+                    HttpMethods.Delete,
+                    HttpMethods.Get,
+                    HttpMethods.Head,
+                    HttpMethods.Options,
+                    HttpMethods.Patch,
+                    HttpMethods.Put
+                ],
+                RejectSearchIndexRefreshUnsupportedMethodAsync)
+            .Add(
+                endpointBuilder =>
+                {
+                    if (endpointBuilder is RouteEndpointBuilder routeEndpointBuilder)
+                    {
+                        routeEndpointBuilder.Order = -100;
+                    }
+                });
+
+        endpoints.MapControllerRoute(
+            name: "appsurfacedocs_search_index_refresh_method_not_allowed",
+            pattern: currentSearchIndexRefreshPattern,
+            defaults: new
+            {
+                controller = "Docs",
+                action = "RefreshSearchIndexUnsupportedMethod"
+            });
+
+        endpoints.MapControllerRoute(
+                name: "appsurfacedocs_search_index_refresh",
+                pattern: currentSearchIndexRefreshPattern,
+                defaults: new
+                {
+                    controller = "Docs",
+                    action = "RefreshSearchIndex"
+                })
+            .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
 
         endpoints.MapControllerRoute(
             name: "appsurfacedocs_harvest_health",
@@ -615,6 +658,27 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                     permanent: false);
                 return Task.CompletedTask;
             });
+    }
+
+    private static Task RejectSearchIndexRefreshUnsupportedMethodAsync(HttpContext context)
+    {
+        var statusCodePages = context.Features.Get<IStatusCodePagesFeature>();
+        if (statusCodePages is not null)
+        {
+            statusCodePages.Enabled = false;
+        }
+
+        context.Response.OnStarting(
+            static state =>
+            {
+                var httpContext = (HttpContext)state;
+                httpContext.Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
+                return Task.CompletedTask;
+            },
+            context);
+        context.Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
+        context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+        return Task.CompletedTask;
     }
 
     private static AppSurfaceDocsOptions ResolveOptions(IServiceProvider? services)

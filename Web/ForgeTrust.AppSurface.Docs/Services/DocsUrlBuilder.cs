@@ -29,6 +29,11 @@ public sealed class DocsUrlBuilder
     /// </summary>
     public const string DocsVersionsPath = "/docs/versions";
 
+    /// <summary>
+    /// Gets the HTTP method required by the live docs search-index refresh route.
+    /// </summary>
+    public const string SearchIndexRefreshMethod = "POST";
+
     private readonly string _currentDocsRootPath;
     private readonly string _routeRootPath;
     private readonly string _docsVersionPrefixPath;
@@ -145,10 +150,14 @@ public sealed class DocsUrlBuilder
     /// <summary>
     /// Builds the current live docs search-index refresh URL.
     /// </summary>
-    /// <returns>The app-relative authenticated refresh URL for the current docs search index.</returns>
+    /// <returns>
+    /// The app-relative operator refresh route for the current docs search index. Callers must send
+    /// <see cref="SearchIndexRefreshMethod"/> with a valid MVC anti-forgery token and satisfy the host-configured
+    /// AppSurface Docs search-index refresh policy.
+    /// </returns>
     public string BuildSearchIndexRefreshUrl()
     {
-        return BuildSearchIndexUrl() + "?refresh=1";
+        return JoinPath(_currentDocsRootPath, "_search-index/refresh");
     }
 
     /// <summary>
@@ -641,6 +650,11 @@ public sealed record AppSurfaceDocsRouteReferences
     /// Gets the authenticated search-index refresh route.
     /// </summary>
     public string SearchIndexRefresh { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the HTTP method callers must use with <see cref="SearchIndexRefresh"/>.
+    /// </summary>
+    public string SearchIndexRefreshMethod { get; init; } = DocsUrlBuilder.SearchIndexRefreshMethod;
 
     /// <summary>
     /// Gets the route-family archive route, whether or not versioning endpoints are currently enabled.

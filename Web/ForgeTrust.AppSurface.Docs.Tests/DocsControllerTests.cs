@@ -9,6 +9,7 @@ using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.RazorWire.Bridge;
 using ForgeTrust.RazorWire.Streams;
 using Ganss.Xss;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -17,9 +18,11 @@ using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
@@ -3344,7 +3347,7 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchIndex_ShouldRefreshCache_WhenAuthenticatedRefreshRequested()
+    public async Task SearchIndex_ShouldIgnoreRefreshQuery_WhenAuthenticatedRefreshRequested()
     {
         var docs = new List<DocNode>
         {
@@ -3353,9 +3356,7 @@ public class DocsControllerTests : IDisposable
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
         var first = Assert.IsType<JsonResult>(await _controller.SearchIndex());
-        var firstPayload = JsonSerializer.Serialize(first.Value);
-        using var firstDoc = JsonDocument.Parse(firstPayload);
-        var firstGenerated = firstDoc.RootElement.GetProperty("metadata").GetProperty("generatedAtUtc").GetString();
+        var firstGenerated = GetGeneratedAt(first);
 
         var refreshedHttpContext = new DefaultHttpContext();
         refreshedHttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
@@ -3368,15 +3369,13 @@ public class DocsControllerTests : IDisposable
         _controller.ControllerContext = new ControllerContext { HttpContext = refreshedHttpContext };
 
         var second = Assert.IsType<JsonResult>(await _controller.SearchIndex());
-        var secondPayload = JsonSerializer.Serialize(second.Value);
-        using var secondDoc = JsonDocument.Parse(secondPayload);
-        var secondGenerated = secondDoc.RootElement.GetProperty("metadata").GetProperty("generatedAtUtc").GetString();
+        var secondGenerated = GetGeneratedAt(second);
 
-        Assert.NotEqual(firstGenerated, secondGenerated);
+        Assert.Equal(firstGenerated, secondGenerated);
     }
 
     [Fact]
-    public async Task SearchIndex_ShouldRefreshCache_WhenAuthenticatedRefreshTrueRequested()
+    public async Task SearchIndex_ShouldIgnoreRefreshTrueQuery_WhenAuthenticatedRefreshRequested()
     {
         var docs = new List<DocNode>
         {
@@ -3385,9 +3384,7 @@ public class DocsControllerTests : IDisposable
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
         var first = Assert.IsType<JsonResult>(await _controller.SearchIndex());
-        var firstPayload = JsonSerializer.Serialize(first.Value);
-        using var firstDoc = JsonDocument.Parse(firstPayload);
-        var firstGenerated = firstDoc.RootElement.GetProperty("metadata").GetProperty("generatedAtUtc").GetString();
+        var firstGenerated = GetGeneratedAt(first);
 
         var refreshedHttpContext = new DefaultHttpContext();
         refreshedHttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
@@ -3400,11 +3397,9 @@ public class DocsControllerTests : IDisposable
         _controller.ControllerContext = new ControllerContext { HttpContext = refreshedHttpContext };
 
         var second = Assert.IsType<JsonResult>(await _controller.SearchIndex());
-        var secondPayload = JsonSerializer.Serialize(second.Value);
-        using var secondDoc = JsonDocument.Parse(secondPayload);
-        var secondGenerated = secondDoc.RootElement.GetProperty("metadata").GetProperty("generatedAtUtc").GetString();
+        var secondGenerated = GetGeneratedAt(second);
 
-        Assert.NotEqual(firstGenerated, secondGenerated);
+        Assert.Equal(firstGenerated, secondGenerated);
     }
 
     [Fact]
@@ -3417,9 +3412,7 @@ public class DocsControllerTests : IDisposable
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
         var first = Assert.IsType<JsonResult>(await _controller.SearchIndex());
-        var firstPayload = JsonSerializer.Serialize(first.Value);
-        using var firstDoc = JsonDocument.Parse(firstPayload);
-        var firstGenerated = firstDoc.RootElement.GetProperty("metadata").GetProperty("generatedAtUtc").GetString();
+        var firstGenerated = GetGeneratedAt(first);
 
         var refreshedHttpContext = new DefaultHttpContext
         {
@@ -3432,9 +3425,7 @@ public class DocsControllerTests : IDisposable
         _controller.ControllerContext = new ControllerContext { HttpContext = refreshedHttpContext };
 
         var second = Assert.IsType<JsonResult>(await _controller.SearchIndex());
-        var secondPayload = JsonSerializer.Serialize(second.Value);
-        using var secondDoc = JsonDocument.Parse(secondPayload);
-        var secondGenerated = secondDoc.RootElement.GetProperty("metadata").GetProperty("generatedAtUtc").GetString();
+        var secondGenerated = GetGeneratedAt(second);
 
         Assert.Equal(firstGenerated, secondGenerated);
     }
@@ -3449,9 +3440,7 @@ public class DocsControllerTests : IDisposable
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
 
         var first = Assert.IsType<JsonResult>(await _controller.SearchIndex());
-        var firstPayload = JsonSerializer.Serialize(first.Value);
-        using var firstDoc = JsonDocument.Parse(firstPayload);
-        var firstGenerated = firstDoc.RootElement.GetProperty("metadata").GetProperty("generatedAtUtc").GetString();
+        var firstGenerated = GetGeneratedAt(first);
 
         var refreshRequestContext = new DefaultHttpContext();
         refreshRequestContext.Request.Query = new QueryCollection(new Dictionary<string, StringValues>
@@ -3461,11 +3450,195 @@ public class DocsControllerTests : IDisposable
         _controller.ControllerContext = new ControllerContext { HttpContext = refreshRequestContext };
 
         var second = Assert.IsType<JsonResult>(await _controller.SearchIndex());
-        var secondPayload = JsonSerializer.Serialize(second.Value);
-        using var secondDoc = JsonDocument.Parse(secondPayload);
-        var secondGenerated = secondDoc.RootElement.GetProperty("metadata").GetProperty("generatedAtUtc").GetString();
+        var secondGenerated = GetGeneratedAt(second);
 
         Assert.Equal(firstGenerated, secondGenerated);
+    }
+
+    [Fact]
+    public async Task RefreshSearchIndex_ShouldInvalidateCache_WhenConfiguredPolicyAuthorizesUser()
+    {
+        var docs = new List<DocNode>
+        {
+            new("Getting Started", "guides/start", "<p>First steps.</p>")
+        };
+        var harvester = A.Fake<IDocHarvester>();
+        A.CallTo(() => harvester.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                SearchIndexRefreshPolicy = "DocsRefresh"
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, harvester);
+        using var _ = cache;
+        using var __ = memo;
+        controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+        {
+            RequestServices = CreateAuthorizationServices(
+                policyName: "DocsRefresh",
+                policy => policy.RequireAuthenticatedUser()),
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+                authenticationType: "test-auth"))
+        });
+
+        var first = Assert.IsType<JsonResult>(await controller.SearchIndex());
+        var firstGenerated = GetGeneratedAt(first);
+
+        var refresh = await controller.RefreshSearchIndex();
+
+        Assert.IsType<NoContentResult>(refresh);
+        var second = Assert.IsType<JsonResult>(await controller.SearchIndex());
+        var secondGenerated = GetGeneratedAt(second);
+        Assert.NotEqual(firstGenerated, secondGenerated);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenPolicyOptionIsMissingOrBlank(
+        string? policyName)
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                SearchIndexRefreshPolicy = policyName
+            }
+        };
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.MissingPolicyOption, result.Reason);
+    }
+
+    [Fact]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenPolicyProviderIsMissing()
+    {
+        var options = CreateRefreshPolicyOptions();
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection()
+                .AddSingleton(A.Fake<IAuthorizationService>())
+                .BuildServiceProvider()
+        });
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider, result.Reason);
+    }
+
+    [Fact]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenAuthorizationServiceIsMissing()
+    {
+        var options = CreateRefreshPolicyOptions();
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection()
+                .AddSingleton<IAuthorizationPolicyProvider>(
+                    new DefaultAuthorizationPolicyProvider(Options.Create(new AuthorizationOptions())))
+                .BuildServiceProvider()
+        });
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.MissingAuthorizationService, result.Reason);
+    }
+
+    [Fact]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenPolicyIsNotFound()
+    {
+        var options = CreateRefreshPolicyOptions();
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+        {
+            RequestServices = CreateAuthorizationServices(
+                policyName: "DifferentPolicy",
+                policy => policy.RequireAuthenticatedUser()),
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+                authenticationType: "test-auth"))
+        });
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.PolicyNotFound, result.Reason);
+    }
+
+    [Fact]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenUserIsUnauthenticated()
+    {
+        var options = CreateRefreshPolicyOptions();
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+        {
+            RequestServices = CreateAuthorizationServices(
+                policyName: "DocsRefresh",
+                policy => policy.RequireAuthenticatedUser()),
+            User = new ClaimsPrincipal(new ClaimsIdentity())
+        });
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.Unauthenticated, result.Reason);
+    }
+
+    [Fact]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenPolicyFails()
+    {
+        var options = CreateRefreshPolicyOptions();
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+        {
+            RequestServices = CreateAuthorizationServices(
+                policyName: "DocsRefresh",
+                policy => policy.RequireClaim("scope", "docs.refresh")),
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, "operator") },
+                authenticationType: "test-auth"))
+        });
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.AuthorizationFailed, result.Reason);
+    }
+
+    [Fact]
+    public async Task RefreshSearchIndex_ShouldReturnForbidden_WhenAuthorizationFails()
+    {
+        var options = new AppSurfaceDocsOptions();
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+
+        var result = await controller.RefreshSearchIndex();
+
+        var status = Assert.IsType<StatusCodeResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, status.StatusCode);
     }
 
     [Fact]
@@ -3908,20 +4081,18 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
-    public void CanRefreshCache_ShouldReturnFalse_WhenUserOrIdentityIsMissing()
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenRequestServicesAreMissing()
     {
-        _controller.ControllerContext = new ControllerContext();
-        var nullContextResult = _controller.CanRefreshCache();
+        var (controller, cache, memo) = CreateController(CreateRefreshPolicyOptions(), A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
 
-        var noIdentityHttpContext = new DefaultHttpContext
-        {
-            User = new ClaimsPrincipal()
-        };
-        _controller.ControllerContext = new ControllerContext { HttpContext = noIdentityHttpContext };
-        var noIdentityResult = _controller.CanRefreshCache();
+        controller.ControllerContext = new ControllerContext();
 
-        Assert.False(nullContextResult);
-        Assert.False(noIdentityResult);
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider, result.Reason);
     }
 
     public void Dispose()
@@ -3958,6 +4129,39 @@ public class DocsControllerTests : IDisposable
             RouteData = new RouteData(),
             ActionDescriptor = new ControllerActionDescriptor()
         };
+    }
+
+    private static string? GetGeneratedAt(JsonResult result)
+    {
+        var payload = JsonSerializer.Serialize(result.Value);
+        using var document = JsonDocument.Parse(payload);
+        return document.RootElement.GetProperty("metadata").GetProperty("generatedAtUtc").GetString();
+    }
+
+    private static AppSurfaceDocsOptions CreateRefreshPolicyOptions()
+    {
+        return new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                SearchIndexRefreshPolicy = "DocsRefresh"
+            }
+        };
+    }
+
+    private static IServiceProvider CreateAuthorizationServices(
+        string policyName,
+        Action<AuthorizationPolicyBuilder> configurePolicy)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorization(
+            options =>
+            {
+                options.AddPolicy(policyName, configurePolicy);
+            });
+
+        return services.BuildServiceProvider();
     }
 
     private (DocsController Controller, IMemoryCache Cache, Memo Memo) CreateController(

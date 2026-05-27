@@ -3,12 +3,13 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.ViewComponents;
 using ForgeTrust.RazorWire.Bridge;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Primitives;
 
 namespace ForgeTrust.AppSurface.Docs.Controllers;
 
@@ -434,20 +435,6 @@ public class DocsController : Controller
     [HttpGet]
     public async Task<IActionResult> SearchIndex()
     {
-        // Manual invalidation hook for operators: use DocsUrlBuilder.Routes.SearchIndexRefresh for the configured root.
-        if (ShouldRefreshCache(Request.Query))
-        {
-            if (CanRefreshCache())
-            {
-                _aggregator.InvalidateCache();
-                _logger.LogInformation("Search index cache generation bumped by an authenticated user.");
-            }
-            else
-            {
-                _logger.LogWarning("Ignoring unauthenticated search index refresh attempt.");
-            }
-        }
-
         // Keep response caching private by default; docs may be served behind auth.
         Response.Headers.CacheControl = $"private,max-age={(int)_aggregator.SnapshotCacheDuration.TotalSeconds}";
 
@@ -455,6 +442,63 @@ public class DocsController : Controller
         var pathBaseAwarePayload = PrefixSearchIndexPathsForPathBase(payload, Request.PathBase.Value);
 
         return Json(pathBaseAwarePayload);
+    }
+
+    /// <summary>
+    /// Invalidates the current live docs search-index cache after host-owned operator authorization succeeds.
+    /// </summary>
+    /// <returns>
+    /// <see cref="NoContentResult"/> when the configured policy authorizes the current user; otherwise HTTP 403. MVC
+    /// anti-forgery validation runs before this action body and rejects missing or invalid tokens before policy checks.
+    /// </returns>
+    /// <remarks>
+    /// This endpoint is intentionally POST-only and side-effecting. Readers should fetch <see cref="SearchIndex"/>; host
+    /// operators should post to <see cref="DocsUrlBuilder.Routes"/>.<c>SearchIndexRefresh</c> with a valid anti-forgery
+    /// token and a user that satisfies <see cref="AppSurfaceDocsDiagnosticsOptions.SearchIndexRefreshPolicy"/>.
+    /// </remarks>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RefreshSearchIndex()
+    {
+        var authorization = await AuthorizeSearchIndexRefreshAsync(HttpContext.RequestAborted);
+        if (!authorization.IsAllowed)
+        {
+            _logger.LogWarning(
+                "Denied AppSurface Docs search-index refresh attempt. Reason: {Reason}",
+                authorization.Reason);
+
+            return StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        _aggregator.InvalidateCache();
+        _logger.LogInformation("AppSurface Docs search-index cache invalidated by an authorized operator.");
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Rejects non-POST search-index refresh requests before they can fall through to document lookup.
+    /// </summary>
+    /// <returns>HTTP 405 with <c>Allow: POST</c>.</returns>
+    [AcceptVerbs("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "PUT")]
+    public IActionResult RefreshSearchIndexUnsupportedMethod()
+    {
+        var statusCodePages = HttpContext.Features.Get<IStatusCodePagesFeature>();
+        if (statusCodePages is not null)
+        {
+            statusCodePages.Enabled = false;
+        }
+
+        Response.OnStarting(
+            static state =>
+            {
+                var httpContext = (HttpContext)state;
+                httpContext.Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
+                return Task.CompletedTask;
+            },
+            HttpContext);
+        Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
+        return StatusCode(StatusCodes.Status405MethodNotAllowed);
     }
 
     /// <summary>
@@ -575,30 +619,42 @@ public class DocsController : Controller
         return new JsonResult(response);
     }
 
-    /// <summary>
-    /// Determines whether the search index cache should be refreshed based on the presence of a "refresh" query parameter.
-    /// </summary>
-    /// <param name="query">The collection of query parameters from the HTTP request.</param>
-    /// <returns><c>true</c> if the cache should be refreshed; otherwise, <c>false</c>.</returns>
-    private static bool ShouldRefreshCache(IQueryCollection query)
+    internal async Task<SearchIndexRefreshAuthorizationResult> AuthorizeSearchIndexRefreshAsync(
+        CancellationToken cancellationToken)
     {
-        if (!query.TryGetValue("refresh", out StringValues refreshValues))
+        var policyName = _options.Diagnostics?.SearchIndexRefreshPolicy;
+        if (string.IsNullOrWhiteSpace(policyName))
         {
-            return false;
+            return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.MissingPolicyOption);
         }
 
-        var refresh = refreshValues.ToString();
-        return refresh == "1"
-               || string.Equals(refresh, "true", StringComparison.OrdinalIgnoreCase);
-    }
+        var policyProvider = HttpContext?.RequestServices?.GetService<IAuthorizationPolicyProvider>();
+        if (policyProvider is null)
+        {
+            return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider);
+        }
 
-    /// <summary>
-    /// Checks whether the current user has permission to initiate a cache refresh.
-    /// </summary>
-    /// <returns><c>true</c> if the user is authenticated; otherwise, <c>false</c>.</returns>
-    internal bool CanRefreshCache()
-    {
-        return User?.Identity?.IsAuthenticated == true;
+        var authorizationService = HttpContext?.RequestServices?.GetService<IAuthorizationService>();
+        if (authorizationService is null)
+        {
+            return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.MissingAuthorizationService);
+        }
+
+        var policy = await policyProvider.GetPolicyAsync(policyName).WaitAsync(cancellationToken);
+        if (policy is null)
+        {
+            return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.PolicyNotFound);
+        }
+
+        if (User?.Identity?.IsAuthenticated != true)
+        {
+            return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.Unauthenticated);
+        }
+
+        var authorization = await authorizationService.AuthorizeAsync(User, resource: null, policy);
+        return authorization.Succeeded
+            ? SearchIndexRefreshAuthorizationResult.Allowed()
+            : SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.AuthorizationFailed);
     }
 
     private async Task<AppSurfaceDocsHarvestHealthResponse> BuildHarvestHealthResponseAsync()
@@ -1792,4 +1848,29 @@ public class DocsController : Controller
 
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
+}
+
+internal readonly record struct SearchIndexRefreshAuthorizationResult(
+    bool IsAllowed,
+    SearchIndexRefreshAuthorizationFailure? Reason)
+{
+    public static SearchIndexRefreshAuthorizationResult Allowed()
+    {
+        return new SearchIndexRefreshAuthorizationResult(true, null);
+    }
+
+    public static SearchIndexRefreshAuthorizationResult Denied(SearchIndexRefreshAuthorizationFailure reason)
+    {
+        return new SearchIndexRefreshAuthorizationResult(false, reason);
+    }
+}
+
+internal enum SearchIndexRefreshAuthorizationFailure
+{
+    MissingPolicyOption,
+    MissingPolicyProvider,
+    MissingAuthorizationService,
+    PolicyNotFound,
+    Unauthenticated,
+    AuthorizationFailed
 }
