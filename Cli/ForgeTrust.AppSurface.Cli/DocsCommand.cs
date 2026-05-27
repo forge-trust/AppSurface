@@ -2205,14 +2205,16 @@ internal sealed class AppSurfaceDocsInProcessHealthVerifyRunner : IAppSurfaceDoc
         }
 
         using var startupTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var timeoutDelayCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         startupTimeoutCts.CancelAfter(startupTimeout.Value);
         var startTask = Task.Run(
             () => _hostStarter.BuildAndStartAsync(args, environmentName, startupTimeoutCts.Token),
             CancellationToken.None);
+        var timeoutTask = Task.Delay(startupTimeout.Value, timeoutDelayCts.Token);
 
         try
         {
-            var completedTask = await Task.WhenAny(startTask, Task.Delay(startupTimeout.Value, cancellationToken));
+            var completedTask = await Task.WhenAny(startTask, timeoutTask);
             if (completedTask != startTask)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -2227,6 +2229,7 @@ internal sealed class AppSurfaceDocsInProcessHealthVerifyRunner : IAppSurfaceDoc
                 throw CreateStartupTimeoutException(startupTimeout.Value, innerException: null);
             }
 
+            await timeoutDelayCts.CancelAsync();
             return await startTask;
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)

@@ -702,6 +702,26 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_NotCancelStartupToken_WhenHostStartsBeforeTimeout()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61241");
+        var starter = new ImmediateHealthHostStarter(host);
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            starter);
+
+        var result = await runner.VerifyAsync(
+            CreateHealthVerifyArgs(repository.Path, TimeSpan.FromSeconds(30)),
+            CancellationToken.None);
+
+        Assert.True(result.Health.Verification.Ok);
+        Assert.False(starter.StartupToken.IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_UseTrailingSlashBaseUrl()
     {
         using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
