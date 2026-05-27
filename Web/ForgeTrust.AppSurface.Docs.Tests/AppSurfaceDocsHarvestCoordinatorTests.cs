@@ -1,7 +1,9 @@
+using System.Threading.Channels;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
@@ -99,7 +101,10 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
     public async Task WaitForCompletionAsync_WhenTestingDelayIsConfigured_DelaysHarvesterAfterPublishingProgress()
     {
         using var cache = new MemoryCache(new MemoryCacheOptions());
-        await using var services = new ServiceCollection().BuildServiceProvider();
+        var streamHub = new BlockingHarvesterStartedStreamHub();
+        await using var services = new ServiceCollection()
+            .AddSingleton<IRazorWireStreamHub>(streamHub)
+            .BuildServiceProvider();
         var harvester = new BlockingHarvester();
         var delay = TimeSpan.FromSeconds(2);
         var tolerance = TimeSpan.FromMilliseconds(200);
@@ -110,11 +115,12 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             configureOptions: options => options.Harvest.TestingDelayPerHarvesterMilliseconds = (int)delay.TotalMilliseconds);
 
         Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
-        await WaitUntilAsync(
-            () => coordinator.CurrentProgress.Harvesters.Any(
-                harvesterProgress => string.Equals(harvesterProgress.Status, "Running", StringComparison.Ordinal)));
+        await streamHub.HarvesterStartedPublished.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.False(harvester.Started.Task.IsCompleted);
+        Assert.Equal(0, harvester.CallCount);
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
+        streamHub.ReleaseHarvesterStartedPublish();
         await harvester.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
         sw.Stop();
 
@@ -290,6 +296,41 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         public void Complete(params DocNode[] docs)
         {
             _completed.TrySetResult(docs);
+        }
+    }
+
+    private sealed class BlockingHarvesterStartedStreamHub : IRazorWireStreamHub
+    {
+        private readonly TaskCompletionSource _releaseHarvesterStartedPublish = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource HarvesterStartedPublished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask PublishAsync(string channel, string message)
+        {
+            return PublishAsync(channel, message, options: null);
+        }
+
+        public async ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
+        {
+            if (message.Contains("BlockingHarvester started.", StringComparison.Ordinal))
+            {
+                HarvesterStartedPublished.TrySetResult();
+                await _releaseHarvesterStartedPublish.Task;
+            }
+        }
+
+        public void ReleaseHarvesterStartedPublish()
+        {
+            _releaseHarvesterStartedPublish.TrySetResult();
+        }
+
+        public ChannelReader<string> Subscribe(string channel)
+        {
+            return Channel.CreateUnbounded<string>().Reader;
+        }
+
+        public void Unsubscribe(string channel, ChannelReader<string> reader)
+        {
         }
     }
 
