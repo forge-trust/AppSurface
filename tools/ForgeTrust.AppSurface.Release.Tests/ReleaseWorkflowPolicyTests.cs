@@ -65,7 +65,7 @@ public sealed class ReleaseWorkflowPolicyTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "ForgeTrust.AppSurface.slnx")))
+            if (File.Exists(Path.Join(directory.FullName, "ForgeTrust.AppSurface.slnx")))
             {
                 return directory.FullName;
             }

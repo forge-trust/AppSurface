@@ -12,7 +12,7 @@ public sealed class ReleaseToolTests : IDisposable
 
     public ReleaseToolTests()
     {
-        _repositoryRoot = Path.Combine(Path.GetTempPath(), "ReleaseToolTests", Guid.NewGuid().ToString("N"));
+        _repositoryRoot = Path.Join(Path.GetTempPath(), "ReleaseToolTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_repositoryRoot);
     }
 
@@ -102,7 +102,7 @@ public sealed class ReleaseToolTests : IDisposable
             FakeCommandRunner.WithSourceCommit("abc123"));
 
         Assert.Equal(0, result.ExitCode);
-        Assert.False(File.Exists(Path.Combine(_repositoryRoot, "releases", "v0.1.0-preview.1.md")));
+        Assert.False(File.Exists(Path.Join(_repositoryRoot, "releases", "v0.1.0-preview.1.md")));
         Assert.Contains("## Dry-run plan", result.Stdout, StringComparison.Ordinal);
         Assert.Contains("releases/v0.1.0-preview.1.release.json", result.Stdout, StringComparison.Ordinal);
     }
@@ -111,7 +111,7 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task PrepareWritesExternalReportDuringDryRun()
     {
         await SeedRepositoryAsync();
-        var reportPath = Path.Combine(Path.GetTempPath(), "ReleaseToolReports", Guid.NewGuid().ToString("N"), "prepare-report.md");
+        var reportPath = Path.Join(Path.GetTempPath(), "ReleaseToolReports", Guid.NewGuid().ToString("N"), "prepare-report.md");
 
         var result = await RunAsync(
             [
@@ -188,7 +188,7 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task CheckWritesReportWhenReportPathIsRequested()
     {
         await SeedRepositoryAsync();
-        var reportPath = Path.Combine(_repositoryRoot, "artifacts", "release-report.md");
+        var reportPath = Path.Join(_repositoryRoot, "artifacts", "release-report.md");
 
         var result = await RunAsync(
             ["check", "--version", "0.1.0-preview.1", "--report", reportPath],
@@ -302,7 +302,7 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task CheckReportsMissingPackagePolicyAndEmptyPublicPackageSet()
     {
         await SeedRepositoryAsync();
-        File.Delete(Path.Combine(_repositoryRoot, ".github", "workflows", "nuget-prerelease-publish.yml"));
+        File.Delete(Path.Join(_repositoryRoot, ".github", "workflows", "nuget-prerelease-publish.yml"));
         await WriteFileAsync(
             "packages/package-index.yml",
             """
@@ -411,7 +411,7 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task PublishEmitsStructuredOutputsForAnnotatedPrereleaseTag()
     {
         await SeedRepositoryAsync();
-        var githubOutput = Path.Combine(_repositoryRoot, "github-output.txt");
+        var githubOutput = Path.Join(_repositoryRoot, "github-output.txt");
         var runner = CreateSuccessfulPublishRunner();
 
         var result = await RunAsync(
@@ -443,9 +443,9 @@ public sealed class ReleaseToolTests : IDisposable
         var version = SemVer.Parse("0.1.0-preview.1");
         var workspace = new ReleaseWorkspace(_repositoryRoot);
 
-        Assert.Equal(Path.Combine(_repositoryRoot, "CHANGELOG.md"), workspace.ChangelogPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "releases", "v0.1.0-preview.1.md"), workspace.ReleaseNotePath(version));
-        Assert.True(ReleaseWorkspace.IsUnderPath(_repositoryRoot, Path.Combine(_repositoryRoot, "releases")));
+        Assert.Equal(Path.Join(_repositoryRoot, "CHANGELOG.md"), workspace.ChangelogPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "releases", "v0.1.0-preview.1.md"), workspace.ReleaseNotePath(version));
+        Assert.True(ReleaseWorkspace.IsUnderPath(_repositoryRoot, Path.Join(_repositoryRoot, "releases")));
         Assert.False(ReleaseWorkspace.IsUnderPath(_repositoryRoot, Path.GetTempPath()));
 
         var changelog = ChangelogEditor.RollForward(
@@ -622,7 +622,7 @@ public sealed class ReleaseToolTests : IDisposable
     public async Task PublishWritesMultilineGithubOutputs()
     {
         await SeedRepositoryAsync();
-        var githubOutput = Path.Combine(_repositoryRoot, "artifacts", "github-output.txt");
+        var githubOutput = Path.Join(_repositoryRoot, "artifacts", "github-output.txt");
         var publishing = new ReleasePublishing(new ReleaseWorkspace(_repositoryRoot), new FakeCommandRunner());
         var options = new ReleaseOptions(
             "publish",
@@ -732,14 +732,25 @@ public sealed class ReleaseToolTests : IDisposable
 
     private async Task WriteFileAsync(string relativePath, string content)
     {
-        var path = Path.Combine(_repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        var path = RepositoryPath(relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, content);
     }
 
     private async Task<string> ReadFileAsync(string relativePath)
     {
-        return await File.ReadAllTextAsync(Path.Combine(_repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        return await File.ReadAllTextAsync(RepositoryPath(relativePath));
+    }
+
+    private string RepositoryPath(string relativePath)
+    {
+        var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedRelativePath))
+        {
+            throw new ArgumentException("Test repository paths must be relative.", nameof(relativePath));
+        }
+
+        return Path.Join(_repositoryRoot, normalizedRelativePath);
     }
 
     private async Task<CliResult> RunAsync(string[] args, FakeCommandRunner runner)
