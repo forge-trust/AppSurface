@@ -491,15 +491,6 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 });
 
         endpoints.MapControllerRoute(
-            name: "appsurfacedocs_search_index_refresh_method_not_allowed",
-            pattern: currentSearchIndexRefreshPattern,
-            defaults: new
-            {
-                controller = "Docs",
-                action = "RefreshSearchIndexUnsupportedMethod"
-            });
-
-        endpoints.MapControllerRoute(
                 name: "appsurfacedocs_search_index_refresh",
                 pattern: currentSearchIndexRefreshPattern,
                 defaults: new

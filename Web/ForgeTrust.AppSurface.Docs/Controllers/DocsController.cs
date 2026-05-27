@@ -4,7 +4,6 @@ using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.ViewComponents;
 using ForgeTrust.RazorWire.Bridge;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -474,31 +473,6 @@ public class DocsController : Controller
         _logger.LogInformation("AppSurface Docs search-index cache invalidated by an authorized operator.");
 
         return NoContent();
-    }
-
-    /// <summary>
-    /// Rejects non-POST search-index refresh requests before they can fall through to document lookup.
-    /// </summary>
-    /// <returns>HTTP 405 with <c>Allow: POST</c>.</returns>
-    [AcceptVerbs("DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "PUT")]
-    public IActionResult RefreshSearchIndexUnsupportedMethod()
-    {
-        var statusCodePages = HttpContext.Features.Get<IStatusCodePagesFeature>();
-        if (statusCodePages is not null)
-        {
-            statusCodePages.Enabled = false;
-        }
-
-        Response.OnStarting(
-            static state =>
-            {
-                var httpContext = (HttpContext)state;
-                httpContext.Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
-                return Task.CompletedTask;
-            },
-            HttpContext);
-        Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
-        return StatusCode(StatusCodes.Status405MethodNotAllowed);
     }
 
     /// <summary>
