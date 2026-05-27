@@ -17,6 +17,8 @@ Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`
 
 `check` validates the release inputs without mutating the repository. It verifies required release files, target versioned artifacts, package publishing policy, package manifest shape, and warning IDs that the review workflow can enforce with `--fail-on-warnings`. The release-prep review workflow also passes `--allow-existing-targets` because it reviews the versioned artifacts that the preparation workflow intentionally generated.
 
+`--fail-on-warnings` and `--allow-existing-targets` are intentionally check-only options. `prepare` and `publish` reject them so a maintainer does not think warning policy or target-collision policy changed for a mutating or publishing command.
+
 ## Prepare
 
 `prepare` creates the release PR payload:
@@ -28,7 +30,7 @@ Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`
 - `packages/package-index.yml` release note paths for every `classification: public` plus `publish_decision: publish` package
 - reset `releases/unreleased.md` and `releases/unreleased.md.yml`
 
-`--dry-run` prints the readiness report and planned file list without changing repository files.
+`--dry-run` prints the readiness report and planned file list without changing repository files. `--date` is parsed as invariant `YYYY-MM-DD`; malformed sidecar YAML fails with the standard diagnostic envelope instead of a raw parser exception.
 
 ## Publish
 
@@ -48,4 +50,4 @@ Every failure uses the same envelope:
 - `Fix`
 - `Docs`
 
-Common codes include `release-version-leading-v`, `release-target-exists`, `release-stable-package-policy-missing`, `release-tag-lightweight`, `release-tag-unreachable-from-main`, and `release-github-release-exists`.
+Common codes include `release-version-leading-v`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-tag-lightweight`, `release-tag-unreachable-from-main`, and `release-github-release-exists`.

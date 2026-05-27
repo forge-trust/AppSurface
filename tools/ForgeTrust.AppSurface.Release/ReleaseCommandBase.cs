@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -74,18 +75,6 @@ internal abstract class ReleaseCommandBase
     public string? ReportPath { get; set; }
 
     /// <summary>
-    /// Gets a value indicating whether check should fail on warning diagnostics.
-    /// </summary>
-    [CommandOption("fail-on-warnings", Description = "Return a failing exit code when check finds warning diagnostics.")]
-    public bool FailOnWarnings { get; set; }
-
-    /// <summary>
-    /// Gets a value indicating whether check may review already-generated release artifacts.
-    /// </summary>
-    [CommandOption("allow-existing-targets", Description = "Allow check to review already-generated release artifacts.")]
-    public bool AllowExistingTargets { get; set; }
-
-    /// <summary>
     /// Runs command logic with release diagnostic rendering.
     /// </summary>
     /// <param name="console">CliFx console.</param>
@@ -157,7 +146,8 @@ internal abstract class ReleaseCommandBase
 
         var parsedVersion = SemVer.Parse(VersionText);
         DateOnly? parsedDate = null;
-        if (!string.IsNullOrWhiteSpace(DateText) && DateOnly.TryParseExact(DateText, "yyyy-MM-dd", out var parsedDateValue))
+        if (!string.IsNullOrWhiteSpace(DateText)
+            && DateOnly.TryParseExact(DateText, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDateValue))
         {
             parsedDate = parsedDateValue;
         }
@@ -203,6 +193,38 @@ internal abstract class ReleaseCommandBase
     /// <param name="repoRoot">Resolved repository root.</param>
     /// <returns>The output path, or <see langword="null"/> for commands that do not write workflow outputs.</returns>
     protected virtual string? ResolveGitHubOutputPath(string repoRoot) => null;
+
+    /// <summary>
+    /// Gets whether this command should turn warning diagnostics into a failing exit code.
+    /// </summary>
+    protected virtual bool FailOnWarnings => false;
+
+    /// <summary>
+    /// Gets whether this command may review already-generated release artifacts.
+    /// </summary>
+    protected virtual bool AllowExistingTargets => false;
+
+    /// <summary>
+    /// Writes the rendered command report to stdout and to the optional report path.
+    /// </summary>
+    /// <param name="options">Resolved command options.</param>
+    /// <param name="rendered">Rendered Markdown report.</param>
+    /// <param name="standardOut">Standard output writer.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes after the report is written.</returns>
+    protected static async Task WriteReportAsync(
+        ReleaseOptions options,
+        string rendered,
+        TextWriter standardOut,
+        CancellationToken cancellationToken)
+    {
+        await standardOut.WriteLineAsync(rendered);
+        if (options.ReportPath is not null && (!options.DryRun || !ReleaseWorkspace.IsUnderPath(options.RepositoryRoot, options.ReportPath)))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(options.ReportPath)!);
+            await File.WriteAllTextAsync(options.ReportPath, rendered, cancellationToken);
+        }
+    }
 
     private static string? ResolveOptionalPath(string repoRoot, string? value)
     {

@@ -37,6 +37,24 @@ internal sealed partial class ReleaseCheckCommand : ReleaseCommandBase, ICommand
     /// <inheritdoc />
     protected override string CommandName => "check";
 
+    /// <summary>
+    /// Gets a value indicating whether check should fail on warning diagnostics.
+    /// </summary>
+    [CommandOption("fail-on-warnings", Description = "Return a failing exit code when check finds warning diagnostics.")]
+    public bool FailOnWarningsOption { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether check may review already-generated release artifacts.
+    /// </summary>
+    [CommandOption("allow-existing-targets", Description = "Allow check to review already-generated release artifacts.")]
+    public bool AllowExistingTargetsOption { get; set; }
+
+    /// <inheritdoc />
+    protected override bool FailOnWarnings => FailOnWarningsOption;
+
+    /// <inheritdoc />
+    protected override bool AllowExistingTargets => AllowExistingTargetsOption;
+
     /// <inheritdoc />
     public ValueTask ExecuteAsync(IConsole console)
     {
@@ -48,20 +66,6 @@ internal sealed partial class ReleaseCheckCommand : ReleaseCommandBase, ICommand
             await WriteReportAsync(options, rendered, console.Output, cancellationToken);
             return report.HasErrors || (options.FailOnWarnings && report.Warnings.Count > 0) ? 1 : 0;
         });
-    }
-
-    private static async Task WriteReportAsync(
-        ReleaseOptions options,
-        string rendered,
-        TextWriter standardOut,
-        CancellationToken cancellationToken)
-    {
-        await standardOut.WriteLineAsync(rendered);
-        if (options.ReportPath is not null && (!options.DryRun || !ReleaseWorkspace.IsUnderPath(options.RepositoryRoot, options.ReportPath)))
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(options.ReportPath)!);
-            await File.WriteAllTextAsync(options.ReportPath, rendered, cancellationToken);
-        }
     }
 }
 
@@ -96,20 +100,6 @@ internal sealed partial class ReleasePrepareCommand : ReleaseCommandBase, IComma
             await WriteReportAsync(options, rendered, console.Output, cancellationToken);
             return result.Check.HasErrors ? 1 : 0;
         });
-    }
-
-    private static async Task WriteReportAsync(
-        ReleaseOptions options,
-        string rendered,
-        TextWriter standardOut,
-        CancellationToken cancellationToken)
-    {
-        await standardOut.WriteLineAsync(rendered);
-        if (options.ReportPath is not null && (!options.DryRun || !ReleaseWorkspace.IsUnderPath(options.RepositoryRoot, options.ReportPath)))
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(options.ReportPath)!);
-            await File.WriteAllTextAsync(options.ReportPath, rendered, cancellationToken);
-        }
     }
 }
 

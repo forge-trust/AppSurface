@@ -35,8 +35,22 @@ internal sealed class ReleaseSidecar
     internal static async Task<ReleaseSidecar> LoadAsync(string path, CancellationToken cancellationToken)
     {
         var content = await File.ReadAllTextAsync(path, cancellationToken);
-        var metadata = new DeserializerBuilder().Build().Deserialize<Dictionary<object, object?>>(content)
-            ?? [];
+        Dictionary<object, object?> metadata;
+        try
+        {
+            metadata = new DeserializerBuilder().Build().Deserialize<Dictionary<object, object?>>(content)
+                ?? [];
+        }
+        catch (YamlException ex)
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-sidecar-invalid",
+                "Release sidecar metadata is not valid YAML.",
+                $"The sidecar at `{path}` could not be parsed: {ex.Message}",
+                "Fix the YAML syntax in the sidecar before preparing the release.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#prepare"));
+        }
+
         return new ReleaseSidecar(metadata);
     }
 

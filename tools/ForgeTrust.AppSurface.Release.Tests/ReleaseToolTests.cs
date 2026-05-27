@@ -94,6 +94,24 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckOnlyOptionsAreRejectedByOtherCommands()
+    {
+        var prepare = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--fail-on-warnings"],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, prepare.ExitCode);
+        Assert.Contains("--fail-on-warnings", prepare.Stderr, StringComparison.Ordinal);
+
+        var publish = await RunAsync(
+            ["publish", "--version", "0.1.0-preview.1", "--tag", "v0.1.0-preview.1", "--allow-existing-targets"],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, publish.ExitCode);
+        Assert.Contains("--allow-existing-targets", publish.Stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PrepareDryRunDoesNotWriteGeneratedFiles()
     {
         await SeedRepositoryAsync();
@@ -167,6 +185,24 @@ public sealed class ReleaseToolTests : IDisposable
         var changelog = await ReadFileAsync("CHANGELOG.md");
         Assert.Contains("## 0.1.0-preview.1 - 2026-05-25", changelog, StringComparison.Ordinal);
         Assert.DoesNotContain("## No tagged releases yet", changelog, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PrepareReportsInvalidSidecarThroughDiagnosticEnvelope()
+    {
+        await SeedRepositoryAsync();
+        await WriteFileAsync("releases/unreleased.md.yml", "title: [\n");
+
+        var result = await RunAsync(
+            ["prepare", "--version", "0.1.0-preview.1", "--date", "2026-05-25"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-sidecar-invalid", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("Problem:", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("Cause:", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("Fix:", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("Docs:", result.Stderr, StringComparison.Ordinal);
     }
 
     [Fact]
