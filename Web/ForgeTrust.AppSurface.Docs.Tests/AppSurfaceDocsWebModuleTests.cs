@@ -8,6 +8,7 @@ using ForgeTrust.AppSurface.Web.Tailwind;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -483,6 +484,45 @@ public class AppSurfaceDocsWebModuleTests
                     && methods.Contains(HttpMethods.Options)
                     && !methods.Contains(HttpMethods.Post);
             });
+    }
+
+    [Fact]
+    public async Task SearchIndexRefreshUnsupportedMethodEndpoint_ShouldReturnMethodNotAllowedAndDisableStatusPages()
+    {
+        var context = CreateStartupContext();
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment());
+        using var app = builder.Build();
+        var routeBuilder = (IEndpointRouteBuilder)app;
+
+        _module.ConfigureEndpoints(context, routeBuilder);
+
+        var endpoint = routeBuilder.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(
+                endpoint =>
+                {
+                    var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+                    return endpoint.RoutePattern.RawText?.TrimStart('/') == "docs/_search-index/refresh"
+                        && methods is not null
+                        && methods.Contains(HttpMethods.Get)
+                        && !methods.Contains(HttpMethods.Post);
+                });
+        await using var responseBody = new MemoryStream();
+        var statusCodePages = A.Fake<IStatusCodePagesFeature>();
+        statusCodePages.Enabled = true;
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = responseBody;
+        httpContext.Features.Set(statusCodePages);
+
+        await endpoint.RequestDelegate!(httpContext);
+        await httpContext.Response.StartAsync();
+
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, httpContext.Response.StatusCode);
+        Assert.False(statusCodePages.Enabled);
+        Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, httpContext.Response.Headers.Allow);
     }
 
     [Fact]

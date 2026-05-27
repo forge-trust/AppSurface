@@ -3646,6 +3646,23 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenDiagnosticsOptionsAreMissing()
+    {
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = null!
+        };
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.MissingPolicyOption, result.Reason);
+    }
+
+    [Fact]
     public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenPolicyProviderIsMissing()
     {
         var options = CreateRefreshPolicyOptions();
