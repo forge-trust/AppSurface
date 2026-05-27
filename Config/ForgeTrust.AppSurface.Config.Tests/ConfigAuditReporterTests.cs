@@ -749,11 +749,9 @@ public class ConfigAuditReporterTests
         var codes = AssertEntry(report, "Codes", ConfigAuditEntryState.Resolved, null).Children;
         Assert.Equal(2, codes.Count);
         Assert.Contains(codes, code => code.Key == "Codes[\"7\"]"
-                                       && code.Element?.KeyLabel == "7"
-                                       && code.Element.IsKeyRedacted == false);
+                                       && code.Element is { KeyLabel: "7", IsKeyRedacted: false });
         Assert.Contains(codes, code => code.Key == "Codes[\"True\"]"
-                                       && code.Element?.KeyLabel == "True"
-                                       && code.Element.IsKeyRedacted == false);
+                                       && code.Element is { KeyLabel: "True", IsKeyRedacted: false });
 
         var hidden = Assert.Single(AssertEntry(report, "Hidden", ConfigAuditEntryState.Resolved, null).Children);
         Assert.Equal("Hidden[[key]]", hidden.Key);
