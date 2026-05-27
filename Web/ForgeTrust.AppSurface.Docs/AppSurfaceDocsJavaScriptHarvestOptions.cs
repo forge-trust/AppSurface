@@ -75,6 +75,20 @@ public sealed class AppSurfaceDocsJavaScriptHarvestOptions
     public bool StrictHealth { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether incomplete public JavaScript event doclets should fail harvest health.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="false" />, which preserves best-effort event documentation: incomplete public
+    /// events render and emit <see cref="Models.DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet"/> warnings.
+    /// Set this to <see langword="true" /> for CI and release verification when public browser events must document
+    /// <c>@target</c>, <c>@firesWhen</c>, and either at least one valid <c>@property detail.*</c> field or
+    /// <c>@detail none</c>. This option applies only to incomplete public event doclets and does not make parse,
+    /// oversized-file, unsupported-shape, or malformed-doclet diagnostics strict; those remain controlled by
+    /// <see cref="StrictHealth"/> or explicit <see cref="IncludeGlobs"/>.
+    /// </remarks>
+    public bool RequireCompleteEventDoclets { get; set; }
+
+    /// <summary>
     /// Gets or sets the largest JavaScript file, in bytes, that the harvester will parse.
     /// </summary>
     /// <remarks>
