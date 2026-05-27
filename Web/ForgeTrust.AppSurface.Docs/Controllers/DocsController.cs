@@ -602,13 +602,25 @@ public class DocsController : Controller
             return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.MissingPolicyOption);
         }
 
-        var policyProvider = HttpContext?.RequestServices?.GetService<IAuthorizationPolicyProvider>();
+        var httpContext = ControllerContext.HttpContext;
+        if (httpContext is null)
+        {
+            return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider);
+        }
+
+        var requestServices = httpContext.RequestServices;
+        if (requestServices is null)
+        {
+            return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider);
+        }
+
+        var policyProvider = requestServices.GetService<IAuthorizationPolicyProvider>();
         if (policyProvider is null)
         {
             return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider);
         }
 
-        var authorizationService = HttpContext?.RequestServices?.GetService<IAuthorizationService>();
+        var authorizationService = requestServices.GetService<IAuthorizationService>();
         if (authorizationService is null)
         {
             return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.MissingAuthorizationService);
@@ -620,7 +632,13 @@ public class DocsController : Controller
             return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.PolicyNotFound);
         }
 
-        if (User?.Identity?.IsAuthenticated != true)
+        var identity = User.Identity;
+        if (identity is null)
+        {
+            return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.Unauthenticated);
+        }
+
+        if (!identity.IsAuthenticated)
         {
             return SearchIndexRefreshAuthorizationResult.Denied(SearchIndexRefreshAuthorizationFailure.Unauthenticated);
         }

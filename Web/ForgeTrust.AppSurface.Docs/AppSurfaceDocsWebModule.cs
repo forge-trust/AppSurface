@@ -10,7 +10,6 @@ using ForgeTrust.RazorWire;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
@@ -471,24 +470,16 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             });
 
         endpoints.MapMethods(
-                currentSearchIndexRefreshPattern,
-                [
-                    HttpMethods.Delete,
-                    HttpMethods.Get,
-                    HttpMethods.Head,
-                    HttpMethods.Options,
-                    HttpMethods.Patch,
-                    HttpMethods.Put
-                ],
-                RejectSearchIndexRefreshUnsupportedMethodAsync)
-            .Add(
-                endpointBuilder =>
-                {
-                    if (endpointBuilder is RouteEndpointBuilder routeEndpointBuilder)
-                    {
-                        routeEndpointBuilder.Order = -100;
-                    }
-                });
+            currentSearchIndexRefreshPattern,
+            [
+                HttpMethods.Delete,
+                HttpMethods.Get,
+                HttpMethods.Head,
+                HttpMethods.Options,
+                HttpMethods.Patch,
+                HttpMethods.Put
+            ],
+            RejectSearchIndexRefreshUnsupportedMethodAsync);
 
         endpoints.MapControllerRoute(
                 name: "appsurfacedocs_search_index_refresh",

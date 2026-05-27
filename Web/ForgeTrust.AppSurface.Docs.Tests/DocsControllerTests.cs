@@ -3748,6 +3748,27 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenUserHasNoIdentity()
+    {
+        var options = CreateRefreshPolicyOptions();
+        var (controller, cache, memo) = CreateController(options, A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        controller.ControllerContext = CreateControllerContext(new DefaultHttpContext
+        {
+            RequestServices = CreateAuthorizationServices(
+                policyName: "DocsRefresh",
+                policy => policy.RequireAuthenticatedUser()),
+            User = new ClaimsPrincipal()
+        });
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.Unauthenticated, result.Reason);
+    }
+
+    [Fact]
     public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenPolicyFails()
     {
         var options = CreateRefreshPolicyOptions();
@@ -4231,6 +4252,24 @@ public class DocsControllerTests : IDisposable
         using var __ = memo;
 
         controller.ControllerContext = new ControllerContext();
+
+        var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
+
+        Assert.False(result.IsAllowed);
+        Assert.Equal(SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider, result.Reason);
+    }
+
+    [Fact]
+    public async Task AuthorizeSearchIndexRefreshAsync_ShouldDeny_WhenHttpContextRequestServicesAreMissing()
+    {
+        var (controller, cache, memo) = CreateController(CreateRefreshPolicyOptions(), A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        var httpContext = new DefaultHttpContext
+        {
+            RequestServices = null!
+        };
+        controller.ControllerContext = CreateControllerContext(httpContext);
 
         var result = await controller.AuthorizeSearchIndexRefreshAsync(CancellationToken.None);
 
