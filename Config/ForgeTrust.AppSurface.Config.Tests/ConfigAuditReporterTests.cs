@@ -723,7 +723,8 @@ public class ConfigAuditReporterTests
                 {
                     ["Codes"] = new Hashtable
                     {
-                        [7] = "seven"
+                        [7] = "seven",
+                        [true] = "enabled"
                     },
                     ["Hidden"] = new Dictionary<string, string>
                     {
@@ -745,10 +746,14 @@ public class ConfigAuditReporterTests
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var code = Assert.Single(AssertEntry(report, "Codes", ConfigAuditEntryState.Resolved, null).Children);
-        Assert.Equal("Codes[\"7\"]", code.Key);
-        Assert.Equal("7", code.Element?.KeyLabel);
-        Assert.False(code.Element?.IsKeyRedacted);
+        var codes = AssertEntry(report, "Codes", ConfigAuditEntryState.Resolved, null).Children;
+        Assert.Equal(2, codes.Count);
+        Assert.Contains(codes, code => code.Key == "Codes[\"7\"]"
+                                       && code.Element?.KeyLabel == "7"
+                                       && code.Element.IsKeyRedacted == false);
+        Assert.Contains(codes, code => code.Key == "Codes[\"True\"]"
+                                       && code.Element?.KeyLabel == "True"
+                                       && code.Element.IsKeyRedacted == false);
 
         var hidden = Assert.Single(AssertEntry(report, "Hidden", ConfigAuditEntryState.Resolved, null).Children);
         Assert.Equal("Hidden[[key]]", hidden.Key);

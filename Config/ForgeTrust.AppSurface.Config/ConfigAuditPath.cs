@@ -100,7 +100,9 @@ internal sealed record ConfigAuditPath(
         string label;
         try
         {
-            label = Convert.ToString(key, CultureInfo.InvariantCulture) ?? string.Empty;
+            label = key is IFormattable formattable
+                ? formattable.ToString(null, CultureInfo.InvariantCulture)
+                : ((IConvertible)key).ToString(CultureInfo.InvariantCulture);
         }
         catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
         {
