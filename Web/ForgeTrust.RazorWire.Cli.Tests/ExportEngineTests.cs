@@ -589,7 +589,8 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new ConventionalNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            var handler = new ConventionalNotFoundPageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -598,9 +599,15 @@ public class ExportEngineTests
             var notFoundFile = Path.Combine(tempDir, "404.html");
             Assert.True(File.Exists(notFoundFile));
             var html = await File.ReadAllTextAsync(notFoundFile);
+            var decodedHtml = Uri.UnescapeDataString(html);
             Assert.Contains("Exported 404 page", html);
             Assert.Contains("href=\"/about.html\"", html);
             Assert.Contains("src=\"/img/error.png\"", html);
+            Assert.DoesNotContain("Diagnostics", html, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("_health", decodedHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("_routes", decodedHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_health", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_routes", StringComparison.OrdinalIgnoreCase));
             Assert.False(File.Exists(Path.Combine(tempDir, "_appsurface", "errors", "404.html")));
             Assert.False(File.Exists(Path.Combine(tempDir, "401.html")));
             Assert.False(File.Exists(Path.Combine(tempDir, "403.html")));
@@ -650,12 +657,11 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_404Html_References_Missing_Asset()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
 
         try
         {
-            var client = new HttpClient(new MissingConventionalNotFoundAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new MissingConventionalNotFoundAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -663,6 +669,35 @@ public class ExportEngineTests
 
             Assert.Contains("RWEXPORT003", ex.Message, StringComparison.Ordinal);
             Assert.Contains("/missing-404.js", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Report_Reference_Provenance_For_Missing_Assets()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new MissingParserDiscoveredAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT003");
+
+            Assert.Contains("<img src>", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("Normalized path: '/img/missing.png'", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Contains("Add the route or asset", diagnostic.Message, StringComparison.Ordinal);
+            Assert.Equal("/img/missing.png", diagnostic.Reference?.Path);
+            Assert.Equal("<img src>", diagnostic.Reference?.Provenance?.DisplaySource);
         }
         finally
         {
@@ -802,7 +837,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("href=\"/about.html\"", indexHtml);
             Assert.Contains("data-copy=\"/about\" href=\"/about.html\"", indexHtml);
             Assert.Contains("href=\"/docs/start.html#intro\"", indexHtml);
@@ -832,6 +867,51 @@ public class ExportEngineTests
             Assert.All(
                 context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && (outcome.IsHtml || outcome.IsCss)),
                 outcome => Assert.Null(outcome.TextBody));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_Rewrite_Source_Preserving_Parser_Discovered_References()
+    {
+        var tempDir = Directory.CreateTempSubdirectory().FullName;
+
+        try
+        {
+            using var client = new HttpClient(new ParserBackedRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, "http://localhost:5000");
+            await _sut.RunAsync(context);
+
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.StartsWith("<!DOCTYPE html>\n<HTML data-kind=raw>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<!-- keep me -->", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<A HREF=/about.html data-extra='keep'>About</A>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<a DATA-RW-EXPORT-IGNORE href=/ignored>Ignored</a>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<a href=./Program.cs>Program</a>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<LINK REL='stylesheet preload' HREF=/styles/app data-copy=1>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<LINK REL='notstylesheet' HREF=/wrong.css>", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""<script SRC=/app>const fake = "<img src=/about>";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<!-- <a href=/about>Comment fake link</a> -->", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("<!-- <style>.comment-fake { background:url(/about); }</style> -->", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""const fake = "<img src=/about>";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""const close = "</script-not-real><img src=/about>";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""const fakeStyle = "<style>.script-fake { background:url(/about); }</style>";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""/* url('/img/comment.png') */""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""content: "url('/img/string.png')";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("""@import "/about.html";""", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("background:URL(/about.html)", indexHtml, StringComparison.Ordinal);
+            Assert.Contains("srcset=\"data:image/svg+xml,%3Csvg%3E,%3C/svg%3E 1x, /img/logo-2x.png?v=1 2x\"", indexHtml, StringComparison.Ordinal);
+
+            var stylesheet = await File.ReadAllTextAsync(Path.Join(tempDir, "styles", "app"));
+            Assert.Contains("url('/about.html')", stylesheet, StringComparison.Ordinal);
         }
         finally
         {
@@ -1881,6 +1961,62 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void ExtractReferences_Should_Use_Parser_Backed_Html_And_Stateful_Css_Discovery()
+    {
+        var html = """
+            <A HREF=/about>About</A>
+            <a href=/ignored data-rw-export-ignore>Ignored</a>
+            <a href=./Program.cs>Program</a>
+            <link rel="notstylesheet" href="/wrong.css">
+            <link rel="stylesheet preload" href="/styles/site">
+            <img SRC=/img/logo.png srcset="data:image/svg+xml,%3Csvg%3E,%3C/svg%3E 1x, /img/logo-2x.png 2x, /img/logo.png?version=1#frag 3x">
+            <div style="background:url('/img/attr.png')"></div>
+            <style>
+            /* url('/img/comment.png') */
+            .literal::before { content: "url('/img/string.png')"; }
+            @import "css/theme.css";
+            @import url('/css/print.css');
+            .hero { background: URL(/img/bg.png?x=1#frag); }
+            .bad { background: url('/img/missing.png' }
+            </style>
+            """;
+
+        var references = _sut.ExtractReferences(html, "/docs/start", htmlScope: true);
+        var paths = references.Select(reference => reference.Path).ToArray();
+
+        Assert.Contains("/about", paths);
+        Assert.Contains("/styles/site", paths);
+        Assert.Contains("/img/logo.png", paths);
+        Assert.Contains("/img/logo-2x.png", paths);
+        Assert.Contains("/img/attr.png", paths);
+        Assert.Contains("/docs/css/theme.css", paths);
+        Assert.Contains("/css/print.css", paths);
+        Assert.Contains("/img/bg.png", paths);
+        Assert.DoesNotContain("/ignored", paths);
+        Assert.DoesNotContain("/docs/Program.cs", paths);
+        Assert.DoesNotContain("/wrong.css", paths);
+        Assert.DoesNotContain("/img/comment.png", paths);
+        Assert.DoesNotContain("/img/string.png", paths);
+        Assert.DoesNotContain("/img/missing.png", paths);
+        Assert.DoesNotContain(paths, path => path.Contains("%3Csvg", StringComparison.Ordinal));
+
+        var aboutReference = Assert.Single(references, reference => reference.Path == "/about");
+        Assert.Equal(ExportReferenceKind.AnchorHref, aboutReference.Kind);
+        Assert.Equal("<a href>", aboutReference.Provenance?.DisplaySource);
+        Assert.NotNull(aboutReference.Provenance?.Line);
+
+        var styleAttributeReference = Assert.Single(references, reference => reference.Path == "/img/attr.png");
+        Assert.Equal("style url() <div style>", styleAttributeReference.Provenance?.DisplaySource);
+
+        var styleBlockReference = Assert.Single(references, reference => reference.Path == "/img/bg.png");
+        Assert.Equal("style url() <style>", styleBlockReference.Provenance?.DisplaySource);
+
+        var versionedLogo = Assert.Single(references, reference => reference.RawValue == "/img/logo.png?version=1#frag");
+        Assert.Equal("?version=1", versionedLogo.Query);
+        Assert.Equal("#frag", versionedLogo.Fragment);
+    }
+
+    [Fact]
     public void ExtractReferences_Should_Ignore_Hash_Only_Css_References()
     {
         var css = """
@@ -1892,6 +2028,37 @@ public class ExportEngineTests
         var reference = Assert.Single(_sut.ExtractReferences(css, "/docs/start", htmlScope: false));
 
         Assert.Equal("/docs/images/bg.png", reference.Path);
+    }
+
+    [Fact]
+    public void ExtractReferences_Should_Include_Css_Import_Strings_But_Not_Comments_Or_Strings()
+    {
+        var css = """
+            /* url('/comment.png') */
+            .literal::before { content: "url('/string.png')"; }
+            @import "theme.css";
+            @import url('/print.css');
+            .hero { background: image-set(url('/hero.png') 1x, URL("/hero@2x.png") 2x); }
+            .escaped { background: url('/hero\ 2x.png'); }
+            .oversized-escape { background: url('/hero\FFFFFF.png'); }
+            .broken { background: url('/broken.png' }
+            """;
+
+        var references = _sut.ExtractReferences(css, "/css/site.css", htmlScope: false);
+        var paths = references.Select(reference => reference.Path).ToArray();
+
+        Assert.Contains("/css/theme.css", paths);
+        Assert.Contains("/print.css", paths);
+        Assert.Contains("/hero.png", paths);
+        Assert.Contains("/hero@2x.png", paths);
+        Assert.Contains(references, reference => reference.RawValue == "/hero 2x.png");
+        Assert.Contains(references, reference => reference.Provenance?.DisplaySource == "stylesheet @import string");
+        Assert.Contains(references, reference => reference.Provenance?.DisplaySource == "stylesheet url()");
+        Assert.DoesNotContain(paths, path => path.Contains('\uFFFD'));
+        Assert.DoesNotContain("/comment.png", paths);
+        Assert.DoesNotContain("/string.png", paths);
+        Assert.DoesNotContain("/broken.png", paths);
+        Assert.All(references, reference => Assert.NotNull(reference.Provenance));
     }
 
     [Fact]
@@ -2086,6 +2253,39 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public void StripAppSurfaceDocsDiagnosticsChrome_ShouldRemoveMarkedDiagnosticsDisclosure()
+    {
+        var html = """
+            <html>
+              <body>
+                <nav>
+                  <details data-docs-diagnostics-chrome="true">
+                    <summary>Diagnostics</summary>
+                    <a href="/docs/_health">Harvest health</a>
+                    <a href="/docs/%5Froutes">Encoded routes</a>
+                  </details>
+                  <a href="/docs/start">Start</a>
+                  <details data-docs-diagnostics-chrome="true">
+                    <summary>More diagnostics</summary>
+                    <a href="/docs/_routes.json">Routes JSON</a>
+                  </details>
+                  <a href="/docs/next">Next</a>
+                </nav>
+              </body>
+            </html>
+            """;
+
+        var stripped = ExportEngine.StripAppSurfaceDocsDiagnosticsChrome(html);
+        var decoded = Uri.UnescapeDataString(stripped);
+
+        Assert.DoesNotContain("Diagnostics", stripped, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("_health", decoded, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("_routes", decoded, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("href=\"/docs/start\"", stripped);
+        Assert.Contains("href=\"/docs/next\"", stripped);
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Export_Docs_Partial_Fragments()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -2095,7 +2295,8 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DocsPartialHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            var handler = new DocsPartialHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
@@ -2129,6 +2330,19 @@ public class ExportEngineTests
             var nextPartialHtml = await File.ReadAllTextAsync(nextPartialPath);
             Assert.Contains("<turbo-frame id=\"doc-content\">", nextPartialHtml);
             Assert.Contains("<article>Next doc</article>", nextPartialHtml);
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_health", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_routes", StringComparison.OrdinalIgnoreCase));
+
+            foreach (var artifactPath in Directory.EnumerateFiles(tempDir, "*", SearchOption.AllDirectories)
+                         .Where(path => path.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+                                        || path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                                        || path.EndsWith(".js", StringComparison.OrdinalIgnoreCase)))
+            {
+                var artifact = Uri.UnescapeDataString(await File.ReadAllTextAsync(artifactPath));
+                Assert.DoesNotContain("Diagnostics", artifact, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("_health", artifact, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("_routes", artifact, StringComparison.OrdinalIgnoreCase);
+            }
         }
         finally
         {
@@ -2238,6 +2452,77 @@ public class ExportEngineTests
             }
 
             return NotFound();
+        }
+    }
+
+    private sealed class ParserBackedRewriteHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/")
+            {
+                var html = """
+<!DOCTYPE html>
+<HTML data-kind=raw>
+<HEAD>
+<!-- keep me -->
+<LINK REL='stylesheet preload' HREF=/styles/app data-copy=1>
+<LINK REL='notstylesheet' HREF=/wrong.css>
+<style>
+/* url('/img/comment.png') */
+.literal::before { content: "url('/img/string.png')"; }
+@import "about";
+.hero { background:URL(/about); }
+.broken { background: url('/img/broken.png' }
+</style>
+</HEAD>
+<BODY>
+<A HREF=/about data-extra='keep'>About</A>
+<a DATA-RW-EXPORT-IGNORE href=/ignored>Ignored</a>
+<a href=./Program.cs>Program</a>
+<!-- <a href=/about>Comment fake link</a> -->
+<!-- <style>.comment-fake { background:url(/about); }</style> -->
+<script SRC=/app>const fake = "<img src=/about>"; const close = "</script-not-real><img src=/about>"; const fakeStyle = "<style>.script-fake { background:url(/about); }</style>";</script>
+<img srcset="data:image/svg+xml,%3Csvg%3E,%3C/svg%3E 1x, /img/logo-2x.png?v=1 2x">
+</BODY>
+</HTML>
+""";
+                return Html(html);
+            }
+
+            if (path == "/about")
+            {
+                return Html("<html><body><h1>About</h1></body></html>");
+            }
+
+            if (path == "/styles/app")
+            {
+                return Text(".sheet { background: url('/about'); }", "text/css");
+            }
+
+            if (path == "/app")
+            {
+                return Text("console.log('parser-backed');", "text/javascript");
+            }
+
+            if (path.StartsWith("/img/", StringComparison.Ordinal))
+            {
+                return Bytes("image/png");
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class MissingParserDiscoveredAssetHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            return path == "/"
+                ? Html("<html><body><img src=/img/missing.png></body></html>")
+                : NotFound();
         }
     }
 
@@ -2667,15 +2952,25 @@ public class ExportEngineTests
 
     private sealed class DocsPartialHandler : HttpMessageHandler
     {
+        public List<string> RequestPaths { get; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var path = request.RequestUri?.AbsolutePath ?? "/";
+            var path = Uri.UnescapeDataString(request.RequestUri?.AbsolutePath ?? "/");
+            RequestPaths.Add(path);
             if (path == "/docs")
             {
                 var html = """
                     <html>
                       <body>
                         <main>Docs landing page</main>
+                        <details data-docs-diagnostics-chrome="true">
+                          <summary>Diagnostics</summary>
+                          <a href="/docs/_health">Harvest health</a>
+                          <a href="/docs/_health.json">Health JSON</a>
+                          <a href="/docs/_routes">Route inspector</a>
+                          <a href="/docs/_routes.json">Routes JSON</a>
+                        </details>
                         <a href="/docs/start">Start</a>
                       </body>
                     </html>
@@ -2695,6 +2990,11 @@ public class ExportEngineTests
                           <article>Start doc</article>
                           <turbo-frame id="nested-frame"><p>Nested doc frame</p></turbo-frame>
                         </turbo-frame>
+                        <details data-docs-diagnostics-chrome="true">
+                          <summary>Diagnostics</summary>
+                          <a href="/docs/_health">Harvest health</a>
+                          <a href="/docs/%5Froutes">Encoded routes</a>
+                        </details>
                         <a href="/docs/next">Next</a>
                       </body>
                     </html>
@@ -2757,15 +3057,31 @@ public class ExportEngineTests
 
     private sealed class ConventionalNotFoundPageHandler : HttpMessageHandler
     {
+        public List<string> RequestPaths { get; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var path = request.RequestUri?.AbsolutePath ?? "/";
+            var path = Uri.UnescapeDataString(request.RequestUri?.AbsolutePath ?? "/");
+            RequestPaths.Add(path);
             if (path == BrowserStatusPageDefaults.ReservedNotFoundRoute)
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(
-                        """<html><body><h1>Exported 404 page</h1><a href="/about">About</a><img src="/img/error.png"></body></html>""",
+                        """
+                        <html>
+                          <body>
+                            <h1>Exported 404 page</h1>
+                            <details data-docs-diagnostics-chrome="true">
+                              <summary>Diagnostics</summary>
+                              <a href="/docs/_health">Harvest health</a>
+                              <a href="/docs/%5Froutes">Encoded routes</a>
+                            </details>
+                            <a href="/about">About</a>
+                            <img src="/img/error.png">
+                          </body>
+                        </html>
+                        """,
                         Encoding.UTF8,
                         "text/html")
                 });

@@ -1,33 +1,65 @@
 @model ForgeTrust.AppSurface.Docs.Models.DocSidebarViewModel
-@if (Model.HarvestHealth is not null)
+@if (Model.Diagnostics is not null)
 {
-    var statusClass = Model.HarvestHealth.Ok
+    var diagnosticsStatusClass = Model.Diagnostics.Status?.Ok == true
         ? "border-emerald-500/30 bg-emerald-950/25 text-emerald-200"
         : "border-rose-500/35 bg-rose-950/30 text-rose-200";
-    var dotClass = Model.HarvestHealth.Ok ? "bg-emerald-300" : "bg-rose-300";
+    var diagnosticsDotClass = Model.Diagnostics.Status?.Ok == true ? "bg-emerald-300" : "bg-rose-300";
 
-    @if (!string.IsNullOrWhiteSpace(Model.HarvestHealth.Href))
-    {
-        <a href="@Url.PathBaseAware(Model.HarvestHealth.Href)"
-           class="mb-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs font-semibold no-underline transition-colors hover:border-[#14b8a6]/45 @statusClass">
-            <span class="inline-flex min-w-0 items-center gap-2">
-                <span class="h-2 w-2 flex-none rounded-full @dotClass" aria-hidden="true"></span>
-                <span class="truncate">Harvest @Model.HarvestHealth.Status</span>
-            </span>
-            <span class="flex-none uppercase tracking-[0.12em]">Health</span>
-        </a>
-    }
-    else
-    {
-        <div class="mb-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs font-semibold @statusClass"
-             aria-label="Harvest @Model.HarvestHealth.Status">
-            <span class="inline-flex min-w-0 items-center gap-2">
-                <span class="h-2 w-2 flex-none rounded-full @dotClass" aria-hidden="true"></span>
-                <span class="truncate">Harvest @Model.HarvestHealth.Status</span>
-            </span>
-            <span class="flex-none uppercase tracking-[0.12em]">Health</span>
-        </div>
-    }
+    <details class="group mb-3 rounded-lg border border-[#1b2a43] bg-[#07111f]/70 text-xs" data-docs-diagnostics-chrome="true">
+        <summary class="list-none cursor-pointer">
+            <div class="flex items-center justify-between gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-[#0d182a]/70">
+                <span class="min-w-0 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">@Model.Diagnostics.Label</span>
+                <span class="inline-flex flex-none items-center gap-2">
+                    @if (Model.Diagnostics.Status is not null)
+                    {
+                        <span class="inline-flex max-w-[8rem] items-center gap-1.5 rounded-full border px-2 py-0.5 font-semibold @diagnosticsStatusClass">
+                            <span class="h-1.5 w-1.5 flex-none rounded-full @diagnosticsDotClass" aria-hidden="true"></span>
+                            <span class="truncate">@Model.Diagnostics.Status.Label</span>
+                        </span>
+                    }
+                    <span class="font-semibold uppercase tracking-[0.2em] text-slate-600 transition-transform group-open:rotate-90" aria-hidden="true">&rsaquo;</span>
+                </span>
+            </div>
+        </summary>
+
+        @if (Model.Diagnostics.Tools.Count > 0)
+        {
+            <ul class="space-y-1 px-2 pb-2">
+                @foreach (var diagnosticsTool in Model.Diagnostics.Tools)
+                {
+                    <li class="rounded-md px-2 py-1.5">
+                        <span class="block min-w-0">
+                            @if (!string.IsNullOrWhiteSpace(diagnosticsTool.Href))
+                            {
+                                <a href="@Url.PathBaseAware(diagnosticsTool.Href)"
+                                   class="block text-sm font-medium text-slate-300 no-underline transition-colors hover:text-[#14b8a6]">
+                                    @diagnosticsTool.Label
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="block text-sm font-medium text-slate-300">@diagnosticsTool.Label</span>
+                            }
+
+                            @if (!string.IsNullOrWhiteSpace(diagnosticsTool.Summary))
+                            {
+                                <span class="block text-[11px] font-medium text-slate-500">@diagnosticsTool.Summary</span>
+                            }
+                        </span>
+
+                        @if (diagnosticsTool.JsonAction is not null)
+                        {
+                            <a href="@Url.PathBaseAware(diagnosticsTool.JsonAction.Href)"
+                               class="mt-1 inline-flex rounded border border-[#1b2a43] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 no-underline transition-colors hover:border-[#14b8a6]/45 hover:text-[#14b8a6]">
+                                @diagnosticsTool.JsonAction.Label
+                            </a>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </details>
 }
 @foreach (var sidebarSection in Model.Sections)
 {

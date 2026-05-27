@@ -96,23 +96,31 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
     }
 
     [Fact]
-    public async Task WaitForCompletionAsync_WhenTestingDelayIsConfigured_PublishesProgressBeforeHarvesterRuns()
+    public async Task WaitForCompletionAsync_WhenTestingDelayIsConfigured_DelaysHarvesterAfterPublishingProgress()
     {
         using var cache = new MemoryCache(new MemoryCacheOptions());
         await using var services = new ServiceCollection().BuildServiceProvider();
         var harvester = new BlockingHarvester();
+        var delay = TimeSpan.FromSeconds(2);
+        var tolerance = TimeSpan.FromMilliseconds(200);
         var coordinator = CreateCoordinator(
             harvester,
             cache,
             services,
-            configureOptions: options => options.Harvest.TestingDelayPerHarvesterMilliseconds = 500);
+            configureOptions: options => options.Harvest.TestingDelayPerHarvesterMilliseconds = (int)delay.TotalMilliseconds);
 
         Assert.False(await coordinator.WaitForCompletionAsync(TimeSpan.Zero, CancellationToken.None));
-        await WaitUntilAsync(() => coordinator.CurrentProgress.State == AppSurfaceDocsHarvestRunState.Running);
-
-        Assert.Equal(0, harvester.CallCount);
+        await WaitUntilAsync(
+            () => coordinator.CurrentProgress.Harvesters.Any(
+                harvesterProgress => string.Equals(harvesterProgress.Status, "Running", StringComparison.Ordinal)));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
 
         await harvester.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        sw.Stop();
+
+        Assert.True(
+            sw.Elapsed >= delay - tolerance,
+            $"Harvester started after {sw.Elapsed.TotalMilliseconds} ms.");
         harvester.Complete(new DocNode("Ready", "README.md", "<p>Ready</p>"));
 
         Assert.True(await coordinator.WaitForCompletionAsync(TimeSpan.FromSeconds(3), CancellationToken.None));
