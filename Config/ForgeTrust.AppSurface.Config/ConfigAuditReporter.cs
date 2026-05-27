@@ -181,7 +181,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             state = ConfigAuditEntryState.PartiallyResolved;
         }
 
-        var redacted = _redactor.FormatValue(knownEntry.Key, rawValue, sources);
+        var redacted = _redactor.FormatValue(knownEntry.Key, rawValue, sources, options.Sensitivity);
         return new ConfigAuditEntry
         {
             Key = knownEntry.Key,

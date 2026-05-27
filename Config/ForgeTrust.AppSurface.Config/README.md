@@ -66,6 +66,9 @@ What does this app believe its configuration is, and why?
 The reporter returns a structured `ConfigAuditReport` for an environment. The report includes provider order, known
 configuration entries, source records, entry states, diagnostics, and display-safe values. A known entry is either a
 discovered `Config<T>` / `ConfigStruct<T>` wrapper or a key registered explicitly with `AddConfigAuditKey<T>()`.
+Audit values are redacted before they enter `ConfigAuditReport`, JSON serialization, text rendering, or diagnostics
+command output. The report is still an internal support artifact: key names, provider names, file paths, environment
+variable names, diagnostics, and the existence of redacted values can still be operationally sensitive.
 
 ```csharp
 var report = auditReporter.GetReport("Staging");
@@ -76,6 +79,14 @@ Explicit registrations are useful for keys that are read directly through `IConf
 
 ```csharp
 services.AddConfigAuditKey<string>("Billing.Endpoint");
+```
+
+Mark domain-specific secrets explicitly when the key name does not contain a built-in sensitive fragment:
+
+```csharp
+services.AddConfigAuditKey<string>(
+    "Partner.Payload",
+    options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
 ```
 
 ### Audit Hello World
@@ -255,6 +266,7 @@ because they cannot form an unambiguous raw config path.
 | `MaxCollectionElements` | `128` | Stops after this many elements from any one collection. |
 | `MaxReportNodes` | `4096` | Bounds total child nodes created for the entry. |
 | `DisplayDictionaryKeys` | `true` | Allows non-sensitive dictionary keys to appear as labels. Sensitive keys are still redacted. |
+| `Sensitivity` | `Unknown` | Classifies the entry for redaction. `Sensitive` redacts root values, traversed child values, and value-derived dictionary labels. `NonSensitive` documents intent but never disables conservative redaction from fragments or sources. |
 
 For discovered wrappers, use `ConfigAuditCollectionTraversalAttribute`. Attribute presence enables traversal and its
 named properties mirror the bounded options:
@@ -276,6 +288,7 @@ services.AddConfigAuditKey<Dictionary<string, ServiceEndpoint>>(
     {
         options.TraverseCollectionElements = true;
         options.MaxCollectionElements = 32;
+        options.Sensitivity = ConfigAuditSensitivity.Sensitive;
     });
 ```
 
@@ -301,6 +314,21 @@ and validation behavior. Explicit manual option assignments override wrapper att
 assignments back to the default value. For example, a wrapper can hide dictionary keys by default while one manual
 registration sets `DisplayDictionaryKeys = true` for a provider-only report composition.
 
+The same duplicate-registration rule is the preferred way to classify a wrapper-discovered key as sensitive without
+losing wrapper validation or traversal metadata:
+
+```csharp
+[ConfigKey("Audit.Services", root: true)]
+[ConfigAuditCollectionTraversal]
+public sealed class AuditServicesConfig : Config<List<ServiceEndpoint>>
+{
+}
+
+services.AddConfigAuditKey<List<ServiceEndpoint>>(
+    "Audit.Services",
+    options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+```
+
 ### Collection Examples
 
 | Shape | Traversal result |
@@ -318,19 +346,37 @@ registration sets `DisplayDictionaryKeys = true` for a provider-only report comp
 
 Audit reports are redacted by default before renderers see values. Sensitive-looking paths, keys, and environment
 variable names render as `[redacted]`. The built-in fragments include `password`, `secret`, `token`, `apikey`, `key`,
-`connectionstring`, `credential`, and `private`.
+`connectionstring`, `credential`, `private`, `passphrase`, `clientsecret`, `client_secret`, `sharedsecret`,
+`shared_secret`, `privatekey`, `private_key`, `certificate`, `cert`, `dsn`, `sas`, `sharedaccesssignature`,
+`assertion`, `cookie`, `sessionid`, `session_id`, `sessioncookie`, `session_cookie`, `bearer`, `jwt`,
+`refresh_token`, `access_token`, `clientassertion`, and `client_assertion`.
 
-Redaction is deliberately conservative. It does not expose string lengths, sensitive collection counts, or sensitive
-nested values. Source metadata remains visible unless a provider marks the source metadata itself as sensitive. This
-keeps values redacted while still showing where a value came from. Treat rendered reports as internal support data:
-provider names, file names, environment variable names, key names, and the existence of redacted values can still be
-operationally sensitive.
+Redaction is deliberately conservative and can produce false positives. Short fragments such as `key`, `cert`, `dsn`,
+and `sas` are accepted because audit reports are operator diagnostics, not a public display surface. Use
+`ConfigAuditSensitivity.NonSensitive` only as documentation for readers and future tooling; it is not an opt-out and
+never downgrades redaction from `Sensitive`, built-in fragments, provider source sensitivity, or sensitive-looking
+source paths.
+
+Source metadata remains visible unless a provider marks the source metadata itself as sensitive. This keeps values
+redacted while still showing where a value came from. Treat rendered reports as internal support data: provider names,
+file names, environment variable names, key names, and the existence of redacted values can still be operationally
+sensitive.
 
 Collection parent values are omitted instead of serialized when the collection key and source metadata are not
 sensitive. This avoids leaking nested element fields such as `Password`, `Token`, `Secret`, or `ApiKey` through a raw
-JSON dump. When element traversal is enabled, dictionary key labels and source selection are redacted before public
-report objects are created. Raw sensitive dictionary keys do not appear in `Key`, `Element`, `Sources`, diagnostics, or
-the text renderer.
+JSON dump. When element traversal is enabled, dictionary key labels are redacted or hidden before public report objects
+are created. Sensitive dictionary labels do not appear in `Key`, `Element.KeyLabel`, diagnostics, or the text renderer.
+Source metadata remains governed by the source-metadata safety contract above.
+
+When an entry is effectively sensitive, dictionary labels become report-local placeholders:
+
+```text
+Partner.Payloads[[redacted-key-1]] = [redacted]
+```
+
+When `DisplayDictionaryKeys = false`, labels are intentionally hidden as `[[key]]`. Hidden labels inherit parent
+provenance for display, but redaction still evaluates parent and child source candidates so a source-sensitive child
+value does not leak.
 
 ### Audit Diagnostics
 
@@ -342,7 +388,7 @@ the text renderer.
 | `config-audit-report-node-limit` | Warning | Traversal stopped at `MaxReportNodes` for the entry. |
 | `config-audit-source-inherited` | Info | An element inherited parent provenance because an exact safe source path was unavailable. |
 | `config-audit-source-unavailable` | Info | No provider source record was available for an element. |
-| `config-audit-options-invalid` | Error | Entry options were invalid; safe defaults were used for bounded traversal values. |
+| `config-audit-options-invalid` | Error | Entry options were invalid. Traversal limits use safe bounded defaults; invalid `Sensitivity` values fail closed as `Sensitive`. |
 
 ### Migration Note
 
@@ -351,6 +397,10 @@ Existing reports keep the same collection shape unless an entry opts into collec
 display values, provider precedence, and wrapper diagnostics continue to work as before. If a wrapper-discovered key
 and a manual key registration use the same config key, wrapper metadata still wins for type and validation, while
 explicit manual audit option assignments are merged into the selected entry.
+
+Adding `Sensitivity = ConfigAuditSensitivity.Sensitive` is additive API surface, but redaction behavior is intentionally
+broader. New built-in fragments can redact values that previously rendered, and `NonSensitive` is not an opt-out. Review
+release notes for fragment changes when audit output shape matters to operators.
 
 ### Audit Pitfalls
 
@@ -362,6 +412,9 @@ explicit manual audit option assignments are merged into the selected entry.
 - Attribute values are compile-time metadata. Use manual `AddConfigAuditKey<T>()` options when traversal settings must
   be chosen dynamically at registration time.
 - Sensitive dictionary key labels are report-local. Do not use `[redacted-key-1]` as a durable correlation identifier.
+- `ConfigAuditSensitivity.NonSensitive` is not a redaction bypass; it cannot override sensitive fragments, source
+  sensitivity, provider sensitivity, or another registration that marks the entry sensitive.
+- Invalid `ConfigAuditSensitivity` enum values emit `config-audit-options-invalid` and redact as sensitive.
 - Element traversal reports existing provider values. Environment-created missing collection elements, global debug
   expansion, diffing, raw-key drift analysis, and support-bundle export are separate product surfaces.
 - Provider-discovered raw key enumeration is intentionally separate from the first audit surface.

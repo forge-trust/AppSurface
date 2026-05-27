@@ -18,7 +18,8 @@ public class ConfigAuditModelsTests
             MaxCollectionDepth = 2,
             MaxCollectionElements = 3,
             MaxReportNodes = 4,
-            DisplayDictionaryKeys = false
+            DisplayDictionaryKeys = false,
+            Sensitivity = ConfigAuditSensitivity.Sensitive
         };
 
         var entry = new ConfigAuditKnownEntry("Valid.Key", null, typeof(string), options);
@@ -28,6 +29,7 @@ public class ConfigAuditModelsTests
         Assert.Equal(3, entry.Options.MaxCollectionElements);
         Assert.Equal(4, entry.Options.MaxReportNodes);
         Assert.False(entry.Options.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditSensitivity.Sensitive, entry.Options.Sensitivity);
         Assert.NotSame(options, entry.Options);
     }
 
@@ -40,18 +42,21 @@ public class ConfigAuditModelsTests
             MaxCollectionDepth = 2,
             MaxCollectionElements = 3,
             MaxReportNodes = 4,
-            DisplayDictionaryKeys = false
+            DisplayDictionaryKeys = false,
+            Sensitivity = ConfigAuditSensitivity.Sensitive
         };
 
         var options = builder.ToOptions();
         builder.TraverseCollectionElements = false;
         builder.MaxCollectionDepth = 99;
+        builder.Sensitivity = ConfigAuditSensitivity.NonSensitive;
 
         Assert.True(options.TraverseCollectionElements);
         Assert.Equal(2, options.MaxCollectionDepth);
         Assert.Equal(3, options.MaxCollectionElements);
         Assert.Equal(4, options.MaxReportNodes);
         Assert.False(options.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditSensitivity.Sensitive, options.Sensitivity);
     }
 
     [Fact]
@@ -70,7 +75,8 @@ public class ConfigAuditModelsTests
             MaxCollectionDepth = 4,
             MaxCollectionElements = 128,
             MaxReportNodes = 4096,
-            DisplayDictionaryKeys = true
+            DisplayDictionaryKeys = true,
+            Sensitivity = ConfigAuditSensitivity.NonSensitive
         };
 
         var merged = wrapperOptions.ApplyAssignedOverrides(builder.ToOptions());
@@ -80,6 +86,7 @@ public class ConfigAuditModelsTests
         Assert.Equal(128, merged.MaxCollectionElements);
         Assert.Equal(4096, merged.MaxReportNodes);
         Assert.True(merged.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditSensitivity.NonSensitive, merged.Sensitivity);
     }
 
     [Fact]
@@ -94,6 +101,33 @@ public class ConfigAuditModelsTests
         Assert.Equal(128, options.MaxCollectionElements);
         Assert.Equal(4096, options.MaxReportNodes);
         Assert.True(options.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditSensitivity.Unknown, options.Sensitivity);
+        Assert.False(options.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.Sensitivity));
+    }
+
+    [Fact]
+    public void ConfigAuditEntryOptions_MergesSensitivityMonotonically()
+    {
+        var sensitive = new ConfigAuditEntryOptions
+        {
+            Sensitivity = ConfigAuditSensitivity.Sensitive
+        };
+        var nonSensitive = new ConfigAuditEntryOptions
+        {
+            Sensitivity = ConfigAuditSensitivity.NonSensitive
+        };
+        var unknown = new ConfigAuditEntryOptions
+        {
+            Sensitivity = ConfigAuditSensitivity.Unknown
+        };
+
+        var sensitiveThenNonSensitive = sensitive.ApplyAssignedOverrides(nonSensitive);
+        var unknownThenNonSensitive = unknown.ApplyAssignedOverrides(nonSensitive);
+        var nonSensitiveThenSensitive = nonSensitive.ApplyAssignedOverrides(sensitive);
+
+        Assert.Equal(ConfigAuditSensitivity.Sensitive, sensitiveThenNonSensitive.Sensitivity);
+        Assert.Equal(ConfigAuditSensitivity.NonSensitive, unknownThenNonSensitive.Sensitivity);
+        Assert.Equal(ConfigAuditSensitivity.Sensitive, nonSensitiveThenSensitive.Sensitivity);
     }
 
     [Fact]
@@ -122,6 +156,7 @@ public class ConfigAuditModelsTests
         Assert.Equal(128, options.MaxCollectionElements);
         Assert.Equal(4096, options.MaxReportNodes);
         Assert.True(options.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditSensitivity.Unknown, options.Sensitivity);
     }
 
     [Fact]
@@ -133,7 +168,8 @@ public class ConfigAuditModelsTests
             MaxCollectionDepth = 2,
             MaxCollectionElements = 3,
             MaxReportNodes = 4,
-            DisplayDictionaryKeys = false
+            DisplayDictionaryKeys = false,
+            Sensitivity = ConfigAuditSensitivity.Sensitive
         };
 
         var normalized = options.Normalize();
@@ -143,6 +179,30 @@ public class ConfigAuditModelsTests
         Assert.Equal(3, normalized.MaxCollectionElements);
         Assert.Equal(4, normalized.MaxReportNodes);
         Assert.False(normalized.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditSensitivity.Sensitive, normalized.Sensitivity);
+    }
+
+    [Fact]
+    public void ConfigAuditEntryOptions_NormalizeFailsClosedInvalidSensitivityWithoutResettingTraversalOptions()
+    {
+        var options = new ConfigAuditEntryOptions
+        {
+            TraverseCollectionElements = true,
+            MaxCollectionDepth = 2,
+            MaxCollectionElements = 1,
+            MaxReportNodes = 3,
+            DisplayDictionaryKeys = false,
+            Sensitivity = (ConfigAuditSensitivity)999
+        };
+
+        var normalized = options.Normalize();
+
+        Assert.True(normalized.TraverseCollectionElements);
+        Assert.Equal(2, normalized.MaxCollectionDepth);
+        Assert.Equal(1, normalized.MaxCollectionElements);
+        Assert.Equal(3, normalized.MaxReportNodes);
+        Assert.False(normalized.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditSensitivity.Sensitive, normalized.Sensitivity);
     }
 
     [Fact]

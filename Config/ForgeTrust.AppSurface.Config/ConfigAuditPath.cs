@@ -12,6 +12,8 @@ internal sealed record ConfigAuditPath(
     int CollectionDepth = 0,
     bool RequiresInheritedSource = false)
 {
+    private const int MaxDictionaryKeyLabelLength = 128;
+
     public static ConfigAuditPath Root(string key) => new(key, key);
 
     public ConfigAuditPath AppendMember(string name) =>
@@ -39,17 +41,24 @@ internal sealed record ConfigAuditPath(
         ConfigAuditEntryOptions options,
         ConfigAuditDictionaryLabelSet labels)
     {
-        var rawLabel = Convert.ToString(key, CultureInfo.InvariantCulture) ?? string.Empty;
+        var rawLabel = ConvertDictionaryKeyToLabel(key, out var conversionFailed, out var truncated);
+        var displayLabel = truncated
+            ? $"{rawLabel[..MaxDictionaryKeyLabelLength]}..."
+            : rawLabel;
         var keyIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(rawLabel);
+        var entryIsSensitive = options.Sensitivity == ConfigAuditSensitivity.Sensitive;
+        var parentIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(DisplayPath)
+                                || ConfigAuditRedactor.ContainsSensitiveFragment(SourcePath);
         var suppressLabel = !options.DisplayDictionaryKeys;
-        var isRedacted = keyIsSensitive || suppressLabel;
-        var label = keyIsSensitive
-            ? labels.GetRedactedLabel(rawLabel)
-            : suppressLabel ? "[key]" : rawLabel;
+        var redactLabel = keyIsSensitive || entryIsSensitive || parentIsSensitive;
+        var isRedacted = redactLabel || suppressLabel || conversionFailed;
+        var label = redactLabel
+            ? labels.GetRedactedLabel(conversionFailed ? $"unprintable:{key?.GetType().FullName}" : rawLabel)
+            : suppressLabel || conversionFailed ? "[key]" : displayLabel;
         var displayKey = isRedacted
             ? $"{DisplayPath}[{label}]"
             : $"{DisplayPath}[\"{EscapeDictionaryLabel(label)}\"]";
-        var canUseExactSource = !isRedacted && IsPlainSourceSegment(rawLabel);
+        var canUseExactSource = !isRedacted && !truncated && IsPlainSourceSegment(rawLabel);
 
         return new ConfigAuditPath(
             displayKey,
@@ -66,6 +75,30 @@ internal sealed record ConfigAuditPath(
 
     private static string EscapeDictionaryLabel(string value) =>
         value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+
+    private static string ConvertDictionaryKeyToLabel(object? key, out bool conversionFailed, out bool truncated)
+    {
+        conversionFailed = false;
+        truncated = false;
+        if (key == null)
+        {
+            return string.Empty;
+        }
+
+        string label;
+        try
+        {
+            label = Convert.ToString(key, CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+        catch (Exception)
+        {
+            conversionFailed = true;
+            return string.Empty;
+        }
+
+        truncated = label.Length > MaxDictionaryKeyLabelLength;
+        return label;
+    }
 
     private static bool IsPlainSourceSegment(string value) =>
         value.Length > 0

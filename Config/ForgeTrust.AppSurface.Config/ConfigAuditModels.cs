@@ -379,7 +379,9 @@ public enum ConfigAuditSourceRole
 /// Classifies source or value sensitivity.
 /// </summary>
 /// <remarks>
-/// Values are explicit and append-only so serialized reports remain stable across releases.
+/// Values are explicit and append-only so serialized reports remain stable across releases. For entry options,
+/// <see cref="NonSensitive"/> is a classification hint, not a redaction bypass; sensitive fragments, provider source
+/// sensitivity, and another registration's <see cref="Sensitive"/> classification still win.
 /// </remarks>
 public enum ConfigAuditSensitivity
 {

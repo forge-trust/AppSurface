@@ -290,6 +290,27 @@ public class AppSurfaceConfigModuleTests
         Assert.False(child.Element?.IsKeyRedacted);
     }
 
+    [Fact]
+    public void CustomRegistrationTask_ManualSensitivityPreservesWrapperTraversalMetadata()
+    {
+        var reporter = CreateReporter(
+            new Dictionary<string, object?>
+            {
+                ["Audit.Services"] = CreateEndpoints("billing")
+            },
+            services => services.AddConfigAuditKey<List<AuditEndpoint>>(
+                "audit.services",
+                options => options.Sensitivity = ConfigAuditSensitivity.Sensitive));
+
+        var report = reporter.GetReport("Production");
+
+        var entry = AssertEntry(report, "Audit.Services", ConfigAuditEntryState.Resolved);
+        var item = Assert.Single(entry.Children);
+        Assert.Equal("Audit.Services[0]", item.Key);
+        Assert.Equal("[redacted]", item.Children.Single(child => child.Key == "Audit.Services[0].Name").DisplayValue);
+        Assert.True(item.Children.Single(child => child.Key == "Audit.Services[0].Name").IsRedacted);
+    }
+
     private static IConfigAuditReporter CreateReporter(
         IReadOnlyDictionary<string, object?> values,
         Action<IServiceCollection>? afterDiscovery = null)
