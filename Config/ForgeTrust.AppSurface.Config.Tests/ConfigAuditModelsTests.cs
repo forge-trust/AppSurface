@@ -218,6 +218,92 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigAuditEntryOptions_ReportsAndNormalizesInvalidCorrelationMode()
+    {
+        var options = new ConfigAuditEntryOptions
+        {
+            TraverseCollectionElements = true,
+            DictionaryKeyCorrelationMode = (ConfigAuditDictionaryKeyCorrelationMode)999
+        };
+
+        var diagnostics = options.Validate("Tenants");
+        var normalized = options.Normalize();
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("config-audit-options-invalid", diagnostic.Code);
+        Assert.Contains(nameof(ConfigAuditEntryOptions.DictionaryKeyCorrelationMode), diagnostic.Message, StringComparison.Ordinal);
+        Assert.True(normalized.TraverseCollectionElements);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, normalized.DictionaryKeyCorrelationMode);
+    }
+
+    [Fact]
+    public void ConfigAuditEntryOptions_RejectsNullAssignedOverrides()
+    {
+        var options = new ConfigAuditEntryOptions();
+
+        Assert.Throws<ArgumentNullException>(() => options.ApplyAssignedOverrides(null!));
+    }
+
+    [Fact]
+    public void ConfigAuditDictionaryKeyCorrelator_ReportsMissingOptionalConfiguration()
+    {
+        var nullOptionsContext = new ConfigAuditDictionaryKeyCorrelator(null).CreateContext("Production", "Tenants");
+        var missingKeyIdContext = new ConfigAuditDictionaryKeyCorrelator(
+            new ConfigAuditDictionaryKeyCorrelationOptions
+            {
+                SecretKey = "0123456789abcdef0123456789abcdef",
+                ApplicationScope = "billing"
+            }).CreateContext("Production", "Tenants");
+        var missingScopeContext = new ConfigAuditDictionaryKeyCorrelator(
+            new ConfigAuditDictionaryKeyCorrelationOptions
+            {
+                SecretKey = "0123456789abcdef0123456789abcdef",
+                KeyId = "AZaz09._-"
+            }).CreateContext("Production", "Tenants");
+
+        Assert.False(nullOptionsContext.IsAvailable);
+        Assert.Equal("a secret key was not configured", nullOptionsContext.UnavailableReason);
+        Assert.False(missingKeyIdContext.IsAvailable);
+        Assert.Equal("a display-safe key id was not configured", missingKeyIdContext.UnavailableReason);
+        Assert.False(missingScopeContext.IsAvailable);
+        Assert.Equal("an application scope was not configured", missingScopeContext.UnavailableReason);
+    }
+
+    [Fact]
+    public void ConfigAuditRedactor_CreatePolicySanitizesCorrelationMetadata()
+    {
+        var redactor = new ConfigAuditRedactor();
+
+        var unrequested = redactor.CreatePolicy(
+            new ConfigAuditDictionaryKeyCorrelationOptions
+            {
+                KeyId = "kid-a",
+                ApplicationScope = "billing"
+            },
+            dictionaryKeyCorrelationRequested: false);
+        var requestedWithoutOptions = redactor.CreatePolicy(
+            correlationOptions: null,
+            dictionaryKeyCorrelationRequested: true);
+        var requestedWithInvalidMetadata = redactor.CreatePolicy(
+            new ConfigAuditDictionaryKeyCorrelationOptions
+            {
+                KeyId = "kid-a\nforged",
+                ApplicationScope = " "
+            },
+            dictionaryKeyCorrelationRequested: true);
+
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, unrequested.DictionaryKeyCorrelationMode);
+        Assert.Null(unrequested.DictionaryKeyCorrelationKeyId);
+        Assert.Null(unrequested.DictionaryKeyCorrelationApplicationScope);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac, requestedWithoutOptions.DictionaryKeyCorrelationMode);
+        Assert.Null(requestedWithoutOptions.DictionaryKeyCorrelationKeyId);
+        Assert.Null(requestedWithoutOptions.DictionaryKeyCorrelationApplicationScope);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac, requestedWithInvalidMetadata.DictionaryKeyCorrelationMode);
+        Assert.Null(requestedWithInvalidMetadata.DictionaryKeyCorrelationKeyId);
+        Assert.Null(requestedWithInvalidMetadata.DictionaryKeyCorrelationApplicationScope);
+    }
+
+    [Fact]
     public void ConfigAuditDictionaryLabelSet_ReusesLabelsForDuplicateRawKeys()
     {
         var labels = new ConfigAuditDictionaryLabelSet();
