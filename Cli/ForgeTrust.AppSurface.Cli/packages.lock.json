@@ -14,11 +14,6 @@
         "resolved": "3.10.1",
         "contentHash": "C+WzXwzpQsJVNqvuh19ZO/bw/vR43L+DC/CmvK+PATUBkail2AWYE6an17dOGgWaVGzF9sU28YwRwfNfkPrQdg=="
       },
-      "AngleSharp": {
-        "type": "Transitive",
-        "resolved": "0.17.1",
-        "contentHash": "5MPI4bbixlwxb0W/smOMeIR+QlxMy5/5jD+WnIAw4pBC+7AhLPe5bS3cLgQMJyvd6q0A48sG+uYOt/ep406GLA=="
-      },
       "AngleSharp.Css": {
         "type": "Transitive",
         "resolved": "0.17.0",
@@ -379,6 +374,7 @@
       "forgetrust.razorwire.cli": {
         "type": "Project",
         "dependencies": {
+          "AngleSharp": "[0.17.1, )",
           "CliFx": "[3.0.0, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
@@ -390,6 +386,12 @@
         "requested": "[1.6.2, )",
         "resolved": "1.6.2",
         "contentHash": "laakpDHzMwHr5C8+q5RlRf0XJJshUvghNeo4xDerICrYR3iEuGvwfpauCmXuU3RE437XDaQO5ZxieWDpADuD+w=="
+      },
+      "AngleSharp": {
+        "type": "CentralTransitive",
+        "requested": "[0.17.1, )",
+        "resolved": "0.17.1",
+        "contentHash": "5MPI4bbixlwxb0W/smOMeIR+QlxMy5/5jD+WnIAw4pBC+7AhLPe5bS3cLgQMJyvd6q0A48sG+uYOt/ep406GLA=="
       },
       "HtmlSanitizer": {
         "type": "CentralTransitive",
