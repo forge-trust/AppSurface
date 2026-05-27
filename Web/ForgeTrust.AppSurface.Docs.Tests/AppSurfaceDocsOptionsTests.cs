@@ -400,6 +400,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.NotNull(options.Harvest.Health);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
+        Assert.NotNull(options.Diagnostics);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ExposeRouteInspector);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ShowChrome);
     }
 
     [Fact]
@@ -852,6 +855,29 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceDocs_ShouldBindConfiguredDiagnosticsOptions()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Diagnostics:ExposeRouteInspector"] = "Always",
+                        ["AppSurfaceDocs:Diagnostics:ShowChrome"] = "Never"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
+    }
+
+    [Fact]
     public void AddAppSurfaceDocs_ShouldBindConfiguredCacheExpirationMinutes()
     {
         var services = new ServiceCollection();
@@ -1227,6 +1253,7 @@ public sealed class AppSurfaceDocsOptionsTests
         var diagnostics = new AppSurfaceDocsDiagnosticsOptions
         {
             ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always,
+            ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never,
             SearchIndexRefreshPolicy = " DocsRefresh "
         };
         var bundle = new AppSurfaceDocsBundleOptions { Path = " /tmp/docs.bundle.json " };
@@ -1285,6 +1312,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.True(options.Harvest.FailOnFailure);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
         Assert.Equal("DocsRefresh", options.Diagnostics.SearchIndexRefreshPolicy);
         Assert.Equal("/tmp/docs.bundle.json", options.Bundle.Path);
         Assert.Equal(["Contoso.Product."], options.Sidebar.NamespacePrefixes);
@@ -1353,6 +1381,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ExposeRoutes);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ExposeRouteInspector);
+        Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ShowChrome);
         Assert.Null(options.Diagnostics.SearchIndexRefreshPolicy);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
@@ -1580,6 +1609,26 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(
             result.Failures,
             failure => failure.Contains("Unsupported AppSurface Docs route inspector exposure mode", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectUnsupportedDiagnosticsChromeExposureValue()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Diagnostics = new AppSurfaceDocsDiagnosticsOptions
+            {
+                ShowChrome = (AppSurfaceDocsHarvestHealthExposure)999
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("Unsupported AppSurface Docs diagnostics chrome exposure mode", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

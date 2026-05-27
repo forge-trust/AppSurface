@@ -6,12 +6,13 @@ The CLI uses AppSurface's command-first console mode. That means help and valida
 
 ## Installation
 
-The RazorWire CLI is packaged as a .NET tool with the command name `razorwire`.
-Use an exact package version when running release builds so exports are reproducible.
-The commands in this section require `ForgeTrust.RazorWire.Cli` to
-exist on one of your configured NuGet sources, or for you to pass an explicit
-local package source. Public package publishing is still manual until the
-coordinated release automation tracked in #161 lands.
+The RazorWire CLI project is configured as a .NET tool with the command name
+`razorwire`. Use an exact package version when running release builds so exports
+are reproducible. The package chooser still excludes `ForgeTrust.RazorWire.Cli`
+from the direct-install matrix until issue #171 lands stable public tool
+packaging, so the commands in this section require the package to exist on one
+of your configured NuGet sources or for you to pass an explicit local package
+source. During normal repository development, prefer the source-run command below.
 
 Run a published package without permanently installing it:
 
@@ -91,19 +92,21 @@ Exactly one source option is required: `--url`, `--project`, or `--dll`.
 - Assets that already have extensions, such as `/css/site.css`, `/img/logo.png`, or `/_content/.../razorwire.js`, keep their path. Cache-busting query strings on assets are allowed only when the query-free path maps to an exported file.
 - The conventional `/_appsurface/errors/404` page, when available, is emitted as `404.html` and participates in the same CDN validation and URL rewriting.
 
-CDN validation fails the export when exporter-managed dependencies cannot be represented as static artifacts. Diagnostics use stable codes:
+CDN validation fails the export when exporter-managed dependencies cannot be represented as static artifacts. Diagnostics use stable codes and include the discovered surface, such as `<img src>`, `<a href>`, `stylesheet url()`, or `stylesheet @import string`, plus the normalized path the exporter tried to prove:
 
-- `RWEXPORT001`: a server-fetched frame route did not materialize.
-- `RWEXPORT002`: a query-bearing frame route cannot be represented as one static artifact.
-- `RWEXPORT003`: a required internal asset did not materialize.
-- `RWEXPORT004`: a managed internal URL could not be rewritten to an emitted artifact URL.
-- `RWEXPORT005`: a registered redirect alias cannot safely point at its canonical route, collides with another route or provider redirect output, or was already crawled as a normal HTML page.
+- `RWEXPORT001`: a server-fetched frame route did not materialize. Add or seed the frame route, or switch to `--mode hybrid` when a live server owns it.
+- `RWEXPORT002`: a query-bearing frame route cannot be represented as one static artifact. Export a query-free route, split the frame into static pages, or keep server routing with `--mode hybrid`.
+- `RWEXPORT003`: a required internal asset did not materialize. Add the asset route, correct path casing, make the reference external/data/hash-only, or use `--mode hybrid`.
+- `RWEXPORT004`: a managed internal URL could not be rewritten to an emitted artifact URL. Seed or expose the target route so it emits an artifact, or mark authoring-only anchors with `data-rw-export-ignore`.
+- `RWEXPORT005`: a registered redirect alias cannot safely point at its canonical route, collides with another route or provider redirect output, or was already crawled as a normal HTML page. Fix the host redirect registration so aliases map to exported canonical routes without artifact collisions.
 
 `hybrid` mode preserves the older application-style URL behavior. Use it when the exported directory will still be served by infrastructure that resolves extensionless URLs, dynamic frame endpoints, or other live-server behavior. Hybrid mode logs missing discovered dependencies but does not enforce CDN static-safety validation.
 
 Redirect strategy is a host-integration setting, not a generic `razorwire export` CLI option. `ExportContext.AddRedirectAlias(...)` is the preferred API for registering alias-to-canonical relationships; `AddRedirectArtifact(...)` remains as a compatibility wrapper for older integrations. `ExportRedirectStrategy.Html` works on generic static hosts such as GitHub Pages. `ExportRedirectStrategy.Netlify` is for CDN exports published to Netlify-compatible providers: it writes one publish-root `_redirects` file, serializes exact site-local paths with per-segment percent encoding, uses `301!`, de-duplicates exact serialized source/target pairs, rejects self-redirects after serialization, rejects same-source/different-target rules, rejects aliases that conflict with exported `_redirects`, and never uses `PublicOrigin` or emitted `.html` artifact URLs as rule targets.
 
-CDN mode validates the URLs the exporter owns and can see while crawling HTML and CSS: discovered page links, Turbo Frame sources, supported HTML asset references, `<link rel="canonical">` values that point at managed app routes, `<img>` and `<source>` `srcset` candidates, and CSS `url(...)` references. It does not prove arbitrary app-authored JavaScript `fetch` calls, form posts, Server-Sent Events, import maps, or other runtime behavior that is not represented as exporter-managed markup or CSS URLs.
+CDN mode validates the static references the exporter owns and can see while crawling HTML and CSS: parser-discovered page links, Turbo Frame sources, supported HTML asset references, `<link rel="canonical">` values that point at managed app routes, `<img>` and `<source>` `srcset` candidates, CSS `url(...)` references, and both `@import url(...)` and string-form `@import "..."` stylesheet dependencies. It does not prove arbitrary app-authored JavaScript `fetch` calls, form posts, Server-Sent Events, import maps, or other runtime behavior that is not represented as exporter-managed markup or CSS references.
+
+Parser-backed discovery can surface valid HTML or CSS references that older exporter versions missed. After upgrading, a new `RWEXPORT###` failure may be correct rather than a regression: export the route or asset, fix path casing, mark authoring-only anchors with `data-rw-export-ignore`, or choose `--mode hybrid` when the dependency is intentionally served by live infrastructure.
 
 CDN export skips relative anchors that point at common source or project file extensions, such as `./Program.cs` or `../Project.csproj`, because those links are usually for GitHub and editor navigation rather than static-site dependencies. For other authoring-only anchors in app-rendered HTML, use `data-rw-export-ignore`; the anchor remains rendered and clickable, but CDN export will not crawl, validate, or rewrite its `href`.
 

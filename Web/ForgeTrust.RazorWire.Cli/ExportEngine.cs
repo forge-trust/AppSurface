@@ -16,73 +16,36 @@ public class ExportEngine
 {
     private readonly ILogger<ExportEngine> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
-    private static readonly Uri ManagedUrlBase = new("http://dummy");
+    private readonly ExportReferenceProcessor _referenceProcessor;
 
-    // Compiled Regexes for performance
-    private const string ExportIgnoreAttributeName = "data-rw-export-ignore";
-    private static readonly HashSet<string> SourceNavigationAnchorExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".cs",
-        ".cshtml",
-        ".csproj",
-        ".fs",
-        ".fsproj",
-        ".props",
-        ".razor",
-        ".sln",
-        ".slnx",
-        ".targets",
-        ".vb",
-        ".vbproj",
-    };
+    /// <summary>
+    /// Attribute emitted by AppSurface Docs to mark maintainer diagnostics chrome that RazorWire strips from exports.
+    /// </summary>
+    /// <remarks>
+    /// The value is <c>data-docs-diagnostics-chrome</c>. It is a cross-component marker between the AppSurface Docs
+    /// sidebar and <see cref="ExportEngine"/> only; consumers should not rely on it for production behavior or as a
+    /// public styling hook.
+    /// </remarks>
+    private const string AppSurfaceDocsDiagnosticsChromeAttributeName = "data-docs-diagnostics-chrome";
 
-    private static readonly Regex AnchorTagRegex = new(
-        @"<a\b[^>]*>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex ExportIgnoreAttributeRegex = new(
-        @"\s" + ExportIgnoreAttributeName + @"(?:\s*=\s*(?:""[^""]*""|'[^']*'|[^\s>]+))?(?=\s|/?>)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex TurboFrameSrcRegex = new(
-        @"<turbo-frame[^>]*\ssrc\s*=\s*(['""])(.*?)\1",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex ScriptSrcRegex = new(
-        @"<script[^>]*\ssrc\s*=\s*(['""])(.*?)\1",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex LinkTagRegex = new(
-        "<link[^>]+>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex LinkHrefRegex = new(
-        @"\shref\s*=\s*(['""])(.*?)\1",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex LinkRelRegex = new(
-        @"\srel\s*=\s*(['""])(.*?)\1",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex ImgSrcRegex = new(
-        @"<img[^>]*\ssrc\s*=\s*(['""])(.*?)\1",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex SrcSetRegex = new(
-        @"<[^>]*\ssrcset\s*=\s*(['""])(.*?)\1",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex StyleBlockRegex = new(
-        "<style[^>]*>(.*?)</style>",
+    /// <summary>
+    /// Matches marked <c>&lt;details&gt;</c> elements that contain <see cref="AppSurfaceDocsDiagnosticsChromeAttributeName"/>.
+    /// </summary>
+    /// <remarks>
+    /// The pattern strips AppSurface Docs diagnostics disclosures whose opening <c>&lt;details&gt;</c> tag contains the
+    /// marker attribute, optionally set to <c>true</c>. It uses case-insensitive, single-line matching so ordering,
+    /// whitespace, and quote style variations are accepted, and the compiled static instance is safe to share across
+    /// export operations.
+    /// <para>
+    /// This is a raw-HTML convenience regex, not an HTML parser. It assumes non-nested diagnostics
+    /// <c>&lt;details&gt;</c> elements, relies on the marker being present on the opening tag, and removes through the
+    /// first matching <c>&lt;/details&gt;</c>. Malformed HTML, nested details blocks, or marker-like text outside the
+    /// intended diagnostics disclosure can produce incomplete stripping or false positives.
+    /// </para>
+    /// </remarks>
+    private static readonly Regex AppSurfaceDocsDiagnosticsChromeRegex = new(
+        @"<details\b(?=[^>]*\s" + AppSurfaceDocsDiagnosticsChromeAttributeName + @"(?:\s*=\s*(?:""true""|'true'|true))?(?=\s|/?>))[^>]*>.*?</details\s*>",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
-
-    private static readonly Regex StyleAttrRegex = new(
-        @"\sstyle\s*=\s*(['""])(.*?)\1",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex CssUrlRegex = new(
-        @"url\(\s*(['""]?)(.*?)\1\s*\)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private const string DocsStaticPartialsMetaName = "rw-docs-static-partials";
     private const string DocsStaticPartialsMetaTag = "<meta name=\"rw-docs-static-partials\" content=\"1\" />";
@@ -105,6 +68,7 @@ public class ExportEngine
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        _referenceProcessor = new ExportReferenceProcessor(_logger);
     }
 
     /// <summary>
@@ -212,7 +176,7 @@ public class ExportEngine
 
             if (isHtml)
             {
-                var html = await response.Content.ReadAsStringAsync(cancellationToken);
+                var html = StripAppSurfaceDocsDiagnosticsChrome(await response.Content.ReadAsStringAsync(cancellationToken));
                 var docContentFrame = ExtractDocContentFrame(html);
                 context.RouteOutcomes[route] = context.Mode == ExportMode.Cdn
                     ? ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, html)
@@ -527,6 +491,7 @@ public class ExportEngine
         bool rewriteManagedReferences,
         CancellationToken cancellationToken)
     {
+        body = StripAppSurfaceDocsDiagnosticsChrome(body);
         var docContentFrame = ExtractDocContentFrame(body);
         var isDocsPage = IsDocsExportPage(route, body, docContentFrame);
         var htmlForWrite = isDocsPage
@@ -541,6 +506,40 @@ public class ExportEngine
             filePath,
             ExtractDocContentFrame(htmlForWrite),
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes AppSurface Docs maintainer diagnostics chrome from export HTML before link discovery or artifact writes.
+    /// </summary>
+    /// <remarks>
+    /// AppSurface Docs diagnostics links are useful in live maintainer hosts but must not become reader-facing static
+    /// artifacts. The marker is owned by the AppSurface Docs sidebar view and allows the generic RazorWire exporter to
+    /// suppress the whole diagnostics disclosure even when exporting from a URL source whose host has diagnostics chrome
+    /// enabled.
+    /// <para>
+    /// <see cref="StripAppSurfaceDocsDiagnosticsChrome"/> returns null or empty input unchanged, then performs an
+    /// ordinal case-insensitive marker precheck against <see cref="AppSurfaceDocsDiagnosticsChromeAttributeName"/> before
+    /// applying a global <see cref="Regex.Replace(string, string)"/> with
+    /// <see cref="AppSurfaceDocsDiagnosticsChromeRegex"/>. All matching diagnostics disclosures are removed.
+    /// </para>
+    /// <para>
+    /// The method operates on raw HTML rather than a parsed DOM, so marker-like text in unexpected locations can be
+    /// removed. The static compiled regex is thread-safe for concurrent exports, but it intentionally trades parser-level
+    /// correctness for lightweight export-time cleanup and inherits the regex constraints documented on
+    /// <see cref="AppSurfaceDocsDiagnosticsChromeRegex"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="html">The fetched or staged HTML document.</param>
+    /// <returns>The HTML with marked AppSurface Docs diagnostics chrome removed.</returns>
+    internal static string StripAppSurfaceDocsDiagnosticsChrome(string html)
+    {
+        if (string.IsNullOrEmpty(html)
+            || !html.Contains(AppSurfaceDocsDiagnosticsChromeAttributeName, StringComparison.OrdinalIgnoreCase))
+        {
+            return html;
+        }
+
+        return AppSurfaceDocsDiagnosticsChromeRegex.Replace(html, string.Empty);
     }
 
     private async Task WriteCssRouteAsync(
@@ -862,13 +861,20 @@ public class ExportEngine
             "RWEXPORT003" => "required internal asset",
             _ => "managed internal URL"
         };
+        var provenance = reference.Provenance;
+        var sourceDescription = provenance is null
+            ? $"from '{reference.SourceRoute}'"
+            : $"from {provenance.DisplaySource} on '{reference.SourceRoute}'";
+        var positionDescription = provenance?.Line is null
+            ? string.Empty
+            : $" near line {provenance.Line.Value}";
 
         AddDiagnostic(
             context,
             seen,
             new ExportDiagnostic(
                 code,
-                $"The {description} '{reference.RawValue}' from '{reference.SourceRoute}' did not map to an emitted CDN artifact.",
+                $"The {description} '{reference.RawValue}' {sourceDescription}{positionDescription} did not map to an emitted CDN artifact. Normalized path: '{reference.Path}'. Add the route or asset to the export, make the reference external/data/hash-only, or use hybrid mode when a live server owns it.",
                 reference.SourceRoute,
             reference));
     }
@@ -1004,7 +1010,7 @@ public class ExportEngine
             }
 
             const string route = "/404.html";
-            var html = await response.Content.ReadAsStringAsync(cancellationToken);
+            var html = StripAppSurfaceDocsDiagnosticsChrome(await response.Content.ReadAsStringAsync(cancellationToken));
             var filePath = MapRouteToFilePath(route, context.OutputPath, isHtml: true);
             var artifactUrl = MapFilePathToArtifactUrl(filePath, context.OutputPath, route);
             context.ArtifactUrls[route] = artifactUrl;
@@ -1318,9 +1324,10 @@ public class ExportEngine
     /// <param name="currentRoute">The route used to resolve relative anchor URLs and record source provenance.</param>
     internal void ExtractLinks(string html, ExportContext context, string currentRoute = "/")
     {
-        var references = new List<ExportReference>();
-        AddAnchorReferences(references, html, currentRoute);
-        AddReferencesAndQueue(references, context);
+        AddReferencesAndQueue(
+            ExtractReferences(html, currentRoute, htmlScope: true)
+                .Where(reference => reference.Kind == ExportReferenceKind.AnchorHref),
+            context);
     }
 
     /// <summary>
@@ -1331,12 +1338,10 @@ public class ExportEngine
     /// <param name="currentRoute">The route used to resolve relative frame source URLs and record source provenance.</param>
     private void ExtractFrames(string html, ExportContext context, string currentRoute = "/")
     {
-        var references = TurboFrameSrcRegex.Matches(html)
-            .Select(m => CreateReference(m.Groups[2].Value.Trim(), ExportReferenceKind.TurboFrameSrc, currentRoute))
-            .Where(r => r is not null)
-            .Select(r => r!);
-
-        AddReferencesAndQueue(references, context);
+        AddReferencesAndQueue(
+            ExtractReferences(html, currentRoute, htmlScope: true)
+                .Where(reference => reference.Kind == ExportReferenceKind.TurboFrameSrc),
+            context);
     }
 
     /// <summary>
@@ -1370,166 +1375,7 @@ public class ExportEngine
     /// </returns>
     internal IReadOnlyList<ExportReference> ExtractReferences(string content, string currentRoute, bool htmlScope)
     {
-        var references = new List<ExportReference>();
-
-        if (htmlScope)
-        {
-            AddAnchorReferences(references, content, currentRoute);
-            AddReferencesFromMatches(references, TurboFrameSrcRegex.Matches(content), ExportReferenceKind.TurboFrameSrc, currentRoute);
-            AddReferencesFromMatches(references, ScriptSrcRegex.Matches(content), ExportReferenceKind.ScriptSrc, currentRoute);
-            AddLinkReferences(references, content, currentRoute);
-            AddReferencesFromMatches(references, ImgSrcRegex.Matches(content), ExportReferenceKind.ImgSrc, currentRoute);
-
-            foreach (Match match in SrcSetRegex.Matches(content))
-            {
-                foreach (var srcSetUrl in ParseSrcSet(match.Groups[2].Value))
-                {
-                    AddReference(references, srcSetUrl, ExportReferenceKind.ImgSrcSet, currentRoute);
-                }
-            }
-
-            var styleBlocks = StyleBlockRegex.Matches(content).Select(m => m.Groups[1].Value);
-            var styleAttrs = StyleAttrRegex.Matches(content).Select(m => m.Groups[2].Value);
-            foreach (var css in styleBlocks.Concat(styleAttrs))
-            {
-                AddCssUrlReferences(references, css, currentRoute);
-            }
-        }
-        else
-        {
-            AddCssUrlReferences(references, content, currentRoute);
-        }
-
-        return references;
-    }
-
-    private void AddReferencesFromMatches(
-        ICollection<ExportReference> references,
-        MatchCollection matches,
-        ExportReferenceKind kind,
-        string currentRoute)
-    {
-        foreach (Match match in matches)
-        {
-            AddReference(references, match.Groups[2].Value.Trim(), kind, currentRoute);
-        }
-    }
-
-    private void AddAnchorReferences(ICollection<ExportReference> references, string html, string currentRoute)
-    {
-        foreach (var tag in AnchorTagRegex.Matches(html).Select(m => m.Value))
-        {
-            var hrefMatch = LinkHrefRegex.Match(tag);
-            if (!hrefMatch.Success)
-            {
-                continue;
-            }
-
-            var href = hrefMatch.Groups[2].Value.Trim();
-            if (ShouldIgnoreAnchorReference(tag, href))
-            {
-                _logger.LogDebug("Skipping source-navigation anchor href {Href} from {CurrentRoute}.", href, currentRoute);
-                continue;
-            }
-
-            AddReference(references, href, ExportReferenceKind.AnchorHref, currentRoute);
-        }
-    }
-
-    private static bool ShouldIgnoreAnchorReference(string tag, string href)
-    {
-        return ExportIgnoreAttributeRegex.IsMatch(tag) || IsSourceNavigationAnchorHref(href);
-    }
-
-    private static bool IsSourceNavigationAnchorHref(string href)
-    {
-        if (string.IsNullOrWhiteSpace(href)
-            || href.StartsWith('/')
-            || Uri.TryCreate(href, UriKind.Absolute, out _))
-        {
-            return false;
-        }
-
-        var pathEnd = href.IndexOfAny(['?', '#']);
-        var pathOnly = pathEnd >= 0 ? href[..pathEnd] : href;
-        return SourceNavigationAnchorExtensions.Contains(Path.GetExtension(pathOnly));
-    }
-
-    private void AddLinkReferences(ICollection<ExportReference> references, string html, string currentRoute)
-    {
-        foreach (var tag in LinkTagRegex.Matches(html).Select(m => m.Value))
-        {
-            var relMatch = LinkRelRegex.Match(tag);
-            if (!relMatch.Success)
-            {
-                continue;
-            }
-
-            var rel = relMatch.Groups[2].Value;
-            if (!rel.Contains("stylesheet", StringComparison.OrdinalIgnoreCase)
-                && !rel.Contains("icon", StringComparison.OrdinalIgnoreCase)
-                && !rel.Contains("preload", StringComparison.OrdinalIgnoreCase)
-                && !rel.Contains("prefetch", StringComparison.OrdinalIgnoreCase)
-                && !rel.Contains("dns-prefetch", StringComparison.OrdinalIgnoreCase)
-                && !rel.Contains("canonical", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var hrefMatch = LinkHrefRegex.Match(tag);
-            if (hrefMatch.Success)
-            {
-                AddReference(references, hrefMatch.Groups[2].Value.Trim(), ExportReferenceKind.LinkHref, currentRoute);
-            }
-        }
-    }
-
-    private void AddCssUrlReferences(ICollection<ExportReference> references, string css, string currentRoute)
-    {
-        var urls = CssUrlRegex.Matches(css)
-            .Select(m => m.Groups[2].Value.Trim())
-            .Where(url => !string.IsNullOrEmpty(url)
-                          && !url.StartsWith('#')
-                          && !url.StartsWith("data:", StringComparison.OrdinalIgnoreCase));
-
-        foreach (var url in urls)
-        {
-            AddReference(references, url, ExportReferenceKind.CssUrl, currentRoute);
-        }
-    }
-
-    private void AddReference(
-        ICollection<ExportReference> references,
-        string rawValue,
-        ExportReferenceKind kind,
-        string currentRoute)
-    {
-        var reference = CreateReference(rawValue, kind, currentRoute);
-        if (reference is not null)
-        {
-            references.Add(reference);
-        }
-    }
-
-    private ExportReference? CreateReference(string rawValue, ExportReferenceKind kind, string currentRoute)
-    {
-        if (IsHashOnlyReference(rawValue))
-        {
-            return null;
-        }
-
-        var resolved = ResolveRelativeUrl(currentRoute, rawValue);
-        if (!TrySplitManagedUrl(resolved, out var path, out var query, out var fragment))
-        {
-            return null;
-        }
-
-        return new ExportReference(currentRoute, kind, rawValue, resolved, path, query, fragment);
-    }
-
-    private static bool IsHashOnlyReference(string rawValue)
-    {
-        return rawValue.TrimStart().StartsWith('#');
+        return _referenceProcessor.ExtractReferences(content, currentRoute, htmlScope);
     }
 
     private static void AddReferencesAndQueue(IEnumerable<ExportReference> references, ExportContext context)
@@ -1553,220 +1399,13 @@ public class ExportEngine
         }
     }
 
-    private IEnumerable<string> ParseSrcSet(string srcSet)
-    {
-        return ParseSrcSetCandidates(srcSet).Select(candidate => candidate.Url);
-    }
-
-    private static IReadOnlyList<SrcSetCandidate> ParseSrcSetCandidates(string srcSet)
-    {
-        var candidates = new List<SrcSetCandidate>();
-        if (string.IsNullOrWhiteSpace(srcSet))
-        {
-            return candidates;
-        }
-
-        var segmentStart = 0;
-        while (segmentStart < srcSet.Length)
-        {
-            var segmentEnd = srcSet.IndexOf(',', segmentStart);
-            if (segmentEnd < 0)
-            {
-                segmentEnd = srcSet.Length;
-            }
-
-            var urlStart = segmentStart;
-            while (urlStart < segmentEnd && char.IsWhiteSpace(srcSet[urlStart]))
-            {
-                urlStart++;
-            }
-
-            var urlEnd = urlStart;
-            while (urlEnd < segmentEnd && !char.IsWhiteSpace(srcSet[urlEnd]))
-            {
-                urlEnd++;
-            }
-
-            if (urlEnd > urlStart)
-            {
-                candidates.Add(new SrcSetCandidate(
-                    srcSet[urlStart..urlEnd],
-                    urlStart,
-                    urlEnd - urlStart));
-            }
-
-            segmentStart = segmentEnd + 1;
-        }
-
-        return candidates;
-    }
-
     private string RewriteManagedReferences(string content, string currentRoute, bool htmlScope, ExportContext context)
     {
-        return htmlScope
-            ? RewriteHtmlReferences(content, currentRoute, context)
-            : RewriteCssReferences(content, currentRoute, context);
-    }
-
-    private string RewriteHtmlReferences(string html, string currentRoute, ExportContext context)
-    {
-        var rewritten = RewriteAnchorReferences(html, currentRoute, context);
-        rewritten = RewriteSimpleAttributeReferences(rewritten, TurboFrameSrcRegex, ExportReferenceKind.TurboFrameSrc, currentRoute, context);
-        rewritten = RewriteSimpleAttributeReferences(rewritten, ScriptSrcRegex, ExportReferenceKind.ScriptSrc, currentRoute, context);
-        rewritten = RewriteLinkReferences(rewritten, currentRoute, context);
-        rewritten = RewriteSimpleAttributeReferences(rewritten, ImgSrcRegex, ExportReferenceKind.ImgSrc, currentRoute, context);
-        rewritten = RewriteSrcSetReferences(rewritten, currentRoute, context);
-        rewritten = StyleBlockRegex.Replace(
-            rewritten,
-            match => ReplaceCapturedValue(
-                match,
-                1,
-                RewriteCssReferences(match.Groups[1].Value, currentRoute, context)));
-        rewritten = StyleAttrRegex.Replace(
-            rewritten,
-            match => ReplaceCapturedValue(
-                match,
-                2,
-                RewriteCssReferences(match.Groups[2].Value, currentRoute, context)));
-
-        return rewritten;
-    }
-
-    private string RewriteSimpleAttributeReferences(
-        string html,
-        Regex regex,
-        ExportReferenceKind kind,
-        string currentRoute,
-        ExportContext context)
-    {
-        return regex.Replace(
-            html,
-            match => RewriteMatchedRawValue(match, match.Groups[2].Value.Trim(), kind, currentRoute, context));
-    }
-
-    private string RewriteAnchorReferences(string html, string currentRoute, ExportContext context)
-    {
-        return AnchorTagRegex.Replace(
-            html,
-            match =>
-            {
-                var tag = match.Value;
-                var hrefMatch = LinkHrefRegex.Match(tag);
-                if (!hrefMatch.Success)
-                {
-                    return tag;
-                }
-
-                if (ShouldIgnoreAnchorReference(tag, hrefMatch.Groups[2].Value.Trim()))
-                {
-                    return tag;
-                }
-
-                var rewrittenHref = RewriteMatchedRawValue(
-                    hrefMatch,
-                    hrefMatch.Groups[2].Value.Trim(),
-                    ExportReferenceKind.AnchorHref,
-                    currentRoute,
-                    context);
-                return tag.Replace(hrefMatch.Value, rewrittenHref, StringComparison.Ordinal);
-            });
-    }
-
-    private string RewriteLinkReferences(string html, string currentRoute, ExportContext context)
-    {
-        return LinkTagRegex.Replace(
-            html,
-            match =>
-            {
-                var tag = match.Value;
-                var relMatch = LinkRelRegex.Match(tag);
-                if (!relMatch.Success)
-                {
-                    return tag;
-                }
-
-                var rel = relMatch.Groups[2].Value;
-                if (!rel.Contains("stylesheet", StringComparison.OrdinalIgnoreCase)
-                    && !rel.Contains("icon", StringComparison.OrdinalIgnoreCase)
-                    && !rel.Contains("preload", StringComparison.OrdinalIgnoreCase)
-                    && !rel.Contains("prefetch", StringComparison.OrdinalIgnoreCase)
-                    && !rel.Contains("dns-prefetch", StringComparison.OrdinalIgnoreCase)
-                    && !rel.Contains("canonical", StringComparison.OrdinalIgnoreCase))
-                {
-                    return tag;
-                }
-
-                var hrefMatch = LinkHrefRegex.Match(tag);
-                if (!hrefMatch.Success)
-                {
-                    return tag;
-                }
-
-                var rewrittenHref = RewriteMatchedRawValue(
-                    hrefMatch,
-                    hrefMatch.Groups[2].Value.Trim(),
-                    ExportReferenceKind.LinkHref,
-                    currentRoute,
-                    context);
-                return tag.Replace(hrefMatch.Value, rewrittenHref, StringComparison.Ordinal);
-            });
-    }
-
-    private string RewriteSrcSetReferences(string html, string currentRoute, ExportContext context)
-    {
-        return SrcSetRegex.Replace(
-            html,
-            match =>
-            {
-                var srcSet = match.Groups[2].Value;
-                var rewrittenSrcSet = new StringBuilder(srcSet);
-                foreach (var candidate in ParseSrcSetCandidates(srcSet).OrderByDescending(candidate => candidate.Start))
-                {
-                    var reference = CreateReference(candidate.Url, ExportReferenceKind.ImgSrcSet, currentRoute);
-                    if (reference is null || !TryResolveReferenceArtifactUrl(reference, context, out var artifactUrl))
-                    {
-                        continue;
-                    }
-
-                    rewrittenSrcSet
-                        .Remove(candidate.Start, candidate.Length)
-                        .Insert(candidate.Start, artifactUrl);
-                }
-
-                return ReplaceCapturedValue(match, 2, rewrittenSrcSet.ToString());
-            });
-    }
-
-    private string RewriteCssReferences(string css, string currentRoute, ExportContext context)
-    {
-        return CssUrlRegex.Replace(
-            css,
-            match => RewriteMatchedRawValue(match, match.Groups[2].Value.Trim(), ExportReferenceKind.CssUrl, currentRoute, context));
-    }
-
-    private string RewriteMatchedRawValue(
-        Match match,
-        string rawValue,
-        ExportReferenceKind kind,
-        string currentRoute,
-        ExportContext context)
-    {
-        var reference = CreateReference(rawValue, kind, currentRoute);
-        if (reference is null || !TryResolveReferenceArtifactUrl(reference, context, out var artifactUrl))
-        {
-            return match.Value;
-        }
-
-        return ReplaceCapturedValue(match, 2, artifactUrl);
-    }
-
-    private static string ReplaceCapturedValue(Match match, int groupNumber, string replacement)
-    {
-        var valueGroup = match.Groups[groupNumber];
-        var valueStart = valueGroup.Index - match.Index;
-        var prefix = match.Value[..valueStart];
-        var suffix = match.Value[(valueStart + valueGroup.Length)..];
-        return prefix + replacement + suffix;
+        return _referenceProcessor.RewriteManagedReferences(
+            content,
+            currentRoute,
+            htmlScope,
+            reference => TryResolveReferenceArtifactUrl(reference, context, out var artifactUrl) ? artifactUrl : null);
     }
 
     private static bool TryResolveReferenceArtifactUrl(
@@ -1808,88 +1447,7 @@ public class ExportEngine
     /// </summary>
     internal string ResolveRelativeUrl(string baseRoute, string url)
     {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return url;
-        }
-
-        // If it's already an absolute URL (http, https, data, mailto, javascript, or starts with /), return it or handle in normalization
-        if (url.StartsWith('/') || Uri.TryCreate(url, UriKind.Absolute, out _))
-        {
-            return url;
-        }
-
-        try
-        {
-            // Use generic dummy host to resolve paths
-            var baseUri = new Uri(new Uri("http://dummy"), baseRoute);
-            var resolvedUri = new Uri(baseUri, url);
-
-            return resolvedUri.AbsolutePath + resolvedUri.Query + resolvedUri.Fragment;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to resolve relative URL: {Url} against {BaseRoute}", url, baseRoute);
-
-            return url;
-        }
-    }
-
-    private static bool TrySplitManagedUrl(
-        string rawRef,
-        out string path,
-        out string query,
-        out string fragment)
-    {
-        path = string.Empty;
-        query = string.Empty;
-        fragment = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(rawRef) || !rawRef.StartsWith('/') || rawRef.StartsWith("//"))
-        {
-            return false;
-        }
-
-        if (!Uri.TryCreate(ManagedUrlBase, rawRef, out var normalizedUri))
-        {
-            return false;
-        }
-
-        rawRef = normalizedUri.PathAndQuery + normalizedUri.Fragment;
-
-        var pathEnd = rawRef.Length;
-        var queryStart = rawRef.IndexOf('?');
-        var fragmentStart = rawRef.IndexOf('#');
-        var hasQuery = queryStart >= 0 && (fragmentStart < 0 || queryStart < fragmentStart);
-
-        if (hasQuery)
-        {
-            pathEnd = Math.Min(pathEnd, queryStart);
-        }
-
-        if (fragmentStart >= 0)
-        {
-            pathEnd = Math.Min(pathEnd, fragmentStart);
-        }
-
-        path = rawRef[..pathEnd];
-        if (string.IsNullOrEmpty(path))
-        {
-            return false;
-        }
-
-        if (hasQuery)
-        {
-            var queryEnd = fragmentStart >= 0 ? fragmentStart : rawRef.Length;
-            query = rawRef[queryStart..queryEnd];
-        }
-
-        if (fragmentStart >= 0)
-        {
-            fragment = rawRef[fragmentStart..];
-        }
-
-        return true;
+        return _referenceProcessor.ResolveRelativeUrl(baseRoute, url);
     }
 
     internal bool TryGetNormalizedRoute(string rawRef, out string normalized)
@@ -1915,7 +1473,7 @@ public class ExportEngine
             return false;
         }
 
-        if (TrySplitManagedUrl(rawRef, out var path, out _, out _))
+        if (ExportReferenceProcessor.TrySplitManagedUrl(rawRef, out var path, out _, out _))
         {
             normalized = path;
             return true;
@@ -1923,6 +1481,4 @@ public class ExportEngine
 
         return false;
     }
-
-    private readonly record struct SrcSetCandidate(string Url, int Start, int Length);
 }

@@ -563,8 +563,9 @@ public enum AppSurfaceDocsHarvestHealthExposure
 /// Maintainer diagnostics settings for AppSurface Docs.
 /// </summary>
 /// <remarks>
-/// Diagnostics surfaces expose route and harvest state intended for local development and trusted operators. The default
-/// keeps route-inspector responses available in Development only. Setting <see cref="ExposeRouteInspector"/> to
+/// Diagnostics surfaces expose route and harvest state intended for local development and trusted operators. The defaults
+/// keep route-inspector responses and sidebar discovery available in Development only. Setting
+/// <see cref="ExposeRouteInspector"/> or <see cref="ShowChrome"/> to
 /// <see cref="AppSurfaceDocsHarvestHealthExposure.Always"/> does not add authentication or authorization; production
 /// hosts must protect the route at the host, reverse proxy, or network layer when route identity is sensitive.
 /// </remarks>
@@ -575,6 +576,18 @@ public sealed class AppSurfaceDocsDiagnosticsOptions
     /// and <c>{DocsRootPath}/_routes.json</c>.
     /// </summary>
     public AppSurfaceDocsHarvestHealthExposure ExposeRouteInspector { get; set; } = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly;
+
+    /// <summary>
+    /// Gets or sets when AppSurface Docs should show route-inspector discovery in the built-in docs sidebar diagnostics
+    /// chrome.
+    /// </summary>
+    /// <remarks>
+    /// This option is intentionally independent from <see cref="ExposeRouteInspector"/> so hosts can expose route
+    /// inspector responses for trusted automation without advertising them in docs chrome, or show diagnostics chrome
+    /// only in environments where maintainers are expected to use the sidebar. Chrome never creates or authorizes a
+    /// route; route exposure still follows <see cref="ExposeRouteInspector"/>.
+    /// </remarks>
+    public AppSurfaceDocsHarvestHealthExposure ShowChrome { get; set; } = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly;
 
     /// <summary>
     /// Gets or sets the host-owned authorization policy required to refresh the live docs search-index cache.
@@ -1174,9 +1187,17 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         {
             failures.Add("AppSurfaceDocs:Diagnostics must not be null.");
         }
-        else if (!Enum.IsDefined(diagnostics.ExposeRouteInspector))
+        else
         {
-            failures.Add($"Unsupported AppSurface Docs route inspector exposure mode '{diagnostics.ExposeRouteInspector}'.");
+            if (!Enum.IsDefined(diagnostics.ExposeRouteInspector))
+            {
+                failures.Add($"Unsupported AppSurface Docs route inspector exposure mode '{diagnostics.ExposeRouteInspector}'.");
+            }
+
+            if (!Enum.IsDefined(diagnostics.ShowChrome))
+            {
+                failures.Add($"Unsupported AppSurface Docs diagnostics chrome exposure mode '{diagnostics.ShowChrome}'.");
+            }
         }
 
         if (sidebar is null)

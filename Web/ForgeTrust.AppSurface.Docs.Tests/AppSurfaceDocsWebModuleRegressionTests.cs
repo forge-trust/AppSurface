@@ -191,9 +191,10 @@ public class AppSurfaceDocsWebModuleRegressionTests
             };
 
             using var getResponse = await client.GetAsync("/docs/_search-index/refresh");
+            using var formContent = new FormUrlEncodedContent([]);
             using var postResponse = await client.PostAsync(
                 "/docs/_search-index/refresh",
-                new FormUrlEncodedContent([]));
+                formContent);
 
             Assert.Equal(HttpStatusCode.MethodNotAllowed, getResponse.StatusCode);
             Assert.Equal(HttpStatusCode.BadRequest, postResponse.StatusCode);
