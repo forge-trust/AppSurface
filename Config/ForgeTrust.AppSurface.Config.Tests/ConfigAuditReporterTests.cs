@@ -853,6 +853,7 @@ public class ConfigAuditReporterTests
                     ["Labels.Items"] = new Hashtable
                     {
                         [new ThrowingDictionaryKey()] = "throwing",
+                        [new FormatFailingDictionaryKey()] = "format",
                         [longKey] = "long"
                     }
                 }));
@@ -866,11 +867,12 @@ public class ConfigAuditReporterTests
         var serialized = JsonSerializer.Serialize(report);
 
         var entry = AssertEntry(report, "Labels.Items", ConfigAuditEntryState.Resolved, null);
-        Assert.Equal(2, entry.Children.Count);
+        Assert.Equal(3, entry.Children.Count);
         Assert.Contains(entry.Children, child => child.Element?.KeyLabel == "[key]" && child.Element.IsKeyRedacted);
         Assert.Contains(entry.Children, child => child.Element?.KeyLabel?.Length == 131);
         Assert.DoesNotContain(new string('a', 200), serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("dictionary-key-secret", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("dictionary-key-format-secret", serialized, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2642,5 +2644,11 @@ public class ConfigAuditReporterTests
     private sealed class ThrowingDictionaryKey
     {
         public override string ToString() => throw new InvalidOperationException("dictionary-key-secret");
+    }
+
+    private sealed class FormatFailingDictionaryKey : IFormattable
+    {
+        public string ToString(string? format, IFormatProvider? formatProvider) =>
+            throw new FormatException("dictionary-key-format-secret");
     }
 }
