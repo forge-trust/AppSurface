@@ -10,6 +10,7 @@ using ForgeTrust.RazorWire.Bridge;
 using ForgeTrust.RazorWire.Streams;
 using Ganss.Xss;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -3765,6 +3766,30 @@ public class DocsControllerTests : IDisposable
 
         var status = Assert.IsType<StatusCodeResult>(result);
         Assert.Equal(StatusCodes.Status403Forbidden, status.StatusCode);
+    }
+
+    [Fact]
+    public async Task RefreshSearchIndexUnsupportedMethod_ShouldReturnMethodNotAllowedAndDisableStatusPages()
+    {
+        var (controller, cache, memo) = CreateController(new AppSurfaceDocsOptions(), A.Fake<IDocHarvester>());
+        using var _ = cache;
+        using var __ = memo;
+        await using var responseBody = new MemoryStream();
+        var statusCodePages = A.Fake<IStatusCodePagesFeature>();
+        statusCodePages.Enabled = true;
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = responseBody;
+        httpContext.Features.Set(statusCodePages);
+        controller.ControllerContext = CreateControllerContext(httpContext);
+
+        var result = controller.RefreshSearchIndexUnsupportedMethod();
+
+        var status = Assert.IsType<StatusCodeResult>(result);
+        Assert.Equal(StatusCodes.Status405MethodNotAllowed, status.StatusCode);
+        httpContext.Response.StatusCode = status.StatusCode;
+        await httpContext.Response.StartAsync();
+        Assert.False(statusCodePages.Enabled);
+        Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, httpContext.Response.Headers.Allow);
     }
 
     [Fact]
