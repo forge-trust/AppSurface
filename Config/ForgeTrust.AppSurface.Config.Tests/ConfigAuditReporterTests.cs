@@ -1724,6 +1724,10 @@ public class ConfigAuditReporterTests
                 """
                 {
                   "KnownExact": "registered",
+                  "SensitiveExact": "provider-only-secret",
+                  "SensitiveTree": {
+                    "Child": "descendant-secret"
+                  },
                   "App": {
                     "Mode": "file",
                     "Enabled": true,
@@ -1755,6 +1759,12 @@ public class ConfigAuditReporterTests
 
             var services = CreateServices(tempDir, environment);
             services.AddConfigAuditKey<string>("KnownExact");
+            services.AddConfigAuditKey<string>(
+                "SensitiveExact",
+                options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+            services.AddConfigAuditKey<Dictionary<string, string>>(
+                "SensitiveTree",
+                options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
             services.AddConfigAuditKey<AppSettings>("App");
             services.AddConfigAuditKey<string>("App.Mode");
 
@@ -1762,6 +1772,18 @@ public class ConfigAuditReporterTests
             var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Staging");
 
             AssertDiscovered(report, "KnownExact", ConfigAuditDiscoveredKeyClassification.Known, "registered");
+            var sensitiveExact = AssertDiscovered(
+                report,
+                "SensitiveExact",
+                ConfigAuditDiscoveredKeyClassification.Known,
+                "[redacted]");
+            Assert.True(sensitiveExact.IsRedacted);
+            var sensitiveChild = AssertDiscovered(
+                report,
+                "SensitiveTree.Child",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                "[redacted]");
+            Assert.True(sensitiveChild.IsRedacted);
             AssertDiscovered(report, "App", ConfigAuditDiscoveredKeyClassification.Known, null);
             AssertDiscovered(report, "App.Mode", ConfigAuditDiscoveredKeyClassification.Known, "file");
             AssertDiscovered(report, "App.Enabled", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "True");
@@ -1824,6 +1846,11 @@ public class ConfigAuditReporterTests
             Assert.DoesNotContain("Unused", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("super-secret", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("secret-one", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("provider-only-secret", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("descendant-secret", rendered, StringComparison.Ordinal);
+            var serialized = JsonSerializer.Serialize(report);
+            Assert.DoesNotContain("provider-only-secret", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("descendant-secret", serialized, StringComparison.Ordinal);
         }
         finally
         {

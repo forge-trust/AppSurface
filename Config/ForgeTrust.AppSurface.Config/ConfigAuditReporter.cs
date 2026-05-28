@@ -130,11 +130,17 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
             foreach (var providerKey in providerKeys)
             {
-                var redacted = _redactor.FormatValue(providerKey.Key, providerKey.RawValue, providerKey.Sources);
+                var classification = ClassifyDiscoveredKey(providerKey.Key);
+                var entrySensitivity = GetDiscoveredKeyEntrySensitivity(providerKey.Key);
+                var redacted = _redactor.FormatValue(
+                    providerKey.Key,
+                    providerKey.RawValue,
+                    providerKey.Sources,
+                    entrySensitivity);
                 discoveredKeys.Add(new ConfigAuditDiscoveredKey
                 {
                     Key = providerKey.Key,
-                    Classification = ClassifyDiscoveredKey(providerKey.Key),
+                    Classification = classification,
                     DisplayValue = redacted.DisplayValue,
                     IsRedacted = redacted.IsRedacted,
                     Sources = providerKey.Sources,
@@ -147,6 +153,22 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             .OrderBy(key => key.Classification)
             .ThenBy(key => key.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private ConfigAuditSensitivity GetDiscoveredKeyEntrySensitivity(string key)
+    {
+        var exact = _knownEntries.FirstOrDefault(
+            knownEntry => string.Equals(knownEntry.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (exact != null)
+        {
+            return exact.OptionsSnapshot.Sensitivity;
+        }
+
+        return _knownEntries
+            .Where(knownEntry => key.StartsWith($"{knownEntry.Key}.", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(knownEntry => knownEntry.Key.Length)
+            .Select(knownEntry => knownEntry.OptionsSnapshot.Sensitivity)
+            .FirstOrDefault();
     }
 
     private ConfigAuditDiscoveredKeyClassification ClassifyDiscoveredKey(string key)
