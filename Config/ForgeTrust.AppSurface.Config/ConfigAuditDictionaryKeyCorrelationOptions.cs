@@ -258,7 +258,7 @@ internal sealed class ConfigAuditDictionaryKeyCorrelationContext
     /// <summary>
     /// Creates a context that can derive scoped HMAC ids for dictionary keys in one report entry.
     /// </summary>
-    /// <param name="secretKey">The UTF-8 encoded secret key retained for this report traversal.</param>
+    /// <param name="secretKey">The UTF-8 encoded secret key to clone and retain for this report traversal.</param>
     /// <param name="keyId">The display-safe key id rendered into each correlation id.</param>
     /// <param name="applicationScope">The application or product scope included in the HMAC input.</param>
     /// <param name="environment">The report environment included in the HMAC input.</param>
@@ -269,8 +269,12 @@ internal sealed class ConfigAuditDictionaryKeyCorrelationContext
         string keyId,
         string applicationScope,
         string environment,
-        string rootKey) =>
-        new(secretKey, keyId, applicationScope, environment, rootKey, unavailableReason: null);
+        string rootKey)
+    {
+        ArgumentNullException.ThrowIfNull(secretKey);
+
+        return new((byte[])secretKey.Clone(), keyId, applicationScope, environment, rootKey, unavailableReason: null);
+    }
 
     /// <summary>
     /// Creates a context that records why requested dictionary-key correlation cannot run.

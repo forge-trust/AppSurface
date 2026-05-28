@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Config.Tests;
@@ -287,6 +288,24 @@ public class ConfigAuditModelsTests
         Assert.Equal("a display-safe key id was not configured", missingKeyIdContext.UnavailableReason);
         Assert.False(missingScopeContext.IsAvailable);
         Assert.Equal("an application scope was not configured", missingScopeContext.UnavailableReason);
+    }
+
+    [Fact]
+    public void ConfigAuditDictionaryKeyCorrelationContext_ClonesSecretKey()
+    {
+        var secretKey = Encoding.UTF8.GetBytes("0123456789abcdef0123456789abcdef");
+        var context = ConfigAuditDictionaryKeyCorrelationContext.Available(
+            secretKey,
+            "kid",
+            "billing",
+            "Production",
+            "Tenants");
+        var beforeMutation = context.CreateCorrelationId("alpha");
+
+        Array.Fill(secretKey, (byte)'x');
+        var afterMutation = context.CreateCorrelationId("alpha");
+
+        Assert.Equal(beforeMutation, afterMutation);
     }
 
     [Fact]
