@@ -46,7 +46,8 @@ internal sealed record ConfigAuditPath(
             ? $"{rawLabel[..MaxDictionaryKeyLabelLength]}..."
             : rawLabel;
         var keyIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(rawLabel);
-        var entryIsSensitive = options.Sensitivity == ConfigAuditSensitivity.Sensitive;
+        var normalizedSensitivity = ConfigAuditEntryOptions.NormalizeSensitivity(options.Sensitivity);
+        var entryIsSensitive = normalizedSensitivity == ConfigAuditSensitivity.Sensitive;
         var parentIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(DisplayPath)
                                 || ConfigAuditRedactor.ContainsSensitiveFragment(SourcePath);
         var suppressLabel = !options.DisplayDictionaryKeys;
@@ -105,6 +106,12 @@ internal sealed record ConfigAuditPath(
                 : ((IConvertible)key).ToString(CultureInfo.InvariantCulture);
         }
         catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+        {
+            conversionFailed = true;
+            return string.Empty;
+        }
+
+        if (label == null)
         {
             conversionFailed = true;
             return string.Empty;

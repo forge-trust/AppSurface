@@ -857,6 +857,7 @@ public class ConfigAuditReporterTests
                     {
                         [new ThrowingDictionaryKey()] = "throwing",
                         [new FormatFailingDictionaryKey()] = "format",
+                        [new NullReturningDictionaryKey()] = "null",
                         [longKey] = "long"
                     }
                 }));
@@ -870,7 +871,7 @@ public class ConfigAuditReporterTests
         var serialized = JsonSerializer.Serialize(report);
 
         var entry = AssertEntry(report, "Labels.Items", ConfigAuditEntryState.Resolved, null);
-        Assert.Equal(3, entry.Children.Count);
+        Assert.Equal(4, entry.Children.Count);
         Assert.Contains(entry.Children, child => child.Element?.KeyLabel == "[key]" && child.Element.IsKeyRedacted);
         Assert.Contains(entry.Children, child => child.Element?.KeyLabel?.Length == 131);
         Assert.DoesNotContain(new string('a', 200), serialized, StringComparison.Ordinal);
@@ -1260,6 +1261,44 @@ public class ConfigAuditReporterTests
         Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
         Assert.DoesNotContain("two", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("three", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_RedactsDictionaryLabelsWhenInvalidSensitivityFailsClosed()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Partner.Payloads"] = new Dictionary<string, string>
+                    {
+                        ["tenant-invalid"] = "invalid-sensitivity-secret"
+                    }
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Partner.Payloads",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.Sensitivity = (ConfigAuditSensitivity)999;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+        var child = Assert.Single(AssertEntry(report, "Partner.Payloads", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        var serialized = JsonSerializer.Serialize(report);
+
+        Assert.Equal("Partner.Payloads[[redacted-key-1]]", child.Key);
+        Assert.Equal("[redacted-key-1]", child.Element?.KeyLabel);
+        Assert.True(child.Element?.IsKeyRedacted);
+        Assert.True(child.IsRedacted);
+        Assert.DoesNotContain("tenant-invalid", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("invalid-sensitivity-secret", serialized, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2680,5 +2719,10 @@ public class ConfigAuditReporterTests
     {
         public string ToString(string? format, IFormatProvider? formatProvider) =>
             throw new FormatException("dictionary-key-format-secret");
+    }
+
+    private sealed class NullReturningDictionaryKey : IFormattable
+    {
+        public string ToString(string? format, IFormatProvider? formatProvider) => null!;
     }
 }

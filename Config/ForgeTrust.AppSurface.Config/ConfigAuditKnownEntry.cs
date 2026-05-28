@@ -340,6 +340,19 @@ public sealed class ConfigAuditEntryOptions
             AssignedOptions | overrides.AssignedOptions);
     }
 
+    /// <summary>
+    /// Merges two assigned entry sensitivity values using the most restrictive valid classification.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ConfigAuditSensitivity.Sensitive"/> wins over <see cref="ConfigAuditSensitivity.NonSensitive"/>,
+    /// and <see cref="ConfigAuditSensitivity.NonSensitive"/> wins over <see cref="ConfigAuditSensitivity.Unknown"/>.
+    /// If either value is outside the known enum members, that invalid value is preserved so validation can emit an
+    /// actionable diagnostic before normalization fails closed. This helper is pure and does not throw for invalid enum
+    /// values.
+    /// </remarks>
+    /// <param name="current">The current sensitivity value.</param>
+    /// <param name="candidate">The candidate sensitivity value being merged in.</param>
+    /// <returns>The merged sensitivity value.</returns>
     internal static ConfigAuditSensitivity MergeSensitivity(
         ConfigAuditSensitivity current,
         ConfigAuditSensitivity candidate)
@@ -357,9 +370,31 @@ public sealed class ConfigAuditEntryOptions
         return current > candidate ? current : candidate;
     }
 
+    /// <summary>
+    /// Returns a report-generation-safe sensitivity value.
+    /// </summary>
+    /// <remarks>
+    /// Valid values are returned unchanged. Invalid enum values normalize to
+    /// <see cref="ConfigAuditSensitivity.Sensitive"/> so redaction fails closed after validation has captured the
+    /// original value. This helper is pure and does not throw.
+    /// </remarks>
+    /// <param name="sensitivity">The sensitivity value to normalize.</param>
+    /// <returns>
+    /// <paramref name="sensitivity"/> when it is valid; otherwise <see cref="ConfigAuditSensitivity.Sensitive"/>.
+    /// </returns>
     internal static ConfigAuditSensitivity NormalizeSensitivity(ConfigAuditSensitivity sensitivity) =>
         IsValidSensitivity(sensitivity) ? sensitivity : ConfigAuditSensitivity.Sensitive;
 
+    /// <summary>
+    /// Determines whether a sensitivity value is one of the supported enum members.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ConfigAuditSensitivity.Unknown"/>, <see cref="ConfigAuditSensitivity.NonSensitive"/>, and
+    /// <see cref="ConfigAuditSensitivity.Sensitive"/> are valid. All other numeric values are invalid and should be
+    /// reported before being normalized. This helper is pure and does not throw.
+    /// </remarks>
+    /// <param name="sensitivity">The sensitivity value to inspect.</param>
+    /// <returns><see langword="true"/> when <paramref name="sensitivity"/> is a supported enum member.</returns>
     internal static bool IsValidSensitivity(ConfigAuditSensitivity sensitivity) =>
         sensitivity is ConfigAuditSensitivity.Unknown
             or ConfigAuditSensitivity.NonSensitive
