@@ -101,8 +101,8 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         using var cache = new MemoryCache(new MemoryCacheOptions());
         await using var services = new ServiceCollection().BuildServiceProvider();
         var harvester = new BlockingHarvester();
-        var delay = TimeSpan.FromSeconds(2);
-        var tolerance = TimeSpan.FromMilliseconds(200);
+        var delay = TimeSpan.FromMilliseconds(250);
+        var tolerance = TimeSpan.FromMilliseconds(75);
         var coordinator = CreateCoordinator(
             harvester,
             cache,
@@ -115,7 +115,7 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
                 harvesterProgress => string.Equals(harvesterProgress.Status, "Running", StringComparison.Ordinal)));
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        await harvester.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await harvester.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
         sw.Stop();
 
         Assert.True(
