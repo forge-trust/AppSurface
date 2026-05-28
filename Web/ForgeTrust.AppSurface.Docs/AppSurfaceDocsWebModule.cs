@@ -345,6 +345,13 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// <see cref="AppSurfaceDocsDiagnosticsOptions.ExposeRouteInspector"/>. These routes are intended for local and
     /// operator verification, not as unauthenticated public reader navigation.
     /// </para>
+    /// <para>
+    /// The route named <c>appsurfacedocs_search_index_refresh</c> maps the pattern produced by
+    /// <see cref="DocsUrlBuilder.BuildSearchIndexRefreshUrl"/> to <c>DocsController.RefreshSearchIndex</c>. That
+    /// operator route is browser-form-shaped and accepts only <c>POST</c>; the companion unsupported-method endpoint
+    /// rejects common non-POST verbs with HTTP 405 and an <c>Allow: POST</c> response header instead of letting the
+    /// request fall through to reader document lookup or status-code-page rendering.
+    /// </para>
     /// </remarks>
     /// <param name="context">Startup context for the application and environment.</param>
     /// <param name="endpoints">Endpoint route builder used to map the module's routes.</param>

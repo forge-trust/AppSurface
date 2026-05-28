@@ -424,12 +424,14 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/", builder.BuildHomeUrl());
         Assert.Equal("/search", builder.BuildSearchUrl());
         Assert.Equal("/search-index.json", builder.BuildSearchIndexUrl());
+        Assert.Equal("/_search-index/refresh", builder.BuildSearchIndexRefreshUrl());
         Assert.Equal("/search.css", builder.BuildAssetUrl("search.css"));
         Assert.Equal("/outline-client.js", builder.BuildAssetUrl("outline-client.js"));
         Assert.Equal("/guides/start.md", builder.BuildDocUrl("guides/start.md"));
         Assert.Equal("/sections/concepts", builder.BuildSectionUrl(DocPublicSection.Concepts));
         Assert.True(builder.IsCurrentDocsPath("/guides/start.md.html"));
         Assert.True(builder.IsCurrentDocsPath("/search"));
+        Assert.True(builder.IsCurrentDocsPath("/_search-index/refresh"));
         Assert.True(builder.IsCurrentDocsPath("/_routes"));
         Assert.True(builder.IsCurrentDocsPath("/_routes.json"));
         Assert.True(builder.IsCurrentDocsPath("/outline-client.js"));
@@ -453,6 +455,7 @@ public sealed class DocsUrlBuilderTests
         Assert.True(builder.IsCurrentDocsPath("/docs/next"));
         Assert.True(builder.IsCurrentDocsPath("/docs/next/guides/start.md.html"));
         Assert.True(builder.IsCurrentDocsPath("/DOCS/NEXT/search"));
+        Assert.True(builder.IsCurrentDocsPath("/docs/next/_search-index/refresh"));
         Assert.False(builder.IsCurrentDocsPath("/docs"));
         Assert.False(builder.IsCurrentDocsPath("/docs/v/1.0"));
         Assert.False(builder.IsCurrentDocsPath(null));

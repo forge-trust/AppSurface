@@ -593,6 +593,32 @@ public class DocsController : Controller
         return new JsonResult(response);
     }
 
+    /// <summary>
+    /// Authorizes a side-effecting search-index refresh request against the host-configured operator policy.
+    /// </summary>
+    /// <param name="cancellationToken">
+    /// Token observed while resolving the configured authorization policy; caller cancellation does not turn policy or
+    /// authorization failures into exceptions.
+    /// </param>
+    /// <returns>
+    /// A <see cref="SearchIndexRefreshAuthorizationResult"/> whose allowed state means cache invalidation may proceed.
+    /// Denied results carry the specific <see cref="SearchIndexRefreshAuthorizationFailure"/> reason for logging and
+    /// explicit 403 responses.
+    /// </returns>
+    /// <remarks>
+    /// The decision flow is intentionally ordered from host configuration to caller identity: a missing or blank
+    /// <see cref="AppSurfaceDocsDiagnosticsOptions.SearchIndexRefreshPolicy"/> returns
+    /// <see cref="SearchIndexRefreshAuthorizationFailure.MissingPolicyOption"/>; missing <see cref="HttpContext"/>,
+    /// request services, or <see cref="IAuthorizationPolicyProvider"/> returns
+    /// <see cref="SearchIndexRefreshAuthorizationFailure.MissingPolicyProvider"/>; a missing
+    /// <see cref="IAuthorizationService"/> returns
+    /// <see cref="SearchIndexRefreshAuthorizationFailure.MissingAuthorizationService"/>; an unresolved configured policy
+    /// returns <see cref="SearchIndexRefreshAuthorizationFailure.PolicyNotFound"/>; a missing or unauthenticated user
+    /// returns <see cref="SearchIndexRefreshAuthorizationFailure.Unauthenticated"/>; and a policy evaluation failure
+    /// returns <see cref="SearchIndexRefreshAuthorizationFailure.AuthorizationFailed"/>. Authorization denials are
+    /// reported as denied results rather than thrown exceptions. The policy lookup uses <see cref="Task.WaitAsync(CancellationToken)"/>
+    /// so cancellation can interrupt a slow policy provider before refresh side effects occur.
+    /// </remarks>
     internal async Task<SearchIndexRefreshAuthorizationResult> AuthorizeSearchIndexRefreshAsync(
         CancellationToken cancellationToken)
     {

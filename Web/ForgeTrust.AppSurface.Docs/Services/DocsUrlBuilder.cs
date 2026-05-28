@@ -460,6 +460,7 @@ public sealed class DocsUrlBuilder
         return string.Equals(path, "/", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/search-index.json", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(path, "/_search-index/refresh", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_health", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_health.json", StringComparison.OrdinalIgnoreCase)
                || string.Equals(path, "/_routes", StringComparison.OrdinalIgnoreCase)
