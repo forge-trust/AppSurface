@@ -95,6 +95,8 @@ internal sealed class ProcessCommandRunner : ICommandRunner
         }
         catch (InvalidOperationException)
         {
+            // The process can exit between HasExited and Kill; timeout handling is already returning a failure result.
+            return;
         }
     }
 
