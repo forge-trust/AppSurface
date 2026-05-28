@@ -506,6 +506,33 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public async Task RunTailwindBuildTask_FailsWithDiagnostic_WhenCliProcessCannotStart()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        const string relativeCliPath = "tools/tailwindcss";
+        var task = CreateBuildTask("sample-start-failure", task =>
+        {
+            task.TailwindCliPath = relativeCliPath;
+            task.TailwindVersion = "4.1.18";
+        });
+        var cliPath = Path.Combine(task.ProjectDirectory, relativeCliPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(cliPath)!);
+        await File.WriteAllTextAsync(cliPath, "#!/bin/sh\nexit 0\n");
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        var error = Assert.Single(buildEngine.Errors);
+        Assert.Contains("ASTW005", error.Message, StringComparison.Ordinal);
+        Assert.Contains(cliPath, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PackedPackageConsumption_BuildAndPublish_LoadsTaskAndGeneratesStaticWebAsset()
     {
         var feedDirectory = Path.Combine(_tempRoot, "feed");

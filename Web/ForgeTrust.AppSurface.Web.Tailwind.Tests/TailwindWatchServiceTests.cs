@@ -110,6 +110,19 @@ public class TailwindWatchServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_LogsWarning_WhenConfiguredCliPathIsMissing()
+    {
+        _tailwindOptions.CliPath = Path.Combine("tools", "missing-tailwind");
+        var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
+
+        await service.ExecuteAsyncPublic(CancellationToken.None);
+
+        Assert.False(service.ProcessExecuted);
+        AssertWarningLogged();
+        A.CallTo(() => _cliManager.GetTailwindPath()).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_LogsError_OnNonZeroExitCode()
     {
         // Arrange
