@@ -5,9 +5,9 @@ namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
 public sealed class TailwindProcessRunnerTests : IDisposable
 {
-    private readonly string _tempRoot = Path.Combine(
+    private readonly string _tempRoot = Path.Join(
         Path.GetTempPath(),
-        $"{nameof(TailwindProcessRunnerTests)}_{Guid.NewGuid():N}");
+        Path.GetFileName($"{nameof(TailwindProcessRunnerTests)}_{Guid.NewGuid():N}"));
 
     public TailwindProcessRunnerTests()
     {
@@ -64,7 +64,7 @@ public sealed class TailwindProcessRunnerTests : IDisposable
             return;
         }
 
-        var scriptPath = Path.Combine(_tempRoot, "not-executable-tailwind");
+        var scriptPath = Path.Join(_tempRoot, "not-executable-tailwind");
         await File.WriteAllTextAsync(scriptPath, "#!/bin/sh\nexit 0\n");
 
         var exception = await Assert.ThrowsAsync<TailwindProcessStartException>(() =>
@@ -137,7 +137,12 @@ public sealed class TailwindProcessRunnerTests : IDisposable
             throw new PlatformNotSupportedException("These tests write Unix executable scripts.");
         }
 
-        var scriptPath = Path.Combine(_tempRoot, fileName);
+        if (Path.IsPathRooted(fileName) || Path.GetFileName(fileName) != fileName)
+        {
+            throw new ArgumentException("Script file names must not include directory components.", nameof(fileName));
+        }
+
+        var scriptPath = Path.Join(_tempRoot, fileName);
         await File.WriteAllTextAsync(scriptPath, contents);
         const UnixFileMode executableMode =
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |

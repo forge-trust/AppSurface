@@ -25,12 +25,12 @@ public class TailwindCliManagerTests : IDisposable
 
     public TailwindCliManagerTests()
     {
-        _tempPath = Path.Combine(Path.GetTempPath(), "TailwindTests_" + Guid.NewGuid().ToString("N"));
+        _tempPath = Path.Join(Path.GetTempPath(), "TailwindTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempPath);
         _logger = A.Fake<ILogger<TailwindCliManager>>();
         _manager = new TailwindCliManager(_logger);
         _manager.BaseDirectoryOverride = _tempPath;
-        _manager.AssemblyDirectoryOverride = Path.Combine(_tempPath, "isolated-assembly");
+        _manager.AssemblyDirectoryOverride = Path.Join(_tempPath, "isolated-assembly");
         _binaryName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "tailwindcss.exe" : "tailwindcss";
         _currentHostRid = GetSupportedHostRid();
         _currentHostRuntimeProjectBinaryName = GetRuntimeProjectBinaryName(_currentHostRid);
@@ -58,9 +58,9 @@ public class TailwindCliManagerTests : IDisposable
     public void GetTailwindPath_ReturnsRuntimePath_IfFound()
     {
         // Arrange
-        var runtimeNativeDir = Path.Combine(_tempPath, "runtimes", _currentHostRid, "native");
+        var runtimeNativeDir = Path.Join(_tempPath, "runtimes", _currentHostRid, "native");
         Directory.CreateDirectory(runtimeNativeDir);
-        var expectedPath = Path.Combine(runtimeNativeDir, _binaryName);
+        var expectedPath = Path.Join(runtimeNativeDir, _binaryName);
         File.WriteAllText(expectedPath, "dummy");
 
         // Act
@@ -74,7 +74,7 @@ public class TailwindCliManagerTests : IDisposable
     public void GetTailwindPath_ReturnsLocalPath_IfRuntimeNotFound()
     {
         // Arrange
-        var expectedPath = Path.Combine(_tempPath, _binaryName);
+        var expectedPath = Path.Join(_tempPath, _binaryName);
         File.WriteAllText(expectedPath, "dummy");
 
         // Act
@@ -88,10 +88,10 @@ public class TailwindCliManagerTests : IDisposable
     public void GetTailwindPath_ReturnsPathValue_IfFoundInPath()
     {
         // Arrange
-        var pathDir = Path.Combine(_tempPath, "bin");
+        var pathDir = Path.Join(_tempPath, "bin");
         Directory.CreateDirectory(pathDir);
 
-        var expectedPath = Path.Combine(pathDir, _binaryName);
+        var expectedPath = Path.Join(pathDir, _binaryName);
         File.WriteAllText(expectedPath, "dummy");
         Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, [pathDir, _originalPath ?? string.Empty]));
 
@@ -105,9 +105,9 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_UsesWindowsBinaryName_WhenWindowsOverrideIsSet()
     {
-        var pathDir = Path.Combine(_tempPath, "bin");
+        var pathDir = Path.Join(_tempPath, "bin");
         Directory.CreateDirectory(pathDir);
-        var expectedPath = Path.Combine(pathDir, "tailwindcss.exe");
+        var expectedPath = Path.Join(pathDir, "tailwindcss.exe");
         File.WriteAllText(expectedPath, "dummy");
         Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, [pathDir, _originalPath ?? string.Empty]));
         TailwindCliManager.IsOSPlatformOverride = platform => platform == OSPlatform.Windows;
@@ -127,10 +127,10 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_ResolvesBinary_WhenUsingDefaultBaseDirectory()
     {
-        var pathDir = Path.Combine(_tempPath, "bin");
+        var pathDir = Path.Join(_tempPath, "bin");
         Directory.CreateDirectory(pathDir);
 
-        var expectedPath = Path.Combine(pathDir, _binaryName);
+        var expectedPath = Path.Join(pathDir, _binaryName);
         File.WriteAllText(expectedPath, "dummy");
         Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, [pathDir, _originalPath ?? string.Empty]));
 
@@ -147,15 +147,15 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_ReturnsAssemblyFallbackRuntimePath_IfFound()
     {
-        var baseDir = Path.Combine(_tempPath, "app-base");
-        var assemblyDir = Path.Combine(_tempPath, "assembly-base");
+        var baseDir = Path.Join(_tempPath, "app-base");
+        var assemblyDir = Path.Join(_tempPath, "assembly-base");
         Directory.CreateDirectory(baseDir);
         _manager.BaseDirectoryOverride = baseDir;
         _manager.AssemblyDirectoryOverride = assemblyDir;
 
-        var runtimeNativeDir = Path.Combine(assemblyDir, "runtimes", _currentHostRid, "native");
+        var runtimeNativeDir = Path.Join(assemblyDir, "runtimes", _currentHostRid, "native");
         Directory.CreateDirectory(runtimeNativeDir);
-        var expectedPath = Path.Combine(runtimeNativeDir, _binaryName);
+        var expectedPath = Path.Join(runtimeNativeDir, _binaryName);
 
         File.WriteAllText(expectedPath, "dummy");
 
@@ -167,23 +167,15 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_ReturnsDevelopmentRuntimeProjectPath_IfFound()
     {
-        var baseDir = Path.Combine(_tempPath, "examples", "sample-app", "bin", "Debug", "net10.0");
-        var assemblyDir = Path.Combine(baseDir, "assembly-shadow");
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
         Directory.CreateDirectory(baseDir);
         _manager.BaseDirectoryOverride = baseDir;
         _manager.AssemblyDirectoryOverride = assemblyDir;
 
-        var runtimeProjectDir = Path.Combine(
-            _tempPath,
-            "Web",
-            "ForgeTrust.AppSurface.Web.Tailwind",
-            "runtimes",
-            "obj",
-            $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{_currentHostRid}",
-            "Debug",
-            "net10.0");
+        var runtimeProjectDir = GetDevelopmentRuntimeProjectDirectory(_currentHostRid);
         Directory.CreateDirectory(runtimeProjectDir);
-        var expectedPath = Path.Combine(runtimeProjectDir, _currentHostRuntimeProjectBinaryName);
+        var expectedPath = Path.Join(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
         File.WriteAllText(expectedPath, "dummy");
 
         var result = _manager.GetTailwindPath();
@@ -194,24 +186,15 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_ReturnsVersionedDevelopmentRuntimeProjectPath_IfFound()
     {
-        var baseDir = Path.Combine(_tempPath, "examples", "sample-app", "bin", "Debug", "net10.0");
-        var assemblyDir = Path.Combine(baseDir, "assembly-shadow");
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
         Directory.CreateDirectory(baseDir);
         _manager.BaseDirectoryOverride = baseDir;
         _manager.AssemblyDirectoryOverride = assemblyDir;
 
-        var runtimeProjectDir = Path.Combine(
-            _tempPath,
-            "Web",
-            "ForgeTrust.AppSurface.Web.Tailwind",
-            "runtimes",
-            "obj",
-            $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{_currentHostRid}",
-            "Debug",
-            "net10.0",
-            "tailwind-4.1.18");
+        var runtimeProjectDir = GetDevelopmentRuntimeProjectDirectory(_currentHostRid, "tailwind-4.1.18");
         Directory.CreateDirectory(runtimeProjectDir);
-        var expectedPath = Path.Combine(runtimeProjectDir, _currentHostRuntimeProjectBinaryName);
+        var expectedPath = Path.Join(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
         File.WriteAllText(expectedPath, "dummy");
 
         var result = _manager.GetTailwindPath();
@@ -222,28 +205,20 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_PrefersLegacyDevelopmentRuntimeProjectPath_WhenBothLegacyAndVersionedExist()
     {
-        var baseDir = Path.Combine(_tempPath, "examples", "sample-app", "bin", "Debug", "net10.0");
-        var assemblyDir = Path.Combine(baseDir, "assembly-shadow");
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
         Directory.CreateDirectory(baseDir);
         _manager.BaseDirectoryOverride = baseDir;
         _manager.AssemblyDirectoryOverride = assemblyDir;
 
-        var runtimeProjectDir = Path.Combine(
-            _tempPath,
-            "Web",
-            "ForgeTrust.AppSurface.Web.Tailwind",
-            "runtimes",
-            "obj",
-            $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{_currentHostRid}",
-            "Debug",
-            "net10.0");
+        var runtimeProjectDir = GetDevelopmentRuntimeProjectDirectory(_currentHostRid);
         Directory.CreateDirectory(runtimeProjectDir);
-        var expectedPath = Path.Combine(runtimeProjectDir, _currentHostRuntimeProjectBinaryName);
+        var expectedPath = Path.Join(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
         File.WriteAllText(expectedPath, "legacy");
 
-        var versionedDir = Path.Combine(runtimeProjectDir, "tailwind-4.1.18");
+        var versionedDir = Path.Join(runtimeProjectDir, "tailwind-4.1.18");
         Directory.CreateDirectory(versionedDir);
-        File.WriteAllText(Path.Combine(versionedDir, _currentHostRuntimeProjectBinaryName), "versioned");
+        File.WriteAllText(Path.Join(versionedDir, EnsureFileName(_currentHostRuntimeProjectBinaryName)), "versioned");
 
         var result = _manager.GetTailwindPath();
 
@@ -254,24 +229,16 @@ public class TailwindCliManagerTests : IDisposable
     [MemberData(nameof(DevelopmentRuntimeRidCases))]
     public void GetTailwindPath_ReturnsDevelopmentRuntimeProjectPath_ForSupportedRidOverride(string rid, string binaryName)
     {
-        var baseDir = Path.Combine(_tempPath, "examples", "sample-app", "bin", "Debug", "net10.0");
-        var assemblyDir = Path.Combine(baseDir, "assembly-shadow");
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
         Directory.CreateDirectory(baseDir);
         _manager.BaseDirectoryOverride = baseDir;
         _manager.AssemblyDirectoryOverride = assemblyDir;
         _manager.RidOverride = rid;
 
-        var runtimeProjectDir = Path.Combine(
-            _tempPath,
-            "Web",
-            "ForgeTrust.AppSurface.Web.Tailwind",
-            "runtimes",
-            "obj",
-            $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{rid}",
-            "Debug",
-            "net10.0");
+        var runtimeProjectDir = GetDevelopmentRuntimeProjectDirectory(rid);
         Directory.CreateDirectory(runtimeProjectDir);
-        var expectedPath = Path.Combine(runtimeProjectDir, binaryName);
+        var expectedPath = Path.Join(runtimeProjectDir, EnsureFileName(binaryName));
         File.WriteAllText(expectedPath, "dummy");
 
         var result = _manager.GetTailwindPath();
@@ -282,24 +249,16 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_ReturnsDevelopmentRuntimeProjectPath_FromAssemblyDirectory_WhenBaseDirectoryShapeIsUnsupported()
     {
-        var baseDir = Path.Combine(_tempPath, "examples", "sample-app");
-        var assemblyDir = Path.Combine(_tempPath, "examples", "shadow-app", "bin", "Debug", "net10.0");
+        var baseDir = Path.Join(_tempPath, "examples", "sample-app");
+        var assemblyDir = Path.Join(_tempPath, "examples", "shadow-app", "bin", "Debug", "net10.0");
         Directory.CreateDirectory(baseDir);
         Directory.CreateDirectory(assemblyDir);
         _manager.BaseDirectoryOverride = baseDir;
         _manager.AssemblyDirectoryOverride = assemblyDir;
 
-        var runtimeProjectDir = Path.Combine(
-            _tempPath,
-            "Web",
-            "ForgeTrust.AppSurface.Web.Tailwind",
-            "runtimes",
-            "obj",
-            $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{_currentHostRid}",
-            "Debug",
-            "net10.0");
+        var runtimeProjectDir = GetDevelopmentRuntimeProjectDirectory(_currentHostRid);
         Directory.CreateDirectory(runtimeProjectDir);
-        var expectedPath = Path.Combine(runtimeProjectDir, _currentHostRuntimeProjectBinaryName);
+        var expectedPath = Path.Join(runtimeProjectDir, EnsureFileName(_currentHostRuntimeProjectBinaryName));
         File.WriteAllText(expectedPath, "dummy");
 
         var result = _manager.GetTailwindPath();
@@ -310,8 +269,8 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_ThrowsFileNotFoundException_WhenSupportedRidHasNoDevelopmentRuntimeProjectInAncestorTree()
     {
-        var baseDir = Path.Combine(_tempPath, "examples", "sample-app", "bin", "Debug", "net10.0");
-        var assemblyDir = Path.Combine(_tempPath, "shadow", "bin", "Debug", "net10.0");
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(_tempPath, "shadow", "bin", "Debug", "net10.0");
         Directory.CreateDirectory(baseDir);
         Directory.CreateDirectory(assemblyDir);
         _manager.BaseDirectoryOverride = baseDir;
@@ -325,13 +284,30 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_ThrowsFileNotFoundException_WhenRidOverrideIsUnsupported()
     {
-        var baseDir = Path.Combine(_tempPath, "examples", "sample-app", "bin", "Debug", "net10.0");
-        var assemblyDir = Path.Combine(baseDir, "assembly-shadow");
+        var baseDir = GetSampleAppBaseDirectory();
+        var assemblyDir = Path.Join(baseDir, "assembly-shadow");
         Directory.CreateDirectory(baseDir);
         _manager.BaseDirectoryOverride = baseDir;
         _manager.AssemblyDirectoryOverride = assemblyDir;
         _manager.RidOverride = "mystery-rid";
         Environment.SetEnvironmentVariable("PATH", string.Empty);
+
+        Assert.Throws<FileNotFoundException>(() => _manager.GetTailwindPath());
+    }
+
+    [Fact]
+    public void GetTailwindPath_SkipsRidBasedProbePaths_WhenRidOverrideContainsPathSeparator()
+    {
+        var baseDir = Path.Join(_tempPath, "app-base");
+        Directory.CreateDirectory(baseDir);
+        _manager.BaseDirectoryOverride = baseDir;
+        _manager.AssemblyDirectoryOverride = Path.Join(_tempPath, "assembly-base");
+        _manager.RidOverride = "linux-x64/nested";
+        Environment.SetEnvironmentVariable("PATH", string.Empty);
+
+        var unsafeRuntimePath = Path.Join(baseDir, "runtimes", "linux-x64", "nested", "native", _binaryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(unsafeRuntimePath)!);
+        File.WriteAllText(unsafeRuntimePath, "dummy");
 
         Assert.Throws<FileNotFoundException>(() => _manager.GetTailwindPath());
     }
@@ -348,9 +324,9 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_ReturnsWindowsCmdShim_IfFoundInPath()
     {
-        var pathDir = Path.Combine(_tempPath, "bin");
+        var pathDir = Path.Join(_tempPath, "bin");
         Directory.CreateDirectory(pathDir);
-        var expectedPath = Path.Combine(pathDir, "tailwindcss.cmd");
+        var expectedPath = Path.Join(pathDir, "tailwindcss.cmd");
         File.WriteAllText(expectedPath, "@echo off");
         Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, [pathDir, _originalPath ?? string.Empty]));
         TailwindCliManager.IsOSPlatformOverride = platform => platform == OSPlatform.Windows;
@@ -370,9 +346,9 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_ReturnsWindowsPowerShellShim_IfFoundInPath()
     {
-        var pathDir = Path.Combine(_tempPath, "bin");
+        var pathDir = Path.Join(_tempPath, "bin");
         Directory.CreateDirectory(pathDir);
-        var expectedPath = Path.Combine(pathDir, "tailwindcss.ps1");
+        var expectedPath = Path.Join(pathDir, "tailwindcss.ps1");
         File.WriteAllText(expectedPath, "Write-Output 'tailwind'");
         Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, [pathDir, _originalPath ?? string.Empty]));
         TailwindCliManager.IsOSPlatformOverride = platform => platform == OSPlatform.Windows;
@@ -469,7 +445,7 @@ public class TailwindCliManagerTests : IDisposable
     public void GetTailwindPath_ThrowsFileNotFoundException_WhenNonWindowsPathProbeHasNoMatches()
     {
         TailwindCliManager.IsOSPlatformOverride = _ => false;
-        Environment.SetEnvironmentVariable("PATH", Path.Combine(_tempPath, "missing-bin"));
+        Environment.SetEnvironmentVariable("PATH", Path.Join(_tempPath, "missing-bin"));
 
         Assert.Throws<FileNotFoundException>(() => _manager.GetTailwindPath());
     }
@@ -478,7 +454,7 @@ public class TailwindCliManagerTests : IDisposable
     public void GetTailwindPath_ThrowsFileNotFoundException_WhenWindowsPathProbeHasNoMatchesAndPathExtIsUnavailable()
     {
         TailwindCliManager.IsOSPlatformOverride = platform => platform == OSPlatform.Windows;
-        Environment.SetEnvironmentVariable("PATH", Path.Combine(_tempPath, "missing-bin"));
+        Environment.SetEnvironmentVariable("PATH", Path.Join(_tempPath, "missing-bin"));
         Environment.SetEnvironmentVariable("PATHEXT", null);
 
         var manager = new TailwindCliManager(_logger)
@@ -494,9 +470,9 @@ public class TailwindCliManagerTests : IDisposable
     [Fact]
     public void GetTailwindPath_ReturnsWindowsPathValue_FromNormalizedPathExtExtension()
     {
-        var pathDir = Path.Combine(_tempPath, "bin-custom-ext");
+        var pathDir = Path.Join(_tempPath, "bin-custom-ext");
         Directory.CreateDirectory(pathDir);
-        var expectedPath = Path.Combine(pathDir, "tailwindcss.COM");
+        var expectedPath = Path.Join(pathDir, "tailwindcss.COM");
         File.WriteAllText(expectedPath, "dummy");
         Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, [pathDir, _originalPath ?? string.Empty]));
         Environment.SetEnvironmentVariable("PATHEXT", "EXE;COM");
@@ -552,6 +528,60 @@ public class TailwindCliManagerTests : IDisposable
         var result = TailwindCliManager.GetCurrentRid();
 
         Assert.Equal(expectedRid, result);
+    }
+
+    private string GetSampleAppBaseDirectory()
+    {
+        var relativeBaseDir = Path.Join("examples", "sample-app", "bin", "Debug", "net10.0");
+        return Path.Join(_tempPath, relativeBaseDir);
+    }
+
+    private string GetDevelopmentRuntimeProjectDirectory(string rid, string? version = null)
+    {
+        var runtimeFolder = $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{rid}";
+        if (!IsRelativePathComponent(runtimeFolder) || (version is not null && !IsRelativePathComponent(version)))
+        {
+            throw new ArgumentException("Development runtime test paths must use relative path components.");
+        }
+
+        var relativePath = version is null
+            ? Path.Join(
+                "Web",
+                "ForgeTrust.AppSurface.Web.Tailwind",
+                "runtimes",
+                "obj",
+                runtimeFolder,
+                "Debug",
+                "net10.0")
+            : Path.Join(
+                "Web",
+                "ForgeTrust.AppSurface.Web.Tailwind",
+                "runtimes",
+                "obj",
+                runtimeFolder,
+                "Debug",
+                "net10.0",
+                version);
+
+        return Path.Join(_tempPath, relativePath);
+    }
+
+    private static string EnsureFileName(string value)
+    {
+        var fileName = Path.GetFileName(value);
+        if (string.IsNullOrWhiteSpace(fileName) || fileName != value)
+        {
+            throw new ArgumentException("Expected a file name without directory components.", nameof(value));
+        }
+
+        return fileName;
+    }
+
+    private static bool IsRelativePathComponent(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            && !Path.IsPathRooted(value)
+            && value.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) < 0;
     }
 
     public static IEnumerable<object[]> RidMatrixCases()

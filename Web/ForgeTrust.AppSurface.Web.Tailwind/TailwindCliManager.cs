@@ -78,17 +78,21 @@ public class TailwindCliManager
         if (!string.IsNullOrEmpty(baseDir))
         {
             var rid = RidOverride ?? GetCurrentRid();
+            var canProbeRidPaths = IsRelativePathComponent(rid);
 
             // 1. Check standard NuGet runtime asset path (for published apps or project-local runtimes folder)
-            var runtimePath = Path.Combine(baseDir, "runtimes", rid, "native", _binaryName);
-            if (File.Exists(runtimePath))
+            if (canProbeRidPaths)
             {
-                _logger.LogDebug("Found Tailwind CLI at runtime path: {Path}", runtimePath);
-                return runtimePath;
+                var runtimePath = Path.Join(baseDir, "runtimes", rid, "native", _binaryName);
+                if (File.Exists(runtimePath))
+                {
+                    _logger.LogDebug("Found Tailwind CLI at runtime path: {Path}", runtimePath);
+                    return runtimePath;
+                }
             }
 
             // 2. Check AppContext.BaseDirectory directly (for single-file or non-standard deployments)
-            var localPath = Path.Combine(baseDir, _binaryName);
+            var localPath = Path.Join(baseDir, _binaryName);
             if (File.Exists(localPath))
             {
                 _logger.LogDebug("Found Tailwind CLI at base path: {Path}", localPath);
@@ -109,18 +113,21 @@ public class TailwindCliManager
 
             if (!string.IsNullOrEmpty(assemblyDir))
             {
-                var fallbackRuntimePath = Path.Combine(assemblyDir, "runtimes", rid, "native", _binaryName);
-                if (File.Exists(fallbackRuntimePath))
+                if (canProbeRidPaths)
                 {
-                    _logger.LogDebug("Found Tailwind CLI at fallback runtime path: {Path}", fallbackRuntimePath);
-                    return fallbackRuntimePath;
-                }
+                    var fallbackRuntimePath = Path.Join(assemblyDir, "runtimes", rid, "native", _binaryName);
+                    if (File.Exists(fallbackRuntimePath))
+                    {
+                        _logger.LogDebug("Found Tailwind CLI at fallback runtime path: {Path}", fallbackRuntimePath);
+                        return fallbackRuntimePath;
+                    }
 
-                var devRuntimeProjectPath = GetDevRuntimeProjectPath(baseDir, rid) ?? GetDevRuntimeProjectPath(assemblyDir, rid);
-                if (!string.IsNullOrEmpty(devRuntimeProjectPath) && File.Exists(devRuntimeProjectPath))
-                {
-                    _logger.LogDebug("Found Tailwind CLI at development runtime project path: {Path}", devRuntimeProjectPath);
-                    return devRuntimeProjectPath;
+                    var devRuntimeProjectPath = GetDevRuntimeProjectPath(baseDir, rid) ?? GetDevRuntimeProjectPath(assemblyDir, rid);
+                    if (!string.IsNullOrEmpty(devRuntimeProjectPath) && File.Exists(devRuntimeProjectPath))
+                    {
+                        _logger.LogDebug("Found Tailwind CLI at development runtime project path: {Path}", devRuntimeProjectPath);
+                        return devRuntimeProjectPath;
+                    }
                 }
             }
         }
@@ -199,7 +206,6 @@ public class TailwindCliManager
         }
 
         var binaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid);
-
         if (string.IsNullOrEmpty(binaryName) || !IsFileName(binaryName))
         {
             return null;
@@ -207,7 +213,7 @@ public class TailwindCliManager
 
         foreach (var candidateRoot in EnumerateSelfAndAncestors(binDir.Parent))
         {
-            var runtimeProjectDir = CombineUnderRoot(
+            var runtimeProjectDir = Path.Join(
                 candidateRoot,
                 "Web",
                 "ForgeTrust.AppSurface.Web.Tailwind",
@@ -217,12 +223,7 @@ public class TailwindCliManager
                 configurationDir.Name,
                 targetFramework);
 
-            if (runtimeProjectDir == null)
-            {
-                continue;
-            }
-
-            var candidatePath = Path.Combine(runtimeProjectDir, binaryName);
+            var candidatePath = Path.Join(runtimeProjectDir, binaryName);
             if (File.Exists(candidatePath))
             {
                 return candidatePath;
@@ -235,7 +236,7 @@ public class TailwindCliManager
 
             foreach (var versionedDirectory in Directory.EnumerateDirectories(runtimeProjectDir, "tailwind-*"))
             {
-                candidatePath = Path.Combine(versionedDirectory, binaryName);
+                candidatePath = Path.Join(versionedDirectory, binaryName);
                 if (File.Exists(candidatePath))
                 {
                     return candidatePath;
@@ -246,25 +247,16 @@ public class TailwindCliManager
         return null;
     }
 
-    private static string? CombineUnderRoot(string root, params string[] segments)
+    private static bool IsFileName(string value)
     {
-        if (segments.Any(Path.IsPathRooted))
-        {
-            return null;
-        }
-
-        var allSegments = new string[segments.Length + 1];
-        allSegments[0] = root;
-        Array.Copy(segments, 0, allSegments, 1, segments.Length);
-        return Path.Combine(allSegments);
+        return IsRelativePathComponent(value) && Path.GetFileName(value) == value;
     }
 
-    private static bool IsFileName(string value)
+    private static bool IsRelativePathComponent(string value)
     {
         return !string.IsNullOrWhiteSpace(value)
             && !Path.IsPathRooted(value)
-            && value.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) < 0
-            && Path.GetFileName(value) == value;
+            && value.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) < 0;
     }
 
     private static bool IsCurrentOsPlatform(OSPlatform platform)
@@ -294,7 +286,7 @@ public class TailwindCliManager
         {
             foreach (var candidateName in EnumeratePathSearchNames(fileName))
             {
-                var fullPath = Path.Combine(p, candidateName);
+                var fullPath = Path.Join(p, candidateName);
                 if (File.Exists(fullPath))
                 {
                     path = fullPath;

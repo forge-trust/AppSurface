@@ -180,8 +180,19 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
             return null;
         }
 
+        if (!IsRelativePathComponent(rid))
+        {
+            Log.LogError(
+                TailwindDiagnostics.Format(
+                    TailwindDiagnostics.UnsupportedRid,
+                    $"Tailwind RID '{rid}' is not supported by this package.",
+                    "The resolved RID is not a single relative path component.",
+                    "Use a supported host or set TailwindCliPath to a compatible local Tailwind CLI binary."));
+            return null;
+        }
+
         var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid);
-        if (string.IsNullOrEmpty(runtimeBinaryName))
+        if (string.IsNullOrEmpty(runtimeBinaryName) || !IsFileName(runtimeBinaryName))
         {
             Log.LogError(
                 TailwindDiagnostics.Format(
@@ -219,11 +230,6 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
 
     private IEnumerable<string> EnumerateRuntimeCandidates(string rid, string runtimeBinaryName)
     {
-        if (!IsRelativePathComponent(rid) || !IsFileName(runtimeBinaryName))
-        {
-            yield break;
-        }
-
         var targetsDirectory = EnsureTrailingSeparator(TargetsDirectory);
         yield return Path.GetFullPath(Path.Join(targetsDirectory, "..", "runtimes", rid, "native", runtimeBinaryName));
         foreach (var packageRuntimePath in EnumerateSiblingRuntimePackageCandidates(targetsDirectory, rid, runtimeBinaryName))
@@ -272,17 +278,12 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
         var packagesRoot = mainPackageVersionDirectory?.Parent?.Parent;
         var packageVersion = mainPackageVersionDirectory?.Name;
 
-        if (packagesRoot == null || string.IsNullOrWhiteSpace(packageVersion))
+        if (packagesRoot == null || packageVersion == null || !IsRelativePathComponent(packageVersion))
         {
             yield break;
         }
 
-        if (!IsRelativePathComponent(rid) || !IsFileName(runtimeBinaryName))
-        {
-            yield break;
-        }
-
-        yield return Path.Combine(
+        yield return Path.Join(
             packagesRoot.FullName,
             $"forgetrust.appsurface.web.tailwind.runtime.{rid}",
             packageVersion,

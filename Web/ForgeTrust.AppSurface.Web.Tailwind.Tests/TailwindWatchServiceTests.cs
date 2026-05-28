@@ -11,7 +11,7 @@ namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
 public class TailwindWatchServiceTests : IDisposable
 {
-    private static readonly string TestContentRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "tailwind-watch-tests"));
+    private static readonly string TestContentRoot = Path.GetFullPath(Path.Join(Path.GetTempPath(), "tailwind-watch-tests"));
     private readonly TailwindCliManager _cliManager;
     private readonly IOptions<TailwindOptions> _options;
     private readonly ILogger<TailwindWatchService> _logger;
@@ -94,10 +94,10 @@ public class TailwindWatchServiceTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_UsesConfiguredCliPath_WhenProvided()
     {
-        var cliPath = Path.Combine(TestContentRoot, "tools", RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "tailwindcss.exe" : "tailwindcss");
+        var cliPath = Path.Join(TestContentRoot, "tools", RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "tailwindcss.exe" : "tailwindcss");
         Directory.CreateDirectory(Path.GetDirectoryName(cliPath)!);
         await File.WriteAllTextAsync(cliPath, "stub");
-        _tailwindOptions.CliPath = Path.Combine("tools", Path.GetFileName(cliPath));
+        _tailwindOptions.CliPath = $"tools/{Path.GetFileName(cliPath)}";
 
         var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
         service.ResultToReturn = new CommandResult(0, "", "");
@@ -112,7 +112,7 @@ public class TailwindWatchServiceTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_LogsWarning_WhenConfiguredCliPathIsMissing()
     {
-        _tailwindOptions.CliPath = Path.Combine("tools", "missing-tailwind");
+        _tailwindOptions.CliPath = "tools/missing-tailwind";
         var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
 
         await service.ExecuteAsyncPublic(CancellationToken.None);
@@ -174,7 +174,7 @@ public class TailwindWatchServiceTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_LogsError_WhenInputAndOutputResolveToSameFile()
     {
-        _tailwindOptions.InputPath = Path.Combine("styles", "..", "app.css");
+        _tailwindOptions.InputPath = Path.Join("styles", "..", "app.css");
         _tailwindOptions.OutputPath = "app.css";
         var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
 
