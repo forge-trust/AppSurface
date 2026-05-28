@@ -237,6 +237,26 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigAuditEntryOptions_ReportsAndNormalizesCorrelationWithoutCollectionTraversal()
+    {
+        var options = new ConfigAuditEntryOptions
+        {
+            TraverseCollectionElements = false,
+            DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
+        };
+
+        var diagnostics = options.Validate("Tenants");
+        var normalized = options.Normalize();
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("config-audit-options-invalid", diagnostic.Code);
+        Assert.Contains(nameof(ConfigAuditEntryOptions.DictionaryKeyCorrelationMode), diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(ConfigAuditEntryOptions.TraverseCollectionElements), diagnostic.Message, StringComparison.Ordinal);
+        Assert.False(normalized.TraverseCollectionElements);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, normalized.DictionaryKeyCorrelationMode);
+    }
+
+    [Fact]
     public void ConfigAuditEntryOptions_RejectsNullAssignedOverrides()
     {
         var options = new ConfigAuditEntryOptions();

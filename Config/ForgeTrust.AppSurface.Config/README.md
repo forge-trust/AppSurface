@@ -423,9 +423,10 @@ services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
 });
 ```
 
-The secret key is interpreted as UTF-8 and must contain at least 32 bytes. AppSurface derives ids with HMAC-SHA256 over
-the algorithm version, application scope, report environment, root audit key, and raw dictionary key, then truncates the
-result to 96 bits. Rendered ids look like `v1:{keyId}:{24-hex-chars}`. The key id is trimmed and can contain only ASCII
+The secret key is interpreted as UTF-8 and must contain at least 32 bytes when UTF-8 encoded. AppSurface derives ids with
+HMAC-SHA256 over the algorithm version, application scope, report environment, root audit key, and raw dictionary key,
+then truncates the result to 96 bits. Rendered ids look like `v1:{keyId}:{24-hex-chars}`. The key id is trimmed and can
+contain only ASCII
 letters, digits, `.`, `_`, and `-` so rendered reports remain line-safe. Changing the secret key, key id, application
 scope, environment, or root audit key intentionally changes the id.
 

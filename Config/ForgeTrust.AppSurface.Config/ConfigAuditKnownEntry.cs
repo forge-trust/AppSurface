@@ -276,6 +276,14 @@ public sealed class ConfigAuditEntryOptions
                 nameof(DictionaryKeyCorrelationMode),
                 "must be a defined ConfigAuditDictionaryKeyCorrelationMode value"));
         }
+        else if (DictionaryKeyCorrelationMode != ConfigAuditDictionaryKeyCorrelationMode.None
+                 && !TraverseCollectionElements)
+        {
+            diagnostics.Add(CreateInvalidOptionDiagnostic(
+                key,
+                nameof(DictionaryKeyCorrelationMode),
+                "ScopedHmac requires TraverseCollectionElements to be true or set mode to None"));
+        }
 
         return diagnostics;
     }
@@ -297,7 +305,7 @@ public sealed class ConfigAuditEntryOptions
                 DefaultMaxCollectionElements,
                 DefaultMaxReportNodes,
                 DisplayDictionaryKeys,
-                Enum.IsDefined(DictionaryKeyCorrelationMode)
+                Enum.IsDefined(DictionaryKeyCorrelationMode) && TraverseCollectionElements
                     ? DictionaryKeyCorrelationMode
                     : ConfigAuditDictionaryKeyCorrelationMode.None,
                 AssignedOptions);
