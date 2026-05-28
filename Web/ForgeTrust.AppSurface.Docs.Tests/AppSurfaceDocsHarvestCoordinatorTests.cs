@@ -106,8 +106,8 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
             .AddSingleton<IRazorWireStreamHub>(streamHub)
             .BuildServiceProvider();
         var harvester = new BlockingHarvester();
-        var delay = TimeSpan.FromSeconds(2);
-        var tolerance = TimeSpan.FromMilliseconds(200);
+        var delay = TimeSpan.FromMilliseconds(250);
+        var tolerance = TimeSpan.FromMilliseconds(75);
         var coordinator = CreateCoordinator(
             harvester,
             cache,
@@ -121,7 +121,7 @@ public sealed class AppSurfaceDocsHarvestCoordinatorTests
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         streamHub.ReleaseHarvesterStartedPublish();
-        await harvester.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await harvester.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
         sw.Stop();
 
         Assert.True(

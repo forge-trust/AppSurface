@@ -332,7 +332,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
         foreach (var item in items)
         {
-            AddCompletenessDiagnostics(item, diagnostics);
+            AddCompletenessDiagnostics(item, options.RequireCompleteEventDoclets, diagnostics);
         }
 
         return items;
@@ -577,6 +577,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             ParseBooleanTag(doclet.TryGetTagValue("bubbles")),
             ParseBooleanTag(doclet.TryGetTagValue("cancelable")),
             IsDetailNone(doclet),
+            HasPublicSignal(doclet),
             doclet.TryGetTagValue("example"),
             doclet.TryGetTagValue("deprecated"),
             relativePath,
@@ -797,9 +798,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static void AddCompletenessDiagnostics(
         JavaScriptApiItem item,
+        bool requireCompleteEventDoclets,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
         var missing = new List<string>();
+        var hasInvalidDetailProperties = false;
+        var hasDetailNoneConflict = false;
         switch (item.Kind)
         {
             case JavaScriptApiKind.Event:
@@ -808,6 +812,16 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 if (!item.DetailNone && item.Properties.Count == 0)
                 {
                     missing.Add("@property detail.* or @detail none");
+                }
+
+                if (item.Properties.Any(property => !IsValidEventDetailPropertyName(property.Name)))
+                {
+                    hasInvalidDetailProperties = true;
+                }
+
+                if (item.DetailNone && item.Properties.Count > 0)
+                {
+                    hasDetailNoneConflict = true;
                 }
 
                 break;
@@ -838,17 +852,24 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 break;
         }
 
-        if (missing.Count == 0)
+        if (missing.Count == 0 && !hasInvalidDetailProperties && !hasDetailNoneConflict)
         {
             return;
         }
 
+        var isStrictEventDiagnostic = item.Kind == JavaScriptApiKind.Event
+                                      && item.IsPublic
+                                      && requireCompleteEventDoclets;
         diagnostics.Add(CreateDiagnostic(
-            DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet,
-            DocHarvestDiagnosticSeverity.Warning,
-            $"{GetKindLabel(item.Kind)} '{item.Name}' is missing public contract fields.",
+            isStrictEventDiagnostic
+                ? DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet
+                : DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet,
+            isStrictEventDiagnostic
+                ? DocHarvestDiagnosticSeverity.Error
+                : DocHarvestDiagnosticSeverity.Warning,
+            BuildCompletenessProblem(item, missing.Count > 0, hasInvalidDetailProperties, hasDetailNoneConflict),
             "The item will render, but readers may not know enough about the public browser contract to consume it confidently.",
-            "Add " + string.Join(", ", missing) + " to the public JavaScript doclet."));
+            BuildCompletenessFix(missing, hasInvalidDetailProperties, hasDetailNoneConflict)));
     }
 
     private static void AddMissing(ICollection<string> missing, string? value, string tagName)
@@ -857,6 +878,120 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         {
             missing.Add(tagName);
         }
+    }
+
+    private static string BuildCompletenessProblem(
+        JavaScriptApiItem item,
+        bool hasMissingFields,
+        bool hasInvalidDetailProperties,
+        bool hasDetailNoneConflict)
+    {
+        var kindLabel = GetKindLabel(item.Kind);
+        if (hasMissingFields && (hasInvalidDetailProperties || hasDetailNoneConflict))
+        {
+            return $"{kindLabel} '{item.Name}' is missing or has invalid public contract fields.";
+        }
+
+        if (hasInvalidDetailProperties || hasDetailNoneConflict)
+        {
+            return $"{kindLabel} '{item.Name}' has invalid or contradictory public contract fields.";
+        }
+
+        return $"{kindLabel} '{item.Name}' is missing public contract fields.";
+    }
+
+    private static string BuildCompletenessFix(
+        IReadOnlyCollection<string> missing,
+        bool hasInvalidDetailProperties,
+        bool hasDetailNoneConflict)
+    {
+        var clauses = new List<string>();
+        if (missing.Count > 0)
+        {
+            clauses.Add("Add " + string.Join(", ", missing) + " to the public JavaScript doclet.");
+        }
+
+        if (hasInvalidDetailProperties)
+        {
+            clauses.Add("Fix @property names to use valid detail.* paths, or remove invalid event detail properties.");
+        }
+
+        if (hasDetailNoneConflict)
+        {
+            clauses.Add("Remove @detail none or remove the event detail @property tags.");
+        }
+
+        return string.Join(" ", clauses);
+    }
+
+    /// <summary>
+    /// Validates whether a parsed <c>@property</c> name is a supported event detail field contract.
+    /// </summary>
+    /// <param name="value">Parsed member name from the doclet property tag.</param>
+    /// <returns>
+    /// <see langword="true"/> when the member name represents a valid <c>detail.*</c> path; otherwise
+    /// <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// The validator trims whitespace, strips optional JSDoc property wrappers through
+    /// <see cref="StripOptionalPropertyWrapper"/>, requires an ordinal <c>detail.</c> prefix, and validates each remaining
+    /// segment with <see cref="IsValidEventDetailPropertySegment"/>. Array contracts use a trailing <c>[]</c> on a segment,
+    /// such as <c>detail.items[]</c> or <c>detail.items[].id</c>. Common pitfalls are blank names, omitted
+    /// <c>detail.</c> prefixes, empty segments, unsupported characters, and assuming case-insensitive matching.
+    /// </remarks>
+    internal static bool IsValidEventDetailPropertyName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var name = StripOptionalPropertyWrapper(value.Trim());
+        if (!name.StartsWith("detail.", StringComparison.Ordinal) || name.Length == "detail.".Length)
+        {
+            return false;
+        }
+
+        var segments = name["detail.".Length..].Split('.');
+        return segments.All(IsValidEventDetailPropertySegment);
+    }
+
+    private static string StripOptionalPropertyWrapper(string value)
+    {
+        if (value.Length < 2 || value[0] != '[' || value[^1] != ']')
+        {
+            return value;
+        }
+
+        var inner = value[1..^1].Trim();
+        var defaultSeparator = inner.IndexOf('=', StringComparison.Ordinal);
+        return defaultSeparator < 0
+            ? inner
+            : inner[..defaultSeparator].Trim();
+    }
+
+    private static bool IsValidEventDetailPropertySegment(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var segment = value.EndsWith("[]", StringComparison.Ordinal)
+            ? value[..^2]
+            : value;
+        if (segment.Length == 0)
+        {
+            return false;
+        }
+
+        return segment.All(static character =>
+            (character >= 'A' && character <= 'Z')
+            || (character >= 'a' && character <= 'z')
+            || (character >= '0' && character <= '9')
+            || character == '_'
+            || character == '$'
+            || character == '-');
     }
 
     private static IReadOnlyList<DocNode> BuildDocNodes(IReadOnlyList<JavaScriptApiItem> items)
@@ -1636,7 +1771,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static bool IsDetailNone(JavaScriptDoclet doclet)
     {
-        return doclet.TryGetTagValue("detail")?.Equals("none", StringComparison.OrdinalIgnoreCase) == true;
+        return doclet.TryGetTagValue("detail")?.Trim().Equals("none", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static string? TryGetMemberPath(Node node)
@@ -1859,6 +1994,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string? Bubbles,
         string? Cancelable,
         bool DetailNone,
+        bool IsPublic,
         string? Example,
         string? Deprecated,
         string SourcePath,

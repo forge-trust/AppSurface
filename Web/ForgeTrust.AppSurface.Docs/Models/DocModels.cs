@@ -1017,6 +1017,11 @@ public static class DocHarvestDiagnosticCodes
     public const string JavaScriptIncompletePublicDoclet = "appsurfacedocs.javascript.incomplete_public_doclet";
 
     /// <summary>
+    /// A public JavaScript event doclet is missing required event contract fields while strict event docs are enabled.
+    /// </summary>
+    public const string JavaScriptIncompletePublicEventDoclet = "appsurfacedocs.javascript.incomplete_public_event_doclet";
+
+    /// <summary>
     /// Multiple JavaScript API items normalized to the same anchor and required deterministic suffixes.
     /// </summary>
     public const string JavaScriptDuplicateAnchor = "appsurfacedocs.javascript.duplicate_anchor";

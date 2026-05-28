@@ -69,6 +69,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.javascript.unsupported_public_shape", DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
         Assert.Equal("appsurfacedocs.javascript.malformed_public_doclet", DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
         Assert.Equal("appsurfacedocs.javascript.incomplete_public_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
+        Assert.Equal("appsurfacedocs.javascript.incomplete_public_event_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
         Assert.Equal("appsurfacedocs.javascript.duplicate_anchor", DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
         Assert.Equal("appsurfacedocs.routes.reserved_collision", DocHarvestDiagnosticCodes.DocReservedRouteCollision);
         Assert.Equal("appsurfacedocs.routes.doc_collision", DocHarvestDiagnosticCodes.DocRouteCollision);
@@ -93,6 +94,35 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.True(options.Harvest.Paths.VcsIgnore.Enabled);
         Assert.Empty(options.Harvest.Paths.VcsIgnore.AllowGlobs);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsOptions_ShouldDisableStrictJavaScriptEventDocletsByDefault()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.False(options.Harvest.JavaScript.RequireCompleteEventDoclets);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindStrictJavaScriptEventDoclets()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets"] = "true"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.True(options.Harvest.JavaScript.RequireCompleteEventDoclets);
     }
 
     [Fact]
@@ -736,6 +766,7 @@ public sealed class AppSurfaceDocsOptionsTests
     [Theory]
     [InlineData("search")]
     [InlineData("search-index.json")]
+    [InlineData("_search-index")]
     [InlineData("_health")]
     [InlineData("_health.json")]
     [InlineData("_routes")]
@@ -1252,7 +1283,8 @@ public sealed class AppSurfaceDocsOptionsTests
         var diagnostics = new AppSurfaceDocsDiagnosticsOptions
         {
             ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always,
-            ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never
+            ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never,
+            SearchIndexRefreshPolicy = " DocsRefresh "
         };
         var bundle = new AppSurfaceDocsBundleOptions { Path = " /tmp/docs.bundle.json " };
         var sidebar = new AppSurfaceDocsSidebarOptions
@@ -1311,6 +1343,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
+        Assert.Equal("DocsRefresh", options.Diagnostics.SearchIndexRefreshPolicy);
         Assert.Equal("/tmp/docs.bundle.json", options.Bundle.Path);
         Assert.Equal(["Contoso.Product."], options.Sidebar.NamespacePrefixes);
         Assert.Equal("main", options.Contributor.DefaultBranch);
@@ -1379,12 +1412,34 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ShowChrome);
+        Assert.Null(options.Diagnostics.SearchIndexRefreshPolicy);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
         Assert.False(options.Localization.Enabled);
         Assert.Equal("en", options.Localization.DefaultLocale);
         Assert.NotNull(options.Localization.Locales);
         Assert.Empty(options.Localization.Locales);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldNormalizeBlankSearchIndexRefreshPolicyToNull()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Diagnostics:SearchIndexRefreshPolicy"] = "   "
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Null(options.Diagnostics.SearchIndexRefreshPolicy);
     }
 
     [Fact]

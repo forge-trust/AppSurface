@@ -93,6 +93,253 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldEmitStrictEventDiagnostic_WhenRequiredPublicEventFieldsAreMissing()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:missing
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("@target", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("@firesWhen", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("@property detail.* or @detail none", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("detail.message")]
+    [InlineData("[detail.message]")]
+    [InlineData("[detail.message=\"fallback\"]")]
+    [InlineData("detail.items[]")]
+    [InlineData("detail.items[].id")]
+    [InlineData("detail.$payload-id")]
+    [InlineData("detail.message_2")]
+    public async Task HarvestAsync_ShouldAcceptStrictEventDetailPropertyNames(string detailPropertyName)
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            $$"""
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:valid-detail
+             * @target document
+             * @firesWhen a valid detail shape is documented.
+             * @property {string} {{detailPropertyName}} - Detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("detail.[]")]
+    [InlineData("detail.message!")]
+    [InlineData("detail.0:")]
+    public void IsValidEventDetailPropertyName_ShouldRejectMalformedNames(string detailPropertyName)
+    {
+        Assert.False(JavaScriptDocHarvester.IsValidEventDetailPropertyName(detailPropertyName));
+    }
+
+    [Theory]
+    [InlineData("detail")]
+    [InlineData("[detail]")]
+    [InlineData("detail.")]
+    [InlineData("detail..message")]
+    [InlineData("detail. message")]
+    [InlineData("detail.[x]")]
+    [InlineData("Detail.message")]
+    [InlineData("form")]
+    [InlineData("message")]
+    public async Task HarvestAsync_ShouldRejectStrictEventDetailPropertyNames(string detailPropertyName)
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            $$"""
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:invalid-detail
+             * @target document
+             * @firesWhen an invalid detail shape is documented.
+             * @property {string} {{detailPropertyName}} - Detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Contains("has invalid or contradictory public contract fields", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Fix @property names to use valid detail.* paths", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add @property detail.*", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRejectStrictEventDetailNoneConflict()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:conflict
+             * @target document
+             * @firesWhen a contradictory detail shape is documented.
+             * @detail none
+             * @property {string} detail.message - Detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Contains("has invalid or contradictory public contract fields", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Remove @detail none or remove the event detail @property tags", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add remove", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldAvoidContradictoryFix_WhenDetailNoneHasInvalidProperty()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:conflict-invalid
+             * @target document
+             * @firesWhen a contradictory and invalid detail shape is documented.
+             * @detail none
+             * @property {string} message - Invalid detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Contains("Fix @property names to use valid detail.* paths", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("Remove @detail none or remove the event detail @property tags", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add @property detail.*", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldDescribeMissingAndInvalidStrictEventFields()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:missing-invalid
+             * @property {string} message - Invalid detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Contains("is missing or has invalid public contract fields", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Add @target, @firesWhen", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("Fix @property names to use valid detail.* paths", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add @property detail.*", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldNotEmitStrictEventDiagnostic_ForNonPublicEventIncludedByGlob()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Included event without an explicit public contract signal.
+             * @event razorwire:internal-include
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
+        Assert.DoesNotContain(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.DoesNotContain(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepNonEventCompletenessDiagnosticsAsWarnings_WhenStrictEventDocletsAreEnabled()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public attribute.
+             * @public
+             * @attribute data-rw-mode
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldRejectFixturePathsOutsideTestRoot()
     {
         var exception = await Assert.ThrowsAsync<ArgumentException>(
@@ -1277,6 +1524,48 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
             && item.Status == DocHarvesterHealthStatus.Failed);
         Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldFailStrictJavaScriptEventDocletsWithoutStrictHealth()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:missing
+             */
+            """);
+        var options = new AppSurfaceDocsOptions();
+        options.Source.RepositoryRoot = _testRoot;
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+        var response = AppSurfaceDocsHarvestHealthResponse.FromSnapshot(health);
+
+        Assert.Equal(DocHarvestHealthStatus.Degraded, health.Status);
+        Assert.Equal(2, health.TotalHarvesters);
+        Assert.Equal(1, health.SuccessfulHarvesters);
+        Assert.Equal(1, health.FailedHarvesters);
+        Assert.False(response.Verification.Ok);
+        Assert.Equal(503, response.Verification.HttpStatusCode);
+        Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+            && item.Status == DocHarvesterHealthStatus.Failed);
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
     }
 
     [Fact]
