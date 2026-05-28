@@ -389,6 +389,14 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public void RunTailwindBuildTask_CancelBeforeExecute_DoesNotThrow()
+    {
+        var task = new RunTailwindBuildTask();
+
+        task.Cancel();
+    }
+
+    [Fact]
     public void RunTailwindBuildTask_FailsWithDiagnostic_WhenRidCannotBeDetermined()
     {
         var task = CreateBuildTask("sample-unknown-rid", task =>
@@ -445,6 +453,36 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         {
             task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
             task.TailwindVersion = "4.1.18";
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenTargetsDirectoryIsEmpty()
+    {
+        var task = CreateBuildTask("sample-empty-targets-directory", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = "4.1.18";
+            task.TargetsDirectory = string.Empty;
+        });
+
+        Assert.Throws<ArgumentException>(() => task.Execute());
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenSiblingPackageLayoutCannotBeDerived()
+    {
+        var task = CreateBuildTask("sample-root-targets-directory", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = "4.1.18";
+            task.TargetsDirectory = Path.GetPathRoot(task.ProjectDirectory)!;
         });
 
         var result = task.Execute();

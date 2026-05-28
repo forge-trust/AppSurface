@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Web.Tailwind;
+using ForgeTrust.AppSurface.Web.Tailwind.Internal;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
@@ -439,6 +440,28 @@ public class TailwindCliManagerTests : IDisposable
             arguments);
 
         Assert.Equal(@"C:\tools\tailwindcss.exe", invocation.FileName);
+        Assert.Equal(arguments, invocation.Arguments);
+    }
+
+    [Fact]
+    public void BuildInvocation_ReturnsDirectInvocation_ForCurrentPlatformDefault()
+    {
+        var arguments = new[] { "-i", "app.css", "-o", "site.css" };
+
+        var invocation = TailwindCliManager.BuildInvocation("/usr/local/bin/tailwindcss", arguments);
+
+        Assert.Equal("/usr/local/bin/tailwindcss", invocation.FileName);
+        Assert.Equal(arguments, invocation.Arguments);
+    }
+
+    [Fact]
+    public void InvocationBuilder_UsesCurrentPlatform_WhenNoPlatformOverrideIsProvided()
+    {
+        var arguments = new[] { "-i", "app.css", "-o", "site.css" };
+
+        var invocation = TailwindInvocationBuilder.Build("/usr/local/bin/tailwindcss", arguments);
+
+        Assert.Equal("/usr/local/bin/tailwindcss", invocation.FileName);
         Assert.Equal(arguments, invocation.Arguments);
     }
 
