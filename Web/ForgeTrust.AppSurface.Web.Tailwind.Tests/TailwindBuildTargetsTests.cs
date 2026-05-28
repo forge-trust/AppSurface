@@ -384,7 +384,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
 
         Assert.False(result);
         Assert.False(File.Exists(finishedPath));
-        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW007", StringComparison.Ordinal) == true);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW007", StringComparison.Ordinal) is true);
         Assert.Empty(buildEngine.Warnings);
     }
 
@@ -409,7 +409,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
 
         Assert.False(result);
-        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW001", StringComparison.Ordinal) == true);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW001", StringComparison.Ordinal) is true);
     }
 
     [Fact]
@@ -427,7 +427,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.False(result);
         Assert.Contains(
             buildEngine.Errors,
-            error => error.Message?.Contains("Tailwind RID 'plan9-x64' is not supported", StringComparison.Ordinal) == true);
+            error => error.Message?.Contains("Tailwind RID 'plan9-x64' is not supported", StringComparison.Ordinal) is true);
     }
 
     [Fact]
@@ -443,7 +443,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
 
         Assert.False(result);
-        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW002", StringComparison.Ordinal) == true);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW002", StringComparison.Ordinal) is true);
     }
 
     [Fact]
@@ -459,7 +459,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
 
         Assert.False(result);
-        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) == true);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) is true);
     }
 
     [Fact]
@@ -489,7 +489,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
 
         Assert.False(result);
-        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) == true);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) is true);
     }
 
     [Fact]
