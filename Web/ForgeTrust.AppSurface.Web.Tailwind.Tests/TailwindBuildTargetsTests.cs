@@ -9,6 +9,12 @@ namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
 public sealed class TailwindBuildTargetsTests : IDisposable
 {
+#if DEBUG
+    private const string CurrentConfiguration = "Debug";
+#else
+    private const string CurrentConfiguration = "Release";
+#endif
+
     private readonly string _tempRoot = Path.Combine(
         Path.GetTempPath(),
         $"{nameof(TailwindBuildTargetsTests)}_{Guid.NewGuid():N}");
@@ -59,7 +65,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             </Project>
             """);
 
-        var result = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var result = await RunDotNetBuildForCurrentConfigurationAsync(projectPath, projectDirectory);
         var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
 
         Assert.NotEqual(0, result.ExitCode);
@@ -107,7 +113,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             </Project>
             """);
 
-        var result = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var result = await RunDotNetBuildForCurrentConfigurationAsync(projectPath, projectDirectory);
         var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
 
         Assert.Equal(0, result.ExitCode);
@@ -116,8 +122,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         var generatedCssPath = Path.Combine(projectDirectory, "wwwroot", "css", "site.gen.css");
         Assert.True(File.Exists(generatedCssPath), "Expected the Tailwind stub to emit the generated stylesheet.");
 
-        var manifestPath = Path.Combine(projectDirectory, "obj", "Debug", "net10.0", "staticwebassets.build.json");
-        Assert.True(File.Exists(manifestPath), "Expected a static web assets build manifest.");
+        var manifestPath = GetStaticWebAssetsBuildManifestPath(projectDirectory, combinedOutput);
 
         await AssertBuildManifestContainsGeneratedCssAsync(manifestPath);
     }
@@ -160,17 +165,16 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             </Project>
             """);
 
-        var firstBuildResult = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var firstBuildResult = await RunDotNetBuildForCurrentConfigurationAsync(projectPath, projectDirectory);
         var firstBuildOutput = firstBuildResult.Stdout + Environment.NewLine + firstBuildResult.Stderr;
 
         Assert.Equal(0, firstBuildResult.ExitCode);
         Assert.True(File.Exists(markerPath), firstBuildOutput);
 
-        var manifestPath = Path.Combine(projectDirectory, "obj", "Debug", "net10.0", "staticwebassets.build.json");
-        Assert.True(File.Exists(manifestPath), "Expected a static web assets build manifest after the first build.");
+        var manifestPath = GetStaticWebAssetsBuildManifestPath(projectDirectory, firstBuildOutput);
         await AssertBuildManifestContainsGeneratedCssAsync(manifestPath);
 
-        var secondBuildResult = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var secondBuildResult = await RunDotNetBuildForCurrentConfigurationAsync(projectPath, projectDirectory);
         var secondBuildOutput = secondBuildResult.Stdout + Environment.NewLine + secondBuildResult.Stderr;
 
         Assert.Equal(0, secondBuildResult.ExitCode);
@@ -446,8 +450,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.True(File.Exists(markerPath), buildOutput);
         Assert.Contains("Tailwind CSS: Running build", buildOutput, StringComparison.Ordinal);
 
-        var manifestPath = Path.Combine(projectDirectory, "obj", "Debug", "net10.0", "staticwebassets.build.json");
-        Assert.True(File.Exists(manifestPath), "Expected a static web assets build manifest.");
+        var manifestPath = GetStaticWebAssetsBuildManifestPath(projectDirectory, buildOutput);
         await AssertBuildManifestContainsGeneratedCssAsync(manifestPath);
 
         var publishResult = await RunDotNetAsync(["publish", projectPath, "-nologo", "-v:minimal", "--no-restore"], projectDirectory);
@@ -700,6 +703,17 @@ exit 0
         return await RunDotNetAsync(["build", projectPath, "-nologo", "-v:minimal"], workingDirectory, environmentVariables);
     }
 
+    private static async Task<DotNetCommandResult> RunDotNetBuildForCurrentConfigurationAsync(
+        string projectPath,
+        string workingDirectory,
+        params (string Name, string Value)[] environmentVariables)
+    {
+        return await RunDotNetAsync(
+            ["build", projectPath, "-nologo", "-v:minimal", $"-p:Configuration={CurrentConfiguration}"],
+            workingDirectory,
+            environmentVariables);
+    }
+
     private static async Task<DotNetCommandResult> RunDotNetAsync(
         IReadOnlyList<string> args,
         string workingDirectory,
@@ -742,6 +756,18 @@ exit 0
                 && relativePath.GetString() is string value
                 && value.StartsWith("css/site.gen", StringComparison.Ordinal)
                 && value.EndsWith(".css", StringComparison.Ordinal));
+    }
+
+    private static string GetStaticWebAssetsBuildManifestPath(string projectDirectory, string buildOutput)
+    {
+        var objDirectory = Path.Combine(projectDirectory, "obj");
+        var manifestPaths = Directory.Exists(objDirectory)
+            ? Directory.EnumerateFiles(objDirectory, "staticwebassets.build.json", SearchOption.AllDirectories).ToArray()
+            : [];
+
+        var manifestPath = Assert.Single(manifestPaths);
+        Assert.True(File.Exists(manifestPath), buildOutput);
+        return manifestPath;
     }
 
     private sealed record DotNetCommandResult(int ExitCode, string Stdout, string Stderr);
