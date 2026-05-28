@@ -92,6 +92,7 @@ public sealed class ConfigAuditEntryOptions
     private int _maxReportNodes = DefaultMaxReportNodes;
     private bool _displayDictionaryKeys = true;
     private ConfigAuditSensitivity _sensitivity = ConfigAuditSensitivity.Unknown;
+    private ConfigAuditDictionaryKeyCorrelationMode _dictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.None;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigAuditEntryOptions"/> class with safe defaults.
@@ -121,6 +122,7 @@ public sealed class ConfigAuditEntryOptions
         _maxReportNodes = source.MaxReportNodes;
         _displayDictionaryKeys = source.DisplayDictionaryKeys;
         _sensitivity = source.Sensitivity;
+        _dictionaryKeyCorrelationMode = source.DictionaryKeyCorrelationMode;
         AssignedOptions = source.AssignedOptions;
     }
 
@@ -138,6 +140,7 @@ public sealed class ConfigAuditEntryOptions
     /// <param name="maxReportNodes">The maximum number of child nodes reported for the entry.</param>
     /// <param name="displayDictionaryKeys">Whether non-sensitive dictionary keys may be displayed.</param>
     /// <param name="sensitivity">The entry-level sensitivity classification.</param>
+    /// <param name="dictionaryKeyCorrelationMode">The dictionary key correlation mode.</param>
     /// <param name="assignedOptions">The properties intentionally assigned by the source.</param>
     internal ConfigAuditEntryOptions(
         bool traverseCollectionElements,
@@ -146,6 +149,7 @@ public sealed class ConfigAuditEntryOptions
         int maxReportNodes,
         bool displayDictionaryKeys,
         ConfigAuditSensitivity sensitivity,
+        ConfigAuditDictionaryKeyCorrelationMode dictionaryKeyCorrelationMode,
         ConfigAuditEntryOptionAssignments assignedOptions)
     {
         _traverseCollectionElements = traverseCollectionElements;
@@ -154,6 +158,7 @@ public sealed class ConfigAuditEntryOptions
         _maxReportNodes = maxReportNodes;
         _displayDictionaryKeys = displayDictionaryKeys;
         _sensitivity = sensitivity;
+        _dictionaryKeyCorrelationMode = dictionaryKeyCorrelationMode;
         AssignedOptions = assignedOptions;
     }
 
@@ -244,6 +249,25 @@ public sealed class ConfigAuditEntryOptions
     }
 
     /// <summary>
+    /// Gets the opt-in persistent dictionary key correlation mode for this entry.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see cref="ConfigAuditDictionaryKeyCorrelationMode.None"/>, which keeps redacted dictionary key
+    /// labels report-local. <see cref="ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac"/> adds a separate
+    /// <see cref="ConfigAuditElementIdentity.KeyCorrelationId"/> to dictionary element entries when global
+    /// correlation key material is configured.
+    /// </remarks>
+    public ConfigAuditDictionaryKeyCorrelationMode DictionaryKeyCorrelationMode
+    {
+        get => _dictionaryKeyCorrelationMode;
+        init
+        {
+            _dictionaryKeyCorrelationMode = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.DictionaryKeyCorrelationMode;
+        }
+    }
+
+    /// <summary>
     /// Gets the option properties that were intentionally assigned by the source registration.
     /// </summary>
     /// <remarks>
@@ -280,6 +304,22 @@ public sealed class ConfigAuditEntryOptions
                     $"value '{Convert.ToInt32(Sensitivity, System.Globalization.CultureInfo.InvariantCulture)}' is not valid; use {ConfigAuditSensitivity.Unknown}, {ConfigAuditSensitivity.NonSensitive}, or {ConfigAuditSensitivity.Sensitive}. Report generation falls back to {ConfigAuditSensitivity.Sensitive} so the entry does not fail open"));
         }
 
+        if (!Enum.IsDefined(DictionaryKeyCorrelationMode))
+        {
+            diagnostics.Add(CreateInvalidOptionDiagnostic(
+                key,
+                nameof(DictionaryKeyCorrelationMode),
+                "must be a defined ConfigAuditDictionaryKeyCorrelationMode value"));
+        }
+        else if (DictionaryKeyCorrelationMode != ConfigAuditDictionaryKeyCorrelationMode.None
+                 && !TraverseCollectionElements)
+        {
+            diagnostics.Add(CreateInvalidOptionDiagnostic(
+                key,
+                nameof(DictionaryKeyCorrelationMode),
+                "ScopedHmac requires TraverseCollectionElements to be true or set mode to None"));
+        }
+
         return diagnostics;
     }
 
@@ -301,6 +341,9 @@ public sealed class ConfigAuditEntryOptions
             MaxReportNodes >= 1 ? MaxReportNodes : DefaultMaxReportNodes,
             DisplayDictionaryKeys,
             NormalizeSensitivity(Sensitivity),
+            Enum.IsDefined(DictionaryKeyCorrelationMode) && TraverseCollectionElements
+                ? DictionaryKeyCorrelationMode
+                : ConfigAuditDictionaryKeyCorrelationMode.None,
             AssignedOptions);
 
     /// <summary>
@@ -337,6 +380,9 @@ public sealed class ConfigAuditEntryOptions
             overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.Sensitivity)
                 ? MergeSensitivity(Sensitivity, overrides.Sensitivity)
                 : Sensitivity,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.DictionaryKeyCorrelationMode)
+                ? overrides.DictionaryKeyCorrelationMode
+                : DictionaryKeyCorrelationMode,
             AssignedOptions | overrides.AssignedOptions);
     }
 
@@ -428,6 +474,7 @@ public sealed class ConfigAuditEntryOptionsBuilder
     private int _maxReportNodes = ConfigAuditEntryOptions.DefaultMaxReportNodes;
     private bool _displayDictionaryKeys = true;
     private ConfigAuditSensitivity _sensitivity = ConfigAuditSensitivity.Unknown;
+    private ConfigAuditDictionaryKeyCorrelationMode _dictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.None;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigAuditEntryOptionsBuilder"/> class with safe defaults.
@@ -521,6 +568,24 @@ public sealed class ConfigAuditEntryOptionsBuilder
     }
 
     /// <summary>
+    /// Gets or sets the opt-in persistent dictionary key correlation mode for this entry.
+    /// </summary>
+    /// <remarks>
+    /// The default keeps redacted dictionary key labels report-local. Use
+    /// <see cref="ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac"/> only when operators need stable opaque
+    /// dictionary key identifiers and global <see cref="ConfigAuditDictionaryKeyCorrelationOptions"/> are configured.
+    /// </remarks>
+    public ConfigAuditDictionaryKeyCorrelationMode DictionaryKeyCorrelationMode
+    {
+        get => _dictionaryKeyCorrelationMode;
+        set
+        {
+            _dictionaryKeyCorrelationMode = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.DictionaryKeyCorrelationMode;
+        }
+    }
+
+    /// <summary>
     /// Gets the option properties that were assigned through this builder.
     /// </summary>
     /// <remarks>
@@ -545,6 +610,7 @@ public sealed class ConfigAuditEntryOptionsBuilder
             MaxReportNodes,
             DisplayDictionaryKeys,
             Sensitivity,
+            DictionaryKeyCorrelationMode,
             AssignedOptions);
 }
 
@@ -594,6 +660,11 @@ internal enum ConfigAuditEntryOptionAssignments
     Sensitivity = 1 << 5,
 
     /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.DictionaryKeyCorrelationMode"/> was explicitly assigned.
+    /// </summary>
+    DictionaryKeyCorrelationMode = 1 << 6,
+
+    /// <summary>
     /// All collection traversal options were explicitly assigned.
     /// </summary>
     CollectionTraversal = TraverseCollectionElements | MaxCollectionDepth | MaxCollectionElements | MaxReportNodes | DisplayDictionaryKeys,
@@ -601,7 +672,7 @@ internal enum ConfigAuditEntryOptionAssignments
     /// <summary>
     /// Every audit entry option was explicitly assigned.
     /// </summary>
-    All = CollectionTraversal | Sensitivity
+    All = CollectionTraversal | Sensitivity | DictionaryKeyCorrelationMode
 }
 
 /// <summary>

@@ -39,7 +39,8 @@ internal sealed record ConfigAuditPath(
     public ConfigAuditPath AppendDictionaryKey(
         object? key,
         ConfigAuditEntryOptions options,
-        ConfigAuditDictionaryLabelSet labels)
+        ConfigAuditDictionaryLabelSet labels,
+        ConfigAuditDictionaryKeyCorrelationContext correlation)
     {
         var rawLabel = ConvertDictionaryKeyToLabel(key, out var conversionFailed, out var truncated);
         var displayLabel = truncated
@@ -68,7 +69,10 @@ internal sealed record ConfigAuditPath(
             {
                 Kind = ConfigAuditElementKind.DictionaryItem,
                 KeyLabel = label,
-                IsKeyRedacted = isRedacted
+                IsKeyRedacted = isRedacted,
+                KeyCorrelationId = options.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
+                    ? correlation.CreateCorrelationId(rawLabel)
+                    : null
             },
             CollectionDepth + 1,
             RequiresInheritedSource || !canUseExactSource);

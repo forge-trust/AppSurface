@@ -65,6 +65,8 @@ internal sealed class DocRouteIdentityCatalog
         "",
         "search",
         "search-index.json",
+        "search-index/refresh",
+        "_search-index/refresh",
         "_health",
         "_health.json",
         "search.css",
@@ -1005,6 +1007,7 @@ internal sealed class DocRouteIdentityCatalog
         AddRouteReference(reserved, docsUrlBuilder.Routes.Home, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.Search, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.SearchIndex, docsUrlBuilder.CurrentDocsRootPath);
+        AddRouteReference(reserved, docsUrlBuilder.Routes.SearchIndexRefresh, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.Health, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.HealthJson, docsUrlBuilder.CurrentDocsRootPath);
         AddRouteReference(reserved, docsUrlBuilder.Routes.RouteInspector, docsUrlBuilder.CurrentDocsRootPath);
@@ -1033,6 +1036,7 @@ internal sealed class DocRouteIdentityCatalog
     private static bool IsReservedPrefix(string routePath)
     {
         return routePath.StartsWith("sections/", StringComparison.OrdinalIgnoreCase)
+               || routePath.StartsWith("_search-index/", StringComparison.OrdinalIgnoreCase)
                || routePath.StartsWith("v/", StringComparison.OrdinalIgnoreCase);
     }
 

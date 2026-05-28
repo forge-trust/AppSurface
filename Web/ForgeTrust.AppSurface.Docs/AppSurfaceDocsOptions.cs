@@ -588,6 +588,17 @@ public sealed class AppSurfaceDocsDiagnosticsOptions
     /// route; route exposure still follows <see cref="ExposeRouteInspector"/>.
     /// </remarks>
     public AppSurfaceDocsHarvestHealthExposure ShowChrome { get; set; } = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly;
+
+    /// <summary>
+    /// Gets or sets the host-owned authorization policy required to refresh the live docs search-index cache.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="null"/>, which denies the packaged
+    /// <c>{DocsRootPath}/_search-index/refresh</c> endpoint. Set this to the name of a policy registered with
+    /// ASP.NET Core authorization when a host wants browser-form-based operator refresh. AppSurface Docs does not
+    /// register a permissive fallback policy because cache refresh is a mutating operator action.
+    /// </remarks>
+    public string? SearchIndexRefreshPolicy { get; set; }
 }
 
 /// <summary>
@@ -1763,6 +1774,7 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         return value.Trim() is { } trimmed
                && (trimmed.Equals("search", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("search-index.json", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("_search-index", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_health", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_health.json", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_routes", StringComparison.OrdinalIgnoreCase)

@@ -1066,6 +1066,8 @@ public class DocAggregator
                 : docs.Count == 0
                     ? DocHarvesterHealthStatus.ReturnedEmpty
                     : DocHarvesterHealthStatus.Succeeded;
+            var participatesInStrictHealth = ParticipatesInStrictHealth(harvester)
+                                             || blockingDiagnostic?.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet;
             if (harvestProgress is not null)
             {
                 await harvestProgress.HarvesterCompletedAsync(runId, harvesterType, status, docs.Count);
@@ -1077,7 +1079,7 @@ public class DocAggregator
                 docs,
                 blockingDiagnostic,
                 supplementalDiagnostics,
-                ParticipatesInStrictHealth: ParticipatesInStrictHealth(harvester));
+                ParticipatesInStrictHealth: participatesInStrictHealth);
         }
         catch (TimeoutException ex)
         {
@@ -1205,9 +1207,16 @@ public class DocAggregator
         IDocHarvester harvester,
         IReadOnlyList<DocHarvestDiagnostic> diagnostics)
     {
-        if (!ParticipatesInStrictHealth(harvester) || harvester is not JavaScriptDocHarvester)
+        if (harvester is not JavaScriptDocHarvester)
         {
             return null;
+        }
+
+        var eventDiagnostic = diagnostics.FirstOrDefault(static diagnostic =>
+            diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        if (eventDiagnostic is not null || !ParticipatesInStrictHealth(harvester))
+        {
+            return eventDiagnostic;
         }
 
         return diagnostics.FirstOrDefault(static diagnostic => diagnostic.Code is

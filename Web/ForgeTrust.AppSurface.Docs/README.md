@@ -750,13 +750,14 @@ var routes = app.Services.GetRequiredService<DocsUrlBuilder>().Routes;
 var home = routes.Home;
 var search = routes.Search;
 var searchIndexRefresh = routes.SearchIndexRefresh;
+var searchIndexRefreshMethod = routes.SearchIndexRefreshMethod; // POST
 var healthJson = routes.HealthJson;
 var routeInspectorJson = routes.RouteInspectorJson;
 ```
 
-`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
+`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `SearchIndexRefreshMethod`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
-The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; keep `Routes.SearchIndexRefresh` for authenticated operator refresh flows.
+The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; operator UI should submit a browser form to `Routes.SearchIndexRefresh` with `Routes.SearchIndexRefreshMethod`.
 
 ### Document route identity
 
@@ -1045,6 +1046,11 @@ static web assets.
   - Defaults to `false`.
   - Keeps broad default JavaScript discovery best-effort for aggregate health: empty results, parse/read diagnostics, and timeouts remain visible but do not mask or cause Markdown/C# strict failures.
   - JavaScript participates in strict aggregate health when this is `true` or JavaScript `IncludeGlobs` is nonempty.
+- `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets`
+  - Defaults to `false`.
+  - When `true`, incomplete public JavaScript event doclets emit `appsurfacedocs.javascript.incomplete_public_event_doclet` with error severity and fail harvest health.
+  - `DocAggregator` treats `appsurfacedocs.javascript.incomplete_public_event_doclet` as a strict blocking diagnostic: when `RequireCompleteEventDoclets` emits it, the JavaScript harvester is treated as though `ParticipatesInStrictHealth=true` and that diagnostic becomes the harvester health result, regardless of whether JavaScript would otherwise participate in `StrictHealth`.
+  - This applies only to public `@event` doclets. Parse failures, oversized files, unsupported shapes, and malformed doclets stay governed by `StrictHealth` or explicit JavaScript include globs.
 - `AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes`
   - Defaults to `262144`.
   - Files above this limit are skipped with a structured harvest diagnostic so generated bundles do not dominate docs snapshot time.
@@ -1141,6 +1147,8 @@ Supported public shapes:
 
 Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
 
+Set `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets=true` when public browser events must be release-blocking. In that mode, each public `@event` must include `@target`, `@firesWhen`, and either at least one valid `detail.*` property or `@detail none`. `@bubbles`, `@cancelable`, and `@example` remain recommended authoring fields, but they are intentionally excluded from the blocking strict-event contract. Valid detail property names are exactly `detail.` plus dot-separated segments. Segments may contain letters, digits, `_`, `$`, `-`, and a trailing `[]`. Optional JSDoc brackets and defaults are accepted, so `detail.message`, `[detail.message]`, `[detail.message="fallback"]`, `detail.items[]`, and `detail.items[].id` are valid. Values such as `detail`, `[detail]`, `detail.`, `detail..message`, `detail. message`, `detail.[x]`, `Detail.message`, `form`, and `message` are invalid. `@detail none` is contradictory when any `detail.*` property is present.
+
 ```js
 /**
  * A RazorWire-enhanced form submission failed and custom UI may handle the failure.
@@ -1174,7 +1182,20 @@ Browser-contract doclets should carry enough fields for readers to use them with
  */
 ```
 
-Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially.
+Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`).
+
+Use the CLI health verifier in CI when degraded docs health should block release output:
+
+```bash
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+  docs verify-health \
+  --repo . \
+  --require-complete-event-doclets \
+  --environment Production \
+  --startup-timeout-seconds 30
+```
+
+The verifier starts the standalone docs host on loopback, reads the same redacted response shape as `{DocsRootPath}/_health.json`, and exits nonzero when `verification.ok=false`. The reported status code matches the health endpoint contract: `200` for `Healthy` or `Empty`, `503` for `Degraded` or `Failed`; `docs verify-health` also fails when the HTTP response status and `verification.httpStatusCode` disagree. `docs verify-health --startup-timeout-seconds` defaults to 10 seconds when omitted; pass `0` to disable the startup watchdog instead of waiting indefinitely. `AppSurfaceDocs:Harvest:FailOnFailure` still fails startup only for aggregate `Failed` snapshots; use `docs verify-health` when a `Degraded` snapshot, such as incomplete strict event docs with Markdown still available, should block publication.
 
 Pitfalls:
 
@@ -1183,6 +1204,7 @@ Pitfalls:
 - When documenting package browser contracts, prefer a small docs-only contract manifest such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js` over generated runtime outputs.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
+- Do not pair `@detail none` with `@property detail.*`; either the event has no payload or its payload shape is documented.
 - Do not put `@public` on classes, default exports, or CommonJS exports until a later harvester slice supports those shapes.
 - Do not treat Acornima as a runtime JavaScript execution engine. AppSurface Docs uses it only to parse configured source for documentation, and `ForgeTrust.AppSurface.Docs` carries `THIRD-PARTY-NOTICES.md` for the redistributed package.
 
@@ -1285,6 +1307,54 @@ When the hidden frozen route manifest is present, mounted archives also use it b
 
 `AppSurfaceDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
 
+### Search index refresh
+
+`GET {DocsRootPath}/search-index.json` is a read-only reader endpoint. Legacy query strings such as `?refresh=1` and `?refresh=true` are ignored so crawlers, browser reloads, and copied reader links cannot mutate the server snapshot cache.
+
+Packaged operator refresh lives at `POST {DocsRootPath}/_search-index/refresh`. The endpoint always requires MVC anti-forgery validation and a host-owned authorization policy named by `AppSurfaceDocs:Diagnostics:SearchIndexRefreshPolicy`. Blank or whitespace policy names are normalized to `null`; when the policy is missing, the packaged endpoint denies refresh.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Diagnostics": {
+      "SearchIndexRefreshPolicy": "DocsSearchIndexRefresh"
+    }
+  }
+}
+```
+
+```csharp
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(
+        "DocsSearchIndexRefresh",
+        policy => policy.RequireAuthenticatedUser()
+            .RequireClaim("scope", "docs.search-index.refresh"));
+});
+```
+
+A Razor/MVC operator surface can post to the packaged endpoint with the normal anti-forgery token:
+
+```cshtml
+@inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrls
+
+<form method="@DocsUrls.Routes.SearchIndexRefreshMethod" action="@DocsUrls.Routes.SearchIndexRefresh">
+    @Html.AntiForgeryToken()
+    <button type="submit">Refresh search index</button>
+</form>
+```
+
+Host automation should usually use a host-owned admin or job endpoint instead of the browser-form-shaped packaged route. After applying host-specific authentication, authorization, audit logging, and replay controls, call `DocAggregator.InvalidateCache()` directly.
+
+| Request state | Response |
+| --- | --- |
+| Missing or invalid anti-forgery token | Framework anti-forgery failure, normally `400` |
+| No configured refresh policy, blank policy, missing policy provider/service, or policy not found | `403` |
+| Unauthenticated user after anti-forgery succeeds | `403` |
+| Authenticated user who fails the configured policy | `403` |
+| Authenticated user who satisfies the configured policy | `204`, cache invalidated |
+| Non-POST request to `{DocsRootPath}/_search-index/refresh` | `405` |
+
 Pitfalls:
 
 - Do not set `CacheExpirationMinutes` to `0` to disable caching. AppSurface Docs rejects zero and negative values because every request would rebuild the docs snapshot and search index.
@@ -1292,7 +1362,7 @@ Pitfalls:
 - Do not set fractional-second values such as `0.333` minutes. AppSurface Docs rejects values that cannot round-trip to a whole-second `max-age`.
 - Do not set huge finite values such as `double.MaxValue`. AppSurface Docs caps the value so the derived search-index `Cache-Control` `max-age` remains representable.
 - The search-index response uses the same duration for its private `Cache-Control` `max-age`, so client refresh behavior stays aligned with server-side snapshot reuse.
-- Manual refresh through `{DocsRootPath}/search-index.json?refresh=1` still invalidates the server snapshot generation immediately for authenticated users; it does not change the configured TTL for later entries. For example, when `AppSurfaceDocs:Routing:DocsRootPath` is `/docs/next`, use `/docs/next/search-index.json?refresh=1`.
+- Do not use `{DocsRootPath}/search-index.json?refresh=1` for operations. It is intentionally read-only compatibility noise; use the POST operator route or a host-owned automation path.
 
 ## Contributor Provenance
 

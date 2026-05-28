@@ -30,6 +30,19 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal("actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd", GetScalar(checkout, "uses"));
         Assert.Equal("0", GetScalar(GetMapping(checkout, "with"), "fetch-depth"));
 
+        var verifyStep = FindStep(steps, "Verify AppSurface Docs harvest health");
+        var verifyEnv = GetMapping(verifyStep, "env");
+        Assert.Equal(
+            "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js",
+            GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"));
+        var verifyRun = GetScalar(verifyStep, "run");
+        Assert.Contains("--no-build", verifyRun, StringComparison.Ordinal);
+        Assert.Contains("docs verify-health", verifyRun, StringComparison.Ordinal);
+        Assert.Contains("--repo .", verifyRun, StringComparison.Ordinal);
+        Assert.Contains("--require-complete-event-doclets", verifyRun, StringComparison.Ordinal);
+        Assert.Contains("--environment Production", verifyRun, StringComparison.Ordinal);
+        Assert.Contains("--startup-timeout-seconds 30", verifyRun, StringComparison.Ordinal);
+
         var exportStep = FindStep(steps, "Export AppSurface Docs static site with CDN validation");
         var exportEnv = GetMapping(exportStep, "env");
         Assert.Contains("AppSurfaceDocs__Contributor__DefaultBranch", ScalarKeys(exportEnv));
@@ -46,10 +59,14 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Equal(
             "/branding/appsurface-site-icon.svg",
             GetScalar(exportEnv, "AppSurfaceDocs__Identity__Favicon__SvgPath"));
+        Assert.Equal(
+            GetScalar(exportEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"),
+            GetScalar(verifyEnv, "AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0"));
 
         var exportRun = GetScalar(exportStep, "run");
         Assert.Contains("printf '%s\\n' '/' '/docs' > \"$RUNNER_TEMP/appsurface-docs-seeds.txt\"", exportRun, StringComparison.Ordinal);
         Assert.Contains("dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", exportRun, StringComparison.Ordinal);
+        Assert.Contains("--no-build", exportRun, StringComparison.Ordinal);
         Assert.Contains("docs export", exportRun, StringComparison.Ordinal);
         Assert.Contains("--repo .", exportRun, StringComparison.Ordinal);
         Assert.Contains("--mode cdn", exportRun, StringComparison.Ordinal);

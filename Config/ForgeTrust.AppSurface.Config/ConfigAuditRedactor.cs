@@ -60,14 +60,41 @@ internal sealed class ConfigAuditRedactor
     /// <summary>
     /// Creates a snapshot of the redaction policy applied to reports.
     /// </summary>
+    /// <param name="correlationOptions">The dictionary key correlation options used to describe report metadata.</param>
+    /// <param name="dictionaryKeyCorrelationRequested">Whether at least one known entry requested dictionary key correlation.</param>
     /// <returns>A policy snapshot with a copy of the sensitive fragments and the placeholder text.</returns>
-    public ConfigAuditRedaction CreatePolicy() =>
-        new()
+    public ConfigAuditRedaction CreatePolicy(
+        ConfigAuditDictionaryKeyCorrelationOptions? correlationOptions = null,
+        bool dictionaryKeyCorrelationRequested = false)
+    {
+        var keyId = dictionaryKeyCorrelationRequested
+            ? ConfigAuditDictionaryKeyCorrelator.NormalizeKeyId(correlationOptions?.KeyId)
+            : null;
+        if (string.IsNullOrEmpty(keyId) || !ConfigAuditDictionaryKeyCorrelator.IsDisplaySafeKeyId(keyId))
+        {
+            keyId = null;
+        }
+
+        var applicationScope = dictionaryKeyCorrelationRequested
+            ? ConfigAuditDictionaryKeyCorrelator.NormalizeApplicationScope(correlationOptions?.ApplicationScope)
+            : null;
+        if (string.IsNullOrEmpty(applicationScope))
+        {
+            applicationScope = null;
+        }
+
+        return new ConfigAuditRedaction
         {
             Enabled = true,
             MatchedFragments = SensitiveFragments.ToArray(),
-            Placeholder = Placeholder
+            Placeholder = Placeholder,
+            DictionaryKeyCorrelationMode = dictionaryKeyCorrelationRequested
+                ? ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
+                : ConfigAuditDictionaryKeyCorrelationMode.None,
+            DictionaryKeyCorrelationKeyId = keyId,
+            DictionaryKeyCorrelationApplicationScope = applicationScope
         };
+    }
 
     /// <summary>
     /// Formats <paramref name="value"/> for display and redacts it when the key or sources look sensitive.
