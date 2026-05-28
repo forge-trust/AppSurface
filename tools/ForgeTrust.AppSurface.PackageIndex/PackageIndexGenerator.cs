@@ -1068,7 +1068,7 @@ internal interface IProjectMetadataProvider
 /// <param name="IsPackable">Whether the project reports itself as packable.</param>
 /// <param name="IsTool">Whether the project reports itself as a .NET tool package.</param>
 /// <param name="OutputType">Resolved output type, such as <c>Library</c> or <c>Exe</c>.</param>
-/// <param name="ProjectReferences">Evaluated project reference paths reported by MSBuild.</param>
+/// <param name="ProjectReferences">Evaluated project reference paths that contribute package dependency assets.</param>
 internal sealed record PackageProjectMetadata(
     string ProjectPath,
     string PackageId,
@@ -1279,12 +1279,19 @@ internal sealed class DotNetProjectMetadataProvider : IProjectMetadataProvider
         }
 
         return projectReferencesElement.EnumerateArray()
+            .Where(IsPackageDependencyReference)
             .Select(element => element.TryGetProperty("FullPath", out var fullPathElement)
                 ? fullPathElement.GetString()
                 : null)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path => path!)
             .ToArray();
+    }
+
+    private static bool IsPackageDependencyReference(JsonElement projectReference)
+    {
+        return !projectReference.TryGetProperty("ReferenceOutputAssembly", out var referenceOutputAssemblyElement)
+            || !string.Equals(referenceOutputAssemblyElement.GetString(), "false", StringComparison.OrdinalIgnoreCase);
     }
 
     private static JsonElement GetRequiredObjectProperty(JsonElement parent, string propertyName)

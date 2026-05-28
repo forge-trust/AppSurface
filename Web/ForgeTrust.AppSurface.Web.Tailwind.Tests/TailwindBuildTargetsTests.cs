@@ -600,7 +600,6 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         string? stderrLine = null,
         int exitCode = 0)
     {
-        var toolsDirectory = Path.Combine(projectDirectory, toolDirectoryName);
         var outputPath = Path.Combine(projectDirectory, outputRelativePath.Replace('/', Path.DirectorySeparatorChar));
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

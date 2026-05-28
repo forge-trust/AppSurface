@@ -9,9 +9,10 @@
     <_TailwindVersionFile Condition="Exists('$(_TailwindVersionFilePackage)')">$(_TailwindVersionFilePackage)</_TailwindVersionFile>
     <_TailwindVersionFile Condition="'$(_TailwindVersionFile)' == '' and Exists('$(_TailwindVersionFileSource)')">$(_TailwindVersionFileSource)</_TailwindVersionFile>
     <_TailwindTaskAssemblyPackage>$(MSBuildThisFileDirectory)tasks\ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll</_TailwindTaskAssemblyPackage>
+    <_TailwindTaskAssemblySourceProject>$(MSBuildThisFileDirectory)..\..\ForgeTrust.AppSurface.Web.Tailwind.Tasks\ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj</_TailwindTaskAssemblySourceProject>
     <_TailwindTaskAssemblySource>$(MSBuildThisFileDirectory)..\..\ForgeTrust.AppSurface.Web.Tailwind.Tasks\bin\$(Configuration)\$(TargetFramework)\ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll</_TailwindTaskAssemblySource>
     <_TailwindTaskAssembly Condition="Exists('$(_TailwindTaskAssemblyPackage)')">$(_TailwindTaskAssemblyPackage)</_TailwindTaskAssembly>
-    <_TailwindTaskAssembly Condition="'$(_TailwindTaskAssembly)' == '' and Exists('$(_TailwindTaskAssemblySource)')">$(_TailwindTaskAssemblySource)</_TailwindTaskAssembly>
+    <_TailwindTaskAssembly Condition="'$(_TailwindTaskAssembly)' == '' and Exists('$(_TailwindTaskAssemblySourceProject)')">$(_TailwindTaskAssemblySource)</_TailwindTaskAssembly>
     <_TailwindOutputPathNormalized>$([System.String]::Copy('$(TailwindOutputPath)').Replace('\', '/'))</_TailwindOutputPathNormalized>
     <_TailwindOutputPathNormalized Condition="$([System.String]::Copy('$(_TailwindOutputPathNormalized)').StartsWith('./'))">$([System.String]::Copy('$(_TailwindOutputPathNormalized)').Substring(2))</_TailwindOutputPathNormalized>
     <_TailwindOutputIsWebRootAsset>false</_TailwindOutputIsWebRootAsset>
@@ -70,11 +71,12 @@
       <!-- Source-tree consumers import only this targets file, so resolve TailwindVersion here as well. -->
       <TailwindVersion Condition="'$(TailwindVersion)' == '' and Exists('$(_TailwindVersionFile)')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(_TailwindVersionFile)')), '^[^\r\n]+').Value)</TailwindVersion>
 
-      <_TailwindTaskAssemblyDisplay Condition="'$(_TailwindTaskAssembly)' == ''">$(_TailwindTaskAssemblyPackage)</_TailwindTaskAssemblyDisplay>
+      <_TailwindTaskAssemblyDisplay Condition="'$(_TailwindTaskAssembly)' != ''">$(_TailwindTaskAssembly)</_TailwindTaskAssemblyDisplay>
+      <_TailwindTaskAssemblyDisplay Condition="'$(_TailwindTaskAssemblyDisplay)' == ''">$(_TailwindTaskAssemblyPackage)</_TailwindTaskAssemblyDisplay>
     </PropertyGroup>
 
     <Error Text="ASTW005: Tailwind MSBuild task assembly could not be found. Cause: '$(_TailwindTaskAssemblyDisplay)' does not exist. Fix: Restore and build ForgeTrust.AppSurface.Web.Tailwind.Tasks, or consume the packed ForgeTrust.AppSurface.Web.Tailwind package. See: https://github.com/forge-trust/AppSurface/tree/main/Web/ForgeTrust.AppSurface.Web.Tailwind#tailwind-diagnostics"
-           Condition="'$(_TailwindTaskAssembly)' == ''" />
+           Condition="'$(_TailwindTaskAssembly)' == '' or !Exists('$(_TailwindTaskAssembly)')" />
 
     <ForgeTrust.AppSurface.Web.Tailwind.Tasks.RunTailwindBuildTask
       ProjectDirectory="$(MSBuildProjectDirectory)"

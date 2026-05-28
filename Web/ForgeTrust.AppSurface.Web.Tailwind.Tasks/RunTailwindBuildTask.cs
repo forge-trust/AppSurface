@@ -203,12 +203,9 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
             return null;
         }
 
-        foreach (var candidate in EnumerateRuntimeCandidates(rid, runtimeBinaryName))
+        foreach (var candidate in EnumerateRuntimeCandidates(rid, runtimeBinaryName).Where(File.Exists))
         {
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
+            return candidate;
         }
 
         Log.LogError(
@@ -222,21 +219,29 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
 
     private IEnumerable<string> EnumerateRuntimeCandidates(string rid, string runtimeBinaryName)
     {
+        if (!IsRelativePathComponent(rid) || !IsFileName(runtimeBinaryName))
+        {
+            yield break;
+        }
+
         var targetsDirectory = EnsureTrailingSeparator(TargetsDirectory);
-        yield return Path.GetFullPath(Path.Combine(targetsDirectory, "..", "runtimes", rid, "native", runtimeBinaryName));
+        yield return Path.GetFullPath(Path.Join(targetsDirectory, "..", "runtimes", rid, "native", runtimeBinaryName));
         foreach (var packageRuntimePath in EnumerateSiblingRuntimePackageCandidates(targetsDirectory, rid, runtimeBinaryName))
         {
             yield return packageRuntimePath;
         }
 
-        yield return Path.GetFullPath(Path.Combine(ProjectDirectory, "runtimes", rid, "native", runtimeBinaryName));
+        yield return Path.GetFullPath(Path.Join(ProjectDirectory, "runtimes", rid, "native", runtimeBinaryName));
 
         var localBinaryName = TailwindRuntimeMap.GetLocalBinaryName();
-        yield return Path.GetFullPath(Path.Combine(targetsDirectory, "..", localBinaryName));
+        if (IsFileName(localBinaryName))
+        {
+            yield return Path.GetFullPath(Path.Join(targetsDirectory, "..", localBinaryName));
+        }
 
         var configuration = string.IsNullOrWhiteSpace(Configuration) ? "Debug" : Configuration;
         var targetFramework = string.IsNullOrWhiteSpace(TargetFramework) ? "net10.0" : TargetFramework;
-        yield return Path.GetFullPath(Path.Combine(
+        yield return Path.GetFullPath(Path.Join(
             targetsDirectory,
             "..",
             "runtimes",
@@ -246,7 +251,7 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
             targetFramework,
             $"tailwind-{TailwindVersion}",
             runtimeBinaryName));
-        yield return Path.GetFullPath(Path.Combine(
+        yield return Path.GetFullPath(Path.Join(
             targetsDirectory,
             "..",
             "runtimes",
@@ -316,5 +321,17 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
         }
 
         return path + Path.DirectorySeparatorChar;
+    }
+
+    private static bool IsRelativePathComponent(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            && !Path.IsPathRooted(value)
+            && value.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) < 0;
+    }
+
+    private static bool IsFileName(string value)
+    {
+        return IsRelativePathComponent(value) && Path.GetFileName(value) == value;
     }
 }

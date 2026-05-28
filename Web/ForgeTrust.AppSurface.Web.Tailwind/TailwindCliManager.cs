@@ -200,14 +200,14 @@ public class TailwindCliManager
 
         var binaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid);
 
-        if (string.IsNullOrEmpty(binaryName))
+        if (string.IsNullOrEmpty(binaryName) || !IsFileName(binaryName))
         {
             return null;
         }
 
         foreach (var candidateRoot in EnumerateSelfAndAncestors(binDir.Parent))
         {
-            var runtimeProjectDir = Path.Combine(
+            var runtimeProjectDir = CombineUnderRoot(
                 candidateRoot,
                 "Web",
                 "ForgeTrust.AppSurface.Web.Tailwind",
@@ -216,6 +216,11 @@ public class TailwindCliManager
                 $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{rid}",
                 configurationDir.Name,
                 targetFramework);
+
+            if (runtimeProjectDir == null)
+            {
+                continue;
+            }
 
             var candidatePath = Path.Combine(runtimeProjectDir, binaryName);
             if (File.Exists(candidatePath))
@@ -239,6 +244,27 @@ public class TailwindCliManager
         }
 
         return null;
+    }
+
+    private static string? CombineUnderRoot(string root, params string[] segments)
+    {
+        if (segments.Any(Path.IsPathRooted))
+        {
+            return null;
+        }
+
+        var allSegments = new string[segments.Length + 1];
+        allSegments[0] = root;
+        Array.Copy(segments, 0, allSegments, 1, segments.Length);
+        return Path.Combine(allSegments);
+    }
+
+    private static bool IsFileName(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            && !Path.IsPathRooted(value)
+            && value.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) < 0
+            && Path.GetFileName(value) == value;
     }
 
     private static bool IsCurrentOsPlatform(OSPlatform platform)
