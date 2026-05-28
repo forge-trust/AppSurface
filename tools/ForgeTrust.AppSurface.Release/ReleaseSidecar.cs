@@ -17,6 +17,13 @@ using YamlDotNet.Serialization.NamingConventions;
 
 namespace ForgeTrust.AppSurface.Release;
 
+/// <summary>
+/// Mutable YAML sidecar metadata for release-note documentation pages.
+/// </summary>
+/// <remarks>
+/// Sidecars are dictionary-backed so unknown fields are preserved. Tagged-release conversion overwrites release-owned keys
+/// (<c>title</c>, <c>summary</c>, <c>order</c>, <c>breadcrumbs</c>, and <c>trust</c>) and leaves unrelated keys untouched.
+/// </remarks>
 internal sealed class ReleaseSidecar
 {
     private readonly Dictionary<object, object?> _metadata;
@@ -29,9 +36,15 @@ internal sealed class ReleaseSidecar
     /// <summary>
     /// Loads sidecar metadata from YAML.
     /// </summary>
-    /// <param name="path">Sidecar path.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Loaded sidecar.</returns>
+    /// <param name="path">Sidecar path. Expected content is a YAML mapping at the document root.</param>
+    /// <param name="cancellationToken">Cancellation token honored during file I/O.</param>
+    /// <returns>Loaded sidecar whose unknown keys are preserved for later serialization.</returns>
+    /// <remarks>
+    /// The current release flow expects the unreleased sidecar to contain documentation keys such as <c>title</c>, <c>summary</c>,
+    /// <c>page_type</c>, <c>nav_group</c>, <c>order</c>, <c>breadcrumbs</c>, and <c>trust</c>. Missing keys are tolerated because
+    /// <see cref="ToTaggedRelease"/> writes the release-owned fields. Malformed YAML is wrapped in <see cref="ReleaseToolException"/>
+    /// with <c>release-sidecar-invalid</c>; I/O and cancellation failures bubble to the shared command diagnostic layer.
+    /// </remarks>
     internal static async Task<ReleaseSidecar> LoadAsync(string path, CancellationToken cancellationToken)
     {
         var content = await File.ReadAllTextAsync(path, cancellationToken);
@@ -59,7 +72,12 @@ internal sealed class ReleaseSidecar
     /// </summary>
     /// <param name="version">Tagged release version.</param>
     /// <param name="date">Release date.</param>
-    /// <returns>Tagged release sidecar YAML.</returns>
+    /// <returns>Tagged release sidecar YAML using underscored key naming for generated CLR-backed values.</returns>
+    /// <remarks>
+    /// This method mutates the loaded dictionary before serializing. It replaces release-owned metadata with final tagged-release
+    /// values and preserves unrelated keys from the source sidecar. Callers should not reuse the instance for another version after
+    /// conversion.
+    /// </remarks>
     internal string ToTaggedRelease(SemVer version, DateOnly date)
     {
         _metadata["title"] = $"Release {version}";
@@ -90,7 +108,11 @@ internal sealed class ReleaseSidecar
     /// <summary>
     /// Creates reset unreleased metadata for the next release cycle.
     /// </summary>
-    /// <returns>Unreleased sidecar YAML.</returns>
+    /// <returns>Canonical unreleased sidecar YAML with title, navigation, trust metadata, and source guidance.</returns>
+    /// <remarks>
+    /// The template is complete enough for docs harvesting without requiring the previous sidecar. It intentionally resets release-specific
+    /// trust metadata back to provisional language.
+    /// </remarks>
     internal static string UnreleasedTemplate()
     {
         return """

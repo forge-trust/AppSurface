@@ -28,7 +28,10 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.DoesNotContain("eval ", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("eval ", publish, StringComparison.Ordinal);
         Assert.Contains("actions: read", publish, StringComparison.Ordinal);
-        Assert.Contains("expected_main=\"$(git rev-parse origin/main)\"", prep, StringComparison.Ordinal);
+        Assert.Contains("BASE_REF: ${{ inputs.base-ref }}", prep, StringComparison.Ordinal);
+        Assert.Contains("expected_base=\"$(git rev-parse \"origin/${BASE_REF}\")\"", prep, StringComparison.Ordinal);
+        Assert.Contains("--base \"${BASE_REF}\"", prep, StringComparison.Ordinal);
+        Assert.DoesNotContain("expected_main=\"$(git rev-parse origin/main)\"", prep, StringComparison.Ordinal);
         Assert.DoesNotContain("merge-base --is-ancestor HEAD origin/main", prep, StringComparison.Ordinal);
         Assert.Contains("No versioned release artifacts changed; validating release tooling instead.", prep, StringComparison.Ordinal);
         Assert.Contains("dotnet test tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj", prep, StringComparison.Ordinal);

@@ -24,6 +24,12 @@ internal static class ReleaseReportRenderer
     /// </summary>
     /// <param name="result">Check result.</param>
     /// <returns>Markdown report.</returns>
+    /// <remarks>
+    /// The report shape is stable for workflow comments and maintainer review: <c># Release readiness report</c>, a summary bullet list,
+    /// <c>## Generated files</c>, <c>## Errors</c>, then <c>## Warnings</c>. Empty diagnostics render as <c>- None</c>. Generated
+    /// file paths and diagnostic codes are wrapped in inline code; diagnostic text is not escaped beyond normal Markdown rendering.
+    /// Consumers should key off headings and diagnostic codes rather than line numbers.
+    /// </remarks>
     internal static string RenderCheck(ReleaseCheckResult result)
     {
         var builder = new StringBuilder();
@@ -51,6 +57,11 @@ internal static class ReleaseReportRenderer
     /// </summary>
     /// <param name="result">Preparation result.</param>
     /// <returns>Markdown report.</returns>
+    /// <remarks>
+    /// Preparation reports begin with the check report contract, then append either <c>## Dry-run plan</c> or <c>## Files written</c>
+    /// based on <see cref="ReleasePreparationResult.DryRun"/>. Paths are repository-relative bullets. This distinction is the only
+    /// dry-run marker in the report, so callers that publish the report should preserve that heading.
+    /// </remarks>
     internal static string RenderPreparation(ReleasePreparationResult result)
     {
         var builder = new StringBuilder(RenderCheck(result.Check));

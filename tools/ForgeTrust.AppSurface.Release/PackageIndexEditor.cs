@@ -25,6 +25,13 @@ internal static class PackageIndexEditor
     /// <param name="content">Existing package index YAML.</param>
     /// <param name="releasePath">New repository-relative release note path.</param>
     /// <returns>Updated YAML content.</returns>
+    /// <remarks>
+    /// This method edits YAML line-by-line so existing comments and ordering survive a release PR. It expects the package index's
+    /// current shape: package entries begin with two spaces and <c>- project:</c>, fields are indented with four spaces, and
+    /// <c>classification</c>, <c>publish_decision</c>, <c>release_notes_path</c>, and <c>order</c> stay inside one package block.
+    /// Different indentation or nested structures require updating this editor. Output is normalized to LF line endings with one
+    /// trailing LF so release PR diffs are stable across platforms.
+    /// </remarks>
     internal static string UpdatePublicPublishedReleaseNotes(string content, string releasePath)
     {
         var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
@@ -47,7 +54,7 @@ internal static class PackageIndexEditor
             output.AddRange(UpdateBlock(block, releasePath));
         }
 
-        return string.Join('\n', output).TrimEnd() + Environment.NewLine;
+        return string.Join('\n', output).TrimEnd() + "\n";
     }
 
     private static IEnumerable<string> UpdateBlock(List<string> block, string releasePath)

@@ -34,7 +34,7 @@ Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`
 
 ## Publish
 
-`publish` is create-only. It validates that the supplied tag is annotated, resolves to a commit reachable from `origin/main`, has a successful prerelease NuGet publish run for prerelease tags, has no existing GitHub Release, and contains the versioned release note at the tag commit. The command writes `version`, `tag`, `tag_commit`, `note_path`, `notes_file`, `release_classification`, and `prerelease` outputs when `--github-output` is supplied.
+`publish` is create-only. It validates that the supplied tag is annotated, resolves to a commit reachable from `origin/main`, has a successful prerelease NuGet publish run for prerelease tags, has no existing GitHub Release, and contains the versioned release note at the tag commit. The command writes `version`, `tag`, `tag_commit`, `note_path`, `notes_file`, `release_classification`, and `prerelease` outputs when `--github-output` is supplied. `--github-output` must be a file path, not a root directory; in GitHub Actions, pass the `GITHUB_OUTPUT` file supplied by the runner.
 
 ## Stable Release Policy
 
@@ -44,10 +44,11 @@ Stable GitHub Releases are blocked until this repository has a protected stable 
 
 Every failure uses the same envelope:
 
+- `Severity`
 - `Code`
 - `Problem`
 - `Cause`
 - `Fix`
 - `Docs`
 
-Common codes include `release-version-leading-v`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-tag-lightweight`, `release-tag-unreachable-from-main`, and `release-github-release-exists`.
+Common codes include `release-version-leading-v`, `release-version-invalid`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-tag-lightweight`, `release-tag-unreachable-from-main`, `release-github-output-path-invalid`, and `release-github-release-exists`.

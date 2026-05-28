@@ -20,6 +20,11 @@ namespace ForgeTrust.AppSurface.Release;
 /// <summary>
 /// Repository path helper for release-owned files.
 /// </summary>
+/// <remarks>
+/// Paths are rooted under <see cref="RepositoryRoot"/> and accept slash-separated repository-relative inputs.
+/// <see cref="PathFor"/> rejects rooted paths and traversal that would escape the repository. Use <see cref="IsUnderPath"/>
+/// when checking paths that come from command-line input, temporary files, or other untrusted sources.
+/// </remarks>
 internal sealed class ReleaseWorkspace
 {
     /// <summary>
@@ -83,10 +88,11 @@ internal sealed class ReleaseWorkspace
     internal string ReleaseManifestPath(SemVer version) => PathFor($"releases/v{version}.release.json");
 
     /// <summary>
-    /// Resolves a repository-relative path.
+    /// Resolves a repository-relative path and verifies that the result stays inside the repository root.
     /// </summary>
-    /// <param name="relativePath">Repository-relative path using slash separators.</param>
-    /// <returns>Absolute path.</returns>
+    /// <param name="relativePath">Repository-relative path using slash separators and no leading root.</param>
+    /// <returns>Absolute path under <see cref="RepositoryRoot"/>.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="relativePath"/> is rooted or traverses outside the repository.</exception>
     internal string PathFor(string relativePath)
     {
         var normalizedRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
@@ -95,7 +101,13 @@ internal sealed class ReleaseWorkspace
             throw new ArgumentException("Release workspace paths must be repository-relative.", nameof(relativePath));
         }
 
-        return Path.Join(RepositoryRoot, normalizedRelativePath);
+        var resolved = Path.Join(RepositoryRoot, normalizedRelativePath);
+        if (!IsUnderPath(RepositoryRoot, resolved))
+        {
+            throw new ArgumentException("Release workspace paths must resolve within the repository root.", nameof(relativePath));
+        }
+
+        return resolved;
     }
 
     /// <summary>

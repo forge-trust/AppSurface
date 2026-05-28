@@ -18,9 +18,17 @@ using YamlDotNet.Serialization.NamingConventions;
 namespace ForgeTrust.AppSurface.Release;
 
 /// <summary>
-/// Immutable command invocation.
+/// Immutable command invocation for release-owned external processes.
 /// </summary>
-internal sealed record CommandInvocation(string Executable, IReadOnlyList<string> Arguments, string WorkingDirectory);
+/// <param name="Executable">Executable name or absolute path.</param>
+/// <param name="Arguments">Argument list passed without shell evaluation.</param>
+/// <param name="WorkingDirectory">Working directory used for the process.</param>
+/// <param name="Timeout">Optional wall-clock timeout. When omitted, release commands use the default bounded timeout.</param>
+internal sealed record CommandInvocation(
+    string Executable,
+    IReadOnlyList<string> Arguments,
+    string WorkingDirectory,
+    TimeSpan? Timeout = null);
 
 /// <summary>
 /// Captured command result.

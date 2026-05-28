@@ -39,9 +39,14 @@ internal sealed class ReleasePublishing
     /// <summary>
     /// Validates an existing annotated tag and extracts release notes from the tag commit.
     /// </summary>
-    /// <param name="options">Publish command options.</param>
+    /// <param name="options">Publish command options. The version and tag must match, and stable versions are blocked until stable package publishing is protected.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Structured workflow outputs.</returns>
+    /// <returns>Structured workflow outputs for GitHub Release creation.</returns>
+    /// <remarks>
+    /// The publish path is create-only: it verifies annotated tag shape, reachability from <c>origin/main</c>, prerelease package publication,
+    /// absence of an existing GitHub Release, and presence of <c>releases/v{version}.md</c> in the tag commit. The method writes the tag's
+    /// release note to a temporary file so workflows can pass a stable notes path to GitHub's release action.
+    /// </remarks>
     internal async Task<PublishOutputs> PublishAsync(ReleaseOptions options, CancellationToken cancellationToken)
     {
         if (options.Version.IsStable)
@@ -94,8 +99,12 @@ internal sealed class ReleasePublishing
     /// Writes publish outputs to a GitHub Actions output file when requested.
     /// </summary>
     /// <param name="outputs">Publish outputs.</param>
-    /// <param name="options">Release command options.</param>
+    /// <param name="options">Release command options. <see cref="ReleaseOptions.GitHubOutputPath"/> must be a file path, not a root directory.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// Scalar outputs use <c>name=value</c>. Multiline outputs use GitHub's delimiter form. Existing files are appended to match
+    /// <c>GITHUB_OUTPUT</c> behavior.
+    /// </remarks>
     internal async Task WriteOutputsAsync(PublishOutputs outputs, ReleaseOptions options, CancellationToken cancellationToken)
     {
         if (options.GitHubOutputPath is null)
@@ -103,7 +112,18 @@ internal sealed class ReleasePublishing
             return;
         }
 
-        Directory.CreateDirectory(Path.GetDirectoryName(options.GitHubOutputPath)!);
+        var outputDirectory = Path.GetDirectoryName(options.GitHubOutputPath);
+        if (string.IsNullOrEmpty(outputDirectory))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-github-output-path-invalid",
+                "The GitHub output path must be a file path, not a root directory.",
+                $"`--github-output {options.GitHubOutputPath}` does not include a parent directory.",
+                "Pass a file path such as `$GITHUB_OUTPUT` or `artifacts/release-output.txt`.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#publish"));
+        }
+
+        Directory.CreateDirectory(outputDirectory);
         var builder = new StringBuilder();
         AppendOutput(builder, "version", outputs.Version);
         AppendOutput(builder, "tag", outputs.Tag);

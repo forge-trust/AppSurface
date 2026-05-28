@@ -22,11 +22,18 @@ internal static class ChangelogEditor
     /// <summary>
     /// Inserts a tagged changelog section immediately after the current Unreleased heading.
     /// </summary>
-    /// <param name="changelog">Existing changelog content.</param>
-    /// <param name="version">Release version.</param>
-    /// <param name="date">Release date.</param>
-    /// <param name="releasePath">Repository-relative release note path.</param>
-    /// <returns>Updated changelog content.</returns>
+    /// <param name="changelog">Existing changelog content. Canonical input contains a single <c>## Unreleased</c> heading.</param>
+    /// <param name="version">Release version inserted as <c>## {version} - yyyy-MM-dd</c>.</param>
+    /// <param name="date">Release date rendered with invariant <c>yyyy-MM-dd</c> formatting.</param>
+    /// <param name="releasePath">Repository-relative release note path linked from the new section.</param>
+    /// <returns>Updated changelog content with the tagged section inserted or appended.</returns>
+    /// <remarks>
+    /// The algorithm is intentionally text-based to preserve surrounding Markdown. If <c>## Unreleased</c> is missing, the release section
+    /// is appended. If the first-release placeholder follows <c>## Unreleased</c>, that placeholder block is replaced. Otherwise the
+    /// section is inserted before the next <c>## </c> heading. Duplicate release sections are not de-duplicated; callers should run
+    /// readiness checks before calling this method. Malformed heading hierarchies and concurrent changelog edits can therefore produce
+    /// surprising placement, so this helper should only be used on the repository's canonical changelog shape.
+    /// </remarks>
     internal static string RollForward(string changelog, SemVer version, DateOnly date, string releasePath)
     {
         var heading = $"## {version} - {date:yyyy-MM-dd}";

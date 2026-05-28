@@ -37,6 +37,8 @@ internal interface ICommandRunner
 [ExcludeFromCodeCoverage(Justification = "Process execution is covered through injected command runners so tests do not depend on local git or gh state.")]
 internal sealed class ProcessCommandRunner : ICommandRunner
 {
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(2);
+
     /// <inheritdoc />
     public async Task<CommandResult> RunAsync(CommandInvocation invocation, CancellationToken cancellationToken)
     {
@@ -54,10 +56,58 @@ internal sealed class ProcessCommandRunner : ICommandRunner
 
         using var process = new Process { StartInfo = startInfo };
         process.Start();
-        var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(invocation.Timeout ?? DefaultTimeout);
+        var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            TryKill(process);
+            throw;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            TryKill(process);
+            var capturedError = await ReadCompletedOutputAsync(stderr);
+            var timeoutError = $"Command timed out after {(invocation.Timeout ?? DefaultTimeout).TotalSeconds:0} seconds: {invocation.Executable}";
+            return new CommandResult(
+                124,
+                await ReadCompletedOutputAsync(stdout),
+                string.IsNullOrWhiteSpace(capturedError) ? timeoutError : capturedError + Environment.NewLine + timeoutError);
+        }
+
+        timeout.CancelAfter(Timeout.InfiniteTimeSpan);
         return new CommandResult(process.ExitCode, await stdout, await stderr);
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private static async Task<string> ReadCompletedOutputAsync(Task<string> output)
+    {
+        try
+        {
+            return await output;
+        }
+        catch (OperationCanceledException)
+        {
+            return "";
+        }
     }
 }
 

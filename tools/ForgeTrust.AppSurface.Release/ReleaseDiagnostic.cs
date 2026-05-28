@@ -51,6 +51,7 @@ internal sealed record ReleaseDiagnostic(
     internal string Render()
     {
         return $"""
+            Severity: {Severity}
             Code: {Code}
             Problem: {Problem}
             Cause: {Cause}

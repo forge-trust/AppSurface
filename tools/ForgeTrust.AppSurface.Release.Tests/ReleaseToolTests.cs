@@ -83,6 +83,11 @@ public sealed class ReleaseToolTests : IDisposable
         var invalidVersion = await RunAsync(["check", "--version", "01.0.0"], new FakeCommandRunner());
         Assert.Equal(1, invalidVersion.ExitCode);
         Assert.Contains("Code: release-version-invalid", invalidVersion.Stderr, StringComparison.Ordinal);
+        Assert.Contains("Severity: error", invalidVersion.Stderr, StringComparison.Ordinal);
+
+        var overflowingVersion = await RunAsync(["check", "--version", "999999999999999999.0.0"], new FakeCommandRunner());
+        Assert.Equal(1, overflowingVersion.ExitCode);
+        Assert.Contains("Code: release-version-invalid", overflowingVersion.Stderr, StringComparison.Ordinal);
 
         var missingTag = await RunAsync(["publish", "--version", "0.1.0-preview.1"], new FakeCommandRunner());
         Assert.Equal(1, missingTag.ExitCode);
@@ -541,7 +546,7 @@ public sealed class ReleaseToolTests : IDisposable
                 publish_decision: publish
             """,
             "releases/v0.1.0-preview.1.md");
-        Assert.EndsWith("    release_notes_path: releases/v0.1.0-preview.1.md" + Environment.NewLine, packageIndexWithoutOrder, StringComparison.Ordinal);
+        Assert.EndsWith("    release_notes_path: releases/v0.1.0-preview.1.md\n", packageIndexWithoutOrder, StringComparison.Ordinal);
 
         var placeholderWithFollowingRelease = ChangelogEditor.RollForward(
             """
@@ -590,6 +595,28 @@ public sealed class ReleaseToolTests : IDisposable
         var exception = Assert.Throws<ArgumentException>(() => workspace.PathFor(Path.GetTempPath()));
 
         Assert.Equal("relativePath", exception.ParamName);
+    }
+
+    [Fact]
+    public void WorkspaceRejectsTraversalRepositoryRelativePaths()
+    {
+        var workspace = new ReleaseWorkspace(_repositoryRoot);
+
+        var exception = Assert.Throws<ArgumentException>(() => workspace.PathFor("../outside.md"));
+
+        Assert.Equal("relativePath", exception.ParamName);
+    }
+
+    [Fact]
+    public async Task ProcessCommandRunnerTimesOutStuckCommands()
+    {
+        var runner = new ProcessCommandRunner();
+        var invocation = CreateSlowCommandInvocation();
+
+        var result = await runner.RunAsync(invocation, CancellationToken.None);
+
+        Assert.Equal(124, result.ExitCode);
+        Assert.Contains("timed out", result.StandardError, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -686,6 +713,36 @@ public sealed class ReleaseToolTests : IDisposable
         var output = await File.ReadAllTextAsync(githubOutput);
         Assert.Contains("notes_file<<EOF_", output, StringComparison.Ordinal);
         Assert.Contains("first\nsecond", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishRejectsGithubOutputRootPath()
+    {
+        var publishing = new ReleasePublishing(new ReleaseWorkspace(_repositoryRoot), new FakeCommandRunner());
+        var options = new ReleaseOptions(
+            "publish",
+            _repositoryRoot,
+            SemVer.Parse("0.1.0-preview.1"),
+            "v0.1.0-preview.1",
+            Date: null,
+            DryRun: true,
+            ReportPath: null,
+            GitHubOutputPath: Path.GetPathRoot(_repositoryRoot),
+            FailOnWarnings: false,
+            AllowExistingTargets: false);
+        var outputs = new PublishOutputs(
+            "0.1.0-preview.1",
+            "v0.1.0-preview.1",
+            "abc123",
+            "releases/v0.1.0-preview.1.md",
+            "notes.md",
+            "prerelease",
+            Prerelease: true,
+            DryRun: true);
+
+        var exception = await Assert.ThrowsAsync<ReleaseToolException>(() => publishing.WriteOutputsAsync(outputs, options, CancellationToken.None));
+
+        Assert.Equal("release-github-output-path-invalid", exception.Diagnostic.Code);
     }
 
     public void Dispose()
@@ -800,6 +857,24 @@ public sealed class ReleaseToolTests : IDisposable
             _repositoryRoot,
             commandRunner: runner);
         return new CliResult(exitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    private CommandInvocation CreateSlowCommandInvocation()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return new CommandInvocation(
+                "cmd.exe",
+                ["/c", "ping -n 6 127.0.0.1 > nul"],
+                _repositoryRoot,
+                TimeSpan.FromMilliseconds(50));
+        }
+
+        return new CommandInvocation(
+            "/bin/sh",
+            ["-c", "sleep 5"],
+            _repositoryRoot,
+            TimeSpan.FromMilliseconds(50));
     }
 
     private static FakeCommandRunner CreateSuccessfulPublishRunner()

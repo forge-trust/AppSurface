@@ -42,9 +42,16 @@ internal sealed class ReleasePreparation
     /// <summary>
     /// Generates release files or, in dry-run mode, returns the planned edits.
     /// </summary>
-    /// <param name="options">Release command options.</param>
+    /// <param name="options">Release command options. Date defaults to the injected clock when omitted.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Preparation result.</returns>
+    /// <returns>Preparation result containing readiness diagnostics and planned or written repository-relative paths.</returns>
+    /// <remarks>
+    /// Preparation is a deterministic repository-file rewrite: it runs readiness checks, reads the unreleased note and sidecar,
+    /// builds versioned release artifacts, rolls <c>CHANGELOG.md</c>, updates public published package note paths, resets unreleased
+    /// files, and records diagnostics in the release manifest. Dry-run mode performs all reads and rendering but does not write files.
+    /// The method does not create git branches, tags, commits, package artifacts, or GitHub Releases; workflows own those operations.
+    /// Callers should treat any readiness errors as blocking and should avoid running against a dirty or concurrently modified tree.
+    /// </remarks>
     internal async Task<ReleasePreparationResult> PrepareAsync(ReleaseOptions options, CancellationToken cancellationToken)
     {
         var check = await _checker.CheckAsync(options, cancellationToken);

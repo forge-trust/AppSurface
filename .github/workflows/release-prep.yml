@@ -63,13 +63,15 @@ jobs:
             10.0.x
 
       - name: Verify base is current
+        env:
+          BASE_REF: ${{ inputs.base-ref }}
         run: |
           set -euo pipefail
-          git fetch origin main
-          expected_main="$(git rev-parse origin/main)"
+          git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          expected_base="$(git rev-parse "origin/${BASE_REF}")"
           actual_head="$(git rev-parse HEAD)"
-          if [[ "${actual_head}" != "${expected_main}" ]]; then
-            echo "Release prep must run from the current origin/main commit. HEAD=${actual_head}; origin/main=${expected_main}." >&2
+          if [[ "${actual_head}" != "${expected_base}" ]]; then
+            echo "Release prep must run from the current origin/${BASE_REF} commit. HEAD=${actual_head}; origin/${BASE_REF}=${expected_base}." >&2
             exit 1
           fi
 
@@ -88,6 +90,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
           VERSION: ${{ inputs.version }}
+          BASE_REF: ${{ inputs.base-ref }}
         run: |
           set -euo pipefail
           branch="release/v${VERSION}"
@@ -102,7 +105,7 @@ jobs:
             gh pr edit "${existing_pr}" --title "chore(release): prepare v${VERSION}" --body-file "${RUNNER_TEMP}/release-prep-report.md"
           else
             gh pr create \
-              --base main \
+              --base "${BASE_REF}" \
               --head "${branch}" \
               --title "chore(release): prepare v${VERSION}" \
               --body-file "${RUNNER_TEMP}/release-prep-report.md"

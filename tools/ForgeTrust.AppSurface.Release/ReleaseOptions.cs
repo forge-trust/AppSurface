@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -75,10 +76,22 @@ internal sealed partial record SemVer(int Major, int Minor, int Patch, string? P
                 "tools/ForgeTrust.AppSurface.Release/README.md#quickstart"));
         }
 
+        if (!TryParseComponent(match.Groups["major"].Value, out var major)
+            || !TryParseComponent(match.Groups["minor"].Value, out var minor)
+            || !TryParseComponent(match.Groups["patch"].Value, out var patch))
+        {
+            throw new ReleaseToolException(ReleaseDiagnostic.Error(
+                "release-version-invalid",
+                $"Release version '{value}' is not valid SemVer 2.0.",
+                "One or more numeric version components exceed the supported integer range.",
+                "Use practical SemVer components such as `0.1.0` or `0.1.0-preview.1`.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#quickstart"));
+        }
+
         return new SemVer(
-            int.Parse(match.Groups["major"].Value),
-            int.Parse(match.Groups["minor"].Value),
-            int.Parse(match.Groups["patch"].Value),
+            major,
+            minor,
+            patch,
             match.Groups["pre"].Success ? match.Groups["pre"].Value : null);
     }
 
@@ -92,4 +105,9 @@ internal sealed partial record SemVer(int Major, int Minor, int Patch, string? P
 
     [GeneratedRegex(@"^(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)(?:-(?<pre>(?:0|[1-9A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9A-Za-z-][0-9A-Za-z-]*))*))?$", RegexOptions.CultureInvariant)]
     private static partial Regex SemVerRegex();
+
+    private static bool TryParseComponent(string value, out int component)
+    {
+        return int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out component);
+    }
 }

@@ -117,6 +117,7 @@ internal sealed class ReleaseChecker
         if (File.Exists(_workspace.UnreleasedPath))
         {
             var unreleased = await File.ReadAllTextAsync(_workspace.UnreleasedPath, cancellationToken);
+            // Validate Markdown syntax; the syntax tree is intentionally discarded.
             Markdown.Parse(unreleased);
             AddNarrativeWarnings(unreleased, warnings);
         }

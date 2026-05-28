@@ -22,10 +22,17 @@ internal static class ReleaseNoteBuilder
     /// <summary>
     /// Converts the living unreleased note into a tagged release note.
     /// </summary>
-    /// <param name="version">Release version.</param>
-    /// <param name="date">Release date.</param>
-    /// <param name="unreleased">Unreleased Markdown content.</param>
-    /// <returns>Tagged release Markdown.</returns>
+    /// <param name="version">Release version rendered in the heading and generated comment.</param>
+    /// <param name="date">Release date rendered with invariant <c>yyyy-MM-dd</c> formatting.</param>
+    /// <param name="unreleased">Unreleased Markdown content. Canonical input starts with an exact <c># Unreleased</c> heading.</param>
+    /// <returns>Tagged release Markdown with a generated comment header and a trailing newline.</returns>
+    /// <remarks>
+    /// The method first parses Markdown to catch syntax problems, but it does not use the returned syntax tree to rewrite content.
+    /// It then replaces only the exact top-level <c># Unreleased</c> heading and two known narrative phrases using ordinal matching.
+    /// Variants in casing or wording are left unchanged. Output is deterministic apart from the supplied version and date, uses
+    /// <see cref="Environment.NewLine"/> for generated sections, and trims trailing whitespace from the source body. Callers should run
+    /// release readiness checks first because duplicate headings, missing phrases, or concurrently edited Markdown are not treated as errors.
+    /// </remarks>
     internal static string Build(SemVer version, DateOnly date, string unreleased)
     {
         Markdown.Parse(unreleased);
@@ -48,7 +55,11 @@ internal static class ReleaseNoteBuilder
     /// Creates the next-cycle unreleased proof artifact.
     /// </summary>
     /// <param name="previousVersion">Version that just moved into tagged release files.</param>
-    /// <returns>Reset unreleased Markdown.</returns>
+    /// <returns>Canonical unreleased Markdown for the next cycle, including the previous version reference and a trailing newline.</returns>
+    /// <remarks>
+    /// This reset intentionally discards the prior living-release body after it has been copied into a tagged release note. It preserves
+    /// the expected section order for future checks: overview, shaping work, included changes, and migration watch.
+    /// </remarks>
     internal static string ResetUnreleased(SemVer previousVersion)
     {
         return $"""
