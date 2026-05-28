@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using CliWrap;
 using CliWrap.Buffered;
+using ForgeTrust.AppSurface.Web.Tailwind.Internal;
 using ForgeTrust.AppSurface.Web.Tailwind.Tasks;
 using Microsoft.Build.Framework;
 
@@ -388,6 +389,123 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenRidCannotBeDetermined()
+    {
+        var task = CreateBuildTask("sample-unknown-rid", task =>
+        {
+            task.TailwindTargetRid = "unknown";
+            task.TailwindVersion = "4.1.18";
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW001", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenRidIsUnsupported()
+    {
+        var task = CreateBuildTask("sample-unsupported-rid", task =>
+        {
+            task.TailwindTargetRid = "plan9-x64";
+            task.TailwindVersion = "4.1.18";
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(
+            buildEngine.Errors,
+            error => error.Message?.Contains("Tailwind RID 'plan9-x64' is not supported", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenTailwindVersionIsMissing()
+    {
+        var task = CreateBuildTask("sample-missing-version", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = null;
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW002", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenPackagedRuntimeIsMissing()
+    {
+        var task = CreateBuildTask("sample-missing-runtime", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = "4.1.18";
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_UsesProjectRuntimeCandidate_WhenPresent()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var task = CreateBuildTask("sample-project-runtime", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = "4.1.18";
+        });
+        var runtimePath = await CreateProjectRuntimeTailwindCliStubAsync(task.ProjectDirectory);
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.True(result);
+        Assert.True(File.Exists(Path.Combine(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Empty(buildEngine.Errors);
+        Assert.Empty(buildEngine.Warnings);
+        Assert.Contains(buildEngine.Messages, message => message.Importance == MessageImportance.Low && message.Message == " ");
+        Assert.Contains(buildEngine.Messages, message => message.Importance == MessageImportance.Normal && message.Message == "≈ tailwindcss v4.1.18");
+        Assert.Contains(buildEngine.Messages, message => message.Message == $"{runtimePath}: {runtimePath}");
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_FailsWithDiagnostic_WhenCliExitsNonZeroWithoutCapturedOutput()
+    {
+        var projectDirectory = Path.Combine(_tempRoot, "sample-nonzero-empty-output");
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(Path.Combine(projectDirectory, "tools"));
+        var markerPath = Path.Combine(projectDirectory, "tailwind-cli-executed.marker");
+        var cliRelativePath = await CreateTailwindCliStubAsync(projectDirectory, markerPath, exitCode: 7);
+        var task = CreateBuildTask("sample-nonzero-empty-output", task =>
+        {
+            task.TailwindCliPath = cliRelativePath;
+            task.TailwindVersion = "4.1.18";
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        var error = Assert.Single(buildEngine.Errors);
+        Assert.Contains("ASTW006", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Captured stdout tail:", error.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(markerPath));
+    }
+
+    [Fact]
     public async Task PackedPackageConsumption_BuildAndPublish_LoadsTaskAndGeneratesStaticWebAsset()
     {
         var feedDirectory = Path.Combine(_tempRoot, "feed");
@@ -595,6 +713,57 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             .Replace(">", "&gt;", StringComparison.Ordinal);
     }
 
+    private RunTailwindBuildTask CreateBuildTask(string directoryName, Action<RunTailwindBuildTask>? configure = null)
+    {
+        var projectDirectory = Path.Combine(_tempRoot, directoryName);
+        Directory.CreateDirectory(projectDirectory);
+        var task = new RunTailwindBuildTask
+        {
+            BuildEngine = new RecordingBuildEngine(),
+            ProjectDirectory = projectDirectory,
+            InputPath = "wwwroot/css/app.css",
+            OutputPath = "wwwroot/css/site.gen.css",
+            TargetsDirectory = projectDirectory,
+            Configuration = CurrentConfiguration,
+            TargetFramework = "net10.0"
+        };
+        configure?.Invoke(task);
+        return task;
+    }
+
+    private static async Task<string> CreateProjectRuntimeTailwindCliStubAsync(string projectDirectory)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            throw new PlatformNotSupportedException("The project-runtime stub test writes a Unix executable script.");
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var runtimePath = Path.Combine(projectDirectory, "runtimes", rid, "native", runtimeBinaryName);
+        Directory.CreateDirectory(Path.GetDirectoryName(runtimePath)!);
+        await File.WriteAllTextAsync(
+            runtimePath,
+            $@"#!/bin/sh
+mkdir -p ""{Path.Combine(projectDirectory, "wwwroot", "css")}""
+cat <<'EOF' > ""{Path.Combine(projectDirectory, "wwwroot", "css", "site.gen.css")}""
+.generated{{color:red;}}
+EOF
+printf ' \n' >&2
+printf '≈ tailwindcss v4.1.18\n' >&2
+printf '%s\n' ""{runtimePath}""
+exit 0
+");
+
+        const UnixFileMode executableMode =
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+        File.SetUnixFileMode(runtimePath, executableMode);
+        return runtimePath;
+    }
+
     private static async Task<string> CreateTailwindCliStubAsync(
         string projectDirectory,
         string markerPath,
@@ -778,6 +947,8 @@ exit 0
 
         public List<BuildWarningEventArgs> Warnings { get; } = [];
 
+        public List<BuildMessageEventArgs> Messages { get; } = [];
+
         public bool ContinueOnError => false;
 
         public int LineNumberOfTaskNode => 0;
@@ -798,6 +969,7 @@ exit 0
 
         public void LogMessageEvent(BuildMessageEventArgs e)
         {
+            Messages.Add(e);
         }
 
         public void LogCustomEvent(CustomBuildEventArgs e)
