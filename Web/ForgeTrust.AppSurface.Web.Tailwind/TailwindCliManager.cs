@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using ForgeTrust.AppSurface.Web.Tailwind.Internal;
 using Microsoft.Extensions.Logging;
 
 [assembly: InternalsVisibleTo("ForgeTrust.AppSurface.Web.Tailwind.Tests")]
@@ -20,7 +21,7 @@ public class TailwindCliManager
     internal sealed record TailwindCliInvocation(string FileName, IReadOnlyList<string> Arguments);
 
     private readonly ILogger<TailwindCliManager> _logger;
-    private readonly string _binaryName = GetBinaryName();
+    private readonly string _binaryName = TailwindRuntimeMap.GetLocalBinaryName(IsCurrentOsPlatform);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TailwindCliManager"/> class.
@@ -151,28 +152,8 @@ public class TailwindCliManager
     /// </remarks>
     internal static TailwindCliInvocation BuildInvocation(string tailwindPath, IReadOnlyList<string> tailwindArgs)
     {
-        if (!IsCurrentOsPlatform(OSPlatform.Windows))
-        {
-            return new TailwindCliInvocation(tailwindPath, tailwindArgs);
-        }
-
-        var extension = Path.GetExtension(tailwindPath);
-        if (string.Equals(extension, ".cmd", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(extension, ".bat", StringComparison.OrdinalIgnoreCase))
-        {
-            return new TailwindCliInvocation(
-                "cmd.exe",
-                CreateInvocationArguments("/d", "/c", tailwindPath, tailwindArgs));
-        }
-
-        if (string.Equals(extension, ".ps1", StringComparison.OrdinalIgnoreCase))
-        {
-            return new TailwindCliInvocation(
-                "powershell.exe",
-                CreateInvocationArguments("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tailwindPath, tailwindArgs));
-        }
-
-        return new TailwindCliInvocation(tailwindPath, tailwindArgs);
+        var invocation = TailwindInvocationBuilder.Build(tailwindPath, tailwindArgs, IsCurrentOsPlatform);
+        return new TailwindCliInvocation(invocation.FileName, invocation.Arguments);
     }
 
     /// <summary>
@@ -188,24 +169,7 @@ public class TailwindCliManager
     /// </remarks>
     public static string GetCurrentRid()
     {
-        var processArchitecture = ProcessArchitectureOverride?.Invoke() ?? RuntimeInformation.ProcessArchitecture;
-
-        if (IsCurrentOsPlatform(OSPlatform.Windows))
-        {
-            return ResolveRid(OSPlatform.Windows, processArchitecture);
-        }
-
-        if (IsCurrentOsPlatform(OSPlatform.Linux))
-        {
-            return ResolveRid(OSPlatform.Linux, processArchitecture);
-        }
-
-        if (IsCurrentOsPlatform(OSPlatform.OSX))
-        {
-            return ResolveRid(OSPlatform.OSX, processArchitecture);
-        }
-
-        return "unknown";
+        return TailwindRuntimeMap.GetCurrentRid(IsCurrentOsPlatform, ProcessArchitectureOverride);
     }
 
     /// <summary>
@@ -220,38 +184,7 @@ public class TailwindCliManager
     /// </remarks>
     internal static string ResolveRid(OSPlatform osPlatform, Architecture architecture)
     {
-        if (osPlatform == OSPlatform.Windows)
-        {
-            return architecture switch
-            {
-                Architecture.X64 => "win-x64",
-                // Tailwind v4.1.18 ships only a Windows x64 standalone binary.
-                Architecture.Arm64 => "win-x64",
-                _ => "unknown"
-            };
-        }
-
-        if (osPlatform == OSPlatform.Linux)
-        {
-            return architecture switch
-            {
-                Architecture.X64 => "linux-x64",
-                Architecture.Arm64 => "linux-arm64",
-                _ => "unknown"
-            };
-        }
-
-        if (osPlatform == OSPlatform.OSX)
-        {
-            return architecture switch
-            {
-                Architecture.X64 => "osx-x64",
-                Architecture.Arm64 => "osx-arm64",
-                _ => "unknown"
-            };
-        }
-
-        return "unknown";
+        return TailwindRuntimeMap.ResolveRid(osPlatform, architecture);
     }
 
     private static string? GetDevRuntimeProjectPath(string sourceDir, string rid)
@@ -265,15 +198,7 @@ public class TailwindCliManager
             return null;
         }
 
-        var binaryName = rid switch
-        {
-            "win-x64" => "tailwindcss-windows-x64.exe",
-            "osx-arm64" => "tailwindcss-macos-arm64",
-            "osx-x64" => "tailwindcss-macos-x64",
-            "linux-arm64" => "tailwindcss-linux-arm64",
-            "linux-x64" => "tailwindcss-linux-x64",
-            _ => null
-        };
+        var binaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid);
 
         if (string.IsNullOrEmpty(binaryName))
         {
@@ -282,7 +207,7 @@ public class TailwindCliManager
 
         foreach (var candidateRoot in EnumerateSelfAndAncestors(binDir.Parent))
         {
-            var candidatePath = Path.Combine(
+            var runtimeProjectDir = Path.Combine(
                 candidateRoot,
                 "Web",
                 "ForgeTrust.AppSurface.Web.Tailwind",
@@ -290,12 +215,26 @@ public class TailwindCliManager
                 "obj",
                 $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{rid}",
                 configurationDir.Name,
-                targetFramework,
-                binaryName);
+                targetFramework);
 
+            var candidatePath = Path.Combine(runtimeProjectDir, binaryName);
             if (File.Exists(candidatePath))
             {
                 return candidatePath;
+            }
+
+            if (!Directory.Exists(runtimeProjectDir))
+            {
+                continue;
+            }
+
+            foreach (var versionedDirectory in Directory.EnumerateDirectories(runtimeProjectDir, "tailwind-*"))
+            {
+                candidatePath = Path.Combine(versionedDirectory, binaryName);
+                if (File.Exists(candidatePath))
+                {
+                    return candidatePath;
+                }
             }
         }
 
@@ -305,11 +244,6 @@ public class TailwindCliManager
     private static bool IsCurrentOsPlatform(OSPlatform platform)
     {
         return IsOSPlatformOverride?.Invoke(platform) ?? RuntimeInformation.IsOSPlatform(platform);
-    }
-
-    private static string GetBinaryName()
-    {
-        return IsCurrentOsPlatform(OSPlatform.Windows) ? "tailwindcss.exe" : "tailwindcss";
     }
 
     private static IEnumerable<string> EnumerateSelfAndAncestors(DirectoryInfo? startDirectory)
@@ -344,44 +278,6 @@ public class TailwindCliManager
         }
 
         return false;
-    }
-
-    private static IReadOnlyList<string> CreateInvocationArguments(
-        string firstArg,
-        string secondArg,
-        string thirdArg,
-        IReadOnlyList<string> tailwindArgs)
-    {
-        var arguments = new List<string>(tailwindArgs.Count + 3)
-        {
-            firstArg,
-            secondArg,
-            thirdArg
-        };
-        arguments.AddRange(tailwindArgs);
-        return arguments;
-    }
-
-    private static IReadOnlyList<string> CreateInvocationArguments(
-        string firstArg,
-        string secondArg,
-        string thirdArg,
-        string fourthArg,
-        string fifthArg,
-        string sixthArg,
-        IReadOnlyList<string> tailwindArgs)
-    {
-        var arguments = new List<string>(tailwindArgs.Count + 6)
-        {
-            firstArg,
-            secondArg,
-            thirdArg,
-            fourthArg,
-            fifthArg,
-            sixthArg
-        };
-        arguments.AddRange(tailwindArgs);
-        return arguments;
     }
 
     private static IEnumerable<string> EnumeratePathSearchNames(string fileName)

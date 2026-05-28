@@ -190,6 +190,65 @@ public class TailwindCliManagerTests : IDisposable
         Assert.Equal(expectedPath, result);
     }
 
+    [Fact]
+    public void GetTailwindPath_ReturnsVersionedDevelopmentRuntimeProjectPath_IfFound()
+    {
+        var baseDir = Path.Combine(_tempPath, "examples", "sample-app", "bin", "Debug", "net10.0");
+        var assemblyDir = Path.Combine(baseDir, "assembly-shadow");
+        Directory.CreateDirectory(baseDir);
+        _manager.BaseDirectoryOverride = baseDir;
+        _manager.AssemblyDirectoryOverride = assemblyDir;
+
+        var runtimeProjectDir = Path.Combine(
+            _tempPath,
+            "Web",
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            "runtimes",
+            "obj",
+            $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{_currentHostRid}",
+            "Debug",
+            "net10.0",
+            "tailwind-4.1.18");
+        Directory.CreateDirectory(runtimeProjectDir);
+        var expectedPath = Path.Combine(runtimeProjectDir, _currentHostRuntimeProjectBinaryName);
+        File.WriteAllText(expectedPath, "dummy");
+
+        var result = _manager.GetTailwindPath();
+
+        Assert.Equal(expectedPath, result);
+    }
+
+    [Fact]
+    public void GetTailwindPath_PrefersLegacyDevelopmentRuntimeProjectPath_WhenBothLegacyAndVersionedExist()
+    {
+        var baseDir = Path.Combine(_tempPath, "examples", "sample-app", "bin", "Debug", "net10.0");
+        var assemblyDir = Path.Combine(baseDir, "assembly-shadow");
+        Directory.CreateDirectory(baseDir);
+        _manager.BaseDirectoryOverride = baseDir;
+        _manager.AssemblyDirectoryOverride = assemblyDir;
+
+        var runtimeProjectDir = Path.Combine(
+            _tempPath,
+            "Web",
+            "ForgeTrust.AppSurface.Web.Tailwind",
+            "runtimes",
+            "obj",
+            $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{_currentHostRid}",
+            "Debug",
+            "net10.0");
+        Directory.CreateDirectory(runtimeProjectDir);
+        var expectedPath = Path.Combine(runtimeProjectDir, _currentHostRuntimeProjectBinaryName);
+        File.WriteAllText(expectedPath, "legacy");
+
+        var versionedDir = Path.Combine(runtimeProjectDir, "tailwind-4.1.18");
+        Directory.CreateDirectory(versionedDir);
+        File.WriteAllText(Path.Combine(versionedDir, _currentHostRuntimeProjectBinaryName), "versioned");
+
+        var result = _manager.GetTailwindPath();
+
+        Assert.Equal(expectedPath, result);
+    }
+
     [Theory]
     [MemberData(nameof(DevelopmentRuntimeRidCases))]
     public void GetTailwindPath_ReturnsDevelopmentRuntimeProjectPath_ForSupportedRidOverride(string rid, string binaryName)
@@ -339,6 +398,20 @@ public class TailwindCliManagerTests : IDisposable
 
         Assert.Equal("cmd.exe", invocation.FileName);
         Assert.Equal(["/d", "/c", @"C:\tools\tailwindcss.cmd", "-i", "app.css", "-o", "site.css"], invocation.Arguments);
+    }
+
+    [Fact]
+    public void BuildInvocation_PreservesWindowsShimPathAsSingleArgument_WhenPathContainsSpacesAndMetacharacters()
+    {
+        TailwindCliManager.IsOSPlatformOverride = platform => platform == OSPlatform.Windows;
+        const string shimPath = @"C:\tools with spaces\bin & shims\tailwindcss.cmd";
+
+        var invocation = TailwindCliManager.BuildInvocation(
+            shimPath,
+            ["-i", "input file.css", "-o", "site file.css"]);
+
+        Assert.Equal("cmd.exe", invocation.FileName);
+        Assert.Equal(["/d", "/c", shimPath, "-i", "input file.css", "-o", "site file.css"], invocation.Arguments);
     }
 
     [Fact]

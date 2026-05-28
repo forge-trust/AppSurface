@@ -92,6 +92,24 @@ public class TailwindWatchServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_UsesConfiguredCliPath_WhenProvided()
+    {
+        var cliPath = Path.Combine(TestContentRoot, "tools", RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "tailwindcss.exe" : "tailwindcss");
+        Directory.CreateDirectory(Path.GetDirectoryName(cliPath)!);
+        await File.WriteAllTextAsync(cliPath, "stub");
+        _tailwindOptions.CliPath = Path.Combine("tools", Path.GetFileName(cliPath));
+
+        var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
+        service.ResultToReturn = new CommandResult(0, "", "");
+
+        await service.ExecuteAsyncPublic(CancellationToken.None);
+
+        Assert.True(service.ProcessExecuted);
+        Assert.Equal(cliPath, service.ExecutedFileName);
+        A.CallTo(() => _cliManager.GetTailwindPath()).MustNotHaveHappened();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_LogsError_OnNonZeroExitCode()
     {
         // Arrange
@@ -307,9 +325,10 @@ public class TailwindWatchServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteTailwindProcessAsync_ReturnsCommandResult()
+    public async Task ExecuteTailwindProcessAsync_StreamsOutputWithoutCapturingWatchBuffer()
     {
-        var service = new TailwindWatchService(_cliManager, _options, _logger, _environment);
+        var logger = new ListLogger<TailwindWatchService>();
+        var service = new TailwindWatchService(_cliManager, _options, logger, _environment);
         var (fileName, args) = CreateShellCommand(
             "(echo watch-out) & (echo watch-err 1>&2) & exit /b 2",
             "printf 'watch-out\\n'; printf 'watch-err\\n' >&2; exit 2");
@@ -321,8 +340,10 @@ public class TailwindWatchServiceTests : IDisposable
             CancellationToken.None);
 
         Assert.Equal(2, result.ExitCode);
-        Assert.Contains("watch-out", result.Stdout);
-        Assert.Contains("watch-err", result.Stderr);
+        Assert.Equal(string.Empty, result.Stdout);
+        Assert.Equal(string.Empty, result.Stderr);
+        Assert.Contains(logger.Messages, entry => entry.Message.Contains("watch-out", StringComparison.Ordinal));
+        Assert.Contains(logger.Messages, entry => entry.Message.Contains("watch-err", StringComparison.Ordinal));
     }
 
     [Fact]
