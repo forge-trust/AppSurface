@@ -284,6 +284,20 @@ public sealed class ReleaseToolTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckWarnsWhenPrereleaseLabelCannotTriggerProtectedPublishing()
+    {
+        await SeedRepositoryAsync();
+
+        var result = await RunAsync(
+            ["check", "--version", "0.1.0-foo.1"],
+            FakeCommandRunner.WithSourceCommit("abc123"));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("release-prerelease-label-unprotected", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("will not trigger protected NuGet prerelease publishing", result.Stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CheckReportsTargetAndNarrativeWarningsWithoutFailingByDefault()
     {
         await SeedRepositoryAsync();

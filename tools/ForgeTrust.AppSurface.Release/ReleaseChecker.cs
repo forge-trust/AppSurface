@@ -1,19 +1,4 @@
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Text;
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using CliFx;
-using CliFx.Binding;
-using CliFx.Infrastructure;
-using ForgeTrust.AppSurface.Console;
-using ForgeTrust.AppSurface.Core;
 using Markdig;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using YamlDotNet.Core;
-using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.NamingConventions;
 
 namespace ForgeTrust.AppSurface.Release;
 
@@ -111,6 +96,15 @@ internal sealed class ReleaseChecker
                 "Stable GitHub Release publishing is currently blocked.",
                 "The repository has a protected prerelease NuGet path, but no protected stable NuGet publish workflow yet.",
                 "Ship a prerelease tag such as `0.1.0-preview.1`, or add a reviewed stable package publish path before publishing `v0.1.0`.",
+                "tools/ForgeTrust.AppSurface.Release/README.md#stable-release-policy"));
+        }
+        else if (!options.Version.IsProtectedPrereleaseWorkflowCompatible)
+        {
+            warnings.Add(ReleaseDiagnostic.Warning(
+                "release-prerelease-label-unprotected",
+                "The prerelease version will not trigger protected NuGet prerelease publishing.",
+                "`nuget-prerelease-publish.yml` only runs for tags shaped like `vX.Y.Z-preview.N`, `vX.Y.Z-alpha.N`, `vX.Y.Z-beta.N`, or `vX.Y.Z-rc.N` where `N` is positive.",
+                "Choose a protected prerelease label such as `0.1.0-preview.1`, or update the protected workflow and release checks together.",
                 "tools/ForgeTrust.AppSurface.Release/README.md#stable-release-policy"));
         }
 

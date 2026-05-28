@@ -1,20 +1,3 @@
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Text;
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using CliFx;
-using CliFx.Binding;
-using CliFx.Infrastructure;
-using ForgeTrust.AppSurface.Console;
-using ForgeTrust.AppSurface.Core;
-using Markdig;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using YamlDotNet.Core;
-using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.NamingConventions;
-
 namespace ForgeTrust.AppSurface.Release;
 
 /// <summary>
@@ -51,6 +34,8 @@ internal sealed class ReleasePreparation
     /// files, and records diagnostics in the release manifest. Dry-run mode performs all reads and rendering but does not write files.
     /// The method does not create git branches, tags, commits, package artifacts, or GitHub Releases; workflows own those operations.
     /// Callers should treat any readiness errors as blocking and should avoid running against a dirty or concurrently modified tree.
+    /// Writes are sequential rather than transactional. If the local process fails after some files are written, rerun <c>git status</c>
+    /// and remove or revert the partial generated artifacts before retrying so create-only target checks do not stop the next run.
     /// </remarks>
     internal async Task<ReleasePreparationResult> PrepareAsync(ReleaseOptions options, CancellationToken cancellationToken)
     {

@@ -1,20 +1,5 @@
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
-using CliFx;
-using CliFx.Binding;
-using CliFx.Infrastructure;
-using ForgeTrust.AppSurface.Console;
-using ForgeTrust.AppSurface.Core;
-using Markdig;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using YamlDotNet.Core;
-using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.NamingConventions;
 
 namespace ForgeTrust.AppSurface.Release;
 
@@ -42,6 +27,11 @@ internal sealed partial record SemVer(int Major, int Minor, int Patch, string? P
     /// Gets whether the version is a stable SemVer identity.
     /// </summary>
     internal bool IsStable => Prerelease is null;
+
+    /// <summary>
+    /// Gets whether this prerelease version can trigger the protected prerelease package workflow.
+    /// </summary>
+    internal bool IsProtectedPrereleaseWorkflowCompatible => Prerelease is null || ProtectedPrereleaseWorkflowRegex().IsMatch(Prerelease);
 
     /// <summary>
     /// Gets the annotated git tag expected for this version.
@@ -105,6 +95,9 @@ internal sealed partial record SemVer(int Major, int Minor, int Patch, string? P
 
     [GeneratedRegex(@"^(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)(?:-(?<pre>(?:0|[1-9A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9A-Za-z-][0-9A-Za-z-]*))*))?$", RegexOptions.CultureInvariant)]
     private static partial Regex SemVerRegex();
+
+    [GeneratedRegex(@"^(preview|alpha|beta|rc)\.[1-9][0-9]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex ProtectedPrereleaseWorkflowRegex();
 
     private static bool TryParseComponent(string value, out int component)
     {

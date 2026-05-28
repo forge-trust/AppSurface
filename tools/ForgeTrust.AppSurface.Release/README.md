@@ -19,6 +19,8 @@ Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`
 
 `--fail-on-warnings` and `--allow-existing-targets` are intentionally check-only options. `prepare` and `publish` reject them so a maintainer does not think warning policy or target-collision policy changed for a mutating or publishing command.
 
+For prereleases, `check` warns when the version cannot trigger protected NuGet prerelease publishing. The protected workflow currently accepts `preview`, `alpha`, `beta`, and `rc` labels with a positive numeric suffix, for example `0.1.0-preview.1`.
+
 ## Prepare
 
 `prepare` creates the release PR payload:
@@ -31,6 +33,8 @@ Use `--version` without a leading `v`. Use `--tag v<version>` only for `publish`
 - reset `releases/unreleased.md` and `releases/unreleased.md.yml`
 
 `--dry-run` prints the readiness report and planned file list without changing repository files. `--date` is parsed as invariant `YYYY-MM-DD`; malformed sidecar YAML fails with the standard diagnostic envelope instead of a raw parser exception.
+
+Non-dry-run preparation writes files sequentially. If a local write fails partway through, inspect `git status` and remove or revert the partial generated files before retrying; otherwise the create-only target checks may report `release-target-exists` for the partially written versioned artifacts.
 
 ## Publish
 
@@ -51,4 +55,4 @@ Every failure uses the same envelope:
 - `Fix`
 - `Docs`
 
-Common codes include `release-version-leading-v`, `release-version-invalid`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-tag-lightweight`, `release-tag-unreachable-from-main`, `release-github-output-path-invalid`, and `release-github-release-exists`.
+Common codes include `release-version-leading-v`, `release-version-invalid`, `release-target-exists`, `release-sidecar-invalid`, `release-stable-package-policy-missing`, `release-prerelease-label-unprotected`, `release-tag-lightweight`, `release-tag-unreachable-from-main`, `release-github-output-path-invalid`, and `release-github-release-exists`.
