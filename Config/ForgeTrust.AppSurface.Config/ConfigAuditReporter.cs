@@ -90,7 +90,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
         var entries = _knownEntries.Select(entry => BuildEntry(environment, entry)).ToList();
         var dictionaryKeyCorrelationRequested = _knownEntries.Any(entry =>
-            entry.OptionsSnapshot.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac);
+            GetEffectiveOptions(entry, out _).DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac);
         var diagnostics = BuildReportDiagnostics(environment).ToList();
         RemoveEntryLevelDiagnostics(diagnostics, entries);
         var discoveredKeys = BuildDiscoveredKeys(environment, diagnostics);
@@ -267,10 +267,10 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         var traversalSources = inspection.DefaultSource != null || resolution.AuditSources.Count == 0
             ? sources
             : resolution.AuditSources;
-        var optionsDiagnostics = knownEntry.OptionsSnapshot.Validate(knownEntry.Key);
-        var options = optionsDiagnostics.Count == 0 ? knownEntry.OptionsSnapshot : knownEntry.OptionsSnapshot.Normalize();
-        var correlation = new ConfigAuditDictionaryKeyCorrelator(_correlationOptions)
-            .CreateContext(environment, knownEntry.Key);
+        var options = GetEffectiveOptions(knownEntry, out var optionsDiagnostics);
+        var correlation = options.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
+            ? new ConfigAuditDictionaryKeyCorrelator(_correlationOptions).CreateContext(environment, knownEntry.Key)
+            : ConfigAuditDictionaryKeyCorrelationContext.Unavailable("dictionary key correlation was not requested");
         var traversal = _traverser.BuildChildren(
             ConfigAuditPath.Root(knownEntry.Key),
             rawValue,
@@ -302,6 +302,14 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             Children = traversal.Children,
             Diagnostics = diagnostics
         };
+    }
+
+    private static ConfigAuditEntryOptions GetEffectiveOptions(
+        ConfigAuditKnownEntry knownEntry,
+        out IReadOnlyList<ConfigAuditDiagnostic> diagnostics)
+    {
+        diagnostics = knownEntry.OptionsSnapshot.Validate(knownEntry.Key);
+        return diagnostics.Count == 0 ? knownEntry.OptionsSnapshot : knownEntry.OptionsSnapshot.Normalize();
     }
 
     private ConfigValueResolution Resolve(string environment, ConfigAuditKnownEntry knownEntry)

@@ -621,6 +621,55 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_UsesEffectiveDictionaryKeyCorrelationPolicyForRedactionMetadata()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
+        {
+            options.SecretKey = CorrelationSecretA;
+            options.KeyId = "kid-a";
+            options.ApplicationScope = "app-a";
+        });
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Tenants"] = new Dictionary<string, string>
+                    {
+                        ["tenant-secret-token"] = "alpha-secret-value"
+                    }
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Tenants",
+            options =>
+            {
+                options.TraverseCollectionElements = false;
+                options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+
+        Assert.Empty(entry.Children);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, report.Redaction.DictionaryKeyCorrelationMode);
+        Assert.Null(report.Redaction.DictionaryKeyCorrelationKeyId);
+        Assert.Null(report.Redaction.DictionaryKeyCorrelationApplicationScope);
+        Assert.Contains(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Code == "config-audit-options-invalid"
+                          && diagnostic.Message.Contains(
+                              nameof(ConfigAuditEntryOptions.DictionaryKeyCorrelationMode),
+                              StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Code == "config-audit-key-correlation-unavailable");
+    }
+
+    [Fact]
     public void GetReport_CreatesStableScopedDictionaryKeyCorrelationIds()
     {
         var firstReport = CreateCorrelationReport(
