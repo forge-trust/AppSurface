@@ -191,13 +191,13 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     [Fact]
     public async Task RunTailwindBuild_FailsWithDiagnostic_WhenExplicitCliPathIsMissing()
     {
-        var projectDirectory = Path.Combine(_tempRoot, "sample-missing-cli");
-        Directory.CreateDirectory(Path.Combine(projectDirectory, "wwwroot", "css"));
+        var projectDirectory = Path.Join(_tempRoot, "sample-missing-cli");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
         await File.WriteAllTextAsync(
-            Path.Combine(projectDirectory, "wwwroot", "css", "app.css"),
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
             "@import \"tailwindcss\";" + Environment.NewLine);
 
-        var projectPath = Path.Combine(projectDirectory, "Sample.csproj");
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
         var targetsPath = await CreatePackagedTargetsCopyAsync(projectDirectory);
 
         await File.WriteAllTextAsync(
@@ -226,16 +226,16 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     [Fact]
     public async Task RunTailwindBuild_DoesNotUsePathFallback_WhenBuildCliIsMissing()
     {
-        var projectDirectory = Path.Combine(_tempRoot, "sample-no-path-fallback");
-        Directory.CreateDirectory(Path.Combine(projectDirectory, "wwwroot", "css"));
-        Directory.CreateDirectory(Path.Combine(projectDirectory, "path-bin"));
+        var projectDirectory = Path.Join(Path.GetFullPath(_tempRoot), "sample-no-path-fallback");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        Directory.CreateDirectory(Path.Join(projectDirectory, "path-bin"));
         await File.WriteAllTextAsync(
-            Path.Combine(projectDirectory, "wwwroot", "css", "app.css"),
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
             "@import \"tailwindcss\";" + Environment.NewLine);
 
-        var markerPath = Path.Combine(projectDirectory, "path-cli-executed.marker");
+        var markerPath = Path.Join(projectDirectory, "path-cli-executed.marker");
         await CreateTailwindCliStubAsync(projectDirectory, markerPath, toolDirectoryName: "path-bin");
-        var projectPath = Path.Combine(projectDirectory, "Sample.csproj");
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
         var targetsPath = await CreatePackagedTargetsCopyAsync(projectDirectory);
 
         await File.WriteAllTextAsync(

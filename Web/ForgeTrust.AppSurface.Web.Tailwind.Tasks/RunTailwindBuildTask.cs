@@ -277,6 +277,11 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
             yield break;
         }
 
+        if (!IsRelativePathComponent(rid) || !IsFileName(runtimeBinaryName))
+        {
+            yield break;
+        }
+
         yield return Path.Combine(
             packagesRoot.FullName,
             $"forgetrust.appsurface.web.tailwind.runtime.{rid}",
