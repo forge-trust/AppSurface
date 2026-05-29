@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Xml.Linq;
 using CliWrap;
 using CliWrap.Buffered;
 using ForgeTrust.AppSurface.Web.Tailwind.Internal;
@@ -221,6 +222,23 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("ASTW003", combinedOutput, StringComparison.Ordinal);
         Assert.Contains("TailwindCliPath", combinedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TailwindTargets_GatesUsingTaskOnExistingTaskAssembly()
+    {
+        var document = XDocument.Load(GetTailwindTargetsPath());
+        var usingTask = Assert.Single(
+            document.Descendants("UsingTask"),
+            element =>
+                string.Equals(
+                    element.Attribute("TaskName")?.Value,
+                    "ForgeTrust.AppSurface.Web.Tailwind.Tasks.RunTailwindBuildTask",
+                    StringComparison.Ordinal));
+
+        Assert.Equal(
+            "'$(_TailwindTaskAssembly)' != '' and Exists('$(_TailwindTaskAssembly)')",
+            usingTask.Attribute("Condition")?.Value);
     }
 
     [Fact]

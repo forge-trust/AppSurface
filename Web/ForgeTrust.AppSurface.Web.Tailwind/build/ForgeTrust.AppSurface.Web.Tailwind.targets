@@ -30,7 +30,7 @@
 
   <UsingTask TaskName="ForgeTrust.AppSurface.Web.Tailwind.Tasks.RunTailwindBuildTask"
              AssemblyFile="$(_TailwindTaskAssembly)"
-             Condition="'$(_TailwindTaskAssembly)' != ''" />
+             Condition="'$(_TailwindTaskAssembly)' != '' and Exists('$(_TailwindTaskAssembly)')" />
 
   <ItemGroup Condition="'$(TailwindEnabled)' == 'true' and '$(_TailwindOutputIsWebRootAsset)' == 'true' and ('$(_TailwindUsesSdkDefaultContentItems)' == 'false' or !Exists('$(TailwindOutputPath)'))">
     <!--
