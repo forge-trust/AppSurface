@@ -196,6 +196,7 @@ This is the living release note for the next coordinated AppSurface version afte
 - AppSurface Docs JavaScript public API harvesting now runs by default for policy-approved `.js` files while still publishing only explicit `@public` browser contracts. Hosts can opt out with `AppSurfaceDocs:Harvest:JavaScript:Enabled=false`, narrow scanning with JavaScript include globs, and keep broad discovery best-effort unless `StrictHealth=true` is enabled.
 - AppSurface Docs now dogfoods RazorWire JavaScript API harvesting through `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js` instead of minified runtime output, keeping generated browser assets small while preserving documented globals, events, DOM hooks, CSS hooks, and island module contracts.
 - AppSurface Config audit reports now support opt-in safe collection element traversal with bounded depth, element, and node limits, source-aware array/list provenance, redacted dictionary key labels, element identity metadata, deterministic numeric rendering, and diagnostics for unsupported or truncated traversal.
+- Opted-in configuration audit collection traversal now reports environment-created collection elements when audit provenance can prove the lower-priority element was absent, and reports a separate base-unknown diagnostic when environment variables supplied the final element but provider evidence cannot prove prior presence. The structured report shape is unchanged, while rendered diagnostics now include severity and stable diagnostic codes for searchability.
 
 ### RazorWire form UX
 

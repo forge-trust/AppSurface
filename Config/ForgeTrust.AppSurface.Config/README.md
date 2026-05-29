@@ -354,6 +354,25 @@ display. Dotted, quoted, bracketed, hidden, or sensitive dictionary keys use inh
 exposing a raw key path; for example, keys such as `user.name`, `items[0]`, or `"first name"` inherit the parent source
 because they cannot form an unambiguous raw config path.
 
+When environment variables create or replace indexed collection elements, traversed child entries keep the exact
+environment source and add proof-limited diagnostics. `config-audit-environment-created-element` means the audit could
+prove there was no lower-priority element for that index. `config-audit-environment-element-base-unknown` means the
+environment supplied the final element, but lower-priority provider evidence was pathless, invalid, generic, or otherwise
+unable to prove whether that index already existed.
+
+For example, with traversal enabled for `MyApp.Settings`, `MYAPP__SETTINGS__ENDPOINTS__0=https://one.example` can
+render like this when no lower-priority provider supplied `Endpoints[0]`:
+
+```text
+MyApp.Settings.Endpoints[0] = https://one.example
+  Source: Environment variable MYAPP__SETTINGS__ENDPOINTS__0
+  Diagnostic: [Info] config-audit-environment-created-element: Environment variable created this collection element; audit provenance found no prior element.
+```
+
+The report still follows runtime probing. If indexed environment variables skip `ENDPOINTS__0` and only define
+`ENDPOINTS__1`, the later variable is not reported as created because AppSurface does not bind it as part of the
+runtime collection.
+
 ### Collection Traversal API
 
 `ConfigAuditEntryOptions` is an immutable snapshot that controls collection expansion for one known entry:
@@ -528,6 +547,8 @@ value does not leak.
 | `config-audit-report-node-limit` | Warning | Traversal stopped at `MaxReportNodes` for the entry. |
 | `config-audit-source-inherited` | Info | An element inherited parent provenance because an exact safe source path was unavailable. |
 | `config-audit-source-unavailable` | Info | No provider source record was available for an element. |
+| `config-audit-environment-created-element` | Info | An environment variable supplied a collection element and audit provenance proved no lower-priority element existed for that index. |
+| `config-audit-environment-element-base-unknown` | Info | An environment variable supplied a collection element, but lower-priority provider evidence could not prove whether that index existed. |
 | `config-audit-options-invalid` | Error | Entry options were invalid. Traversal limits use safe bounded defaults; invalid `Sensitivity` values fail closed as `Sensitive`, and invalid or unavailable correlation mode falls back to `None`. |
 | `config-audit-key-correlation-unavailable` | Warning | Dictionary key correlation was requested, but global key material was missing or invalid. |
 
@@ -537,7 +558,9 @@ Existing reports keep the same collection shape unless an entry opts into collec
 `ConfigAuditCollectionTraversalAttribute` or manual `TraverseCollectionElements`. Object child entries, redacted scalar
 display values, provider precedence, and wrapper diagnostics continue to work as before. If a wrapper-discovered key
 and a manual key registration use the same config key, wrapper metadata still wins for type and validation, while
-explicit manual audit option assignments are merged into the selected entry.
+explicit manual audit option assignments are merged into the selected entry. Opted-in traversed collection entries may
+now include additional info diagnostics for environment-created or base-unknown elements. The public report object shape
+is unchanged, but text output now includes diagnostic severity and code so operators can search rendered reports.
 
 Adding `Sensitivity = ConfigAuditSensitivity.Sensitive` is additive API surface, but redaction behavior is intentionally
 broader. New built-in fragments can redact values that previously rendered, and `NonSensitive` is not an opt-out. Review
@@ -567,8 +590,10 @@ release notes for fragment changes when audit output shape matters to operators.
   not public logging, analytics, or user-facing output.
 - Key rotation is explicit: changing the correlation secret or key id breaks historical correlation. V1 does not
   dual-read old keys during a migration window.
-- Element traversal reports existing provider values. Environment-created missing collection elements, global debug
-  expansion, diffing, raw-key drift analysis, and support-bundle export are separate product surfaces.
+- Element traversal can report environment-created collection elements only when runtime-bound environment variables and
+  audit provenance prove the element exists because of the environment override. It does not enumerate orphaned
+  environment variables, sparse indices skipped by runtime probing, global debug expansion, raw-key drift analysis, or
+  support-bundle export.
 - Provider-discovered raw key enumeration is intentionally separate from the first audit surface.
 - File origins include file path and config path. File source locations are optional and only appear when AppSurface can
   map a source record to an exact property token without ambiguity.

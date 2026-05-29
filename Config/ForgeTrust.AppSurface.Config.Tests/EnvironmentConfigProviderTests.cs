@@ -1060,6 +1060,75 @@ public class EnvironmentConfigProviderTests
             .TracePatch("Production", "MyApp.Settings", cyclic, typeof(CyclicOptions));
         Assert.False(cloneFailure.Patched);
         Assert.Contains(cloneFailure.Diagnostics, diagnostic => diagnostic.Code == "config-patch-clone-failed");
+        Assert.Empty(cloneFailure.Facts);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsPerElementPriorPresenceForCollectionReplacement()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        var current = new AppSettings
+        {
+            Endpoints = ["https://file.example"]
+        };
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(AppSettings));
+
+        Assert.True(patch.Patched);
+        var first = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        var second = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1");
+        Assert.Equal(ConfigAuditPriorPresence.Present, first.PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, second.PriorPresence);
+        Assert.Equal(ConfigPatchProvenanceAction.ReplacedCollection, first.Action);
+    }
+
+    [Fact]
+    public void TracePatch_TreatsConstructorDefaultCollectionAsMissingWhenRootWasMissing()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(ConstructorDefaultCollectionOptions));
+
+        Assert.True(patch.Patched);
+        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        Assert.Equal(ConfigAuditPriorPresence.Missing, fact.PriorPresence);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsPerElementPriorPresenceForGetterOnlyCollectionPatch()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        var current = new GetterOnlyAppSettings();
+        current.Endpoints.Add("https://file.example");
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(GetterOnlyAppSettings));
+
+        Assert.True(patch.Patched);
+        Assert.Equal(ConfigPatchProvenanceAction.PatchedExistingCollection, patch.Facts[0].Action);
+        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
     }
 
     private sealed class AppSettings
@@ -1078,6 +1147,11 @@ public class EnvironmentConfigProviderTests
         public DatabaseOptions Database { get; } = new();
 
         public List<string> Endpoints { get; } = [];
+    }
+
+    private sealed class ConstructorDefaultCollectionOptions
+    {
+        public List<string> Endpoints { get; set; } = ["https://constructor.example"];
     }
 
     private interface IConfigPatchContract

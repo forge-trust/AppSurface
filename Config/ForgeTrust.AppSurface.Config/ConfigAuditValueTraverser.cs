@@ -19,19 +19,21 @@ internal sealed class ConfigAuditValueTraverser
         ConfigAuditPath path,
         object? value,
         IReadOnlyList<ConfigAuditSourceRecord> sources,
+        ConfigAuditFactContext factContext,
         ConfigAuditEntryOptions options,
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
         ConfigAuditDictionaryKeyCorrelationContext correlation)
     {
         var budget = options.MaxReportNodes;
-        return BuildChildren(path, value, sources, options, visited, labels, correlation, ref budget);
+        return BuildChildren(path, value, sources, factContext, options, visited, labels, correlation, ref budget);
     }
 
     private ConfigAuditTraversalResult BuildChildren(
         ConfigAuditPath path,
         object? value,
         IReadOnlyList<ConfigAuditSourceRecord> sources,
+        ConfigAuditFactContext factContext,
         ConfigAuditEntryOptions options,
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
@@ -52,22 +54,22 @@ internal sealed class ConfigAuditValueTraverser
         {
             if (value is Array array)
             {
-                return BuildArrayChildren(path, array, sources, options, visited, labels, correlation, ref budget);
+                return BuildArrayChildren(path, array, sources, factContext, options, visited, labels, correlation, ref budget);
             }
 
             if (value is IDictionary dictionary)
             {
-                return BuildDictionaryChildren(path, dictionary, sources, options, visited, labels, correlation, ref budget);
+                return BuildDictionaryChildren(path, dictionary, sources, factContext, options, visited, labels, correlation, ref budget);
             }
 
             if (value is IList list)
             {
-                return BuildListChildren(path, list, sources, options, visited, labels, correlation, ref budget);
+                return BuildListChildren(path, list, sources, factContext, options, visited, labels, correlation, ref budget);
             }
 
             if (TryCreateReadOnlyListAccessor(value, out var readOnlyList))
             {
-                return BuildReadOnlyListChildren(path, readOnlyList, sources, options, visited, labels, correlation, ref budget);
+                return BuildReadOnlyListChildren(path, readOnlyList, sources, factContext, options, visited, labels, correlation, ref budget);
             }
 
             if (value is IEnumerable)
@@ -82,7 +84,7 @@ internal sealed class ConfigAuditValueTraverser
                     : ConfigAuditTraversalResult.Empty;
             }
 
-            return BuildObjectChildren(path, value, sources, options, visited, labels, correlation, ref budget);
+            return BuildObjectChildren(path, value, sources, factContext, options, visited, labels, correlation, ref budget);
         }
         finally
         {
@@ -97,6 +99,7 @@ internal sealed class ConfigAuditValueTraverser
         ConfigAuditPath path,
         Array array,
         IReadOnlyList<ConfigAuditSourceRecord> sources,
+        ConfigAuditFactContext factContext,
         ConfigAuditEntryOptions options,
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
@@ -133,7 +136,7 @@ internal sealed class ConfigAuditValueTraverser
             }
 
             var childPath = path.AppendIndex(i, ConfigAuditElementKind.ArrayItem);
-            entries.Add(BuildChild(childPath, array.GetValue(i), sources, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(childPath, array.GetValue(i), sources, factContext, options, visited, labels, correlation, ref budget));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -143,6 +146,7 @@ internal sealed class ConfigAuditValueTraverser
         ConfigAuditPath path,
         IList list,
         IReadOnlyList<ConfigAuditSourceRecord> sources,
+        ConfigAuditFactContext factContext,
         ConfigAuditEntryOptions options,
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
@@ -169,7 +173,7 @@ internal sealed class ConfigAuditValueTraverser
             }
 
             var childPath = path.AppendIndex(i, ConfigAuditElementKind.ListItem);
-            entries.Add(BuildChild(childPath, list[i], sources, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(childPath, list[i], sources, factContext, options, visited, labels, correlation, ref budget));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -179,6 +183,7 @@ internal sealed class ConfigAuditValueTraverser
         ConfigAuditPath path,
         ReadOnlyListAccessor list,
         IReadOnlyList<ConfigAuditSourceRecord> sources,
+        ConfigAuditFactContext factContext,
         ConfigAuditEntryOptions options,
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
@@ -205,7 +210,7 @@ internal sealed class ConfigAuditValueTraverser
             }
 
             var childPath = path.AppendIndex(i, ConfigAuditElementKind.ListItem);
-            entries.Add(BuildChild(childPath, list.GetValue(i), sources, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(childPath, list.GetValue(i), sources, factContext, options, visited, labels, correlation, ref budget));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -215,6 +220,7 @@ internal sealed class ConfigAuditValueTraverser
         ConfigAuditPath path,
         IDictionary dictionary,
         IReadOnlyList<ConfigAuditSourceRecord> sources,
+        ConfigAuditFactContext factContext,
         ConfigAuditEntryOptions options,
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
@@ -247,7 +253,7 @@ internal sealed class ConfigAuditValueTraverser
             }
 
             var childPath = path.AppendDictionaryKey(item.Key, options, labels, correlation);
-            entries.Add(BuildChild(childPath, item.Value, sources, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(childPath, item.Value, sources, factContext, options, visited, labels, correlation, ref budget));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -257,6 +263,7 @@ internal sealed class ConfigAuditValueTraverser
         ConfigAuditPath path,
         object value,
         IReadOnlyList<ConfigAuditSourceRecord> sources,
+        ConfigAuditFactContext factContext,
         ConfigAuditEntryOptions options,
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
@@ -287,7 +294,7 @@ internal sealed class ConfigAuditValueTraverser
                 break;
             }
 
-            entries.Add(BuildChild(path.AppendMember(property.Name), childValue, sources, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(path.AppendMember(property.Name), childValue, sources, factContext, options, visited, labels, correlation, ref budget));
         }
 
         foreach (var field in value.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public))
@@ -303,7 +310,7 @@ internal sealed class ConfigAuditValueTraverser
                 break;
             }
 
-            entries.Add(BuildChild(path.AppendMember(field.Name), field.GetValue(value), sources, options, visited, labels, correlation, ref budget));
+            entries.Add(BuildChild(path.AppendMember(field.Name), field.GetValue(value), sources, factContext, options, visited, labels, correlation, ref budget));
         }
 
         return new ConfigAuditTraversalResult(entries, diagnostics);
@@ -313,6 +320,7 @@ internal sealed class ConfigAuditValueTraverser
         ConfigAuditPath path,
         object? value,
         IReadOnlyList<ConfigAuditSourceRecord> sources,
+        ConfigAuditFactContext factContext,
         ConfigAuditEntryOptions options,
         HashSet<object> visited,
         ConfigAuditDictionaryLabelSet labels,
@@ -322,8 +330,11 @@ internal sealed class ConfigAuditValueTraverser
         var selectedSources = SelectChildSources(sources, path);
         var redactionSources = path.RequiresInheritedSource ? sources : selectedSources.Sources;
         var redacted = _redactor.FormatValue(path.DisplayPath, value, redactionSources, options.Sensitivity);
-        var traversal = BuildChildren(path, value, sources, options, visited, labels, correlation, ref budget);
-        var diagnostics = selectedSources.Diagnostics.Concat(traversal.Diagnostics).ToList();
+        var traversal = BuildChildren(path, value, sources, factContext, options, visited, labels, correlation, ref budget);
+        var diagnostics = selectedSources.Diagnostics
+            .Concat(CreateProvenanceDiagnostics(path, factContext))
+            .Concat(traversal.Diagnostics)
+            .ToList();
         var state = traversal.Children.Any(ConfigAuditEntryStateHelpers.IsPartiallyResolved)
                     || redactionSources.Any(source => source.Role == ConfigAuditSourceRole.Patch)
             ? ConfigAuditEntryState.PartiallyResolved
@@ -487,6 +498,43 @@ internal sealed class ConfigAuditValueTraverser
             : -1;
     }
 
+    private static IEnumerable<ConfigAuditDiagnostic> CreateProvenanceDiagnostics(
+        ConfigAuditPath path,
+        ConfigAuditFactContext factContext)
+    {
+        if (path.Element?.Index == null)
+        {
+            yield break;
+        }
+
+        foreach (var fact in factContext.GetFacts(path.SourcePath))
+        {
+            if (fact.Source.Kind != ConfigAuditSourceKind.EnvironmentVariable)
+            {
+                continue;
+            }
+
+            if (fact.PriorPresence == ConfigAuditPriorPresence.Missing)
+            {
+                yield return CreateDiagnostic(
+                    path,
+                    "config-audit-environment-created-element",
+                    ConfigAuditDiagnosticSeverity.Info,
+                    "Environment variable created this collection element; audit provenance found no prior element.",
+                    fact.Source);
+            }
+            else if (fact.PriorPresence == ConfigAuditPriorPresence.Unknown)
+            {
+                yield return CreateDiagnostic(
+                    path,
+                    "config-audit-environment-element-base-unknown",
+                    ConfigAuditDiagnosticSeverity.Info,
+                    "Environment variable supplied this collection element; audit provenance could not prove whether a lower-priority element existed.",
+                    fact.Source);
+            }
+        }
+    }
+
     private static ConfigAuditDiagnostic CreateDepthLimitDiagnostic(ConfigAuditPath path) =>
         CreateDiagnostic(
             path,
@@ -501,13 +549,15 @@ internal sealed class ConfigAuditValueTraverser
         ConfigAuditPath path,
         string code,
         ConfigAuditDiagnosticSeverity severity,
-        string message) =>
+        string message,
+        ConfigAuditSourceRecord? source = null) =>
         new()
         {
             Severity = severity,
             Code = code,
             Key = path.DisplayPath,
             ConfigPath = path.DisplayPath,
+            Source = source,
             Message = message
         };
 
