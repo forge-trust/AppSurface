@@ -58,7 +58,13 @@ public sealed class AppSurfaceAuthDependencyGuardTests
     private static XDocument LoadProject(string projectPath)
     {
         var repositoryRoot = FindRepositoryRoot();
-        var fullPath = Path.Combine(repositoryRoot, projectPath.Replace('/', Path.DirectorySeparatorChar));
+        var normalizedProjectPath = projectPath.Replace('/', Path.DirectorySeparatorChar);
+        if (Path.IsPathRooted(normalizedProjectPath))
+        {
+            throw new ArgumentException("Project path must be relative.", nameof(projectPath));
+        }
+
+        var fullPath = Path.Join(repositoryRoot, normalizedProjectPath);
 
         return XDocument.Load(fullPath);
     }
@@ -68,7 +74,7 @@ public sealed class AppSurfaceAuthDependencyGuardTests
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current is not null)
         {
-            if (File.Exists(Path.Combine(current.FullName, "ForgeTrust.AppSurface.slnx")))
+            if (File.Exists(Path.Join(current.FullName, "ForgeTrust.AppSurface.slnx")))
             {
                 return current.FullName;
             }
