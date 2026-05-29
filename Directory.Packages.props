@@ -10,6 +10,7 @@
     <PackageVersion Include="Aspire.Hosting" Version="9.4.2" />
     <!-- Acornima 1.6.2 is an intentional SemVer-stable NuGet pin for AppSurface Docs JavaScript API harvesting. -->
     <PackageVersion Include="Acornima" Version="1.6.2" />
+    <PackageVersion Include="AngleSharp" Version="0.17.1" />
     <PackageVersion Include="Autofac" Version="9.1.0" />
     <PackageVersion Include="Autofac.Extensions.DependencyInjection" Version="11.0.0" />
     <PackageVersion Include="CliFx" Version="3.0.0" />

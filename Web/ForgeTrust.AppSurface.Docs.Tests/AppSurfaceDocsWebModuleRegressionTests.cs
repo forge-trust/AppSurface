@@ -149,6 +149,63 @@ public class AppSurfaceDocsWebModuleRegressionTests
     }
 
     [Fact]
+    public async Task SearchIndexRefreshEndpoint_ShouldRequirePostAndAntiForgeryToken()
+    {
+        var module = new AppSurfaceDocsWebModule();
+        var startup = new TestAppSurfaceDocsStartup(module);
+        var context = CreatePackagedModuleStartupContext(module);
+        var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+
+        builder.ConfigureAppConfiguration(
+            (_, configuration) =>
+            {
+                configuration.AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Diagnostics:SearchIndexRefreshPolicy"] = "DocsRefresh"
+                    });
+            });
+        builder.ConfigureServices(
+            services =>
+            {
+                services.AddAuthorization(
+                    options =>
+                    {
+                        options.AddPolicy("DocsRefresh", policy => policy.RequireAuthenticatedUser());
+                    });
+            });
+        builder.ConfigureWebHost(webHost => webHost.UseUrls("http://127.0.0.1:0"));
+
+        using var host = builder.Build();
+        await host.StartAsync();
+
+        try
+        {
+            var server = host.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            using var getResponse = await client.GetAsync("/docs/_search-index/refresh");
+            using var formContent = new FormUrlEncodedContent([]);
+            using var postResponse = await client.PostAsync(
+                "/docs/_search-index/refresh",
+                formContent);
+
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, getResponse.StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, postResponse.StatusCode);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task ConfigureWebOptions_Issue001_ServesRootStylesheetEndToEnd()
     {
         var module = new AppSurfaceDocsWebModule();

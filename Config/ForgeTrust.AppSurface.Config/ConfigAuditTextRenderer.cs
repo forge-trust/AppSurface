@@ -76,6 +76,11 @@ public sealed class ConfigAuditTextRenderer
             builder.AppendLine($"{indent}  Source: {FormatSource(source)}");
         }
 
+        if (entry.Element?.KeyCorrelationId != null)
+        {
+            builder.AppendLine($"{indent}  Key correlation: {entry.Element.KeyCorrelationId}");
+        }
+
         foreach (var diagnostic in entry.Diagnostics)
         {
             builder.AppendLine($"{indent}  Diagnostic: {diagnostic.Message}");
@@ -150,6 +155,8 @@ public sealed class ConfigAuditTextRenderer
     private static string FormatSource(ConfigAuditSourceRecord source) =>
         source.Kind switch
         {
+            ConfigAuditSourceKind.File when source.Location != null =>
+                $"{source.ProviderName} {Path.GetFileName(source.FilePath)}:{source.Location.LineNumber}:{source.Location.ByteColumnNumber} :: {source.ConfigPath}",
             ConfigAuditSourceKind.File => $"{source.ProviderName} {Path.GetFileName(source.FilePath)} :: {source.ConfigPath}",
             ConfigAuditSourceKind.EnvironmentVariable => $"Environment variable {source.EnvironmentVariableName}",
             ConfigAuditSourceKind.Default => $"Default value on {source.ProviderName}",

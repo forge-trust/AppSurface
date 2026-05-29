@@ -7,7 +7,9 @@ using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.FileProviders;
@@ -343,6 +345,13 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// <see cref="AppSurfaceDocsDiagnosticsOptions.ExposeRouteInspector"/>. These routes are intended for local and
     /// operator verification, not as unauthenticated public reader navigation.
     /// </para>
+    /// <para>
+    /// The route named <c>appsurfacedocs_search_index_refresh</c> maps the pattern produced by
+    /// <see cref="DocsUrlBuilder.BuildSearchIndexRefreshUrl"/> to <c>DocsController.RefreshSearchIndex</c>. That
+    /// operator route is browser-form-shaped and accepts only <c>POST</c>; the companion unsupported-method endpoint
+    /// rejects common non-POST verbs with HTTP 405 and an <c>Allow: POST</c> response header instead of letting the
+    /// request fall through to reader document lookup or status-code-page rendering.
+    /// </para>
     /// </remarks>
     /// <param name="context">Startup context for the application and environment.</param>
     /// <param name="endpoints">Endpoint route builder used to map the module's routes.</param>
@@ -426,6 +435,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var currentRootPattern = docsUrlBuilder.CurrentDocsRootPath.TrimStart('/');
         var currentSearchPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchUrl());
         var currentSearchIndexPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexUrl());
+        var currentSearchIndexRefreshPattern = TrimLeadingSlash(docsUrlBuilder.BuildSearchIndexRefreshUrl());
         var currentHealthPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthUrl());
         var currentHealthJsonPattern = TrimLeadingSlash(docsUrlBuilder.BuildHealthJsonUrl());
         var currentRouteInspectorPattern = TrimLeadingSlash(docsUrlBuilder.BuildRouteInspectorUrl());
@@ -465,6 +475,28 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                 controller = "Docs",
                 action = "SearchIndex"
             });
+
+        endpoints.MapMethods(
+            currentSearchIndexRefreshPattern,
+            [
+                HttpMethods.Delete,
+                HttpMethods.Get,
+                HttpMethods.Head,
+                HttpMethods.Options,
+                HttpMethods.Patch,
+                HttpMethods.Put
+            ],
+            RejectSearchIndexRefreshUnsupportedMethodAsync);
+
+        endpoints.MapControllerRoute(
+                name: "appsurfacedocs_search_index_refresh",
+                pattern: currentSearchIndexRefreshPattern,
+                defaults: new
+                {
+                    controller = "Docs",
+                    action = "RefreshSearchIndex"
+                })
+            .WithMetadata(new HttpMethodMetadata([HttpMethods.Post]));
 
         endpoints.MapControllerRoute(
             name: "appsurfacedocs_harvest_health",
@@ -615,6 +647,27 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
                     permanent: false);
                 return Task.CompletedTask;
             });
+    }
+
+    private static Task RejectSearchIndexRefreshUnsupportedMethodAsync(HttpContext context)
+    {
+        var statusCodePages = context.Features.Get<IStatusCodePagesFeature>();
+        if (statusCodePages is not null)
+        {
+            statusCodePages.Enabled = false;
+        }
+
+        context.Response.OnStarting(
+            static state =>
+            {
+                var httpContext = (HttpContext)state;
+                httpContext.Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
+                return Task.CompletedTask;
+            },
+            context);
+        context.Response.Headers["Allow"] = DocsUrlBuilder.SearchIndexRefreshMethod;
+        context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+        return Task.CompletedTask;
     }
 
     private static AppSurfaceDocsOptions ResolveOptions(IServiceProvider? services)

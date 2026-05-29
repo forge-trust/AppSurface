@@ -418,11 +418,18 @@
       "forgetrust.razorwire.cli": {
         "type": "Project",
         "dependencies": {
+          "AngleSharp": "[0.17.1, )",
           "CliFx": "[3.0.0, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )"
         }
+      },
+      "AngleSharp": {
+        "type": "CentralTransitive",
+        "requested": "[0.17.1, )",
+        "resolved": "0.17.1",
+        "contentHash": "5MPI4bbixlwxb0W/smOMeIR+QlxMy5/5jD+WnIAw4pBC+7AhLPe5bS3cLgQMJyvd6q0A48sG+uYOt/ep406GLA=="
       },
       "CliFx": {
         "type": "CentralTransitive",
