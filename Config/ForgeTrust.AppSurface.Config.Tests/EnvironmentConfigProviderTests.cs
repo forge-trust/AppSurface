@@ -1179,6 +1179,24 @@ public class EnvironmentConfigProviderTests
         Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
     }
 
+    [Fact]
+    public void TracePatch_SkipsGetterOnlyMultiDimensionalArrayCollection()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        var current = new MultiDimensionalArrayEndpointSettings();
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(MultiDimensionalArrayEndpointSettings));
+
+        Assert.False(patch.Patched);
+        Assert.Empty(patch.Facts);
+    }
+
     private sealed class AppSettings
     {
         public string? Mode { get; set; }
@@ -1210,6 +1228,11 @@ public class EnvironmentConfigProviderTests
     private sealed class ReadOnlyEndpointSettings
     {
         public IReadOnlyList<string> Endpoints { get; set; } = [];
+    }
+
+    private sealed class MultiDimensionalArrayEndpointSettings
+    {
+        public string[,] Endpoints { get; } = new string[1, 1];
     }
 
     private sealed class ReadOnlyEndpointList : IReadOnlyList<string>

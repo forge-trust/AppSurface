@@ -888,11 +888,6 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         object? priorValue,
         int? priorCount = null)
     {
-        if (sources.Count == 0)
-        {
-            return;
-        }
-
         priorCount ??= TryGetCollectionCount(priorValue, out var count) ? count : null;
         foreach (var source in sources)
         {
