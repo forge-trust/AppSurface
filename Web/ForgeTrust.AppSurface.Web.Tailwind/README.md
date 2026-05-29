@@ -19,7 +19,22 @@ AppSurface is preparing the first coordinated `v0.1.0` release. Before installin
 
 ## Usage
 
-Install the package and register Tailwind in your web module:
+### First Tailwind page in five minutes
+
+1. Add the package to an AppSurface web project:
+
+```bash
+dotnet add package ForgeTrust.AppSurface.Web.Tailwind
+```
+
+2. Create the default input file:
+
+```css
+/* wwwroot/css/app.css */
+@import "tailwindcss";
+```
+
+3. Register watch mode for local development:
 
 ```csharp
 services.AddTailwind(options =>
@@ -29,11 +44,22 @@ services.AddTailwind(options =>
 });
 ```
 
-Reference the generated stylesheet from your layout:
+4. Reference the generated stylesheet from your layout:
 
 ```html
 <link rel="stylesheet" href="~/css/site.gen.css" asp-append-version="true" />
 ```
+
+5. Build and run:
+
+```bash
+dotnet build
+dotnet run
+```
+
+The build should log `Tailwind CSS: Running build for wwwroot/css/app.css -> wwwroot/css/site.gen.css`, create `wwwroot/css/site.gen.css`, and include that file in static web assets when the output remains under `wwwroot/`.
+
+### Build and watch behavior
 
 When `OutputPath` stays under `wwwroot/`, the generated file is registered as an ASP.NET Core static web
 asset on clean builds and publish runs. That means Razor Class Libraries and other package-style consumers can
@@ -43,7 +69,28 @@ package to declare the generated web-root asset explicitly.
 
 Keep `InputPath` and `OutputPath` pointed at different files. The build target and the development watch service both reject configurations where the two paths resolve to the same file, even if one path uses a normalized relative form such as `./wwwroot/css/../css/app.css`.
 
-During development, the watch service is non-blocking. If the Tailwind CLI is not available on the current machine, the app still starts and serves any existing CSS while logging a warning that points developers to the runtime package or `TailwindCliPath` override. Other startup failures still log as errors.
+During development, the watch service is non-blocking. If the Tailwind CLI is not available on the current machine, the app still starts and serves any existing CSS while logging a warning that points developers to the runtime package or `TailwindOptions.CliPath` override. Other startup failures still log as errors.
+
+Build mode uses a compiled MSBuild task instead of `<Exec>`. The task receives structured arguments, emits stable `ASTW###` diagnostics, and keeps build resolution behavior explicit. Build mode does not search `PATH`; use `TailwindCliPath` when you want a custom CLI during builds. Watch mode may use `PATH` as a development convenience after checking packaged runtime locations.
+
+### MSBuild property reference
+
+| Property | Default | Behavior |
+|---|---|---|
+| `TailwindEnabled` | `true` | Set to `false` to skip package-driven build integration. |
+| `TailwindInputPath` | `wwwroot/css/app.css` | CSS input path, resolved relative to the project directory. |
+| `TailwindOutputPath` | `wwwroot/css/site.gen.css` | Generated CSS path, resolved relative to the project directory. Keep it under `wwwroot/` for static web asset registration. |
+| `TailwindCliPath` | empty | Explicit build-time Tailwind CLI path. Relative paths resolve from the project directory. Build mode does not fall back to `PATH`. |
+| `TailwindVersion` | from `build/tailwind.version` | Tailwind standalone CLI version used by runtime packages. Override only when testing a coordinated runtime-package change. |
+
+### Runtime option reference
+
+| Option | Default | Behavior |
+|---|---|---|
+| `Enabled` | `true` | Set to `false` to disable development watch mode. |
+| `InputPath` | `wwwroot/css/app.css` | Watch-mode input path, resolved relative to the content root. |
+| `OutputPath` | `wwwroot/css/site.gen.css` | Watch-mode output path, resolved relative to the content root. |
+| `CliPath` | `null` | Explicit watch-mode Tailwind CLI path. Relative paths resolve from the content root. |
 
 ## CI
 
@@ -72,7 +119,33 @@ If you want to keep the package-driven build but point it at a different standal
 </PropertyGroup>
 ```
 
-On Windows, `TailwindCliPath` can point at the standalone binary directly or at the npm-generated `.cmd` or `.ps1` shim. The package wraps those shims consistently in both build mode and development watch mode, so the same override works in each flow.
+Use the matching runtime option for development watch mode:
+
+```csharp
+services.AddTailwind(options =>
+{
+    options.CliPath = "tools/tailwindcss/tailwindcss";
+});
+```
+
+On Windows, `TailwindCliPath` and `TailwindOptions.CliPath` can point at the standalone binary directly or at the npm-generated `.cmd`, `.bat`, or `.ps1` shim. The package wraps those shims with the correct launcher while preserving argument boundaries for paths with spaces.
+
+## Tailwind diagnostics
+
+Every build-task diagnostic includes a stable code, problem, cause, fix, and this troubleshooting anchor.
+
+| Code | Meaning | Fix |
+|---|---|---|
+| `ASTW001` | The build host could not be mapped to a supported Tailwind runtime identifier. | Build on Windows x64/Arm64, macOS x64/Arm64, or Linux x64/Arm64, or set `TailwindCliPath`. |
+| `ASTW002` | `TailwindVersion` could not be resolved. | Ensure `build/tailwind.version` is present next to the targets file or set `TailwindVersion`. |
+| `ASTW003` | `TailwindCliPath` was set but the resolved file does not exist. | Point `TailwindCliPath` at an existing standalone binary or remove it to use packaged runtimes. |
+| `ASTW004` | No build-mode Tailwind CLI was found. | Install the matching runtime package or set `TailwindCliPath`; build mode does not search `PATH`. |
+| `ASTW005` | The MSBuild task assembly could not load or the Tailwind process could not start. | Restore/build the package, verify `build/tasks` exists in the nupkg, and ensure the CLI file is executable. |
+| `ASTW006` | Tailwind exited with a non-zero code. | Read the captured output tail, fix the CSS/configuration error, and run the build again. |
+| `ASTW007` | MSBuild canceled the Tailwind task. | Re-run the build if cancellation was unintentional. |
+| `ASTW008` | Input and output resolve to the same file. | Set `TailwindOutputPath` to a generated file distinct from `TailwindInputPath`. |
+
+If an error mentions `build/tasks`, inspect the packed package. A valid package contains `build/ForgeTrust.AppSurface.Web.Tailwind.targets`, `build/tailwind.version`, `build/tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll`, and `build/tasks/CliWrap.dll`.
 
 ## Escape hatch (plugin-heavy Tailwind setups)
 
@@ -81,6 +154,8 @@ If your Tailwind configuration depends on npm-only plugins or custom JavaScript 
 Disable the package-driven MSBuild integration with `TailwindEnabled=false`, and either omit `services.AddTailwind()` or set `options.Enabled = false` so the development watch service does not start. After that, run your existing npm, pnpm, or yarn Tailwind command as part of your normal frontend build.
 
 If your custom setup still uses the standalone CLI but stores it outside the package runtime layout, prefer `TailwindCliPath` over editing the imported `.targets` file directly.
+
+The v0.1 integration intentionally does not expose separate MSBuild knobs for minification, additional Tailwind arguments, working directory, template input globs, config input globs, or static web asset registration. Those defaults are part of the zero-Node path. Use `TailwindEnabled=false` and your own asset pipeline when a project needs full Tailwind command control.
 
 ## Notes
 
