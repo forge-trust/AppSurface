@@ -408,7 +408,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                         diagnostics)
                     {
                         AuditSources = providerResolution.AuditSources.Concat(patch.Sources).ToList(),
-                        AuditFacts = BuildPatchFactContext(patch.Facts, providerResolution, invalidProviderResolution)
+                        AuditFacts = BuildPatchFactContext(patch.Facts, invalidProviderResolution)
                     };
                 }
             }
@@ -453,16 +453,13 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
     private static ConfigValueResolution SelectProvenanceBaseResolution(
         ConfigValueResolution baseResolution,
         ConfigValueResolution? invalidBaseResolution) =>
-        baseResolution.State == ConfigAuditEntryState.Missing && invalidBaseResolution != null
-            ? invalidBaseResolution
-            : baseResolution;
+        invalidBaseResolution ?? baseResolution;
 
     private static ConfigAuditFactContext BuildPatchFactContext(
         IReadOnlyList<ConfigPatchProvenanceFact> facts,
-        ConfigValueResolution providerResolution,
         ConfigValueResolution? invalidProviderResolution)
     {
-        if (providerResolution.State != ConfigAuditEntryState.Missing || invalidProviderResolution == null)
+        if (invalidProviderResolution == null)
         {
             return new ConfigAuditFactContext(facts);
         }
@@ -955,6 +952,17 @@ internal sealed class ConfigAuditFactContext
 {
     private readonly Dictionary<string, IReadOnlyList<ConfigPatchProvenanceFact>> _factsByPath;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConfigAuditFactContext"/> class.
+    /// </summary>
+    /// <param name="facts">
+    /// Provenance facts emitted by provider patching or environment overrides. Each fact must carry a source-style
+    /// <see cref="ConfigPatchProvenanceFact.ConfigPath"/>, the source that created the fact, the patch action, and the
+    /// proven prior presence for that path; optional source metadata can stay unset when the provider could not prove it.
+    /// Facts are grouped case-insensitively by config path and copied into per-path <see cref="IReadOnlyList{T}"/> buckets,
+    /// so constructed contexts are immutable and safe to share between traversal calls as long as the supplied fact records
+    /// are treated as immutable.
+    /// </param>
     public ConfigAuditFactContext(IEnumerable<ConfigPatchProvenanceFact> facts)
     {
         _factsByPath = facts
@@ -962,6 +970,13 @@ internal sealed class ConfigAuditFactContext
             .ToDictionary(group => group.Key, group => (IReadOnlyList<ConfigPatchProvenanceFact>)group.ToList(), StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Gets the shared immutable empty fact context for callers that have no provenance facts to report.
+    /// </summary>
+    /// <remarks>
+    /// Use this instance to avoid allocations when traversal should emit no fact-derived child diagnostics. The context
+    /// contains no path entries and is never modified after construction.
+    /// </remarks>
     public static ConfigAuditFactContext Empty { get; } = new([]);
 
     /// <summary>

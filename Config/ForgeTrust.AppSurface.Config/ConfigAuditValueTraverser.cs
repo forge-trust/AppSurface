@@ -15,6 +15,24 @@ internal sealed class ConfigAuditValueTraverser
         _redactor = redactor;
     }
 
+    /// <summary>
+    /// Builds child audit entries for <paramref name="value"/>.
+    /// </summary>
+    /// <param name="path">The root path being traversed.</param>
+    /// <param name="value">The value to expand into child entries.</param>
+    /// <param name="sources">Candidate sources used for child provenance and source selection.</param>
+    /// <param name="factContext">
+    /// Proof-limited provenance facts used to attach fact-derived child diagnostics. Pass
+    /// <see cref="ConfigAuditFactContext.Empty"/> when resolution produced no facts or when child diagnostics must not
+    /// infer collection element creation from patch evidence. Non-empty contexts can add diagnostics to the returned
+    /// <see cref="ConfigAuditTraversalResult"/> without changing labels, correlations, traversal limits, or the child value
+    /// shape.
+    /// </param>
+    /// <param name="options">Traversal limits, collection opt-ins, and redaction options.</param>
+    /// <param name="visited">Reference-tracking set used to avoid cycles.</param>
+    /// <param name="labels">Dictionary label state carried through traversal.</param>
+    /// <param name="correlation">Dictionary key correlation context.</param>
+    /// <returns>The traversed child entries and traversal diagnostics.</returns>
     public ConfigAuditTraversalResult BuildChildren(
         ConfigAuditPath path,
         object? value,
@@ -29,6 +47,23 @@ internal sealed class ConfigAuditValueTraverser
         return BuildChildren(path, value, sources, factContext, options, visited, labels, correlation, ref budget);
     }
 
+    /// <summary>
+    /// Builds child audit entries for <paramref name="value"/> while sharing the caller-owned traversal budget.
+    /// </summary>
+    /// <param name="path">The root path being traversed.</param>
+    /// <param name="value">The value to expand into child entries.</param>
+    /// <param name="sources">Candidate sources used for child provenance and source selection.</param>
+    /// <param name="factContext">
+    /// Proof-limited provenance facts used to attach fact-derived child diagnostics. Pass
+    /// <see cref="ConfigAuditFactContext.Empty"/> when there are no facts; non-empty contexts can mark environment-created
+    /// or unknown-base collection elements in the returned <see cref="ConfigAuditTraversalResult"/>.
+    /// </param>
+    /// <param name="options">Traversal limits, collection opt-ins, and redaction options.</param>
+    /// <param name="visited">Reference-tracking set used to avoid cycles.</param>
+    /// <param name="labels">Dictionary label state carried through traversal.</param>
+    /// <param name="correlation">Dictionary key correlation context.</param>
+    /// <param name="budget">Remaining report-node budget shared across recursive traversal.</param>
+    /// <returns>The traversed child entries and traversal diagnostics.</returns>
     private ConfigAuditTraversalResult BuildChildren(
         ConfigAuditPath path,
         object? value,
