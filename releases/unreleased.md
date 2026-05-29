@@ -10,6 +10,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- AppSurface Docs JavaScript API pages can now resolve public doclets into reader-facing API families. Explicit `@namespace` and `@module` tags remain authoritative, ordered `GroupNameRules` can name known source trees, and untagged fallback groups use path-aware identities so same-stem files in different folders do not merge.
 - The `/docs` landing now promotes a Releases entry point alongside product proof paths.
 - AppSurface now ships a public release hub, a changelog, an unreleased page, and a tagged release template inside the repository.
 - AppSurface now has a consumer-facing [v0.1.0 release preview](./v0.1-preview.md) that package consumers can read before the tag exists. Package-facing docs route release-risk questions into that preview while this unreleased page remains the merged-work proof artifact.
