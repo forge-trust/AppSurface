@@ -292,22 +292,17 @@ internal sealed class TargetAppProcess : ITargetAppProcess
             hookProcess = _hookProcess;
         }
 
-        try
+        using var cancellationToDispose = cancellation;
+        using var commandTaskToDispose = commandTask;
+        using var hookProcessToDispose = hookProcess;
+
+        if (hookProcess is not null || _hooks is not null)
         {
-            if (hookProcess is not null || _hooks is not null)
-            {
-                await DisposeHookProcessAsync(hookProcess, previousState == TargetAppProcessState.Running);
-            }
-            else if (commandTask is not null && previousState == TargetAppProcessState.Running)
-            {
-                await DisposeCliWrapProcessAsync(commandTask, cancellation);
-            }
+            await DisposeHookProcessAsync(hookProcess, previousState == TargetAppProcessState.Running);
         }
-        finally
+        else if (commandTask is not null && previousState == TargetAppProcessState.Running)
         {
-            cancellation?.Dispose();
-            commandTask?.Dispose();
-            hookProcess?.Dispose();
+            await DisposeCliWrapProcessAsync(commandTask, cancellation);
         }
     }
 
@@ -431,7 +426,23 @@ internal sealed class TargetAppProcess : ITargetAppProcess
         {
             // Disposal requested process-tree termination.
         }
-        catch (Exception ex)
+        catch (OperationCanceledException ex)
+        {
+            RaiseErrorLineForProcessFailure(ex);
+        }
+        catch (CommandExecutionException ex)
+        {
+            RaiseErrorLineForProcessFailure(ex);
+        }
+        catch (CliWrapException ex)
+        {
+            RaiseErrorLineForProcessFailure(ex);
+        }
+        catch (Win32Exception ex)
+        {
+            RaiseErrorLineForProcessFailure(ex);
+        }
+        catch (InvalidOperationException ex)
         {
             RaiseErrorLineForProcessFailure(ex);
         }
