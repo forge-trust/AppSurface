@@ -242,6 +242,22 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public void TailwindTargets_SetsSourceTaskAssemblyOnlyWhenAssemblyExists()
+    {
+        var document = XDocument.Load(GetTailwindTargetsPath());
+        var sourceTaskAssembly = Assert.Single(
+            document.Descendants("_TailwindTaskAssembly"),
+            element => string.Equals(
+                element.Value,
+                "$(_TailwindTaskAssemblySource)",
+                StringComparison.Ordinal));
+
+        Assert.Equal(
+            "'$(_TailwindTaskAssembly)' == '' and Exists('$(_TailwindTaskAssemblySource)')",
+            sourceTaskAssembly.Attribute("Condition")?.Value);
+    }
+
+    [Fact]
     public async Task RunTailwindBuild_DoesNotUsePathFallback_WhenBuildCliIsMissing()
     {
         var projectDirectory = Path.Join(Path.GetFullPath(_tempRoot), "sample-no-path-fallback");

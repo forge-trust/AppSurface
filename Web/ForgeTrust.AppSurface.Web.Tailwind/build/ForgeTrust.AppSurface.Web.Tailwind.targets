@@ -12,8 +12,9 @@
     <_TailwindTaskAssemblySourceProject>$(MSBuildThisFileDirectory)..\..\ForgeTrust.AppSurface.Web.Tailwind.Tasks\ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj</_TailwindTaskAssemblySourceProject>
     <_TailwindTaskTargetFramework>net10.0</_TailwindTaskTargetFramework>
     <_TailwindTaskAssemblySource>$(MSBuildThisFileDirectory)..\..\ForgeTrust.AppSurface.Web.Tailwind.Tasks\bin\$(Configuration)\$(_TailwindTaskTargetFramework)\ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll</_TailwindTaskAssemblySource>
+    <_TailwindTaskAssemblySourceDisplay Condition="Exists('$(_TailwindTaskAssemblySourceProject)')">$(_TailwindTaskAssemblySource)</_TailwindTaskAssemblySourceDisplay>
     <_TailwindTaskAssembly Condition="Exists('$(_TailwindTaskAssemblyPackage)')">$(_TailwindTaskAssemblyPackage)</_TailwindTaskAssembly>
-    <_TailwindTaskAssembly Condition="'$(_TailwindTaskAssembly)' == '' and Exists('$(_TailwindTaskAssemblySourceProject)')">$(_TailwindTaskAssemblySource)</_TailwindTaskAssembly>
+    <_TailwindTaskAssembly Condition="'$(_TailwindTaskAssembly)' == '' and Exists('$(_TailwindTaskAssemblySource)')">$(_TailwindTaskAssemblySource)</_TailwindTaskAssembly>
     <_TailwindOutputPathNormalized>$([System.String]::Copy('$(TailwindOutputPath)').Replace('\', '/'))</_TailwindOutputPathNormalized>
     <_TailwindOutputPathNormalized Condition="$([System.String]::Copy('$(_TailwindOutputPathNormalized)').StartsWith('./'))">$([System.String]::Copy('$(_TailwindOutputPathNormalized)').Substring(2))</_TailwindOutputPathNormalized>
     <_TailwindOutputIsWebRootAsset>false</_TailwindOutputIsWebRootAsset>
@@ -73,6 +74,7 @@
       <TailwindVersion Condition="'$(TailwindVersion)' == '' and Exists('$(_TailwindVersionFile)')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(_TailwindVersionFile)')), '^[^\r\n]+').Value)</TailwindVersion>
 
       <_TailwindTaskAssemblyDisplay Condition="'$(_TailwindTaskAssembly)' != ''">$(_TailwindTaskAssembly)</_TailwindTaskAssemblyDisplay>
+      <_TailwindTaskAssemblyDisplay Condition="'$(_TailwindTaskAssemblyDisplay)' == '' and '$(_TailwindTaskAssemblySourceDisplay)' != ''">$(_TailwindTaskAssemblySourceDisplay)</_TailwindTaskAssemblyDisplay>
       <_TailwindTaskAssemblyDisplay Condition="'$(_TailwindTaskAssemblyDisplay)' == ''">$(_TailwindTaskAssemblyPackage)</_TailwindTaskAssemblyDisplay>
     </PropertyGroup>
 
