@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Threading.Channels;
 
 namespace ForgeTrust.RazorWire.Streams;
@@ -147,12 +148,13 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
             return;
         }
 
-        foreach (var subscriber in state.SnapshotWriters())
+        var failedSubscribers = state
+            .SnapshotWriters()
+            .Where(subscriber => !subscriber.TryWrite(message));
+
+        foreach (var subscriber in failedSubscribers)
         {
-            if (!subscriber.TryWrite(message))
-            {
-                RemoveClosedSubscriber(channel, state, subscriber);
-            }
+            RemoveClosedSubscriber(channel, state, subscriber);
         }
     }
 
