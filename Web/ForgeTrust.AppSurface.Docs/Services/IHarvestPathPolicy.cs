@@ -36,16 +36,22 @@ internal interface IHarvestPathPolicy
     bool ShouldPruneDirectory(string relativeDirectory, AppSurfaceDocsHarvestSourceKind sourceKind);
 
     /// <summary>
-    /// Lazily enumerates candidate files below a repository root while applying directory pruning.
+    /// Lazily enumerates candidate files below a repository root while applying directory pruning and skipping reparse
+    /// points.
     /// </summary>
     /// <param name="rootPath">Absolute repository root to traverse.</param>
     /// <param name="sourceKind">The harvester source kind requesting candidates.</param>
     /// <param name="searchPattern">A file-system search pattern such as <c>*.md</c>.</param>
     /// <param name="cancellationToken">A token observed before each directory is expanded.</param>
-    /// <returns>Absolute file paths that match <paramref name="searchPattern"/> and are not below a pruned directory.</returns>
+    /// <returns>
+    /// Absolute file paths that match <paramref name="searchPattern"/>, are not below a pruned directory, and are not
+    /// file-system reparse points.
+    /// </returns>
     /// <remarks>
     /// File-level include checks are intentionally separate; callers must still pass returned files through
-    /// <see cref="ShouldIncludeFilePath"/> after converting them back to repository-relative paths.
+    /// <see cref="ShouldIncludeFilePath"/> after converting them back to repository-relative paths. Implementations
+    /// skip reparse-point files and directories before yielding or descending so built-in harvesters do not follow
+    /// symlinks, junctions, or similar filesystem indirection outside the selected repository root.
     /// </remarks>
     IEnumerable<string> EnumerateCandidateFiles(
         string rootPath,

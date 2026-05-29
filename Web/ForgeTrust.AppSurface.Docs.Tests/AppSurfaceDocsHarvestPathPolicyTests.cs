@@ -73,6 +73,69 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
         Assert.Empty(decision.MatchedDefaultGroups);
     }
 
+    [Fact]
+    public async Task EnumerateCandidateFiles_WhenFileIsReparsePointSkipsCandidate()
+    {
+        var root = CreateTempDirectory();
+        var externalRoot = CreateTempDirectory();
+        try
+        {
+            var externalFile = Path.Join(externalRoot, "External.md");
+            await File.WriteAllTextAsync(externalFile, "# External");
+            var linkPath = Path.Join(root, "Linked.md");
+            if (!TryCreateFileSymbolicLink(linkPath, externalFile))
+            {
+                return;
+            }
+
+            var candidates = AppSurfaceDocsHarvestPathPolicy.CreateDefault()
+                .EnumerateCandidateFiles(
+                    root,
+                    AppSurfaceDocsHarvestSourceKind.Markdown,
+                    "*.md",
+                    CancellationToken.None)
+                .ToArray();
+
+            Assert.DoesNotContain(candidates, path => path.EndsWith("Linked.md", StringComparison.Ordinal));
+        }
+        finally
+        {
+            DeleteDirectory(root);
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
+    public async Task EnumerateCandidateFiles_WhenDirectoryIsReparsePointSkipsTraversal()
+    {
+        var root = CreateTempDirectory();
+        var externalRoot = CreateTempDirectory();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(externalRoot, "External.md"), "# External");
+            var linkPath = Path.Join(root, "linked");
+            if (!TryCreateDirectorySymbolicLink(linkPath, externalRoot))
+            {
+                return;
+            }
+
+            var candidates = AppSurfaceDocsHarvestPathPolicy.CreateDefault()
+                .EnumerateCandidateFiles(
+                    root,
+                    AppSurfaceDocsHarvestSourceKind.Markdown,
+                    "*.md",
+                    CancellationToken.None)
+                .ToArray();
+
+            Assert.DoesNotContain(candidates, path => path.EndsWith("External.md", StringComparison.Ordinal));
+        }
+        finally
+        {
+            DeleteDirectory(root);
+            DeleteDirectory(externalRoot);
+        }
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("/docs/readme.md")]
@@ -479,6 +542,72 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
     private static AppSurfaceDocsHarvestSourceKind ParseSourceKind(string sourceKind)
     {
         return Enum.Parse<AppSurfaceDocsHarvestSourceKind>(sourceKind);
+    }
+
+    private static string CreateTempDirectory()
+    {
+        var path = Path.Join(Path.GetTempPath(), "AppSurfaceDocsHarvestPathPolicyTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static bool TryCreateFileSymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static void DeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, true);
+        }
+        catch
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
     }
 
     private static void AssertDecision(

@@ -215,6 +215,110 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_WhenMarkdownFileIsReparsePointSkipsCandidate()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            var externalFile = Path.Join(externalRoot, "External.md");
+            await File.WriteAllTextAsync(externalFile, "# External");
+            var linkPath = CombineUnder(_testRoot, "Linked.md");
+            if (!TryCreateFileSymbolicLink(linkPath, externalFile))
+            {
+                return;
+            }
+
+            var results = await _harvester.HarvestAsync(_testRoot);
+
+            Assert.DoesNotContain(results, node => node.Title == "External" || node.Path == "Linked.md");
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WhenMarkdownDirectoryIsReparsePointSkipsTraversal()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(externalRoot, "External.md"), "# External");
+            var linkPath = CombineUnder(_testRoot, "linked");
+            if (!TryCreateDirectorySymbolicLink(linkPath, externalRoot))
+            {
+                return;
+            }
+
+            var results = await _harvester.HarvestAsync(_testRoot);
+
+            Assert.DoesNotContain(results, node => node.Title == "External");
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WhenRootLicenseIsReparsePointSkipsLicense()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            var externalFile = Path.Join(externalRoot, "LICENSE");
+            await File.WriteAllTextAsync(externalFile, "# External License");
+            var linkPath = CombineUnder(_testRoot, "LICENSE");
+            if (!TryCreateFileSymbolicLink(linkPath, externalFile))
+            {
+                return;
+            }
+
+            var results = await _harvester.HarvestAsync(_testRoot);
+
+            Assert.DoesNotContain(results, node => node.Path == "LICENSE");
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WhenMetadataSidecarIsReparsePointIgnoresSidecar()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            await File.WriteAllTextAsync(CombineUnder(_testRoot, "Guide.md"), "# Public Guide");
+            var externalSidecar = Path.Join(externalRoot, "Guide.md.yml");
+            await File.WriteAllTextAsync(
+                externalSidecar,
+                """
+                title: External Secret
+                summary: Should not be imported.
+                """);
+            var linkPath = CombineUnder(_testRoot, "Guide.md.yml");
+            if (!TryCreateFileSymbolicLink(linkPath, externalSidecar))
+            {
+                return;
+            }
+
+            var results = await _harvester.HarvestAsync(_testRoot);
+            var guide = Assert.Single(results);
+
+            Assert.Equal("Public Guide", guide.Title);
+            Assert.DoesNotContain("External Secret", guide.Content, StringComparison.Ordinal);
+            Assert.NotEqual("Should not be imported.", guide.Metadata?.Summary);
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldParseFrontMatterMetadata_AndRemoveItFromRenderedHtml()
     {
         var content = """
@@ -1494,6 +1598,72 @@ public class MarkdownHarvesterTests : IDisposable
         Assert.All(segments, segment => Assert.False(Path.IsPathRooted(segment)));
 
         return segments.Aggregate(root, Path.Combine);
+    }
+
+    private static string CreateExternalTempDirectory()
+    {
+        var path = Path.Join(Path.GetTempPath(), "AppSurfaceDocsTests_MD_External", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static bool TryCreateFileSymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static void DeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, true);
+        }
+        catch
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
     }
 
     private sealed class DerivedMarkdownHarvester(ILogger<MarkdownHarvester> logger)

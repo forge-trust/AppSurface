@@ -72,6 +72,10 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - `StartupContext.ApplicationName` is now treated as a display label while `IHostEnvironment.ApplicationName` stays assembly-backed for static web asset manifest discovery.
 - AppSurface Docs now harvests RazorWire's public JavaScript API from a docs-only contract manifest instead of generated runtime bundles, keeping minification independent from public API documentation.
 
+### Fixed
+
+- AppSurface Docs built-in Markdown and C# harvesters now keep the configured repository root as the source boundary by skipping file and directory reparse points, including symlinked root `LICENSE` files and Markdown metadata sidecars.
+
 ### Migration
 
 - AppSurface has not cut `v0.1.0` yet, so there is no tagged migration guide today.

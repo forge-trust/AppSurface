@@ -61,10 +61,11 @@ internal sealed class AppSurfaceDocsHarvestPathPolicySnapshot : IHarvestPathPoli
 
     /// <inheritdoc />
     /// <remarks>
-    /// Traversal is lazy and depth-first using an explicit stack. File paths are yielded as absolute paths, directory
-    /// paths are normalized to forward-slash repository-relative values before pruning, and directory reparse points
-    /// are skipped to avoid following symlinks or junctions outside the repository. File reparse points are skipped for
-    /// the same reason, so symlinked files cannot point harvesters at content outside the repository boundary.
+    /// Traversal is lazy and depth-first using the shared AppSurface Docs harvest filesystem helper. File paths are
+    /// yielded as absolute paths, directory paths are normalized to forward-slash repository-relative values before
+    /// pruning, and directory reparse points are skipped to avoid following symlinks or junctions outside the
+    /// repository. File reparse points are skipped for the same reason, so symlinked files cannot point harvesters at
+    /// content outside the repository boundary.
     /// Cancellation is checked before each directory expansion, so callers can stop large repository walks without
     /// waiting for every descendant to be listed. The method throws <see cref="ArgumentNullException"/> for a
     /// <see langword="null"/> <paramref name="rootPath"/> or <paramref name="searchPattern"/>; file-system enumeration
@@ -79,42 +80,11 @@ internal sealed class AppSurfaceDocsHarvestPathPolicySnapshot : IHarvestPathPoli
         ArgumentNullException.ThrowIfNull(rootPath);
         ArgumentNullException.ThrowIfNull(searchPattern);
 
-        var pendingDirectories = new Stack<string>();
-        pendingDirectories.Push(rootPath);
-
-        while (pendingDirectories.Count > 0)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var currentDirectory = pendingDirectories.Pop();
-            foreach (var file in Directory.EnumerateFiles(currentDirectory, searchPattern, SearchOption.TopDirectoryOnly))
-            {
-                var attributes = File.GetAttributes(file);
-                if (attributes.HasFlag(FileAttributes.ReparsePoint))
-                {
-                    continue;
-                }
-
-                yield return file;
-            }
-
-            foreach (var directory in Directory.EnumerateDirectories(currentDirectory))
-            {
-                var attributes = File.GetAttributes(directory);
-                if (attributes.HasFlag(FileAttributes.ReparsePoint))
-                {
-                    continue;
-                }
-
-                var relativeDirectory = Path.GetRelativePath(rootPath, directory).Replace('\\', '/');
-                if (ShouldPruneDirectory(relativeDirectory, sourceKind))
-                {
-                    continue;
-                }
-
-                pendingDirectories.Push(directory);
-            }
-        }
+        return AppSurfaceDocsHarvestFileSystem.EnumerateCandidateFiles(
+            rootPath,
+            searchPattern,
+            relativeDirectory => ShouldPruneDirectory(relativeDirectory, sourceKind),
+            cancellationToken);
     }
 
     /// <summary>
