@@ -50,7 +50,7 @@ internal interface IHarvestPathPolicy
     /// <remarks>
     /// File-level include checks are intentionally separate; callers must still pass returned files through
     /// <see cref="ShouldIncludeFilePath"/> after converting them back to repository-relative paths. Implementations
-    /// skip reparse-point files and directories before yielding or descending so built-in harvesters do not follow
+    /// skip reparse-point files and directories before yielding or descending so candidate traversal does not follow
     /// symlinks, junctions, or similar filesystem indirection outside the selected repository root.
     /// </remarks>
     IEnumerable<string> EnumerateCandidateFiles(
