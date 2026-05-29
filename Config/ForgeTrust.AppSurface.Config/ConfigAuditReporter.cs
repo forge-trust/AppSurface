@@ -163,22 +163,35 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
     private ConfigAuditSensitivity GetDiscoveredKeyEntrySensitivity(string key)
     {
-        ConfigAuditKnownEntry? nearestParent = null;
+        ConfigAuditSensitivity? exactSensitivity = null;
+        ConfigAuditSensitivity? nearestSpecifiedParentSensitivity = null;
+        var nearestSpecifiedParentLength = -1;
         foreach (var knownEntry in _knownEntries)
         {
+            var sensitivity = knownEntry.OptionsSnapshot.Sensitivity;
             if (string.Equals(knownEntry.Key, key, StringComparison.OrdinalIgnoreCase))
             {
-                return knownEntry.OptionsSnapshot.Sensitivity;
+                if (ConfigAuditEntryOptions.NormalizeSensitivity(sensitivity) != ConfigAuditSensitivity.Unknown)
+                {
+                    return sensitivity;
+                }
+
+                exactSensitivity = sensitivity;
+                continue;
             }
 
             if (IsKnownDescendantKey(key, knownEntry.Key)
-                && (nearestParent == null || knownEntry.Key.Length > nearestParent.Key.Length))
+                && ConfigAuditEntryOptions.NormalizeSensitivity(sensitivity) != ConfigAuditSensitivity.Unknown
+                && knownEntry.Key.Length > nearestSpecifiedParentLength)
             {
-                nearestParent = knownEntry;
+                nearestSpecifiedParentSensitivity = sensitivity;
+                nearestSpecifiedParentLength = knownEntry.Key.Length;
             }
         }
 
-        return nearestParent?.OptionsSnapshot.Sensitivity ?? ConfigAuditSensitivity.Unknown;
+        return nearestSpecifiedParentSensitivity
+            ?? exactSensitivity
+            ?? ConfigAuditSensitivity.Unknown;
     }
 
     private ConfigAuditDiscoveredKeyClassification ClassifyDiscoveredKey(string key)

@@ -2095,6 +2095,11 @@ public class ConfigAuditReporterTests
                       "Leaf": "nearest-visible"
                     }
                   },
+                  "SensitiveUnknownTree": {
+                    "Branch": {
+                      "Leaf": "inherited-secret"
+                    }
+                  },
                   "App": {
                     "Mode": "file",
                     "Enabled": true,
@@ -2138,6 +2143,10 @@ public class ConfigAuditReporterTests
             services.AddConfigAuditKey<Dictionary<string, string>>(
                 "NestedTree.Branch",
                 options => options.Sensitivity = ConfigAuditSensitivity.NonSensitive);
+            services.AddConfigAuditKey<Dictionary<string, object?>>(
+                "SensitiveUnknownTree",
+                options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+            services.AddConfigAuditKey<Dictionary<string, string>>("SensitiveUnknownTree.Branch");
             services.AddConfigAuditKey<AppSettings>("App");
             services.AddConfigAuditKey<string>("App.Mode");
 
@@ -2163,6 +2172,12 @@ public class ConfigAuditReporterTests
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 "nearest-visible");
             Assert.False(nearestParentChild.IsRedacted);
+            var unknownChildInherited = AssertDiscovered(
+                report,
+                "SensitiveUnknownTree.Branch.Leaf",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                "[redacted]");
+            Assert.True(unknownChildInherited.IsRedacted);
             AssertDiscovered(report, "App", ConfigAuditDiscoveredKeyClassification.Known, null);
             AssertDiscovered(report, "App.Mode", ConfigAuditDiscoveredKeyClassification.Known, "file");
             AssertDiscovered(report, "App.Enabled", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "True");
