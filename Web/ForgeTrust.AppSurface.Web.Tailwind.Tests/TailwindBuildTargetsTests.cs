@@ -480,14 +480,16 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) is true);
     }
 
-    [Fact]
-    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenTargetsDirectoryIsEmpty()
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenTargetsDirectoryIsEmpty(string targetsDirectory)
     {
         var task = CreateBuildTask("sample-empty-targets-directory", task =>
         {
             task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
             task.TailwindVersion = "4.1.18";
-            task.TargetsDirectory = string.Empty;
+            task.TargetsDirectory = targetsDirectory;
         });
 
         Assert.Throws<ArgumentException>(() => task.Execute());

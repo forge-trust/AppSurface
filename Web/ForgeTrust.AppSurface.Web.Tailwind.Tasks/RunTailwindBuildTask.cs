@@ -391,7 +391,7 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
 
     private static string EnsureTrailingSeparator(string path)
     {
-        if (string.IsNullOrEmpty(path))
+        if (string.IsNullOrWhiteSpace(path))
         {
             throw new ArgumentException("TargetsDirectory cannot be empty.", nameof(path));
         }
