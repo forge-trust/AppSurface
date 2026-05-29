@@ -1,13 +1,23 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Xml.Linq;
 using CliWrap;
 using CliWrap.Buffered;
+using ForgeTrust.AppSurface.Web.Tailwind.Internal;
+using ForgeTrust.AppSurface.Web.Tailwind.Tasks;
+using Microsoft.Build.Framework;
 
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
 public sealed class TailwindBuildTargetsTests : IDisposable
 {
-    private readonly string _tempRoot = Path.Combine(
+#if DEBUG
+    private const string CurrentConfiguration = "Debug";
+#else
+    private const string CurrentConfiguration = "Release";
+#endif
+
+    private readonly string _tempRoot = Path.Join(
         Path.GetTempPath(),
         $"{nameof(TailwindBuildTargetsTests)}_{Guid.NewGuid():N}");
 
@@ -29,17 +39,17 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     [Fact]
     public async Task RunTailwindBuild_Fails_WhenInputAndOutputResolveToSameFile()
     {
-        var projectDirectory = Path.Combine(_tempRoot, "sample-app");
-        Directory.CreateDirectory(Path.Combine(projectDirectory, "wwwroot", "css"));
-        Directory.CreateDirectory(Path.Combine(projectDirectory, "tools"));
+        var projectDirectory = Path.Join(_tempRoot, "sample-app");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        Directory.CreateDirectory(Path.Join(projectDirectory, "tools"));
 
         await File.WriteAllTextAsync(
-            Path.Combine(projectDirectory, "wwwroot", "css", "app.css"),
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
             "@import \"tailwindcss\";" + Environment.NewLine);
 
-        var markerPath = Path.Combine(projectDirectory, "tailwind-cli-executed.marker");
+        var markerPath = Path.Join(projectDirectory, "tailwind-cli-executed.marker");
         var cliRelativePath = await CreateTailwindCliStubAsync(projectDirectory, markerPath);
-        var projectPath = Path.Combine(projectDirectory, "Sample.csproj");
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
         var targetsPath = GetTailwindTargetsPath();
 
         await File.WriteAllTextAsync(
@@ -57,7 +67,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             </Project>
             """);
 
-        var result = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var result = await RunDotNetBuildForCurrentConfigurationAsync(projectPath, projectDirectory);
         var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
 
         Assert.NotEqual(0, result.ExitCode);
@@ -71,17 +81,17 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     [Fact]
     public async Task RunTailwindBuild_IncludesGeneratedCssInStaticWebAssetsManifest_OnCleanBuild()
     {
-        var projectDirectory = Path.Combine(_tempRoot, "sample-rcl");
-        Directory.CreateDirectory(Path.Combine(projectDirectory, "wwwroot", "css"));
-        Directory.CreateDirectory(Path.Combine(projectDirectory, "tools"));
+        var projectDirectory = Path.Join(_tempRoot, "sample-rcl");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        Directory.CreateDirectory(Path.Join(projectDirectory, "tools"));
 
         await File.WriteAllTextAsync(
-            Path.Combine(projectDirectory, "wwwroot", "css", "app.css"),
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
             "@import \"tailwindcss\";" + Environment.NewLine);
 
-        var markerPath = Path.Combine(projectDirectory, "tailwind-cli-executed.marker");
+        var markerPath = Path.Join(projectDirectory, "tailwind-cli-executed.marker");
         var cliRelativePath = await CreateTailwindCliStubAsync(projectDirectory, markerPath);
-        var projectPath = Path.Combine(projectDirectory, "Sample.csproj");
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
         var targetsPath = GetTailwindTargetsPath();
 
         await File.WriteAllTextAsync(
@@ -105,17 +115,16 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             </Project>
             """);
 
-        var result = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var result = await RunDotNetBuildForCurrentConfigurationAsync(projectPath, projectDirectory);
         var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
 
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(markerPath), combinedOutput);
 
-        var generatedCssPath = Path.Combine(projectDirectory, "wwwroot", "css", "site.gen.css");
+        var generatedCssPath = Path.Join(projectDirectory, "wwwroot", "css", "site.gen.css");
         Assert.True(File.Exists(generatedCssPath), "Expected the Tailwind stub to emit the generated stylesheet.");
 
-        var manifestPath = Path.Combine(projectDirectory, "obj", "Debug", "net10.0", "staticwebassets.build.json");
-        Assert.True(File.Exists(manifestPath), "Expected a static web assets build manifest.");
+        var manifestPath = GetStaticWebAssetsBuildManifestPath(projectDirectory, combinedOutput);
 
         await AssertBuildManifestContainsGeneratedCssAsync(manifestPath);
     }
@@ -123,17 +132,17 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     [Fact]
     public async Task RunTailwindBuild_PreservesGeneratedCssInStaticWebAssetsManifest_WhenDefaultContentItemsAreDisabled()
     {
-        var projectDirectory = Path.Combine(_tempRoot, "sample-rcl-no-default-content");
-        Directory.CreateDirectory(Path.Combine(projectDirectory, "wwwroot", "css"));
-        Directory.CreateDirectory(Path.Combine(projectDirectory, "tools"));
+        var projectDirectory = Path.Join(_tempRoot, "sample-rcl-no-default-content");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        Directory.CreateDirectory(Path.Join(projectDirectory, "tools"));
 
         await File.WriteAllTextAsync(
-            Path.Combine(projectDirectory, "wwwroot", "css", "app.css"),
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
             "@import \"tailwindcss\";" + Environment.NewLine);
 
-        var markerPath = Path.Combine(projectDirectory, "tailwind-cli-executed.marker");
+        var markerPath = Path.Join(projectDirectory, "tailwind-cli-executed.marker");
         var cliRelativePath = await CreateTailwindCliStubAsync(projectDirectory, markerPath);
-        var projectPath = Path.Combine(projectDirectory, "Sample.csproj");
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
         var targetsPath = GetTailwindTargetsPath();
 
         await File.WriteAllTextAsync(
@@ -158,17 +167,16 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             </Project>
             """);
 
-        var firstBuildResult = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var firstBuildResult = await RunDotNetBuildForCurrentConfigurationAsync(projectPath, projectDirectory);
         var firstBuildOutput = firstBuildResult.Stdout + Environment.NewLine + firstBuildResult.Stderr;
 
         Assert.Equal(0, firstBuildResult.ExitCode);
         Assert.True(File.Exists(markerPath), firstBuildOutput);
 
-        var manifestPath = Path.Combine(projectDirectory, "obj", "Debug", "net10.0", "staticwebassets.build.json");
-        Assert.True(File.Exists(manifestPath), "Expected a static web assets build manifest after the first build.");
+        var manifestPath = GetStaticWebAssetsBuildManifestPath(projectDirectory, firstBuildOutput);
         await AssertBuildManifestContainsGeneratedCssAsync(manifestPath);
 
-        var secondBuildResult = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var secondBuildResult = await RunDotNetBuildForCurrentConfigurationAsync(projectPath, projectDirectory);
         var secondBuildOutput = secondBuildResult.Stdout + Environment.NewLine + secondBuildResult.Stderr;
 
         Assert.Equal(0, secondBuildResult.ExitCode);
@@ -181,10 +189,669 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task RunTailwindBuild_FailsWithDiagnostic_WhenExplicitCliPathIsMissing()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "sample-missing-cli");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
+            "@import \"tailwindcss\";" + Environment.NewLine);
+
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
+        var targetsPath = await CreatePackagedTargetsCopyAsync(projectDirectory);
+
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
+                <TailwindOutputPath>wwwroot/css/site.gen.css</TailwindOutputPath>
+                <TailwindCliPath>tools/missing-tailwind</TailwindCliPath>
+              </PropertyGroup>
+
+              <Import Project="{{EscapeForXml(targetsPath)}}" />
+            </Project>
+            """);
+
+        var result = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASTW003", combinedOutput, StringComparison.Ordinal);
+        Assert.Contains("TailwindCliPath", combinedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TailwindTargets_GatesUsingTaskOnExistingTaskAssembly()
+    {
+        var document = XDocument.Load(GetTailwindTargetsPath());
+        var usingTask = Assert.Single(
+            document.Descendants("UsingTask"),
+            element =>
+                string.Equals(
+                    element.Attribute("TaskName")?.Value,
+                    "ForgeTrust.AppSurface.Web.Tailwind.Tasks.RunTailwindBuildTask",
+                    StringComparison.Ordinal));
+
+        Assert.Equal(
+            "'$(_TailwindTaskAssembly)' != '' and (Exists('$(_TailwindTaskAssembly)') or '$(_TailwindTaskAssembly)' == '$(_TailwindTaskAssemblySource)')",
+            usingTask.Attribute("Condition")?.Value);
+    }
+
+    [Fact]
+    public void TailwindTargets_RetainsSourceTaskAssemblyPathForBootstrap()
+    {
+        var document = XDocument.Load(GetTailwindTargetsPath());
+        var sourceTaskAssembly = Assert.Single(
+            document.Descendants("_TailwindTaskAssembly"),
+            element => string.Equals(
+                element.Value,
+                "$(_TailwindTaskAssemblySource)",
+                StringComparison.Ordinal));
+
+        Assert.Equal(
+            "'$(_TailwindTaskAssembly)' == '' and Exists('$(_TailwindTaskAssemblySourceProject)')",
+            sourceTaskAssembly.Attribute("Condition")?.Value);
+    }
+
+    [Fact]
+    public void TailwindTargets_BuildsSourceTaskAssemblyBeforeRunTailwindBuild()
+    {
+        var document = XDocument.Load(GetTailwindTargetsPath());
+        var bootstrapTarget = Assert.Single(
+            document.Descendants("Target"),
+            element => string.Equals(
+                element.Attribute("Name")?.Value,
+                "BuildTailwindSourceTaskAssembly",
+                StringComparison.Ordinal));
+        var buildTask = Assert.Single(bootstrapTarget.Descendants("MSBuild"));
+
+        Assert.Equal("RunTailwindBuild", bootstrapTarget.Attribute("BeforeTargets")?.Value);
+        Assert.Equal("$(_TailwindTaskAssemblySourceProject)", buildTask.Attribute("Projects")?.Value);
+        Assert.Equal("Build", buildTask.Attribute("Targets")?.Value);
+        Assert.Contains(
+            "!Exists('$(_TailwindTaskAssemblySource)')",
+            bootstrapTarget.Attribute("Condition")?.Value,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTailwindBuild_DoesNotUsePathFallback_WhenBuildCliIsMissing()
+    {
+        var projectDirectory = Path.Join(Path.GetFullPath(_tempRoot), "sample-no-path-fallback");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        Directory.CreateDirectory(Path.Join(projectDirectory, "path-bin"));
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
+            "@import \"tailwindcss\";" + Environment.NewLine);
+
+        var markerPath = Path.Join(projectDirectory, "path-cli-executed.marker");
+        await CreateTailwindCliStubAsync(projectDirectory, markerPath, toolDirectoryName: "path-bin");
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
+        var targetsPath = await CreatePackagedTargetsCopyAsync(projectDirectory);
+
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
+                <TailwindOutputPath>wwwroot/css/site.gen.css</TailwindOutputPath>
+              </PropertyGroup>
+
+              <Import Project="{{EscapeForXml(targetsPath)}}" />
+            </Project>
+            """);
+
+        var result = await RunDotNetBuildAsync(
+            projectPath,
+            projectDirectory,
+            ("PATH", Path.Join(projectDirectory, "path-bin")));
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("ASTW004", combinedOutput, StringComparison.Ordinal);
+        Assert.Contains("Build mode does not search PATH", combinedOutput, StringComparison.Ordinal);
+        Assert.False(File.Exists(markerPath));
+    }
+
+    [Fact]
+    public async Task RunTailwindBuild_Succeeds_WhenCliWritesUnknownStderrAndExitsZero()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "sample-stderr-zero");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        Directory.CreateDirectory(Path.Join(projectDirectory, "tools"));
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
+            "@import \"tailwindcss\";" + Environment.NewLine);
+
+        var markerPath = Path.Join(projectDirectory, "tailwind-cli-executed.marker");
+        var cliRelativePath = await CreateTailwindCliStubAsync(
+            projectDirectory,
+            markerPath,
+            stderrLine: "tailwind warning on stderr",
+            exitCode: 0);
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
+        var targetsPath = await CreatePackagedTargetsCopyAsync(projectDirectory);
+
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
+                <TailwindOutputPath>wwwroot/css/site.gen.css</TailwindOutputPath>
+                <TailwindCliPath>{{cliRelativePath}}</TailwindCliPath>
+              </PropertyGroup>
+
+              <Import Project="{{EscapeForXml(targetsPath)}}" />
+            </Project>
+            """);
+
+        var result = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(markerPath), combinedOutput);
+        Assert.Contains("tailwind warning on stderr", combinedOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("ASTW006", combinedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTailwindBuild_FailsWithDiagnostic_WhenCliExitsNonZero()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "sample-nonzero");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        Directory.CreateDirectory(Path.Join(projectDirectory, "tools"));
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
+            "@import \"tailwindcss\";" + Environment.NewLine);
+
+        var markerPath = Path.Join(projectDirectory, "tailwind-cli-executed.marker");
+        var cliRelativePath = await CreateTailwindCliStubAsync(
+            projectDirectory,
+            markerPath,
+            stderrLine: "tailwind failed",
+            exitCode: 7);
+        var projectPath = Path.Join(projectDirectory, "Sample.csproj");
+        var targetsPath = await CreatePackagedTargetsCopyAsync(projectDirectory);
+
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
+                <TailwindOutputPath>wwwroot/css/site.gen.css</TailwindOutputPath>
+                <TailwindCliPath>{{cliRelativePath}}</TailwindCliPath>
+              </PropertyGroup>
+
+              <Import Project="{{EscapeForXml(targetsPath)}}" />
+            </Project>
+            """);
+
+        var result = await RunDotNetBuildAsync(projectPath, projectDirectory);
+        var combinedOutput = result.Stdout + Environment.NewLine + result.Stderr;
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.True(File.Exists(markerPath), combinedOutput);
+        Assert.Contains("ASTW006", combinedOutput, StringComparison.Ordinal);
+        Assert.Contains("tailwind failed", combinedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_Cancel_StopsLongRunningTailwindProcess()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "sample-cancel");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        Directory.CreateDirectory(Path.Join(projectDirectory, "tools"));
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
+            "@import \"tailwindcss\";" + Environment.NewLine);
+
+        var startedPath = Path.Join(projectDirectory, "started.marker");
+        var finishedPath = Path.Join(projectDirectory, "finished.marker");
+        var cliPath = await CreateLongRunningTailwindCliStubAsync(projectDirectory, startedPath, finishedPath);
+        var buildEngine = new RecordingBuildEngine();
+        var task = new RunTailwindBuildTask
+        {
+            BuildEngine = buildEngine,
+            ProjectDirectory = projectDirectory,
+            InputPath = "wwwroot/css/app.css",
+            OutputPath = "wwwroot/css/site.gen.css",
+            TailwindCliPath = cliPath,
+            TailwindVersion = "4.1.18",
+            TargetsDirectory = projectDirectory,
+            Configuration = "Debug",
+            TargetFramework = "net10.0"
+        };
+
+        var executeTask = Task.Run(task.Execute);
+        await WaitForFileAsync(startedPath);
+        task.Cancel();
+        var result = await executeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result);
+        Assert.False(File.Exists(finishedPath));
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW007", StringComparison.Ordinal) is true);
+        Assert.Empty(buildEngine.Warnings);
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_CancelBeforeExecute_DoesNotThrow()
+    {
+        var task = new RunTailwindBuildTask();
+
+        task.Cancel();
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenRidCannotBeDetermined()
+    {
+        var task = CreateBuildTask("sample-unknown-rid", task =>
+        {
+            task.TailwindTargetRid = "unknown";
+            task.TailwindVersion = "4.1.18";
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW001", StringComparison.Ordinal) is true);
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenRidIsUnsupported()
+    {
+        var task = CreateBuildTask("sample-unsupported-rid", task =>
+        {
+            task.TailwindTargetRid = "plan9-x64";
+            task.TailwindVersion = "4.1.18";
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(
+            buildEngine.Errors,
+            error => error.Message?.Contains("Tailwind RID 'plan9-x64' is not supported", StringComparison.Ordinal) is true);
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenRidContainsPathSeparator()
+    {
+        var task = CreateBuildTask("sample-rid-path-component", task =>
+        {
+            task.TailwindTargetRid = "linux-x64/nested";
+            task.TailwindVersion = "4.1.18";
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(
+            buildEngine.Errors,
+            error => error.Message?.Contains("single relative path component", StringComparison.Ordinal) is true);
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenTailwindVersionIsMissing()
+    {
+        var task = CreateBuildTask("sample-missing-version", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = null;
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW002", StringComparison.Ordinal) is true);
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenPackagedRuntimeIsMissing()
+    {
+        var task = CreateBuildTask("sample-missing-runtime", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = "4.1.18";
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) is true);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenTargetsDirectoryIsEmpty(string targetsDirectory)
+    {
+        var task = CreateBuildTask("sample-empty-targets-directory", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = "4.1.18";
+            task.TargetsDirectory = targetsDirectory;
+        });
+
+        Assert.Throws<ArgumentException>(() => task.Execute());
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenSiblingPackageLayoutCannotBeDerived()
+    {
+        var task = CreateBuildTask("sample-root-targets-directory", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = "4.1.18";
+            task.TargetsDirectory = Path.GetPathRoot(task.ProjectDirectory)!;
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) is true);
+    }
+
+    [Fact]
+    public void RunTailwindBuildTask_FailsWithDiagnostic_WhenSiblingPackageVersionIsInvalid()
+    {
+        var invalidTargetsDirectory = Path.Join(
+            _tempRoot,
+            "packages",
+            "forgetrust.appsurface.web.tailwind",
+            " ",
+            "build",
+            "net10.0");
+        Directory.CreateDirectory(invalidTargetsDirectory);
+        var task = CreateBuildTask("sample-invalid-package-version", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = "4.1.18";
+            task.TargetsDirectory = invalidTargetsDirectory;
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        Assert.Contains(buildEngine.Errors, error => error.Message?.Contains("ASTW004", StringComparison.Ordinal) is true);
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_UsesProjectRuntimeCandidate_WhenPresent()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var task = CreateBuildTask("sample-project-runtime", task =>
+        {
+            task.TailwindTargetRid = TailwindRuntimeMap.GetCurrentRid();
+            task.TailwindVersion = "4.1.18";
+        });
+        var runtimePath = await CreateProjectRuntimeTailwindCliStubAsync(task.ProjectDirectory);
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.True(result);
+        Assert.True(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Empty(buildEngine.Errors);
+        Assert.Empty(buildEngine.Warnings);
+        Assert.Contains(buildEngine.Messages, message => message.Importance == MessageImportance.Low && message.Message == " ");
+        Assert.Contains(buildEngine.Messages, message => message.Importance == MessageImportance.Normal && message.Message == "≈ tailwindcss v4.1.18");
+        Assert.Contains(
+            buildEngine.Messages,
+            message => message.Message?.Contains(Path.GetFileName(runtimePath), StringComparison.Ordinal) is true);
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_UsesSiblingRuntimePackageCandidate_WhenPresent()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        const string packageVersion = "4.1.18";
+        var targetsDirectory = Path.Join(
+            _tempRoot,
+            "packages",
+            "forgetrust.appsurface.web.tailwind",
+            packageVersion,
+            "build");
+        var runtimePath = Path.Join(
+            _tempRoot,
+            "packages",
+            $"forgetrust.appsurface.web.tailwind.runtime.{rid}",
+            packageVersion,
+            "runtimes",
+            rid,
+            "native",
+            runtimeBinaryName);
+        Directory.CreateDirectory(targetsDirectory);
+        var task = CreateBuildTask("sample-sibling-runtime", task =>
+        {
+            task.TailwindTargetRid = rid;
+            task.TailwindVersion = packageVersion;
+            task.TargetsDirectory = targetsDirectory;
+        });
+        await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.True(result);
+        Assert.True(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Empty(buildEngine.Errors);
+        Assert.Empty(buildEngine.Warnings);
+        Assert.Contains(
+            buildEngine.Messages,
+            message => message.Message?.Contains(Path.GetFileName(runtimePath), StringComparison.Ordinal) is true);
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_FailsWithDiagnostic_WhenCliExitsNonZeroWithoutCapturedOutput()
+    {
+        var projectDirectory = Path.Join(_tempRoot, "sample-nonzero-empty-output");
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(Path.Join(projectDirectory, "tools"));
+        var markerPath = Path.Join(projectDirectory, "tailwind-cli-executed.marker");
+        var cliRelativePath = await CreateTailwindCliStubAsync(projectDirectory, markerPath, exitCode: 7);
+        var task = CreateBuildTask("sample-nonzero-empty-output", task =>
+        {
+            task.TailwindCliPath = cliRelativePath;
+            task.TailwindVersion = "4.1.18";
+        });
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        var error = Assert.Single(buildEngine.Errors);
+        Assert.Contains("ASTW006", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Captured stdout tail:", error.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(markerPath));
+    }
+
+    [Fact]
+    public async Task RunTailwindBuildTask_FailsWithDiagnostic_WhenCliProcessCannotStart()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        const string relativeCliPath = "tools/tailwindcss";
+        var task = CreateBuildTask("sample-start-failure", task =>
+        {
+            task.TailwindCliPath = relativeCliPath;
+            task.TailwindVersion = "4.1.18";
+        });
+        var cliPath = Path.Join(task.ProjectDirectory, relativeCliPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(cliPath)!);
+        await File.WriteAllTextAsync(cliPath, "#!/bin/sh\nexit 0\n");
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.False(result);
+        var error = Assert.Single(buildEngine.Errors);
+        Assert.Contains("ASTW005", error.Message, StringComparison.Ordinal);
+        Assert.Contains(cliPath, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PackedPackageConsumption_BuildAndPublish_LoadsTaskAndGeneratesStaticWebAsset()
+    {
+        var feedDirectory = Path.Join(_tempRoot, "feed");
+        Directory.CreateDirectory(feedDirectory);
+        var repoRoot = GetRepositoryRoot();
+        var packageVersion = CreateSmokePackageVersion();
+
+        foreach (var packageProjectPath in GetPackageProjectsForSmoke(repoRoot))
+        {
+            var packResult = await RunDotNetAsync(
+                ["pack", packageProjectPath, "-c", "Release", "--no-restore", "-o", feedDirectory, "-v:minimal", $"-p:Version={packageVersion}", $"-p:PackageVersion={packageVersion}"],
+                repoRoot);
+            Assert.Equal(0, packResult.ExitCode);
+        }
+
+        var tailwindPackagePath = Path.Join(feedDirectory, $"ForgeTrust.AppSurface.Web.Tailwind.{packageVersion}.nupkg");
+        Assert.True(File.Exists(tailwindPackagePath), "Expected the Tailwind package to be created.");
+        using (var archive = System.IO.Compression.ZipFile.OpenRead(tailwindPackagePath))
+        {
+            Assert.Contains(archive.Entries, entry => entry.FullName == "build/tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll");
+            Assert.Contains(archive.Entries, entry => entry.FullName == "build/tasks/CliWrap.dll");
+            Assert.Contains(archive.Entries, entry => entry.FullName == "build/ForgeTrust.AppSurface.Web.Tailwind.targets");
+        }
+
+        var projectDirectory = Path.Join(_tempRoot, "packed-consumer");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        Directory.CreateDirectory(Path.Join(projectDirectory, "tools"));
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
+            "@import \"tailwindcss\";" + Environment.NewLine);
+
+        var markerPath = Path.Join(projectDirectory, "tailwind-cli-executed.marker");
+        var cliRelativePath = await CreateTailwindCliStubAsync(projectDirectory, markerPath);
+        var projectPath = Path.Join(projectDirectory, "PackedConsumer.csproj");
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk.Razor">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <Nullable>enable</Nullable>
+                <RestoreSources>{{EscapeForXml(feedDirectory)}};$(RestoreSources)</RestoreSources>
+                <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
+                <StaticWebAssetBasePath>_content/PackedConsumer</StaticWebAssetBasePath>
+                <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
+                <TailwindOutputPath>wwwroot/css/site.gen.css</TailwindOutputPath>
+                <TailwindCliPath>{{cliRelativePath}}</TailwindCliPath>
+              </PropertyGroup>
+
+              <ItemGroup>
+                <FrameworkReference Include="Microsoft.AspNetCore.App" />
+                <PackageReference Include="ForgeTrust.AppSurface.Web.Tailwind" Version="{{packageVersion}}" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        var buildResult = await RunDotNetAsync(["build", projectPath, "-nologo", "-v:minimal"], projectDirectory);
+        var buildOutput = buildResult.Stdout + Environment.NewLine + buildResult.Stderr;
+        Assert.Equal(0, buildResult.ExitCode);
+        Assert.True(File.Exists(markerPath), buildOutput);
+        Assert.Contains("Tailwind CSS: Running build", buildOutput, StringComparison.Ordinal);
+
+        var manifestPath = GetStaticWebAssetsBuildManifestPath(projectDirectory, buildOutput);
+        await AssertBuildManifestContainsGeneratedCssAsync(manifestPath);
+
+        var publishResult = await RunDotNetAsync(["publish", projectPath, "-nologo", "-v:minimal", "--no-restore"], projectDirectory);
+        var publishOutput = publishResult.Stdout + Environment.NewLine + publishResult.Stderr;
+        Assert.Equal(0, publishResult.ExitCode);
+        Assert.True(
+            File.Exists(Path.Join(projectDirectory, "bin", "Release", "net10.0", "publish", "wwwroot", "css", "site.gen.css")) ||
+            File.Exists(Path.Join(projectDirectory, "bin", "Debug", "net10.0", "publish", "wwwroot", "css", "site.gen.css")),
+            publishOutput);
+    }
+
+    [Fact]
+    public async Task PackedPackageConsumption_DefaultRuntimePackageBuild_LoadsRuntimeCliWithoutExplicitPath()
+    {
+        var feedDirectory = Path.Join(_tempRoot, "default-runtime-feed");
+        Directory.CreateDirectory(feedDirectory);
+        var repoRoot = GetRepositoryRoot();
+        var packageVersion = CreateSmokePackageVersion();
+
+        foreach (var packageProjectPath in GetPackageProjectsForSmoke(repoRoot))
+        {
+            var packResult = await RunDotNetAsync(
+                ["pack", packageProjectPath, "-c", "Release", "--no-restore", "-o", feedDirectory, "-v:minimal", $"-p:Version={packageVersion}", $"-p:PackageVersion={packageVersion}"],
+                repoRoot);
+            Assert.Equal(0, packResult.ExitCode);
+        }
+
+        var projectDirectory = Path.Join(_tempRoot, "packed-default-runtime-consumer");
+        Directory.CreateDirectory(Path.Join(projectDirectory, "wwwroot", "css"));
+        await File.WriteAllTextAsync(
+            Path.Join(projectDirectory, "wwwroot", "css", "app.css"),
+            "@import \"tailwindcss\";" + Environment.NewLine);
+
+        var projectPath = Path.Join(projectDirectory, "PackedDefaultRuntimeConsumer.csproj");
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk.Razor">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <Nullable>enable</Nullable>
+                <RestoreSources>{{EscapeForXml(feedDirectory)}};$(RestoreSources)</RestoreSources>
+                <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
+                <StaticWebAssetBasePath>_content/PackedDefaultRuntimeConsumer</StaticWebAssetBasePath>
+                <TailwindInputPath>wwwroot/css/app.css</TailwindInputPath>
+                <TailwindOutputPath>wwwroot/css/site.gen.css</TailwindOutputPath>
+              </PropertyGroup>
+
+              <ItemGroup>
+                <FrameworkReference Include="Microsoft.AspNetCore.App" />
+                <PackageReference Include="ForgeTrust.AppSurface.Web.Tailwind" Version="{{packageVersion}}" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        var buildResult = await RunDotNetAsync(["build", projectPath, "-nologo", "-v:minimal"], projectDirectory);
+        var buildOutput = buildResult.Stdout + Environment.NewLine + buildResult.Stderr;
+
+        Assert.True(buildResult.ExitCode == 0, buildOutput);
+        Assert.Contains("Tailwind CSS: Running build", buildOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("ASTW004", buildOutput, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(projectDirectory, "wwwroot", "css", "site.gen.css")), buildOutput);
+    }
+
     private static string GetTailwindTargetsPath()
     {
         return Path.GetFullPath(
-            Path.Combine(
+            Path.Join(
                 AppContext.BaseDirectory,
                 "..",
                 "..",
@@ -197,6 +864,61 @@ public sealed class TailwindBuildTargetsTests : IDisposable
                 "ForgeTrust.AppSurface.Web.Tailwind.targets"));
     }
 
+    private static string GetRepositoryRoot()
+    {
+        return Path.GetFullPath(
+            Path.Join(
+                AppContext.BaseDirectory,
+                "..",
+                "..",
+                "..",
+                "..",
+                ".."));
+    }
+
+    private static IEnumerable<string> GetPackageProjectsForSmoke(string repoRoot)
+    {
+        yield return Path.Join(repoRoot, "ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core.csproj");
+        yield return Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Web.Tailwind", "runtimes", "ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64.csproj");
+        yield return Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Web.Tailwind", "runtimes", "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj");
+        yield return Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Web.Tailwind", "runtimes", "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64.csproj");
+        yield return Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Web.Tailwind", "runtimes", "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64.csproj");
+        yield return Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Web.Tailwind", "runtimes", "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj");
+        yield return Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Web.Tailwind", "ForgeTrust.AppSurface.Web.Tailwind.csproj");
+    }
+
+    private static string CreateSmokePackageVersion()
+    {
+        return "0.1.0-smoke." + Guid.NewGuid().ToString("N");
+    }
+
+    private static async Task<string> CreatePackagedTargetsCopyAsync(string projectDirectory)
+    {
+        var packageBuildDirectory = Path.Join(projectDirectory, "package", "build");
+        var taskDirectory = Path.Join(packageBuildDirectory, "tasks");
+        Directory.CreateDirectory(taskDirectory);
+
+        var targetsPath = Path.Join(packageBuildDirectory, "ForgeTrust.AppSurface.Web.Tailwind.targets");
+        File.Copy(GetTailwindTargetsPath(), targetsPath);
+        File.Copy(
+            Path.Join(Path.GetDirectoryName(GetTailwindTargetsPath())!, "..", "tailwind.version"),
+            Path.Join(packageBuildDirectory, "tailwind.version"));
+
+        var taskAssemblyDirectory = Path.GetDirectoryName(typeof(RunTailwindBuildTask).Assembly.Location)!;
+        foreach (var file in Directory.EnumerateFiles(taskAssemblyDirectory, "*.dll"))
+        {
+            File.Copy(file, Path.Join(taskDirectory, Path.GetFileName(file)));
+        }
+
+        foreach (var file in Directory.EnumerateFiles(taskAssemblyDirectory, "*.deps.json"))
+        {
+            File.Copy(file, Path.Join(taskDirectory, Path.GetFileName(file)));
+        }
+
+        await Task.CompletedTask;
+        return targetsPath;
+    }
+
     private static string EscapeForXml(string value)
     {
         return value
@@ -206,25 +928,89 @@ public sealed class TailwindBuildTargetsTests : IDisposable
             .Replace(">", "&gt;", StringComparison.Ordinal);
     }
 
+    private RunTailwindBuildTask CreateBuildTask(string directoryName, Action<RunTailwindBuildTask>? configure = null)
+    {
+        var projectDirectory = Path.Join(_tempRoot, directoryName);
+        Directory.CreateDirectory(projectDirectory);
+        var task = new RunTailwindBuildTask
+        {
+            BuildEngine = new RecordingBuildEngine(),
+            ProjectDirectory = projectDirectory,
+            InputPath = "wwwroot/css/app.css",
+            OutputPath = "wwwroot/css/site.gen.css",
+            TargetsDirectory = projectDirectory,
+            Configuration = CurrentConfiguration,
+            TargetFramework = "net10.0"
+        };
+        configure?.Invoke(task);
+        return task;
+    }
+
+    private static async Task<string> CreateProjectRuntimeTailwindCliStubAsync(string projectDirectory)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            throw new PlatformNotSupportedException("The project-runtime stub test writes a Unix executable script.");
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        var runtimePath = Path.Join(projectDirectory, "runtimes", rid, "native", runtimeBinaryName);
+        return await CreateRuntimeTailwindCliStubAsync(projectDirectory, runtimePath);
+    }
+
+    private static async Task<string> CreateRuntimeTailwindCliStubAsync(string projectDirectory, string runtimePath)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            throw new PlatformNotSupportedException("The runtime stub test writes a Unix executable script.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(runtimePath)!);
+        await File.WriteAllTextAsync(
+            runtimePath,
+            $@"#!/bin/sh
+mkdir -p ""{Path.Join(projectDirectory, "wwwroot", "css")}""
+cat <<'EOF' > ""{Path.Join(projectDirectory, "wwwroot", "css", "site.gen.css")}""
+.generated{{color:red;}}
+EOF
+printf ' \n' >&2
+printf '≈ tailwindcss v4.1.18\n' >&2
+printf '%s\n' ""{runtimePath}""
+exit 0
+	");
+
+        const UnixFileMode executableMode =
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+        File.SetUnixFileMode(runtimePath, executableMode);
+        return runtimePath;
+    }
+
     private static async Task<string> CreateTailwindCliStubAsync(
         string projectDirectory,
         string markerPath,
-        string outputRelativePath = "wwwroot/css/site.gen.css")
+        string outputRelativePath = "wwwroot/css/site.gen.css",
+        string toolDirectoryName = "tools",
+        string? stderrLine = null,
+        int exitCode = 0)
     {
-        var toolsDirectory = Path.Combine(projectDirectory, "tools");
-        var outputPath = Path.Combine(projectDirectory, outputRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        var outputPath = Path.Join(projectDirectory, outputRelativePath.Replace('/', Path.DirectorySeparatorChar));
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            var relativePath = Path.Combine("tools", "tailwindcss.cmd");
-            var fullPath = Path.Combine(projectDirectory, relativePath);
+            var relativePath = Path.Join(toolDirectoryName, "tailwindcss.cmd");
+            var fullPath = Path.Join(projectDirectory, relativePath);
             await File.WriteAllTextAsync(
                 fullPath,
                 $@"@echo off
 if not exist ""{Path.GetDirectoryName(outputPath)}"" mkdir ""{Path.GetDirectoryName(outputPath)}""
 >""{outputPath}"" echo .generated{{color:red;}}
 echo invoked>""{markerPath}""
-exit /b 0
+{(stderrLine == null ? string.Empty : $@"echo {stderrLine} 1>&2
+")}exit /b {exitCode}
 ");
 
             return relativePath;
@@ -235,8 +1021,8 @@ exit /b 0
             UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
             UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
 
-        var unixRelativePath = Path.Combine("tools", "tailwindcss");
-        var unixFullPath = Path.Combine(projectDirectory, unixRelativePath);
+        var unixRelativePath = Path.Join(toolDirectoryName, "tailwindcss");
+        var unixFullPath = Path.Join(projectDirectory, unixRelativePath);
         await File.WriteAllTextAsync(
             unixFullPath,
             $@"#!/bin/sh
@@ -245,19 +1031,106 @@ cat <<'EOF' > ""{outputPath}""
 .generated{{color:red;}}
 EOF
 printf 'invoked\n' > ""{markerPath}""
+{(stderrLine == null ? string.Empty : $"printf '{stderrLine}\\n' >&2")}
+exit {exitCode}
+");
+        File.SetUnixFileMode(unixFullPath, executableMode);
+        return unixRelativePath;
+    }
+
+    private static async Task<string> CreateLongRunningTailwindCliStubAsync(
+        string projectDirectory,
+        string startedPath,
+        string finishedPath)
+    {
+        var toolsDirectory = Path.Join(projectDirectory, "tools");
+        Directory.CreateDirectory(toolsDirectory);
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            var relativePath = Path.Join("tools", "tailwindcss.cmd");
+            var fullPath = Path.Join(projectDirectory, relativePath);
+            await File.WriteAllTextAsync(
+                fullPath,
+                $@"@echo off
+echo started>""{startedPath}""
+ping 127.0.0.1 -n 30 > nul
+echo finished>""{finishedPath}""
+exit /b 0
+");
+            return relativePath;
+        }
+
+        const UnixFileMode executableMode =
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+
+        var unixRelativePath = Path.Join("tools", "tailwindcss");
+        var unixFullPath = Path.Join(projectDirectory, unixRelativePath);
+        await File.WriteAllTextAsync(
+            unixFullPath,
+            $@"#!/bin/sh
+printf 'started\n' > ""{startedPath}""
+sleep 30
+printf 'finished\n' > ""{finishedPath}""
 exit 0
 ");
         File.SetUnixFileMode(unixFullPath, executableMode);
         return unixRelativePath;
     }
 
-    private static async Task<DotNetCommandResult> RunDotNetBuildAsync(string projectPath, string workingDirectory)
+    private static async Task WaitForFileAsync(string path)
     {
-        var result = await Cli.Wrap("dotnet")
-            .WithArguments(["build", projectPath, "-nologo", "-v:minimal"])
+        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!File.Exists(path))
+        {
+            await Task.Delay(50, cancellationTokenSource.Token);
+        }
+    }
+
+    private static async Task<DotNetCommandResult> RunDotNetBuildAsync(
+        string projectPath,
+        string workingDirectory,
+        params (string Name, string Value)[] environmentVariables)
+    {
+        return await RunDotNetAsync(["build", projectPath, "-nologo", "-v:minimal"], workingDirectory, environmentVariables);
+    }
+
+    private static async Task<DotNetCommandResult> RunDotNetBuildForCurrentConfigurationAsync(
+        string projectPath,
+        string workingDirectory,
+        params (string Name, string Value)[] environmentVariables)
+    {
+        return await RunDotNetAsync(
+            ["build", projectPath, "-nologo", "-v:minimal", $"-p:Configuration={CurrentConfiguration}"],
+            workingDirectory,
+            environmentVariables);
+    }
+
+    private static async Task<DotNetCommandResult> RunDotNetAsync(
+        IReadOnlyList<string> args,
+        string workingDirectory,
+        params (string Name, string Value)[] environmentVariables)
+    {
+        var command = Cli.Wrap("dotnet")
+            .WithArguments(args)
             .WithWorkingDirectory(workingDirectory)
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync();
+            .WithValidation(CommandResultValidation.None);
+
+        var commandEnvironment = new Dictionary<string, string?>
+        {
+            ["MSBUILDDISABLENODEREUSE"] = "1"
+        };
+
+        foreach (var (name, value) in environmentVariables)
+        {
+            commandEnvironment[name] = value;
+        }
+
+        command = command.WithEnvironmentVariables(commandEnvironment);
+
+        var result = await command.ExecuteBufferedAsync();
 
         return new DotNetCommandResult(
             result.ExitCode,
@@ -279,5 +1152,62 @@ exit 0
                 && value.EndsWith(".css", StringComparison.Ordinal));
     }
 
+    private static string GetStaticWebAssetsBuildManifestPath(string projectDirectory, string buildOutput)
+    {
+        var objDirectory = Path.Join(projectDirectory, "obj");
+        var manifestPaths = Directory.Exists(objDirectory)
+            ? Directory.EnumerateFiles(objDirectory, "staticwebassets.build.json", SearchOption.AllDirectories).ToArray()
+            : [];
+
+        var manifestPath = Assert.Single(manifestPaths);
+        Assert.True(File.Exists(manifestPath), buildOutput);
+        return manifestPath;
+    }
+
     private sealed record DotNetCommandResult(int ExitCode, string Stdout, string Stderr);
+
+    private sealed class RecordingBuildEngine : IBuildEngine
+    {
+        public List<BuildErrorEventArgs> Errors { get; } = [];
+
+        public List<BuildWarningEventArgs> Warnings { get; } = [];
+
+        public List<BuildMessageEventArgs> Messages { get; } = [];
+
+        public bool ContinueOnError => false;
+
+        public int LineNumberOfTaskNode => 0;
+
+        public int ColumnNumberOfTaskNode => 0;
+
+        public string ProjectFileOfTaskNode => string.Empty;
+
+        public void LogErrorEvent(BuildErrorEventArgs e)
+        {
+            Errors.Add(e);
+        }
+
+        public void LogWarningEvent(BuildWarningEventArgs e)
+        {
+            Warnings.Add(e);
+        }
+
+        public void LogMessageEvent(BuildMessageEventArgs e)
+        {
+            Messages.Add(e);
+        }
+
+        public void LogCustomEvent(CustomBuildEventArgs e)
+        {
+        }
+
+        public bool BuildProjectFile(
+            string projectFileName,
+            string[] targetNames,
+            System.Collections.IDictionary globalProperties,
+            System.Collections.IDictionary targetOutputs)
+        {
+            return true;
+        }
+    }
 }

@@ -3,6 +3,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddTailwindBuildTaskFilesToPackage</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
   <Import Project="Tailwind.Common.props" />
@@ -14,7 +15,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="CliWrap" />
     <ProjectReference Include="../../ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Web.Tailwind.Tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
     <ProjectReference Include="runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64.csproj" />
     <ProjectReference Include="runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj" />
     <ProjectReference Include="runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64.csproj" />
@@ -31,4 +34,11 @@
     <None Include="build\ForgeTrust.AppSurface.Web.Tailwind.targets" Pack="true" PackagePath="build" />
     <None Include="tailwind.version" Pack="true" PackagePath="build" />
   </ItemGroup>
+
+  <Target Name="AddTailwindBuildTaskFilesToPackage">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="..\ForgeTrust.AppSurface.Web.Tailwind.Tasks\bin\$(Configuration)\net10.0\*.dll" PackagePath="build\tasks" />
+      <TfmSpecificPackageFile Include="..\ForgeTrust.AppSurface.Web.Tailwind.Tasks\bin\$(Configuration)\net10.0\*.deps.json" PackagePath="build\tasks" />
+    </ItemGroup>
+  </Target>
 </Project>
