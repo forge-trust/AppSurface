@@ -1038,6 +1038,12 @@ static web assets.
   - Include globs default to an empty list; exclude globs default to `**/*.min.js`; default-exclusion controls mirror the global path option shape.
   - Use include globs as an optional narrowing or performance boundary, such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js`.
   - Global path rules apply first, then JavaScript-specific includes, default exclusions, and excludes refine the candidate set.
+- `AppSurfaceDocs:Harvest:JavaScript:GroupNameRules`
+  - Defaults to an empty list.
+  - Names already-eligible JavaScript source trees when public doclets do not declare a nonblank `@namespace` or `@module`.
+  - Rules are evaluated in order; the first matching rule wins.
+  - Each rule requires a nonblank `Name` and at least one valid repository-relative `IncludeGlobs` pattern.
+  - Group name rules do not include files in the harvest. Use `IncludeGlobs`, `ExcludeGlobs`, and shared path policy for harvest boundaries.
 - `AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag`
   - Defaults to `true`.
   - Requires harvested doclets to carry `@public`. `@internal`, `@private`, and `@ignore` always exclude a doclet.
@@ -1129,7 +1135,40 @@ JavaScript harvesting is for intentional browser runtime contracts: custom event
 }
 ```
 
-The v1 harvester parses policy-approved `.js` files with Acornima and reads JSDoc-shaped block comments. It parses modules first and falls back to script parsing for classic browser runtimes. It renders group pages such as `api/javascript/razorwire`, adds fragment-addressable search stubs for each item, and uses `@namespace` or `@module` as the group name. Without an explicit group, `window.RazorWire` groups under `RazorWire`; otherwise the source file name is used.
+The v1 harvester parses policy-approved `.js` files with Acornima and reads JSDoc-shaped block comments. It parses modules first and falls back to script parsing for classic browser runtimes. It renders group pages such as `api/javascript/razorwire`, adds fragment-addressable search stubs for each item, and uses `@namespace` or `@module` as the group name. Without an explicit group, configured group rules run next; if no rule matches, classic browser globals such as `window.RazorWire` infer `RazorWire`, and other doclets use source-path fallback.
+
+JavaScript API family names resolve in this order:
+
+1. the first nonblank `@namespace`
+2. the first nonblank `@module`
+3. the first configured `GroupNameRules` match
+4. classic browser global inference from `window.*`
+5. fallback identity from the source path
+
+Configured group rules are useful when a docs-only contract manifest or package-owned source tree should publish under a reader-facing family name without repeating the same tag on every doclet:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "JavaScript": {
+        "GroupNameRules": [
+          {
+            "Name": "RazorWire",
+            "IncludeGlobs": [
+              "Web/ForgeTrust.RazorWire/assets/contracts/**/*.js"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Rules are ordered and first match wins. Put narrow package paths before broad fallback paths. A rule only names files that normal harvest policy already accepted; it does not widen `IncludeGlobs`, bypass excludes, or publish unannotated JavaScript. If a doclet has `@namespace` or `@module`, that tag wins over any matching rule so source-owned API names remain stable.
+
+Path fallback is deterministic and path-aware. A single untagged file such as `src/public-api.js` uses `public-api` as its reader-facing family label and publishes at `api/javascript/src-public-api`, so its route stays stable if another `public-api.js` appears later. If multiple fallback files share the same stem, AppSurface Docs also disambiguates the visible family labels with path context, such as `forms/public-api` and `widgets/public-api`, so unrelated contracts do not silently merge onto one page. Add `@namespace`, `@module`, or a configured group rule when fallback labels are not the names readers should see.
 
 Supported public shapes:
 
@@ -1200,6 +1239,9 @@ The verifier starts the standalone docs host on loopback, reads the same redacte
 Pitfalls:
 
 - Do not add broad `**/*.js` include globs just to turn JavaScript harvesting on. It is already on; include globs are for narrowing default discovery.
+- Do not expect `GroupNameRules` to harvest files. They only name JavaScript API families after the normal path policy accepts a file.
+- Do not put a broad `GroupNameRules` entry before a narrower package rule unless you want the broad name to win.
+- Do not rely on fallback file names as stable product names for packages. Prefer `@namespace`, `@module`, or a configured group rule for public API families.
 - Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
 - When documenting package browser contracts, prefer a small docs-only contract manifest such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js` over generated runtime outputs.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.

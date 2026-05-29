@@ -458,6 +458,73 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void Redactor_RedactsExplicitSensitiveEntriesAndNonSensitiveDoesNotDowngradeFragments()
+    {
+        var redactor = new ConfigAuditRedactor();
+
+        var explicitSensitive = redactor.FormatValue(
+            "Partner.Payload",
+            "partner-assertion",
+            [],
+            ConfigAuditSensitivity.Sensitive);
+        var nonSensitiveFragment = redactor.FormatValue(
+            "Payment.ApiKey",
+            "not-safe",
+            [],
+            ConfigAuditSensitivity.NonSensitive);
+
+        Assert.True(explicitSensitive.IsRedacted);
+        Assert.Equal("[redacted]", explicitSensitive.DisplayValue);
+        Assert.True(nonSensitiveFragment.IsRedacted);
+        Assert.Equal("[redacted]", nonSensitiveFragment.DisplayValue);
+    }
+
+    [Theory]
+    [InlineData("Partner.Passphrase")]
+    [InlineData("Partner.Dsn")]
+    [InlineData("Partner.Assertion")]
+    [InlineData("Partner.Certificate")]
+    [InlineData("Partner.ClientSecret")]
+    [InlineData("Partner.SharedAccessSignature")]
+    [InlineData("Partner.Cookie")]
+    public void Redactor_RedactsExpandedSensitiveFragments(string key)
+    {
+        var redactor = new ConfigAuditRedactor();
+
+        var redacted = redactor.FormatValue(key, "secret-value", []);
+
+        Assert.True(redacted.IsRedacted);
+        Assert.Equal("[redacted]", redacted.DisplayValue);
+    }
+
+    [Fact]
+    public void GetReport_RedactsExplicitSensitiveProviderOnlyKeyBeforeStructuredAndTextOutput()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Partner.Payload"] = "partner-assertion-value"
+                }));
+        services.AddConfigAuditKey<string>(
+            "Partner.Payload",
+            options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+
+        var provider = services.BuildServiceProvider();
+        var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
+        var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
+        var serialized = JsonSerializer.Serialize(report);
+
+        var entry = AssertEntry(report, "Partner.Payload", ConfigAuditEntryState.Resolved, "[redacted]");
+        Assert.True(entry.IsRedacted);
+        Assert.DoesNotContain("partner-assertion-value", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("partner-assertion-value", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void GetReport_OmitsCollectionDisplayValuesWithoutLeakingNestedSecrets()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -859,6 +926,53 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_DictionaryKeyCorrelationOmitsIdsForUnprintableDictionaryKeys()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
+        {
+            options.SecretKey = CorrelationSecretA;
+            options.KeyId = "kid-a";
+            options.ApplicationScope = "app-a";
+        });
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Labels.Items"] = new Hashtable
+                    {
+                        [new ThrowingDictionaryKey()] = "throwing",
+                        [new FormatFailingDictionaryKey()] = "format",
+                        [new NullReturningDictionaryKey()] = "null",
+                        ["safe"] = "safe"
+                    }
+                }));
+        services.AddConfigAuditKey<Hashtable>(
+            "Labels.Items",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var children = AssertEntry(report, "Labels.Items", ConfigAuditEntryState.Resolved, null).Children;
+        var unprintableChildren = children
+            .Where(child => child.Element?.KeyLabel == "[key]")
+            .ToList();
+        var safeChild = Assert.Single(children, child => child.Element?.KeyLabel == "safe");
+
+        Assert.Equal(3, unprintableChildren.Count);
+        Assert.All(unprintableChildren, child => Assert.Null(child.Element?.KeyCorrelationId));
+        Assert.NotNull(safeChild.Element?.KeyCorrelationId);
+    }
+
+    [Fact]
     public void GetReport_ManualOptionOverridesWrapperDictionaryCorrelationPolicy()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -957,11 +1071,19 @@ public class ConfigAuditReporterTests
                 {
                     ["Codes"] = new Hashtable
                     {
-                        [7] = "seven"
+                        [7] = "seven",
+                        [true] = "enabled"
                     },
                     ["Hidden"] = new Dictionary<string, string>
                     {
                         ["public-name"] = "visible"
+                    },
+                    ["HiddenNested"] = new Dictionary<string, object?>
+                    {
+                        ["public-name"] = new Dictionary<string, string>
+                        {
+                            ["child-name"] = "visible"
+                        }
                     }
                 }));
         services.AddConfigAuditKey<Hashtable>(
@@ -974,20 +1096,156 @@ public class ConfigAuditReporterTests
                 options.TraverseCollectionElements = true;
                 options.DisplayDictionaryKeys = false;
             });
+        services.AddConfigAuditKey<Dictionary<string, object?>>(
+            "HiddenNested",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.DisplayDictionaryKeys = false;
+            });
 
         var report = services.BuildServiceProvider()
             .GetRequiredService<IConfigAuditReporter>()
             .GetReport("Production");
 
-        var code = Assert.Single(AssertEntry(report, "Codes", ConfigAuditEntryState.Resolved, null).Children);
-        Assert.Equal("Codes[\"7\"]", code.Key);
-        Assert.Equal("7", code.Element?.KeyLabel);
-        Assert.False(code.Element?.IsKeyRedacted);
+        var codes = AssertEntry(report, "Codes", ConfigAuditEntryState.Resolved, null).Children;
+        Assert.Equal(2, codes.Count);
+        Assert.Contains(codes, code => code.Key == "Codes[\"7\"]"
+                                       && code.Element is { KeyLabel: "7", IsKeyRedacted: false });
+        Assert.Contains(codes, code => code.Key == "Codes[\"True\"]"
+                                       && code.Element is { KeyLabel: "True", IsKeyRedacted: false });
 
         var hidden = Assert.Single(AssertEntry(report, "Hidden", ConfigAuditEntryState.Resolved, null).Children);
         Assert.Equal("Hidden[[key]]", hidden.Key);
         Assert.Equal("[key]", hidden.Element?.KeyLabel);
         Assert.True(hidden.Element?.IsKeyRedacted);
+
+        var hiddenParent = Assert.Single(AssertEntry(report, "HiddenNested", ConfigAuditEntryState.Resolved, null).Children);
+        var hiddenChild = Assert.Single(hiddenParent.Children);
+        Assert.Equal("HiddenNested[[key]][[key]]", hiddenChild.Key);
+        Assert.Equal("[key]", hiddenChild.Element?.KeyLabel);
+        Assert.True(hiddenChild.Element?.IsKeyRedacted);
+        Assert.DoesNotContain("[redacted-key", hiddenChild.Key, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_RedactsDictionaryLabelsForSensitiveParentSignals()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["CookieJar"] = new Dictionary<string, string>
+                    {
+                        ["tenant-a"] = "session-cookie"
+                    },
+                    ["Partner.Payloads"] = new Dictionary<string, string>
+                    {
+                        ["tenant-b"] = "payload"
+                    }
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "CookieJar",
+            options => options.TraverseCollectionElements = true);
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Partner.Payloads",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.Sensitivity = ConfigAuditSensitivity.Sensitive;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+        var serialized = JsonSerializer.Serialize(report);
+
+        var fragmentSensitiveChild = Assert.Single(AssertEntry(report, "CookieJar", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        Assert.Equal("CookieJar[[redacted-key-1]]", fragmentSensitiveChild.Key);
+        Assert.Equal("[redacted-key-1]", fragmentSensitiveChild.Element?.KeyLabel);
+        Assert.True(fragmentSensitiveChild.Element?.IsKeyRedacted);
+
+        var entrySensitiveChild = Assert.Single(AssertEntry(report, "Partner.Payloads", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        Assert.Equal("Partner.Payloads[[redacted-key-1]]", entrySensitiveChild.Key);
+        Assert.Equal("[redacted-key-1]", entrySensitiveChild.Element?.KeyLabel);
+        Assert.True(entrySensitiveChild.IsRedacted);
+
+        Assert.DoesNotContain("tenant-a", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-b", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_RedactsSourceSensitiveDictionaryChildWhenLabelsAreHidden()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new SourceSensitiveDictionaryProvider(
+                "Hidden.Payloads",
+                new Dictionary<string, string>
+                {
+                    ["tenant-a"] = "patched-secret"
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Hidden.Payloads",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.DisplayDictionaryKeys = false;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+        var serialized = JsonSerializer.Serialize(report);
+
+        var child = Assert.Single(AssertEntry(report, "Hidden.Payloads", ConfigAuditEntryState.PartiallyResolved, "[redacted]").Children);
+        Assert.Equal("Hidden.Payloads[[key]]", child.Key);
+        Assert.Equal("[redacted]", child.DisplayValue);
+        Assert.True(child.IsRedacted);
+        Assert.DoesNotContain("patched-secret", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-a", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_HandlesUnsafeDictionaryKeyLabelsWithoutCrashingOrLeaking()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var longKey = new string('a', 200);
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Labels.Items"] = new Hashtable
+                    {
+                        [new ThrowingDictionaryKey()] = "throwing",
+                        [new FormatFailingDictionaryKey()] = "format",
+                        [new NullReturningDictionaryKey()] = "null",
+                        [longKey] = "long"
+                    }
+                }));
+        services.AddConfigAuditKey<Hashtable>(
+            "Labels.Items",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+        var serialized = JsonSerializer.Serialize(report);
+
+        var entry = AssertEntry(report, "Labels.Items", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal(4, entry.Children.Count);
+        Assert.Contains(entry.Children, child => child.Element?.KeyLabel == "[key]" && child.Element.IsKeyRedacted);
+        Assert.Contains(entry.Children, child => child.Element?.KeyLabel?.Length == 131);
+        Assert.DoesNotContain(new string('a', 200), serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("dictionary-key-secret", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("dictionary-key-format-secret", serialized, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1303,6 +1561,113 @@ public class ConfigAuditReporterTests
         var entry = AssertEntry(report, "Invalid.Options", ConfigAuditEntryState.Resolved, null);
         Assert.Equal(2, entry.Children.Count);
         Assert.Equal(3, entry.Diagnostics.Count(diagnostic => diagnostic.Code == "config-audit-options-invalid"));
+    }
+
+    [Fact]
+    public void GetReport_ReportsInvalidSensitivityAndFailsClosed()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Partner.Payload"] = "invalid-sensitivity-secret"
+                }));
+        services.AddConfigAuditKey<string>(
+            "Partner.Payload",
+            options => options.Sensitivity = (ConfigAuditSensitivity)999);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+        var entry = AssertEntry(report, "Partner.Payload", ConfigAuditEntryState.Resolved, "[redacted]");
+        var diagnostic = Assert.Single(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-options-invalid");
+
+        Assert.True(entry.IsRedacted);
+        Assert.Contains("Sensitivity", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("999", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("Sensitive", diagnostic.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("invalid-sensitivity-secret", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_ReportsInvalidSensitivityWithoutRelaxingValidTraversalLimits()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Partner.Payloads"] = new List<string> { "one", "two", "three" }
+                }));
+        services.AddConfigAuditKey<List<string>>(
+            "Partner.Payloads",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.MaxCollectionElements = 1;
+                options.MaxReportNodes = 2;
+                options.Sensitivity = (ConfigAuditSensitivity)999;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+        var entry = AssertEntry(report, "Partner.Payloads", ConfigAuditEntryState.Resolved, "[redacted]");
+        var child = Assert.Single(entry.Children);
+        var serialized = JsonSerializer.Serialize(report);
+
+        Assert.Equal("Partner.Payloads[0]", child.Key);
+        Assert.Equal("[redacted]", child.DisplayValue);
+        Assert.True(child.IsRedacted);
+        Assert.Single(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-options-invalid");
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-collection-element-limit");
+        Assert.DoesNotContain("two", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("three", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_RedactsDictionaryLabelsWhenInvalidSensitivityFailsClosed()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Partner.Payloads"] = new Dictionary<string, string>
+                    {
+                        ["tenant-invalid"] = "invalid-sensitivity-secret"
+                    }
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Partner.Payloads",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.Sensitivity = (ConfigAuditSensitivity)999;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+        var child = Assert.Single(AssertEntry(report, "Partner.Payloads", ConfigAuditEntryState.Resolved, "[redacted]").Children);
+        var serialized = JsonSerializer.Serialize(report);
+
+        Assert.Equal("Partner.Payloads[[redacted-key-1]]", child.Key);
+        Assert.Equal("[redacted-key-1]", child.Element?.KeyLabel);
+        Assert.True(child.Element?.IsKeyRedacted);
+        Assert.True(child.IsRedacted);
+        Assert.DoesNotContain("tenant-invalid", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("invalid-sensitivity-secret", serialized, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1768,6 +2133,20 @@ public class ConfigAuditReporterTests
                 """
                 {
                   "KnownExact": "registered",
+                  "SensitiveExact": "provider-only-secret",
+                  "SensitiveTree": {
+                    "Child": "descendant-secret"
+                  },
+                  "NestedTree": {
+                    "Branch": {
+                      "Leaf": "nearest-visible"
+                    }
+                  },
+                  "SensitiveUnknownTree": {
+                    "Branch": {
+                      "Leaf": "inherited-secret"
+                    }
+                  },
                   "App": {
                     "Mode": "file",
                     "Enabled": true,
@@ -1799,6 +2178,22 @@ public class ConfigAuditReporterTests
 
             var services = CreateServices(tempDir, environment);
             services.AddConfigAuditKey<string>("KnownExact");
+            services.AddConfigAuditKey<string>(
+                "SensitiveExact",
+                options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+            services.AddConfigAuditKey<Dictionary<string, string>>(
+                "SensitiveTree",
+                options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+            services.AddConfigAuditKey<Dictionary<string, object?>>(
+                "NestedTree",
+                options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+            services.AddConfigAuditKey<Dictionary<string, string>>(
+                "NestedTree.Branch",
+                options => options.Sensitivity = ConfigAuditSensitivity.NonSensitive);
+            services.AddConfigAuditKey<Dictionary<string, object?>>(
+                "SensitiveUnknownTree",
+                options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+            services.AddConfigAuditKey<Dictionary<string, string>>("SensitiveUnknownTree.Branch");
             services.AddConfigAuditKey<AppSettings>("App");
             services.AddConfigAuditKey<string>("App.Mode");
 
@@ -1806,6 +2201,30 @@ public class ConfigAuditReporterTests
             var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Staging");
 
             AssertDiscovered(report, "KnownExact", ConfigAuditDiscoveredKeyClassification.Known, "registered");
+            var sensitiveExact = AssertDiscovered(
+                report,
+                "SensitiveExact",
+                ConfigAuditDiscoveredKeyClassification.Known,
+                "[redacted]");
+            Assert.True(sensitiveExact.IsRedacted);
+            var sensitiveChild = AssertDiscovered(
+                report,
+                "SensitiveTree.Child",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                "[redacted]");
+            Assert.True(sensitiveChild.IsRedacted);
+            var nearestParentChild = AssertDiscovered(
+                report,
+                "NestedTree.Branch.Leaf",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                "nearest-visible");
+            Assert.False(nearestParentChild.IsRedacted);
+            var unknownChildInherited = AssertDiscovered(
+                report,
+                "SensitiveUnknownTree.Branch.Leaf",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                "[redacted]");
+            Assert.True(unknownChildInherited.IsRedacted);
             AssertDiscovered(report, "App", ConfigAuditDiscoveredKeyClassification.Known, null);
             AssertDiscovered(report, "App.Mode", ConfigAuditDiscoveredKeyClassification.Known, "file");
             AssertDiscovered(report, "App.Enabled", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "True");
@@ -1868,6 +2287,11 @@ public class ConfigAuditReporterTests
             Assert.DoesNotContain("Unused", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("super-secret", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("secret-one", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("provider-only-secret", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("descendant-secret", rendered, StringComparison.Ordinal);
+            var serialized = JsonSerializer.Serialize(report);
+            Assert.DoesNotContain("provider-only-secret", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("descendant-secret", serialized, StringComparison.Ordinal);
         }
         finally
         {
@@ -2372,6 +2796,65 @@ public class ConfigAuditReporterTests
         public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
     }
 
+    private sealed class SourceSensitiveDictionaryProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        private readonly string _key;
+        private readonly object _value;
+
+        public SourceSensitiveDictionaryProvider(string key, object value)
+        {
+            _key = key;
+            _value = value;
+        }
+
+        public int Priority => 20;
+
+        public string Name => nameof(SourceSensitiveDictionaryProvider);
+
+        public T? GetValue<T>(string environment, string key) =>
+            string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                _value,
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.Provider,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        ConfigPath = key,
+                        AppliedToPath = key,
+                        Role = ConfigAuditSourceRole.Base
+                    },
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.EnvironmentVariable,
+                        EnvironmentVariableName = "HIDDEN__PAYLOADS",
+                        ConfigPath = key,
+                        AppliedToPath = key,
+                        Role = ConfigAuditSourceRole.Patch,
+                        Sensitivity = ConfigAuditSensitivity.Sensitive
+                    }
+                ],
+                []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
     private sealed class MissingStringProvider : IConfigProvider
     {
         public int Priority => 10;
@@ -2688,5 +3171,21 @@ public class ConfigAuditReporterTests
         public IEnumerator GetEnumerator() => throw new JsonException();
 
         public override string ToString() => throw new InvalidOperationException();
+    }
+
+    private sealed class ThrowingDictionaryKey
+    {
+        public override string ToString() => throw new InvalidOperationException("dictionary-key-secret");
+    }
+
+    private sealed class FormatFailingDictionaryKey : IFormattable
+    {
+        public string ToString(string? format, IFormatProvider? formatProvider) =>
+            throw new FormatException("dictionary-key-format-secret");
+    }
+
+    private sealed class NullReturningDictionaryKey : IFormattable
+    {
+        public string ToString(string? format, IFormatProvider? formatProvider) => null!;
     }
 }

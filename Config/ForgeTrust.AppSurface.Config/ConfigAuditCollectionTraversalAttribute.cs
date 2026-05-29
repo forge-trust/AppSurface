@@ -69,10 +69,9 @@ public sealed class ConfigAuditCollectionTraversalAttribute : Attribute
     /// Converts the attribute values into immutable audit entry options.
     /// </summary>
     /// <remarks>
-    /// The returned options enable collection traversal, copy attribute values as-is, and mark every option as
-    /// assigned with <see cref="ConfigAuditEntryOptionAssignments.All"/>. Marking every option assigned lets the
-    /// wrapper attribute provide a complete wrapper-level policy while still allowing explicitly assigned manual
-    /// registration options, including default-valued assignments, to override individual properties later.
+    /// The returned options enable collection traversal, copy attribute values as-is, and mark every traversal option
+    /// plus dictionary key correlation as assigned. The traversal attribute never assigns entry sensitivity; use
+    /// manual audit-key options when a discovered wrapper should be classified as sensitive.
     /// </remarks>
     internal ConfigAuditEntryOptions ToOptions() =>
         new(
@@ -81,6 +80,7 @@ public sealed class ConfigAuditCollectionTraversalAttribute : Attribute
             MaxCollectionElements,
             MaxReportNodes,
             DisplayDictionaryKeys,
+            ConfigAuditSensitivity.Unknown,
             DictionaryKeyCorrelationMode,
-            ConfigAuditEntryOptionAssignments.All);
+            ConfigAuditEntryOptionAssignments.CollectionTraversal | ConfigAuditEntryOptionAssignments.DictionaryKeyCorrelationMode);
 }

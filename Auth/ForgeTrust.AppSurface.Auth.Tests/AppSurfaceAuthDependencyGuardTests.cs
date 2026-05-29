@@ -24,7 +24,9 @@ public sealed class AppSurfaceAuthDependencyGuardTests
             .Select(element => (string?)element.Attribute("Include"))
             .Where(value => !string.IsNullOrWhiteSpace(value));
 
-        Assert.DoesNotContain("Microsoft.AspNetCore.App", frameworkReferences);
+        Assert.DoesNotContain(
+            frameworkReferences,
+            value => string.Equals(value, "Microsoft.AspNetCore.App", StringComparison.OrdinalIgnoreCase));
 
         var packageReferences = project.Descendants()
             .Where(element => element.Name.LocalName == "PackageReference")
@@ -33,7 +35,7 @@ public sealed class AppSurfaceAuthDependencyGuardTests
 
         Assert.DoesNotContain(
             packageReferences,
-            value => value!.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal));
+            value => value!.StartsWith("Microsoft.AspNetCore", StringComparison.OrdinalIgnoreCase));
 
         var projectReferences = project.Descendants()
             .Where(element => element.Name.LocalName == "ProjectReference")
@@ -41,7 +43,7 @@ public sealed class AppSurfaceAuthDependencyGuardTests
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => value!.Replace('\\', '/'));
 
-        Assert.DoesNotContain(projectReferences, value => value.Contains("/Web/", StringComparison.Ordinal));
+        Assert.DoesNotContain(projectReferences, value => value.Contains("/Web/", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
@@ -52,7 +54,18 @@ public sealed class AppSurfaceAuthDependencyGuardTests
 
         Assert.DoesNotContain(
             assembly.GetReferencedAssemblies(),
-            reference => reference.Name?.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal) == true);
+            reference => reference.Name?.StartsWith("Microsoft.AspNetCore", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public void LoadProject_WithRootedPath_ThrowsArgumentException()
+    {
+        var rootedPath = Path.GetFullPath("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj");
+
+        var exception = Assert.Throws<ArgumentException>(() => LoadProject(rootedPath));
+
+        Assert.Equal("projectPath", exception.ParamName);
+        Assert.Contains("relative", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static XDocument LoadProject(string projectPath)

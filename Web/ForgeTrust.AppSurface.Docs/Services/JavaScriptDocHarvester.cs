@@ -327,7 +327,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 continue;
             }
 
-            AddStandaloneItem(comment, items, source, relativePath, requirePublicTag, diagnostics);
+            AddStandaloneItem(comment, items, source, relativePath, options, requirePublicTag, diagnostics);
         }
 
         foreach (var item in items)
@@ -411,7 +411,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return;
         }
 
-        items.Add(CreateApiItem(name, kind, doclet, relativePath, provenanceNode.Location.Start.Line));
+        items.Add(CreateApiItem(name, kind, doclet, relativePath, provenanceNode.Location.Start.Line, options));
     }
 
     private static void AddVariableDeclarationItems(
@@ -499,6 +499,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         ICollection<JavaScriptApiItem> items,
         string source,
         string relativePath,
+        AppSurfaceDocsJavaScriptHarvestOptions options,
         bool requirePublicTag,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
@@ -520,7 +521,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 return;
             }
 
-            items.Add(CreateApiItem(name, kind, doclet, relativePath, comment.Location.Start.Line));
+            items.Add(CreateApiItem(name, kind, doclet, relativePath, comment.Location.Start.Line, options));
             return;
         }
 
@@ -544,9 +545,10 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         JavaScriptApiKind kind,
         JavaScriptDoclet doclet,
         string relativePath,
-        int startLine)
+        int startLine,
+        AppSurfaceDocsJavaScriptHarvestOptions options)
     {
-        var group = ResolveGroupName(doclet, name, relativePath);
+        var group = ResolveGroup(doclet, name, relativePath, options);
         var summary = doclet.Summary.Length == 0 ? name : doclet.Summary;
         var properties = doclet.GetTagValues("property")
             .Select(ParseTypedMember)
@@ -557,7 +559,9 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return new JavaScriptApiItem(
             name.Trim(),
             kind,
-            group,
+            group.Identity,
+            group.DisplayName,
+            group.IsPathFallback,
             summary,
             doclet.Description,
             doclet.GetTagValues("param").Select(ParseTypedMember).Where(static value => value is not null).Select(static value => value!).ToArray(),
@@ -764,9 +768,12 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         IReadOnlyList<JavaScriptApiItem> items,
         ICollection<DocHarvestDiagnostic> diagnostics)
     {
-        foreach (var group in items.GroupBy(item => item.Group, StringComparer.OrdinalIgnoreCase))
+        foreach (var group in items.GroupBy(item => item.GroupIdentity, StringComparer.OrdinalIgnoreCase))
         {
-            foreach (var anchorGroup in group.GroupBy(item => BuildAnchorPrefix(item.Kind) + "-" + Slugify(item.Name), StringComparer.Ordinal))
+            var groupItems = group.ToArray();
+            var groupDisplayName = groupItems[0].GroupDisplayName;
+            var groupIdentity = group.Key;
+            foreach (var anchorGroup in groupItems.GroupBy(item => BuildAnchorPrefix(item.Kind) + "-" + Slugify(item.Name), StringComparer.Ordinal))
             {
                 var ordered = anchorGroup
                     .OrderBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
@@ -779,7 +786,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     diagnostics.Add(CreateDiagnostic(
                         DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor,
                         DocHarvestDiagnosticSeverity.Warning,
-                        $"JavaScript API group '{group.Key}' has duplicate anchor '{anchorGroup.Key}'.",
+                        $"JavaScript API group '{groupDisplayName}' with identity '{groupIdentity}' has duplicate anchor '{anchorGroup.Key}'.",
                         "Multiple public JavaScript API items normalized to the same anchor, so AppSurface Docs appended deterministic suffixes.",
                         "Rename one of the public JavaScript items or set clearer doclet names if the suffixes are not reader-friendly."));
                 }
@@ -1002,25 +1009,71 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
 
         var reservedGroupSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        return items
-            .GroupBy(item => item.Group, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+        return CreateJavaScriptApiGroups(items)
+            .OrderBy(group => group.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group.Identity, StringComparer.OrdinalIgnoreCase)
             .SelectMany(group => CreateGroupDocNodes(group, reservedGroupSlugs))
             .ToArray();
     }
 
+    private static IReadOnlyList<JavaScriptApiGroup> CreateJavaScriptApiGroups(IReadOnlyList<JavaScriptApiItem> items)
+    {
+        var groups = items
+            .GroupBy(item => item.GroupIdentity, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var groupItems = group.ToArray();
+                var displayName = groupItems[0].GroupDisplayName;
+                var isPathFallback = groupItems.Any(item => item.GroupIsPathFallback);
+                var sourcePath = groupItems
+                    .Select(item => item.SourcePath)
+                    .Order(StringComparer.OrdinalIgnoreCase)
+                    .First();
+                var routeSlugSeed = isPathFallback
+                    ? BuildFallbackPathDisplayName(sourcePath)
+                    : displayName;
+
+                return new JavaScriptApiGroup(
+                    group.Key,
+                    displayName,
+                    isPathFallback,
+                    sourcePath,
+                    routeSlugSeed,
+                    groupItems);
+            })
+            .ToArray();
+        var duplicateFallbackLabels = groups
+            .Where(group => group.IsPathFallback)
+            .GroupBy(group => group.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .SelectMany(group => group)
+            .Select(group => group.Identity)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (duplicateFallbackLabels.Count == 0)
+        {
+            return groups;
+        }
+
+        return groups
+            .Select(group => duplicateFallbackLabels.Contains(group.Identity)
+                ? group with { DisplayName = BuildFallbackPathDisplayName(group.SourcePath) }
+                : group)
+            .ToArray();
+    }
+
     private static IReadOnlyList<DocNode> CreateGroupDocNodes(
-        IGrouping<string, JavaScriptApiItem> group,
+        JavaScriptApiGroup group,
         ISet<string> reservedGroupSlugs)
     {
-        var orderedItems = group
+        var orderedItems = group.Items
             .OrderBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.StartLine)
             .ThenBy(item => item.Name, StringComparer.Ordinal)
             .ToArray();
-        var groupSlug = ReserveGroupSlug(group.Key, reservedGroupSlugs);
+        var groupSlug = ReserveGroupSlug(group.RouteSlugSeed, group.Identity, reservedGroupSlugs);
         var groupPath = $"api/javascript/{groupSlug}";
-        var groupTitle = $"{group.Key} JavaScript API";
+        var groupTitle = $"{group.DisplayName} JavaScript API";
         var content = new StringBuilder();
         var outline = new List<DocOutlineItem>();
         var provenance = new List<DocSymbolSourceProvenance>();
@@ -1057,7 +1110,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         var groupMetadata = CreateJavaScriptMetadata(
             groupTitle,
             "javascript-api",
-            group.Key,
+            group.DisplayName,
             groupSlug,
             order: 250);
         nodes.Add(
@@ -1081,7 +1134,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     Metadata: CreateJavaScriptMetadata(
                         item.Name,
                         GetPageType(item.Kind),
-                        group.Key,
+                        group.DisplayName,
                         groupSlug,
                         order: 251)));
         }
@@ -1089,7 +1142,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return nodes;
     }
 
-    private static string ReserveGroupSlug(string groupName, ISet<string> reservedGroupSlugs)
+    private static string ReserveGroupSlug(string groupName, string groupIdentity, ISet<string> reservedGroupSlugs)
     {
         var baseSlug = Slugify(groupName);
         if (reservedGroupSlugs.Add(baseSlug))
@@ -1097,7 +1150,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return baseSlug;
         }
 
-        var suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(groupName)))[..8].ToLowerInvariant();
+        var suffix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(groupIdentity)))[..8].ToLowerInvariant();
         var candidate = $"{baseSlug}-{suffix}";
         var sequence = 2;
         while (!reservedGroupSlugs.Add(candidate))
@@ -1735,12 +1788,25 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         return member?.Name ?? value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
     }
 
-    private static string ResolveGroupName(JavaScriptDoclet doclet, string itemName, string relativePath)
+    private static JavaScriptApiGroupReference ResolveGroup(
+        JavaScriptDoclet doclet,
+        string itemName,
+        string relativePath,
+        AppSurfaceDocsJavaScriptHarvestOptions options)
     {
-        var explicitGroup = doclet.TryGetTagValue("namespace") ?? doclet.TryGetTagValue("module");
-        if (!string.IsNullOrWhiteSpace(explicitGroup))
+        if (doclet.TryGetFirstNonBlankTagValue("namespace") is { } namespaceGroup)
         {
-            return explicitGroup.Trim();
+            return CreateNamedGroupReference(namespaceGroup);
+        }
+
+        if (doclet.TryGetFirstNonBlankTagValue("module") is { } moduleGroup)
+        {
+            return CreateNamedGroupReference(moduleGroup);
+        }
+
+        if (TryResolveConfiguredGroup(relativePath, options.GroupNameRules, out var configuredGroup))
+        {
+            return CreateNamedGroupReference(configuredGroup);
         }
 
         if (itemName.StartsWith("window.", StringComparison.OrdinalIgnoreCase))
@@ -1748,11 +1814,66 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             var parts = itemName.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (parts.Length > 1)
             {
-                return parts[1];
+                return CreateNamedGroupReference(parts[1]);
             }
         }
 
-        return Path.GetFileNameWithoutExtension(relativePath);
+        var normalizedPath = NormalizeRelativePath(relativePath);
+        return new JavaScriptApiGroupReference(
+            $"path:{normalizedPath}",
+            BuildFallbackBaseDisplayName(normalizedPath),
+            IsPathFallback: true);
+    }
+
+    private static JavaScriptApiGroupReference CreateNamedGroupReference(string groupName)
+    {
+        var displayName = groupName.Trim();
+        return new JavaScriptApiGroupReference($"name:{displayName}", displayName, IsPathFallback: false);
+    }
+
+    private static bool TryResolveConfiguredGroup(
+        string relativePath,
+        IReadOnlyList<AppSurfaceDocsJavaScriptGroupNameRule>? rules,
+        out string groupName)
+    {
+        var normalizedPath = NormalizeRelativePath(relativePath);
+        foreach (var rule in rules ?? [])
+        {
+            if (rule is null || string.IsNullOrWhiteSpace(rule.Name))
+            {
+                continue;
+            }
+
+            var matcher = new AppSurfaceDocsHarvestPathMatcher(rule.IncludeGlobs ?? []);
+            if (matcher.MatchFirst(normalizedPath) is not null)
+            {
+                groupName = rule.Name.Trim();
+                return true;
+            }
+        }
+
+        groupName = string.Empty;
+        return false;
+    }
+
+    private static string BuildFallbackBaseDisplayName(string relativePath)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(relativePath);
+        return string.IsNullOrWhiteSpace(fileName) ? "JavaScript" : fileName;
+    }
+
+    private static string BuildFallbackPathDisplayName(string relativePath)
+    {
+        var pathWithoutExtension = Path.ChangeExtension(NormalizeRelativePath(relativePath), null);
+        var segments = pathWithoutExtension
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length == 0)
+        {
+            return BuildFallbackBaseDisplayName(relativePath);
+        }
+
+        var segmentCount = Math.Min(2, segments.Length);
+        return string.Join('/', segments[^segmentCount..]);
     }
 
     private static string? ParseBooleanTag(string? value)
@@ -1927,6 +2048,14 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return Tags.FirstOrDefault(tag => tag.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.Value;
         }
 
+        public string? TryGetFirstNonBlankTagValue(string name)
+        {
+            return Tags
+                .Where(tag => tag.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                .Select(tag => tag.Value.Trim())
+                .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
+        }
+
         public IEnumerable<string> GetTagValues(string name)
         {
             return Tags
@@ -1971,10 +2100,22 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private sealed record JavaScriptMember(string Name, string? Type, string Description);
 
+    private sealed record JavaScriptApiGroupReference(string Identity, string DisplayName, bool IsPathFallback);
+
+    private sealed record JavaScriptApiGroup(
+        string Identity,
+        string DisplayName,
+        bool IsPathFallback,
+        string SourcePath,
+        string RouteSlugSeed,
+        IReadOnlyList<JavaScriptApiItem> Items);
+
     private sealed record JavaScriptApiItem(
         string Name,
         JavaScriptApiKind Kind,
-        string Group,
+        string GroupIdentity,
+        string GroupDisplayName,
+        bool GroupIsPathFallback,
         string Summary,
         string Description,
         IReadOnlyList<JavaScriptMember> Parameters,

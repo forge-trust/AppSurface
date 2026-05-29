@@ -10,4 +10,6 @@ namespace ForgeTrust.AppSurface.Auth;
 /// challenges, forbids, middleware, endpoint filters, or UI. Host applications must keep those choices in their
 /// host-specific security configuration until a later AppSurface package explicitly owns them.
 /// </remarks>
-public sealed class AppSurfaceAuthOptions;
+public sealed class AppSurfaceAuthOptions
+{
+}
