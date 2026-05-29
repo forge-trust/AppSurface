@@ -42,6 +42,31 @@ public class ConfigAuditReporterTests
         public int TimeoutSeconds { get; set; }
     }
 
+    private sealed class EndpointSettings
+    {
+        public List<string> Endpoints { get; set; } = [];
+    }
+
+    private sealed class FieldEndpointSettings
+    {
+        public List<string> Endpoints = [];
+    }
+
+    private sealed class ScalarEndpointSettings
+    {
+        public string Endpoint { get; set; } = string.Empty;
+    }
+
+    private sealed class ReadOnlyFieldEndpointSettings
+    {
+        public ReadOnlyFieldEndpointSettings(params string[] endpoints)
+        {
+            Endpoints = [.. endpoints];
+        }
+
+        public readonly List<string> Endpoints;
+    }
+
     [ConfigKey("Short.Name", root: true)]
     [ConfigValueMinLength(3)]
     private sealed class ShortNameConfig : Config<string>
@@ -152,7 +177,12 @@ public class ConfigAuditReporterTests
 
     private sealed class ReadOnlyValues : IReadOnlyList<string>
     {
-        private readonly string[] _values = ["first", "second"];
+        private readonly string[] _values;
+
+        public ReadOnlyValues(params string[] values)
+        {
+            _values = values.Length == 0 ? ["first", "second"] : values;
+        }
 
         public string this[int index] => _values[index];
 
@@ -1480,6 +1510,596 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_MarksDirectEnvironmentCollectionElementsCreatedWhenBaseIsMissing()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var provider = services.BuildServiceProvider();
+        var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Production");
+
+        var entry = AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null);
+        Assert.Equal(["Endpoints[0]", "Endpoints[1]"], entry.Children.Select(child => child.Key));
+        Assert.All(
+            entry.Children,
+            child =>
+            {
+                Assert.Contains(child.Sources, source => source.Kind == ConfigAuditSourceKind.EnvironmentVariable);
+                Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+            });
+
+        var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
+        Assert.Contains("[Info] config-audit-environment-created-element:", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_DoesNotMarkDirectEnvironmentCollectionElementCreatedWhenBaseIndexExists()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
+            .Returns("https://env.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Endpoints", new List<string> { "https://file.example" }));
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("https://env.example", child.DisplayValue);
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentCollectionTailElementCreatedWhenBaseIsShorter()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Endpoints", new List<string> { "https://file.example" }));
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null);
+        var first = entry.Children.Single(child => child.Key == "Endpoints[0]");
+        var second = entry.Children.Single(child => child.Key == "Endpoints[1]");
+
+        Assert.DoesNotContain(first.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.Contains(second.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentArrayTailElementCreatedWhenBaseIsShorter()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Endpoints", new[] { "https://file.example" }));
+        services.AddConfigAuditKey<string[]>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null);
+        var first = entry.Children.Single(child => child.Key == "Endpoints[0]");
+        var second = entry.Children.Single(child => child.Key == "Endpoints[1]");
+
+        Assert.DoesNotContain(first.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.Contains(second.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+    }
+
+    [Fact]
+    public void GetReport_DoesNotMarkDirectEnvironmentReadOnlyListElementCreatedWhenBaseIndexExists()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
+            .Returns("https://env.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Endpoints", new ReadOnlyValues()));
+        services.AddConfigAuditKey<IReadOnlyList<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("https://env.example", child.DisplayValue);
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentReadOnlyListTailElementCreatedWhenBaseIsShorter()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "Endpoints",
+            new ReadOnlyValues("first", "second", "third"),
+            "Endpoints.2");
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Endpoints", new ReadOnlyValues()));
+        services.AddConfigAuditKey<IReadOnlyList<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children, child => child.Key == "Endpoints[2]");
+        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentCollectionElementCreatedWhenBaseValueIsNull()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
+            .Returns("https://env.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Endpoints"] = null
+                }));
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_DoesNotCreateFactsForEnvironmentSourcesWithoutCollectionElementPath()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "MyApp.Settings",
+            new EndpointSettings
+            {
+                Endpoints = ["https://env.example"]
+            },
+            "MyApp.Settings");
+        services.AddConfigAuditKey<EndpointSettings>(
+            "MyApp.Settings",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var endpoint = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null)
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints")
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints[0]");
+        Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_DoesNotCreateFactsForEnvironmentSourcesWithoutPathSeparator()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "Endpoints",
+            new List<string> { "https://env.example" },
+            "Endpoints");
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var endpoint = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("https://env.example", endpoint.DisplayValue);
+        Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_DoesNotCreateFactsForEnvironmentSourcesWithTrailingPathSeparator()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "Endpoints",
+            new List<string> { "https://env.example" },
+            "Endpoints.");
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var endpoint = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("https://env.example", endpoint.DisplayValue);
+        Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_DoesNotMarkDirectEnvironmentObjectElementCreatedWhenBasePropertyIndexExists()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "MyApp.Settings",
+            new EndpointSettings
+            {
+                Endpoints = ["https://env.example"]
+            },
+            "MyApp.Settings.Endpoints.0");
+        services.AddSingleton<IConfigProvider>(
+            new StaticConfigProvider(
+                "MyApp.Settings",
+                new EndpointSettings
+                {
+                    Endpoints = ["https://file.example"]
+                }));
+        services.AddConfigAuditKey<EndpointSettings>(
+            "MyApp.Settings",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var endpoint = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null)
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints")
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints[0]");
+        Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentObjectElementCreatedWhenBasePropertyIsNull()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "MyApp.Settings",
+            new EndpointSettings
+            {
+                Endpoints = ["https://env.example"]
+            },
+            "MyApp.Settings.Endpoints.0");
+        services.AddSingleton<IConfigProvider>(
+            new StaticConfigProvider(
+                "MyApp.Settings",
+                new EndpointSettings
+                {
+                    Endpoints = null!
+                }));
+        services.AddConfigAuditKey<EndpointSettings>(
+            "MyApp.Settings",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var endpoint = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null)
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints")
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints[0]");
+        Assert.Contains(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentObjectElementCreatedWhenBaseFieldCollectionIsEmpty()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "MyApp.Settings",
+            new FieldEndpointSettings
+            {
+                Endpoints = ["https://env.example"]
+            },
+            "MyApp.Settings.Endpoints.0");
+        services.AddSingleton<IConfigProvider>(
+            new StaticConfigProvider(
+                "MyApp.Settings",
+                new FieldEndpointSettings()));
+        services.AddConfigAuditKey<FieldEndpointSettings>(
+            "MyApp.Settings",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var endpoint = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null)
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints")
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints[0]");
+        Assert.Contains(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(endpoint.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentObjectElementCreatedWhenBaseFieldIsReadOnly()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "MyApp.Settings",
+            new ReadOnlyFieldEndpointSettings("https://env.example"),
+            "MyApp.Settings.Endpoints.0");
+        services.AddSingleton<IConfigProvider>(
+            new StaticConfigProvider(
+                "MyApp.Settings",
+                new ReadOnlyFieldEndpointSettings()));
+        services.AddConfigAuditKey<ReadOnlyFieldEndpointSettings>(
+            "MyApp.Settings",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        Assert.DoesNotContain(
+            AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null).Children,
+            child => child.Key == "MyApp.Settings.Endpoints");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentObjectElementCreatedWhenBaseMemberCannotBeIndexed()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "MyApp.Settings",
+            new ScalarEndpointSettings
+            {
+                Endpoint = "https://env.example"
+            },
+            "MyApp.Settings.Endpoint.0");
+        services.AddSingleton<IConfigProvider>(
+            new StaticConfigProvider(
+                "MyApp.Settings",
+                new ScalarEndpointSettings
+                {
+                    Endpoint = "https://file.example"
+                }));
+        services.AddConfigAuditKey<ScalarEndpointSettings>(
+            "MyApp.Settings",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.Resolved, null);
+        var endpoint = entry.Children.Single(child => child.Key == "MyApp.Settings.Endpoint");
+        Assert.Equal("https://env.example", endpoint.DisplayValue);
+        Assert.Empty(endpoint.Diagnostics);
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentCollectionBasePresenceUnknownForPathlessProvider()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
+            .Returns("https://env.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new PathlessSourceProvider("Endpoints", new List<string> { "https://file.example" }));
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+    }
+
+    [Fact]
+    public void GetReport_IgnoresMismatchedEnvironmentElementFactWhenBaseSourceUsesDifferentRoot()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "Endpoints",
+            new List<string> { "https://env.example" },
+            "Other.0");
+        services.AddSingleton<IConfigProvider>(
+            new SourcePathProvider(
+                "Endpoints",
+                new List<string> { "https://file.example" },
+                "Other"));
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("https://env.example", child.DisplayValue);
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentCollectionBasePresenceUnknownForInvalidProvider()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
+            .Returns("https://env.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("Endpoints", priority: 30));
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentCollectionBasePresenceUnknownWhenLowerProviderResolvesAfterInvalidProvider()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("ENDPOINTS__0", A<string?>._))
+            .Returns("https://env.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("Endpoints", priority: 30));
+        services.AddSingleton<IConfigProvider>(new SourcePathProvider("Endpoints", new List<string>(), "Endpoints"));
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("https://env.example", child.DisplayValue);
+        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+    }
+
+    [Fact]
+    public void GetReport_MarksNestedEnvironmentCollectionTailCreatedDuringPatch()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => environment.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(
+            new StaticConfigProvider(
+                "MyApp.Settings",
+                new EndpointSettings
+                {
+                    Endpoints = ["https://file.example"]
+                }));
+        services.AddConfigAuditKey<EndpointSettings>(
+            "MyApp.Settings",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var endpoints = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.PartiallyResolved, null)
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints");
+        var first = endpoints.Children.Single(child => child.Key == "MyApp.Settings.Endpoints[0]");
+        var second = endpoints.Children.Single(child => child.Key == "MyApp.Settings.Endpoints[1]");
+
+        Assert.DoesNotContain(first.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.Contains(second.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+    }
+
+    [Fact]
+    public void GetReport_MarksNestedEnvironmentCollectionBasePresenceUnknownForInvalidProviderDuringPatch()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://env.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("MyApp.Settings", priority: 30));
+        services.AddConfigAuditKey<EndpointSettings>(
+            "MyApp.Settings",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var endpoints = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.PartiallyResolved, null)
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints");
+        var child = Assert.Single(endpoints.Children);
+        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+    }
+
+    [Fact]
+    public void GetReport_MarksNestedEnvironmentCollectionBasePresenceUnknownWhenLowerProviderResolvesAfterInvalidProvider()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => environment.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://env.example");
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new InvalidDiagnosticProvider("MyApp.Settings", priority: 30));
+        services.AddSingleton<IConfigProvider>(
+            new StaticConfigProvider(
+                "MyApp.Settings",
+                new EndpointSettings
+                {
+                    Endpoints = []
+                }));
+        services.AddConfigAuditKey<EndpointSettings>(
+            "MyApp.Settings",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var endpoints = AssertEntry(report, "MyApp.Settings", ConfigAuditEntryState.PartiallyResolved, null)
+            .Children.Single(child => child.Key == "MyApp.Settings.Endpoints");
+        var child = Assert.Single(endpoints.Children);
+        Assert.Equal("https://env.example", child.DisplayValue);
+        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+    }
+
+    [Fact]
     public void GetReport_FallsBackWhenSourcePathsAreUnavailable()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -2570,6 +3190,30 @@ public class ConfigAuditReporterTests
         return services;
     }
 
+    private static ServiceCollection CreateServicesWithDiagnosticEnvironment(
+        string key,
+        object value,
+        string sourcePath)
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IEnvironmentConfigProvider>(
+            new DiagnosticEnvironmentProvider(
+                key,
+                value,
+                new ConfigAuditSourceRecord
+                {
+                    Kind = ConfigAuditSourceKind.EnvironmentVariable,
+                    EnvironmentVariableName = sourcePath.Replace('.', '_').ToUpperInvariant(),
+                    ConfigPath = sourcePath,
+                    AppliedToPath = sourcePath,
+                    Role = ConfigAuditSourceRole.Override
+                }));
+        return services;
+    }
+
     private static ConfigAuditReport CreateCorrelationReport(
         string environmentName,
         string rootKey,
@@ -2699,6 +3343,68 @@ public class ConfigAuditReporterTests
         public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
 
         public T? GetValue<T>(string environment, string key) => default;
+    }
+
+    private sealed class DiagnosticEnvironmentProvider : IEnvironmentConfigProvider, IConfigDiagnosticProvider
+    {
+        private readonly string _key;
+        private readonly object _value;
+        private readonly ConfigAuditSourceRecord _source;
+
+        public DiagnosticEnvironmentProvider(string key, object value, ConfigAuditSourceRecord source)
+        {
+            _key = key;
+            _value = value;
+            _source = source;
+        }
+
+        public string Environment => "Production";
+
+        public bool IsDevelopment => false;
+
+        public int Priority => -1;
+
+        public string Name => nameof(DiagnosticEnvironmentProvider);
+
+        public string? GetEnvironmentVariable(string name, string? defaultValue = null) => defaultValue;
+
+        public T? GetValue<T>(string environment, string key) =>
+            string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                _value,
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = _source.Kind,
+                        ProviderName = _source.ProviderName,
+                        ProviderPriority = _source.ProviderPriority,
+                        FilePath = _source.FilePath,
+                        EnvironmentVariableName = _source.EnvironmentVariableName,
+                        ConfigPath = _source.ConfigPath,
+                        AppliedToPath = _source.AppliedToPath,
+                        Location = _source.Location,
+                        Role = role,
+                        Sensitivity = _source.Sensitivity
+                    }
+                ],
+                []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
     }
 
     private sealed class ThrowingKeyEnumeratorProvider : IConfigProvider, IConfigAuditKeyEnumerator
@@ -2955,6 +3661,58 @@ public class ConfigAuditReporterTests
                 Kind = ConfigAuditSourceKind.Provider,
                 ProviderName = Name,
                 ProviderPriority = Priority,
+                Role = role
+            };
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                _value,
+                [source],
+                []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
+    private sealed class SourcePathProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        private readonly string _key;
+        private readonly object _value;
+        private readonly string _sourcePath;
+
+        public SourcePathProvider(string key, object value, string sourcePath)
+        {
+            _key = key;
+            _value = value;
+            _sourcePath = sourcePath;
+        }
+
+        public int Priority => 20;
+
+        public string Name => nameof(SourcePathProvider);
+
+        public T? GetValue<T>(string environment, string key) =>
+            string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            var source = new ConfigAuditSourceRecord
+            {
+                Kind = ConfigAuditSourceKind.Provider,
+                ProviderName = Name,
+                ProviderPriority = Priority,
+                ConfigPath = _sourcePath,
+                AppliedToPath = _sourcePath,
                 Role = role
             };
 

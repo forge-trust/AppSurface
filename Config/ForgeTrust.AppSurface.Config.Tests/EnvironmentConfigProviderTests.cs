@@ -1060,6 +1060,212 @@ public class EnvironmentConfigProviderTests
             .TracePatch("Production", "MyApp.Settings", cyclic, typeof(CyclicOptions));
         Assert.False(cloneFailure.Patched);
         Assert.Contains(cloneFailure.Diagnostics, diagnostic => diagnostic.Code == "config-patch-clone-failed");
+        Assert.Empty(cloneFailure.Facts);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsPerElementPriorPresenceForCollectionReplacement()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        var current = new AppSettings
+        {
+            Endpoints = ["https://file.example"]
+        };
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(AppSettings));
+
+        Assert.True(patch.Patched);
+        var first = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        var second = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1");
+        Assert.Equal(ConfigAuditPriorPresence.Present, first.PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, second.PriorPresence);
+        Assert.Equal(ConfigPatchProvenanceAction.ReplacedCollection, first.Action);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsEnvironmentScopedCollectionReplacementFacts()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        var current = new AppSettings
+        {
+            Endpoints = ["https://file.example"]
+        };
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(AppSettings));
+
+        Assert.True(patch.Patched);
+        Assert.Equal(
+            ConfigAuditPriorPresence.Present,
+            patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
+        Assert.Equal(
+            ConfigAuditPriorPresence.Missing,
+            patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsUnknownPriorPresenceWhenProviderEvidenceCollectionIsNull()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        var current = new AppSettings
+        {
+            Endpoints = null!
+        };
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(AppSettings));
+
+        Assert.True(patch.Patched);
+        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        Assert.Equal(ConfigAuditPriorPresence.Unknown, fact.PriorPresence);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsUnknownPriorPresenceForSetOnlyCollectionProperty()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        var current = new SetOnlyEndpointSettings();
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(SetOnlyEndpointSettings));
+
+        Assert.True(patch.Patched);
+        var value = Assert.IsType<SetOnlyEndpointSettings>(patch.Value);
+        Assert.Equal(["https://one.example"], value.WrittenEndpoints);
+        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        Assert.Equal(ConfigAuditPriorPresence.Unknown, fact.PriorPresence);
+    }
+
+    [Fact]
+    public void TracePatch_TreatsConstructorDefaultCollectionAsMissingWhenRootWasMissing()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", null, typeof(ConstructorDefaultCollectionOptions));
+
+        Assert.True(patch.Patched);
+        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        Assert.Equal(ConfigAuditPriorPresence.Missing, fact.PriorPresence);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsPerElementPriorPresenceForGetterOnlyCollectionPatch()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        var current = new GetterOnlyAppSettings();
+        current.Endpoints.Add("https://file.example");
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(GetterOnlyAppSettings));
+
+        Assert.True(patch.Patched);
+        Assert.Equal(ConfigPatchProvenanceAction.PatchedExistingCollection, patch.Facts[0].Action);
+        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsArrayPriorPresenceForCollectionReplacement()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        var current = new ArrayEndpointSettings
+        {
+            Endpoints = ["https://file.example"]
+        };
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(ArrayEndpointSettings));
+
+        Assert.True(patch.Patched);
+        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsReadOnlyCollectionPriorPresenceForCollectionReplacement()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        var current = new ReadOnlyEndpointSettings
+        {
+            Endpoints = new ReadOnlyEndpointList("https://file.example")
+        };
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(ReadOnlyEndpointSettings));
+
+        Assert.True(patch.Patched);
+        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+    }
+
+    [Fact]
+    public void TracePatch_SkipsGetterOnlyMultiDimensionalArrayCollection()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        var current = new MultiDimensionalArrayEndpointSettings();
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(MultiDimensionalArrayEndpointSettings));
+
+        Assert.False(patch.Patched);
+        Assert.Empty(patch.Facts);
     }
 
     private sealed class AppSettings
@@ -1078,6 +1284,54 @@ public class EnvironmentConfigProviderTests
         public DatabaseOptions Database { get; } = new();
 
         public List<string> Endpoints { get; } = [];
+    }
+
+    private sealed class ConstructorDefaultCollectionOptions
+    {
+        public List<string> Endpoints { get; set; } = ["https://constructor.example"];
+    }
+
+    private sealed class ArrayEndpointSettings
+    {
+        public string[] Endpoints { get; set; } = [];
+    }
+
+    private sealed class ReadOnlyEndpointSettings
+    {
+        public IReadOnlyList<string> Endpoints { get; set; } = [];
+    }
+
+    private sealed class SetOnlyEndpointSettings
+    {
+        public List<string>? WrittenEndpoints { get; private set; }
+
+        public List<string> Endpoints
+        {
+            set => WrittenEndpoints = value;
+        }
+    }
+
+    private sealed class MultiDimensionalArrayEndpointSettings
+    {
+        public string[,] Endpoints { get; } = new string[1, 1];
+    }
+
+    private sealed class ReadOnlyEndpointList : IReadOnlyList<string>
+    {
+        private readonly string[] _values;
+
+        public ReadOnlyEndpointList(params string[] values)
+        {
+            _values = values;
+        }
+
+        public string this[int index] => _values[index];
+
+        public int Count => _values.Length;
+
+        public IEnumerator<string> GetEnumerator() => ((IEnumerable<string>)_values).GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private interface IConfigPatchContract

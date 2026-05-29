@@ -50,7 +50,7 @@ public sealed class ConfigAuditTextRenderer
             builder.AppendLine("Diagnostics:");
             foreach (var diagnostic in report.Diagnostics)
             {
-                builder.AppendLine($"  [{diagnostic.Severity}] {diagnostic.Message}");
+                builder.AppendLine($"  {FormatDiagnostic(diagnostic)}");
             }
         }
 
@@ -83,7 +83,7 @@ public sealed class ConfigAuditTextRenderer
 
         foreach (var diagnostic in entry.Diagnostics)
         {
-            builder.AppendLine($"{indent}  Diagnostic: {diagnostic.Message}");
+            builder.AppendLine($"{indent}  Diagnostic: {FormatDiagnostic(diagnostic)}");
         }
 
         if (entry.Children.Count == 0)
@@ -115,9 +115,12 @@ public sealed class ConfigAuditTextRenderer
 
         foreach (var diagnostic in discoveredKey.Diagnostics)
         {
-            builder.AppendLine($"    Diagnostic: {diagnostic.Message}");
+            builder.AppendLine($"    Diagnostic: {FormatDiagnostic(diagnostic)}");
         }
     }
+
+    private static string FormatDiagnostic(ConfigAuditDiagnostic diagnostic) =>
+        $"[{diagnostic.Severity}] {diagnostic.Code}: {diagnostic.Message}";
 
     private static IEnumerable<ConfigAuditEntry> OrderChildren(IReadOnlyList<ConfigAuditEntry> children)
     {

@@ -544,7 +544,7 @@ public class ConfigAuditModelsTests
         Assert.Contains("Provider", rendered, StringComparison.Ordinal);
         Assert.Contains("Discovered keys:", rendered, StringComparison.Ordinal);
         Assert.Contains("Discovered.Fallback [99] = value", rendered, StringComparison.Ordinal);
-        Assert.Contains("Diagnostic: Discovered diagnostic.", rendered, StringComparison.Ordinal);
+        Assert.Contains("Diagnostic: [Warning] discovered-warning: Discovered diagnostic.", rendered, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -319,6 +321,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             ConfigAuditPath.Root(knownEntry.Key),
             rawValue,
             traversalSources,
+            resolution.AuditFacts,
             options,
             new HashSet<object>(ReferenceEqualityComparer.Instance),
             new ConfigAuditDictionaryLabelSet(),
@@ -361,27 +364,18 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         var envResolution = ResolveProvider(_environmentProvider, environment, knownEntry, ConfigAuditSourceRole.Override);
         if (envResolution.State == ConfigAuditEntryState.Resolved)
         {
-            return envResolution;
+            var baseResolution = ResolveBaseProviders(environment, knownEntry, out var baseDiagnostics, out var invalidBaseResolution);
+            var provenanceBaseResolution = SelectProvenanceBaseResolution(baseResolution, invalidBaseResolution);
+            return envResolution with
+            {
+                Diagnostics = envResolution.Diagnostics.Concat(baseDiagnostics).ToList(),
+                AuditFacts = BuildEnvironmentOverrideFacts(knownEntry.Key, envResolution, provenanceBaseResolution)
+            };
         }
 
         var diagnostics = envResolution.Diagnostics.ToList();
-        ConfigValueResolution providerResolution = ConfigValueResolution.Missing(knownEntry.Key);
-        ConfigValueResolution? invalidProviderResolution = null;
-        foreach (var provider in _otherProviders)
-        {
-            var current = ResolveProvider(provider, environment, knownEntry, ConfigAuditSourceRole.Base);
-            diagnostics.AddRange(current.Diagnostics);
-            if (current.State == ConfigAuditEntryState.Resolved)
-            {
-                providerResolution = current;
-                break;
-            }
-
-            if (current.State == ConfigAuditEntryState.Invalid)
-            {
-                invalidProviderResolution ??= current;
-            }
-        }
+        var providerResolution = ResolveBaseProviders(environment, knownEntry, out var providerDiagnostics, out var invalidProviderResolution);
+        diagnostics.AddRange(providerDiagnostics);
 
         if (_environmentProvider is IConfigDiagnosticPatcher patcher)
         {
@@ -413,7 +407,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                         sourceRecords,
                         diagnostics)
                     {
-                        AuditSources = providerResolution.AuditSources.Concat(patch.Sources).ToList()
+                        AuditSources = providerResolution.AuditSources.Concat(patch.Sources).ToList(),
+                        AuditFacts = BuildPatchFactContext(patch.Facts, invalidProviderResolution)
                     };
                 }
             }
@@ -423,6 +418,249 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             ? providerResolution
             : invalidProviderResolution ?? providerResolution;
         return resolution with { Diagnostics = diagnostics };
+    }
+
+    private ConfigValueResolution ResolveBaseProviders(
+        string environment,
+        ConfigAuditKnownEntry knownEntry,
+        out IReadOnlyList<ConfigAuditDiagnostic> diagnostics,
+        out ConfigValueResolution? invalidProviderResolution)
+    {
+        var collectedDiagnostics = new List<ConfigAuditDiagnostic>();
+        var providerResolution = ConfigValueResolution.Missing(knownEntry.Key);
+        invalidProviderResolution = null;
+
+        foreach (var provider in _otherProviders)
+        {
+            var current = ResolveProvider(provider, environment, knownEntry, ConfigAuditSourceRole.Base);
+            collectedDiagnostics.AddRange(current.Diagnostics);
+            if (current.State == ConfigAuditEntryState.Resolved)
+            {
+                providerResolution = current;
+                break;
+            }
+
+            if (current.State == ConfigAuditEntryState.Invalid)
+            {
+                invalidProviderResolution ??= current;
+            }
+        }
+
+        diagnostics = collectedDiagnostics;
+        return providerResolution;
+    }
+
+    private static ConfigValueResolution SelectProvenanceBaseResolution(
+        ConfigValueResolution baseResolution,
+        ConfigValueResolution? invalidBaseResolution) =>
+        invalidBaseResolution ?? baseResolution;
+
+    private static ConfigAuditFactContext BuildPatchFactContext(
+        IReadOnlyList<ConfigPatchProvenanceFact> facts,
+        ConfigValueResolution? invalidProviderResolution)
+    {
+        if (invalidProviderResolution == null)
+        {
+            return new ConfigAuditFactContext(facts);
+        }
+
+        return new ConfigAuditFactContext(
+            facts.Select(fact => fact with { PriorPresence = ConfigAuditPriorPresence.Unknown }));
+    }
+
+    private static ConfigAuditFactContext BuildEnvironmentOverrideFacts(
+        string rootKey,
+        ConfigValueResolution envResolution,
+        ConfigValueResolution baseResolution)
+    {
+        var facts = envResolution.AuditSources
+            .Where(source => source.Kind == ConfigAuditSourceKind.EnvironmentVariable
+                             && source.ConfigPath != null
+                             && IsCollectionElementPath(source.ConfigPath))
+            .Select(source => new ConfigPatchProvenanceFact(
+                source.ConfigPath!,
+                source,
+                ConfigPatchProvenanceAction.EnvironmentOverrideElement,
+                ClassifyBasePresence(rootKey, source.ConfigPath!, baseResolution)))
+            .ToList();
+
+        return new ConfigAuditFactContext(facts);
+    }
+
+    private static bool IsCollectionElementPath(string configPath)
+    {
+        var lastSeparator = configPath.LastIndexOf('.');
+        if (lastSeparator < 0 || lastSeparator == configPath.Length - 1)
+        {
+            return false;
+        }
+
+        return int.TryParse(configPath[(lastSeparator + 1)..], out _);
+    }
+
+    private static ConfigAuditPriorPresence ClassifyBasePresence(
+        string rootKey,
+        string configPath,
+        ConfigValueResolution baseResolution)
+    {
+        if (baseResolution.State == ConfigAuditEntryState.Missing)
+        {
+            return ConfigAuditPriorPresence.Missing;
+        }
+
+        if (baseResolution.State != ConfigAuditEntryState.Resolved || !HasUsableBaseEvidence(rootKey, configPath, baseResolution))
+        {
+            return ConfigAuditPriorPresence.Unknown;
+        }
+
+        return TryPathExists(rootKey, configPath, baseResolution.Value, out var exists)
+            ? exists ? ConfigAuditPriorPresence.Present : ConfigAuditPriorPresence.Missing
+            : ConfigAuditPriorPresence.Unknown;
+    }
+
+    private static bool HasUsableBaseEvidence(
+        string rootKey,
+        string configPath,
+        ConfigValueResolution baseResolution) =>
+        baseResolution.AuditSources.Any(source =>
+            SourcePathMatches(source.ConfigPath, rootKey, configPath)
+            || SourcePathMatches(source.AppliedToPath, rootKey, configPath));
+
+    private static bool SourcePathMatches(string? sourcePath, string rootKey, string configPath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            return false;
+        }
+
+        return string.Equals(sourcePath, configPath, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(sourcePath, rootKey, StringComparison.OrdinalIgnoreCase)
+               || configPath.StartsWith($"{sourcePath}.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryPathExists(string rootKey, string configPath, object? value, out bool exists)
+    {
+        exists = false;
+        if (value == null)
+        {
+            return true;
+        }
+
+        if (!configPath.StartsWith($"{rootKey}.", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        object? current = value;
+        foreach (var segment in configPath[(rootKey.Length + 1)..].Split('.'))
+        {
+            if (current == null)
+            {
+                exists = false;
+                return true;
+            }
+
+            if (int.TryParse(segment, out var index))
+            {
+                if (!TryGetIndexedValue(current, index, out current))
+                {
+                    exists = false;
+                    return true;
+                }
+            }
+            else if (!TryGetMemberValue(current, segment, out current))
+            {
+                exists = false;
+                return true;
+            }
+        }
+
+        exists = true;
+        return true;
+    }
+
+    private static bool TryGetIndexedValue(object value, int index, out object? item)
+    {
+        item = null;
+        if (value is Array array)
+        {
+            if (array.Rank != 1 || index < 0 || index >= array.Length)
+            {
+                return false;
+            }
+
+            item = array.GetValue(index);
+            return true;
+        }
+
+        if (value is IList list)
+        {
+            if (index < 0 || index >= list.Count)
+            {
+                return false;
+            }
+
+            item = list[index];
+            return true;
+        }
+
+        if (TryCreateReadOnlyListAccessor(value, out var accessor))
+        {
+            if (index < 0 || index >= accessor.Count)
+            {
+                return false;
+            }
+
+            item = accessor.GetValue(index);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetMemberValue(object value, string memberName, out object? memberValue)
+    {
+        memberValue = null;
+        var type = value.GetType();
+        var property = type.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
+        if (property is { GetMethod: not null } && property.GetIndexParameters().Length == 0)
+        {
+            memberValue = property.GetValue(value);
+            return true;
+        }
+
+        var field = type.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
+        if (field == null || field.IsInitOnly)
+        {
+            return false;
+        }
+
+        memberValue = field.GetValue(value);
+        return true;
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Defensive reflection helper; public traversal tests cover supported IReadOnlyList shapes.")]
+    private static bool TryCreateReadOnlyListAccessor(object value, out ReadOnlyListAccessor accessor)
+    {
+        var interfaceType = value.GetType()
+            .GetInterfaces()
+            .FirstOrDefault(type => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyList<>));
+        if (interfaceType == null)
+        {
+            accessor = default;
+            return false;
+        }
+
+        var countProperty = interfaceType.GetInterfaces()
+            .Append(interfaceType)
+            .FirstOrDefault(type => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>))
+            ?.GetProperty(nameof(IReadOnlyCollection<object>.Count))!;
+        var itemProperty = interfaceType.GetProperty("Item")!;
+
+        accessor = new ReadOnlyListAccessor(
+            (int)(countProperty.GetValue(value) ?? 0),
+            index => itemProperty.GetValue(value, [index]));
+        return true;
     }
 
     private ConfigValueResolution ResolveProvider(
@@ -610,7 +848,15 @@ internal sealed record ConfigValueResolution(
     IReadOnlyList<ConfigAuditSourceRecord> Sources,
     IReadOnlyList<ConfigAuditDiagnostic> Diagnostics)
 {
+    /// <summary>
+    /// Gets the sources used for child-entry source selection.
+    /// </summary>
     public IReadOnlyList<ConfigAuditSourceRecord> AuditSources { get; init; } = Sources;
+
+    /// <summary>
+    /// Gets internal provenance facts used to attach proof-limited diagnostics while traversing child entries.
+    /// </summary>
+    public ConfigAuditFactContext AuditFacts { get; init; } = ConfigAuditFactContext.Empty;
 
     /// <summary>
     /// Creates a missing resolution with a synthetic missing source record for <paramref name="key"/>.
@@ -645,7 +891,102 @@ internal sealed record ConfigPatchDiagnosticResult(
     bool Patched,
     object? Value,
     IReadOnlyList<ConfigAuditSourceRecord> Sources,
-    IReadOnlyList<ConfigAuditDiagnostic> Diagnostics);
+    IReadOnlyList<ConfigAuditDiagnostic> Diagnostics)
+{
+    /// <summary>
+    /// Gets internal patch-time provenance facts for child audit diagnostics.
+    /// </summary>
+    public IReadOnlyList<ConfigPatchProvenanceFact> Facts { get; init; } = [];
+}
+
+/// <summary>
+/// Describes one environment patch fact before it is converted into public audit diagnostics.
+/// </summary>
+/// <param name="ConfigPath">The source-style config path affected by the environment source.</param>
+/// <param name="Source">The environment source that supplied the value.</param>
+/// <param name="Action">The patch action that produced the final value.</param>
+/// <param name="PriorPresence">The lower-priority/provider presence evidence for the same config path.</param>
+internal sealed record ConfigPatchProvenanceFact(
+    string ConfigPath,
+    ConfigAuditSourceRecord Source,
+    ConfigPatchProvenanceAction Action,
+    ConfigAuditPriorPresence PriorPresence);
+
+/// <summary>
+/// Identifies how an environment source changed the final audited value.
+/// </summary>
+internal enum ConfigPatchProvenanceAction
+{
+    /// <summary>An environment variable set a scalar or object member.</summary>
+    SetMember = 0,
+
+    /// <summary>An environment-indexed collection replaced a settable collection member.</summary>
+    ReplacedCollection = 1,
+
+    /// <summary>An environment-indexed collection patched an existing getter-only mutable collection.</summary>
+    PatchedExistingCollection = 2,
+
+    /// <summary>An environment-indexed collection supplied an element for a root override value.</summary>
+    EnvironmentOverrideElement = 3
+}
+
+/// <summary>
+/// Describes whether lower-priority provider evidence proved a path existed before the environment override.
+/// </summary>
+internal enum ConfigAuditPriorPresence
+{
+    /// <summary>Provider evidence was pathless, generic, invalid, or otherwise unable to prove presence.</summary>
+    Unknown = 0,
+
+    /// <summary>Provider evidence proved the path was absent.</summary>
+    Missing = 1,
+
+    /// <summary>Provider evidence proved the path was present.</summary>
+    Present = 2
+}
+
+/// <summary>
+/// Indexes internal audit provenance facts by source-style config path for traversal.
+/// </summary>
+internal sealed class ConfigAuditFactContext
+{
+    private readonly Dictionary<string, IReadOnlyList<ConfigPatchProvenanceFact>> _factsByPath;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConfigAuditFactContext"/> class.
+    /// </summary>
+    /// <param name="facts">
+    /// Provenance facts emitted by provider patching or environment overrides. Each fact must carry a source-style
+    /// <see cref="ConfigPatchProvenanceFact.ConfigPath"/>, the source that created the fact, the patch action, and the
+    /// proven prior presence for that path; optional source metadata can stay unset when the provider could not prove it.
+    /// Facts are grouped case-insensitively by config path and copied into per-path <see cref="IReadOnlyList{T}"/> buckets,
+    /// so constructed contexts are immutable and safe to share between traversal calls as long as the supplied fact records
+    /// are treated as immutable.
+    /// </param>
+    public ConfigAuditFactContext(IEnumerable<ConfigPatchProvenanceFact> facts)
+    {
+        _factsByPath = facts
+            .GroupBy(fact => fact.ConfigPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<ConfigPatchProvenanceFact>)group.ToList(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Gets the shared immutable empty fact context for callers that have no provenance facts to report.
+    /// </summary>
+    /// <remarks>
+    /// Use this instance to avoid allocations when traversal should emit no fact-derived child diagnostics. The context
+    /// contains no path entries and is never modified after construction.
+    /// </remarks>
+    public static ConfigAuditFactContext Empty { get; } = new([]);
+
+    /// <summary>
+    /// Gets all facts associated with <paramref name="configPath"/>.
+    /// </summary>
+    /// <param name="configPath">The source-style config path to inspect.</param>
+    /// <returns>Facts for the path, or an empty list when none are known.</returns>
+    public IReadOnlyList<ConfigPatchProvenanceFact> GetFacts(string configPath) =>
+        _factsByPath.TryGetValue(configPath, out var facts) ? facts : [];
+}
 
 /// <summary>
 /// Describes wrapper inspection after provider resolution.
