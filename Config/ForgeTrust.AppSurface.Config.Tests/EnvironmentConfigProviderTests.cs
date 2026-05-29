@@ -1141,6 +1141,27 @@ public class EnvironmentConfigProviderTests
     }
 
     [Fact]
+    public void TracePatch_RecordsUnknownPriorPresenceForSetOnlyCollectionProperty()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        var current = new SetOnlyEndpointSettings();
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(SetOnlyEndpointSettings));
+
+        Assert.True(patch.Patched);
+        var value = Assert.IsType<SetOnlyEndpointSettings>(patch.Value);
+        Assert.Equal(["https://one.example"], value.WrittenEndpoints);
+        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        Assert.Equal(ConfigAuditPriorPresence.Unknown, fact.PriorPresence);
+    }
+
+    [Fact]
     public void TracePatch_TreatsConstructorDefaultCollectionAsMissingWhenRootWasMissing()
     {
         var innerProvider = A.Fake<IEnvironmentProvider>();
@@ -1278,6 +1299,16 @@ public class EnvironmentConfigProviderTests
     private sealed class ReadOnlyEndpointSettings
     {
         public IReadOnlyList<string> Endpoints { get; set; } = [];
+    }
+
+    private sealed class SetOnlyEndpointSettings
+    {
+        public List<string>? WrittenEndpoints { get; private set; }
+
+        public List<string> Endpoints
+        {
+            set => WrittenEndpoints = value;
+        }
     }
 
     private sealed class MultiDimensionalArrayEndpointSettings
