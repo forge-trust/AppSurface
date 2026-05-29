@@ -105,10 +105,9 @@ public class CSharpDocHarvesterTests : IDisposable
                 public class ExternalService {}
                 """);
             var linkPath = CombineUnder(_testRoot, "ExternalService.cs");
-            if (!TryCreateFileSymbolicLink(linkPath, externalFile))
-            {
-                return;
-            }
+            Assert.True(
+                TryCreateFileSymbolicLink(linkPath, externalFile),
+                "The reparse-point regression test requires file symlink creation to succeed.");
 
             var results = await _harvester.HarvestAsync(_testRoot);
 
@@ -136,10 +135,9 @@ public class CSharpDocHarvesterTests : IDisposable
                 public class ExternalService {}
                 """);
             var linkPath = CombineUnder(_testRoot, "linked");
-            if (!TryCreateDirectorySymbolicLink(linkPath, externalRoot))
-            {
-                return;
-            }
+            Assert.True(
+                TryCreateDirectorySymbolicLink(linkPath, externalRoot),
+                "The reparse-point regression test requires directory symlink creation to succeed.");
 
             var results = await _harvester.HarvestAsync(_testRoot);
 

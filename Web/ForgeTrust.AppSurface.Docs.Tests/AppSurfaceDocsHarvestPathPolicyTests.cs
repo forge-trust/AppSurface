@@ -83,10 +83,9 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
             var externalFile = Path.Join(externalRoot, "External.md");
             await File.WriteAllTextAsync(externalFile, "# External");
             var linkPath = Path.Join(root, "Linked.md");
-            if (!TryCreateFileSymbolicLink(linkPath, externalFile))
-            {
-                return;
-            }
+            Assert.True(
+                TryCreateFileSymbolicLink(linkPath, externalFile),
+                "The reparse-point regression test requires file symlink creation to succeed.");
 
             var candidates = AppSurfaceDocsHarvestPathPolicy.CreateDefault()
                 .EnumerateCandidateFiles(
@@ -114,10 +113,9 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
         {
             await File.WriteAllTextAsync(Path.Join(externalRoot, "External.md"), "# External");
             var linkPath = Path.Join(root, "linked");
-            if (!TryCreateDirectorySymbolicLink(linkPath, externalRoot))
-            {
-                return;
-            }
+            Assert.True(
+                TryCreateDirectorySymbolicLink(linkPath, externalRoot),
+                "The reparse-point regression test requires directory symlink creation to succeed.");
 
             var candidates = AppSurfaceDocsHarvestPathPolicy.CreateDefault()
                 .EnumerateCandidateFiles(
