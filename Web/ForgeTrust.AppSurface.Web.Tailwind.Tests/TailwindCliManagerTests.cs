@@ -441,6 +441,21 @@ public class TailwindCliManagerTests : IDisposable
         Assert.Equal(arguments, invocation.Arguments);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void InvocationBuilder_RejectsMissingTailwindPath(string? tailwindPath)
+    {
+        Assert.ThrowsAny<ArgumentException>(() => TailwindInvocationBuilder.Build(tailwindPath!, []));
+    }
+
+    [Fact]
+    public void InvocationBuilder_RejectsNullTailwindArguments()
+    {
+        Assert.Throws<ArgumentNullException>(() => TailwindInvocationBuilder.Build("tailwindcss", null!));
+    }
+
     [Fact]
     public void GetTailwindPath_ThrowsFileNotFoundException_WhenNonWindowsPathProbeHasNoMatches()
     {

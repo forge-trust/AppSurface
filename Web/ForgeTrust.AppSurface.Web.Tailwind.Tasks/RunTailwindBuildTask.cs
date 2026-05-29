@@ -5,69 +5,132 @@ using Microsoft.Build.Utilities;
 namespace ForgeTrust.AppSurface.Web.Tailwind.Tasks;
 
 /// <summary>
-/// Runs the Tailwind CLI during an MSBuild build.
+/// Runs the Tailwind CLI during an MSBuild build and reports stable <c>ASTW###</c> diagnostics.
 /// </summary>
+/// <remarks>
+/// The task is loaded by <c>ForgeTrust.AppSurface.Web.Tailwind.targets</c> for build-time CSS generation.
+/// It prefers an explicit <see cref="TailwindCliPath"/> when supplied; otherwise it resolves the runtime
+/// package for the current build host RID. Build mode intentionally does not search <c>PATH</c>, because
+/// command-line shells and CI agents often expose different paths than MSBuild nodes. Developer watch mode
+/// may use <c>PATH</c>, but reproducible builds should use the packaged runtime or an explicit local binary.
+/// </remarks>
 public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICancelableTask
 {
     private const int BuildOutputCaptureLimit = 8192;
     private CancellationTokenSource? _cancellationTokenSource;
 
     /// <summary>
-    /// Gets or sets the project directory used as the Tailwind working directory and base for relative paths.
+    /// Gets or sets the project directory used as the Tailwind working directory.
     /// </summary>
+    /// <remarks>
+    /// Required. Relative <see cref="InputPath"/>, <see cref="OutputPath"/>, and <see cref="TailwindCliPath"/>
+    /// values are resolved from this directory. MSBuild passes <c>$(MSBuildProjectDirectory)</c>.
+    /// </remarks>
     [Required]
     public string ProjectDirectory { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the Tailwind input CSS path, relative to <see cref="ProjectDirectory"/> unless rooted.
+    /// Gets or sets the Tailwind input CSS path.
     /// </summary>
+    /// <remarks>
+    /// Required. The value is passed to Tailwind as <c>-i</c> and is interpreted relative to
+    /// <see cref="ProjectDirectory"/> unless it is rooted. The imported targets validate that input and output
+    /// paths do not resolve to the same file before this task runs.
+    /// </remarks>
     [Required]
     public string InputPath { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the Tailwind output CSS path, relative to <see cref="ProjectDirectory"/> unless rooted.
+    /// Gets or sets the generated Tailwind output CSS path.
     /// </summary>
+    /// <remarks>
+    /// Required. The value is passed to Tailwind as <c>-o</c> and is interpreted relative to
+    /// <see cref="ProjectDirectory"/> unless it is rooted. Outputs under <c>wwwroot</c> are registered by the
+    /// targets file as static web assets.
+    /// </remarks>
     [Required]
     public string OutputPath { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets an optional explicit Tailwind CLI path.
+    /// Gets or sets an optional explicit Tailwind CLI path used instead of the packaged runtime.
     /// </summary>
+    /// <remarks>
+    /// Optional. Use this escape hatch when a project must pin a custom standalone Tailwind binary or a local
+    /// shim. Relative values resolve from <see cref="ProjectDirectory"/>. When set, the file must exist or the
+    /// task emits <c>ASTW003</c>; when unset, <see cref="TailwindVersion"/> is required so the runtime package
+    /// candidate paths can be constructed.
+    /// </remarks>
     public string? TailwindCliPath { get; set; }
 
     /// <summary>
     /// Gets or sets the resolved Tailwind version from <c>tailwind.version</c>.
     /// </summary>
+    /// <remarks>
+    /// Required when <see cref="TailwindCliPath"/> is not supplied. The targets file normally reads this value
+    /// from the package <c>tailwind.version</c> file. Missing values emit <c>ASTW002</c> because packaged runtime
+    /// lookup includes the Tailwind version in source-tree candidate paths.
+    /// </remarks>
     public string? TailwindVersion { get; set; }
 
     /// <summary>
     /// Gets or sets the directory containing <c>ForgeTrust.AppSurface.Web.Tailwind.targets</c>.
     /// </summary>
+    /// <remarks>
+    /// Required. The task uses this directory to find package-local runtimes, sibling runtime packages in the
+    /// NuGet global-packages layout, and source-tree runtime outputs. MSBuild passes
+    /// <c>$(MSBuildThisFileDirectory)</c>, which includes a trailing separator.
+    /// </remarks>
     [Required]
     public string TargetsDirectory { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the current build configuration.
+    /// Gets or sets the current build configuration used for source-tree runtime probing.
     /// </summary>
+    /// <remarks>
+    /// Optional. Defaults to <c>Debug</c> when blank. Package consumers normally do not depend on this property;
+    /// it exists so repository/source-tree imports can locate runtime outputs under <c>runtimes/obj</c>.
+    /// </remarks>
     public string? Configuration { get; set; }
 
     /// <summary>
-    /// Gets or sets the current target framework.
+    /// Gets or sets the current project target framework used for source-tree runtime probing.
     /// </summary>
+    /// <remarks>
+    /// Optional. Defaults to <c>net10.0</c> when blank. This is the consuming project's framework, not the
+    /// framework used to load the MSBuild task assembly.
+    /// </remarks>
     public string? TargetFramework { get; set; }
 
     /// <summary>
     /// Gets or sets an optional Tailwind RID override for tests.
     /// </summary>
+    /// <remarks>
+    /// Optional. Production builds should leave this blank so <see cref="TailwindRuntimeMap.GetCurrentRid"/> can
+    /// resolve the host RID. Tests set this value to exercise unsupported RIDs and package probing branches.
+    /// </remarks>
     public string? TailwindTargetRid { get; set; }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Requests cancellation of the running Tailwind child process.
+    /// </summary>
+    /// <remarks>
+    /// MSBuild calls this method when the build is canceled. <see cref="Execute"/> observes the cancellation token,
+    /// terminates the child process through the process runner, emits <c>ASTW007</c>, and returns <c>false</c>.
+    /// Calling this method before <see cref="Execute"/> starts is a no-op.
+    /// </remarks>
     public void Cancel()
     {
         _cancellationTokenSource?.Cancel();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Resolves the Tailwind executable, runs <c>tailwindcss -i ... -o ... --minify</c>, and reports success to MSBuild.
+    /// </summary>
+    /// <returns>
+    /// <c>true</c> when Tailwind exits with code <c>0</c>; otherwise <c>false</c> after logging an <c>ASTW###</c>
+    /// diagnostic. Non-zero exits include the last <c>8192</c> characters of stdout and stderr to avoid unbounded
+    /// MSBuild memory growth while preserving the useful tail of the failure output.
+    /// </returns>
     public override bool Execute()
     {
         using var cancellationTokenSource = new CancellationTokenSource();
@@ -273,9 +336,16 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
         string rid,
         string runtimeBinaryName)
     {
-        var buildDirectory = Directory.GetParent(targetsDirectory);
-        var mainPackageVersionDirectory = buildDirectory?.Parent;
-        var packagesRoot = mainPackageVersionDirectory?.Parent?.Parent;
+        var normalizedTargetsDirectory = Path.TrimEndingDirectorySeparator(targetsDirectory);
+        if (string.IsNullOrWhiteSpace(normalizedTargetsDirectory))
+        {
+            yield break;
+        }
+
+        var buildDirectory = new DirectoryInfo(normalizedTargetsDirectory);
+        var mainPackageVersionDirectory = buildDirectory.Parent;
+        var mainPackageIdDirectory = mainPackageVersionDirectory?.Parent;
+        var packagesRoot = mainPackageIdDirectory?.Parent;
         var packageVersion = mainPackageVersionDirectory?.Name;
 
         if (packagesRoot == null || packageVersion == null || !IsRelativePathComponent(packageVersion))
@@ -321,7 +391,12 @@ public sealed class RunTailwindBuildTask : Microsoft.Build.Utilities.Task, ICanc
 
     private static string EnsureTrailingSeparator(string path)
     {
-        if (string.IsNullOrEmpty(path) || Path.EndsInDirectorySeparator(path))
+        if (string.IsNullOrEmpty(path))
+        {
+            throw new ArgumentException("TargetsDirectory cannot be empty.", nameof(path));
+        }
+
+        if (Path.EndsInDirectorySeparator(path))
         {
             return path;
         }

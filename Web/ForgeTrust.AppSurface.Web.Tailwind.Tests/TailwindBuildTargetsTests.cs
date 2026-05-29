@@ -565,6 +565,54 @@ public sealed class TailwindBuildTargetsTests : IDisposable
     }
 
     [Fact]
+    public async Task RunTailwindBuildTask_UsesSiblingRuntimePackageCandidate_WhenPresent()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var rid = TailwindRuntimeMap.GetCurrentRid();
+        var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
+            ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
+        const string packageVersion = "4.1.18";
+        var targetsDirectory = Path.Join(
+            _tempRoot,
+            "packages",
+            "forgetrust.appsurface.web.tailwind",
+            packageVersion,
+            "build");
+        var runtimePath = Path.Join(
+            _tempRoot,
+            "packages",
+            $"forgetrust.appsurface.web.tailwind.runtime.{rid}",
+            packageVersion,
+            "runtimes",
+            rid,
+            "native",
+            runtimeBinaryName);
+        Directory.CreateDirectory(targetsDirectory);
+        var task = CreateBuildTask("sample-sibling-runtime", task =>
+        {
+            task.TailwindTargetRid = rid;
+            task.TailwindVersion = packageVersion;
+            task.TargetsDirectory = targetsDirectory;
+        });
+        await CreateRuntimeTailwindCliStubAsync(task.ProjectDirectory, runtimePath);
+
+        var result = task.Execute();
+        var buildEngine = Assert.IsType<RecordingBuildEngine>(task.BuildEngine);
+
+        Assert.True(result);
+        Assert.True(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
+        Assert.Empty(buildEngine.Errors);
+        Assert.Empty(buildEngine.Warnings);
+        Assert.Contains(
+            buildEngine.Messages,
+            message => message.Message?.Contains(Path.GetFileName(runtimePath), StringComparison.Ordinal) is true);
+    }
+
+    [Fact]
     public async Task RunTailwindBuildTask_FailsWithDiagnostic_WhenCliExitsNonZeroWithoutCapturedOutput()
     {
         var projectDirectory = Path.Join(_tempRoot, "sample-nonzero-empty-output");
@@ -852,6 +900,16 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         var runtimeBinaryName = TailwindRuntimeMap.GetRuntimeBinaryName(rid)
             ?? throw new InvalidOperationException($"No Tailwind runtime binary name exists for '{rid}'.");
         var runtimePath = Path.Join(projectDirectory, "runtimes", rid, "native", runtimeBinaryName);
+        return await CreateRuntimeTailwindCliStubAsync(projectDirectory, runtimePath);
+    }
+
+    private static async Task<string> CreateRuntimeTailwindCliStubAsync(string projectDirectory, string runtimePath)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            throw new PlatformNotSupportedException("The runtime stub test writes a Unix executable script.");
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(runtimePath)!);
         await File.WriteAllTextAsync(
             runtimePath,
@@ -864,7 +922,7 @@ printf ' \n' >&2
 printf '≈ tailwindcss v4.1.18\n' >&2
 printf '%s\n' ""{runtimePath}""
 exit 0
-");
+	");
 
         const UnixFileMode executableMode =
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |

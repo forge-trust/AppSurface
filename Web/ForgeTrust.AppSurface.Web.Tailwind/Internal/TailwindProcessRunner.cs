@@ -10,6 +10,22 @@ namespace ForgeTrust.AppSurface.Web.Tailwind.Internal;
 /// </summary>
 internal static class TailwindProcessRunner
 {
+    /// <summary>
+    /// Executes a Tailwind process, streams complete stdout and stderr lines, and captures bounded output tails.
+    /// </summary>
+    /// <param name="fileName">The executable or shell launcher to start.</param>
+    /// <param name="args">The ordered process arguments. Values should be unquoted; CliWrap handles escaping.</param>
+    /// <param name="workingDirectory">The process working directory used for relative Tailwind paths.</param>
+    /// <param name="stdoutLine">Optional callback invoked for each complete stdout line.</param>
+    /// <param name="stderrLine">Optional callback invoked for each complete stderr line with its classified severity.</param>
+    /// <param name="captureLimit">Maximum characters retained from stdout and stderr independently; <c>0</c> disables capture.</param>
+    /// <param name="cancellationToken">Cancellation token that terminates the child process when canceled.</param>
+    /// <returns>
+    /// The process exit code plus captured stdout and stderr tails. Callbacks may receive more output than is retained
+    /// in the result when the process writes more than <paramref name="captureLimit"/> characters.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> is canceled.</exception>
+    /// <exception cref="TailwindProcessStartException">Thrown when the operating system or CliWrap cannot start the process.</exception>
     public static async Task<TailwindCommandResult> ExecuteAsync(
         string fileName,
         IReadOnlyList<string> args,

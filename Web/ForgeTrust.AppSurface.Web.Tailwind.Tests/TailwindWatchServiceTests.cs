@@ -11,7 +11,8 @@ namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
 public class TailwindWatchServiceTests : IDisposable
 {
-    private static readonly string TestContentRoot = Path.GetFullPath(Path.Join(Path.GetTempPath(), "tailwind-watch-tests"));
+    private readonly string _testContentRoot = Path.GetFullPath(
+        Path.Join(Path.GetTempPath(), $"tailwind-watch-tests-{Guid.NewGuid():N}"));
     private readonly TailwindCliManager _cliManager;
     private readonly IOptions<TailwindOptions> _options;
     private readonly ILogger<TailwindWatchService> _logger;
@@ -20,6 +21,7 @@ public class TailwindWatchServiceTests : IDisposable
 
     public TailwindWatchServiceTests()
     {
+        Directory.CreateDirectory(_testContentRoot);
         _cliManager = A.Fake<TailwindCliManager>(x => x.WithArgumentsForConstructor([A.Fake<ILogger<TailwindCliManager>>()]));
         _tailwindOptions = new TailwindOptions
         {
@@ -32,13 +34,18 @@ public class TailwindWatchServiceTests : IDisposable
         _environment = A.Fake<IHostEnvironment>();
 
         A.CallTo(() => _environment.EnvironmentName).Returns(Environments.Development);
-        A.CallTo(() => _environment.ContentRootPath).Returns(TestContentRoot);
+        A.CallTo(() => _environment.ContentRootPath).Returns(_testContentRoot);
         A.CallTo(() => _cliManager.GetTailwindPath()).Returns("/path/to/tailwind");
     }
 
     public void Dispose()
     {
         TailwindCliManager.IsOSPlatformOverride = null;
+        if (Directory.Exists(_testContentRoot))
+        {
+            Directory.Delete(_testContentRoot, recursive: true);
+        }
+
         GC.SuppressFinalize(this);
     }
 
@@ -94,7 +101,7 @@ public class TailwindWatchServiceTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_UsesConfiguredCliPath_WhenProvided()
     {
-        var cliPath = Path.Join(TestContentRoot, "tools", RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "tailwindcss.exe" : "tailwindcss");
+        var cliPath = Path.Join(_testContentRoot, "tools", RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "tailwindcss.exe" : "tailwindcss");
         Directory.CreateDirectory(Path.GetDirectoryName(cliPath)!);
         await File.WriteAllTextAsync(cliPath, "stub");
         _tailwindOptions.CliPath = $"tools/{Path.GetFileName(cliPath)}";

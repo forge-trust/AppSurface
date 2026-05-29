@@ -7,6 +7,15 @@ namespace ForgeTrust.AppSurface.Web.Tailwind.Internal;
 /// </summary>
 internal static class TailwindRuntimeMap
 {
+    /// <summary>
+    /// Resolves the Tailwind runtime identifier for the current build host.
+    /// </summary>
+    /// <param name="isOsPlatform">Optional platform predicate for tests; defaults to <see cref="RuntimeInformation.IsOSPlatform"/>.</param>
+    /// <param name="processArchitecture">Optional architecture provider for tests; defaults to <see cref="RuntimeInformation.ProcessArchitecture"/>.</param>
+    /// <returns>
+    /// A supported Tailwind RID such as <c>win-x64</c>, <c>linux-arm64</c>, or <c>osx-arm64</c>; otherwise
+    /// <c>unknown</c> when the platform or architecture is not mapped. This method does not throw for unsupported hosts.
+    /// </returns>
     public static string GetCurrentRid(
         Func<OSPlatform, bool>? isOsPlatform = null,
         Func<Architecture>? processArchitecture = null)
