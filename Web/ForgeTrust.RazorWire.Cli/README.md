@@ -4,6 +4,17 @@ The **RazorWire CLI** is a command-line tool for managing RazorWire projects. It
 
 The CLI uses AppSurface's command-first console mode. That means help and validation output are intentionally quiet, without Generic Host lifecycle banners, while real export runs still emit useful progress logs.
 
+## Start here: export the sample
+
+During repository development, the fastest confidence check is to export the RazorWire MVC sample from source:
+
+```bash
+dotnet run --project Web/ForgeTrust.RazorWire.Cli -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
+test -f ./dist/index.html
+```
+
+A successful run publishes the sample, starts it on an ephemeral loopback URL, crawls the discovered pages, writes static files under `./dist`, and shuts the target app down automatically. Inspect `./dist/index.html` first; it proves the exporter emitted the root artifact.
+
 ## Installation
 
 The RazorWire CLI project is configured as a .NET tool with the command name
@@ -126,6 +137,18 @@ For both `--project` and `--dll`:
 - If you do not pass `--urls` via `--app-args`, the CLI appends `--urls http://127.0.0.1:0`.
 - The launched app inherits the parent process environment, while the CLI forces `ASPNETCORE_ENVIRONMENT=Production` and `DOTNET_ENVIRONMENT=Production` for deployed-runtime semantics.
 - The CLI waits for startup, crawls the app, then shuts the process down automatically.
+- Pass multiple target-app arguments by repeating `--app-args` once per token. For example, `--app-args --urls --app-args http://127.0.0.1:5009` launches the app with `--urls http://127.0.0.1:5009`.
+
+#### If export fails
+
+Process failures are reported with the command stage, exit code or startup exception when available, recent target-app stdout/stderr, and the next recovery step. Common branches:
+
+- **Missing source option or multiple sources**: choose exactly one of `--url`, `--project`, or `--dll`; run `razorwire export --help` for the current command shape.
+- **Multi-targeted project without `--framework`**: pass `-f|--framework <TFM>`, such as `--framework net10.0`, so publish and DLL resolution use the same target.
+- **Project publish fails**: read the captured `dotnet publish` stdout/stderr, fix the build error, and rerun the same export command.
+- **Target app exits before listening**: inspect the recent target-app output in the error. The app failed during startup before the exporter could discover a base URL.
+- **Readiness timeout after a listening URL**: verify the app can serve requests at the emitted loopback URL and that startup work is not blocking the first response.
+- **Cancellation or interrupted export**: the CLI performs best-effort shutdown of the launched target app before returning.
 
 ### AppSurface Docs versioned export notes
 
@@ -155,3 +178,14 @@ dotnet run --project Web/ForgeTrust.RazorWire.Cli -- export -o ./dist -p ./examp
 ```bash
 dotnet run --project Web/ForgeTrust.RazorWire.Cli -- export -o ./dist -d ./bin/Release/net10.0/MyApp.dll --app-args --urls --app-args http://127.0.0.1:5009
 ```
+
+## Contributor process execution policy
+
+RazorWire CLI owns two process boundaries:
+
+| Boundary | Use for | Contract |
+|---|---|---|
+| Command executor | Finite commands such as publish probes and MSBuild property reads. | Return exit code, stdout, and stderr as data; do not throw for non-zero exits or ordinary startup failures; propagate cancellation. |
+| Target app process | Long-running app launched for crawling. | Raise stdout/stderr as non-empty lines, surface startup failure before readiness timeout, raise exit after output drain when possible, and perform best-effort process-tree cleanup on disposal. |
+
+Keep command arguments tokenized as ordered argument lists. Do not build shell command strings. User-facing docs should describe observable behavior and recovery steps; implementation dependencies belong in contributor docs and tests.

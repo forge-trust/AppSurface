@@ -29,6 +29,7 @@
   <ItemGroup>
     <PackageReference Include="AngleSharp" />
     <PackageReference Include="CliFx" />
+    <PackageReference Include="CliWrap" />
   </ItemGroup>
 
 </Project>

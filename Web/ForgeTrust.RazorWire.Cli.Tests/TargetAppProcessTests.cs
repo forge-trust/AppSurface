@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 
 namespace ForgeTrust.RazorWire.Cli.Tests;
 
@@ -23,6 +24,44 @@ public class TargetAppProcessTests
         });
 
         Assert.True(process.HasExited);
+    }
+
+    [Fact]
+    public async Task Start_Should_Throw_When_Called_Twice()
+    {
+        await using var process = new TargetAppProcess(
+            new ProcessLaunchSpec
+            {
+                FileName = "dotnet",
+                Arguments = ["--version"],
+                WorkingDirectory = Directory.GetCurrentDirectory()
+            },
+            new TargetAppProcessHooks
+            {
+                StartOverride = _ => { },
+                HasExitedOverride = _ => true
+            },
+            process: new Process(),
+            started: false);
+
+        process.Start();
+
+        var ex = Assert.Throws<InvalidOperationException>(process.Start);
+        Assert.Contains("already been started", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Start_Should_Throw_After_Dispose()
+    {
+        var process = new TargetAppProcess(new ProcessLaunchSpec
+        {
+            FileName = "dotnet",
+            Arguments = ["--version"],
+            WorkingDirectory = Directory.GetCurrentDirectory()
+        });
+        await process.DisposeAsync();
+
+        Assert.Throws<ObjectDisposedException>(process.Start);
     }
 
     [Fact]
@@ -103,6 +142,76 @@ public class TargetAppProcessTests
         Assert.Empty(errorLines);
         Assert.True(outputReceived.Task.IsCompleted, "Expected at least one stdout line from 'dotnet --version'.");
         Assert.NotEmpty(outputLines);
+    }
+
+    [Fact]
+    public async Task Start_Should_Surface_StartupFailure_As_ErrorLine_Then_Exited()
+    {
+        var errorReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var exitedSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var process = new TargetAppProcess(new ProcessLaunchSpec
+        {
+            FileName = "definitely-missing-razorwire-target-app",
+            Arguments = [],
+            WorkingDirectory = Directory.GetCurrentDirectory()
+        });
+
+        process.ErrorLineReceived += line => errorReceived.TrySetResult(line);
+        process.Exited += () => exitedSignal.TrySetResult();
+
+        process.Start();
+
+        var timeout = Task.Delay(TimeSpan.FromSeconds(5));
+        var errorSignal = await Task.WhenAny(errorReceived.Task, timeout);
+        Assert.NotSame(timeout, errorSignal);
+        var exitSignal = await Task.WhenAny(exitedSignal.Task, timeout);
+        Assert.NotSame(timeout, exitSignal);
+
+        Assert.Contains("failed", await errorReceived.Task, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_Should_Cancel_Running_CliWrap_Process()
+    {
+        using var project = TestConsoleProject.Create(
+            """
+            Console.WriteLine("ready");
+            await Task.Delay(TimeSpan.FromSeconds(30));
+            """);
+        var outputReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var exitedSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var process = new TargetAppProcess(new ProcessLaunchSpec
+        {
+            FileName = "dotnet",
+            Arguments = ["run", "--project", project.ProjectPath],
+            WorkingDirectory = project.DirectoryPath
+        });
+        process.OutputLineReceived += line => outputReceived.TrySetResult(line);
+        process.Exited += () => exitedSignal.TrySetResult();
+        process.Start();
+
+        var startupSignal = await Task.WhenAny(outputReceived.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+        Assert.Same(outputReceived.Task, startupSignal);
+
+        var exception = await Record.ExceptionAsync(async () => await process.DisposeAsync());
+
+        Assert.Null(exception);
+        var exitSignal = await Task.WhenAny(exitedSignal.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.Same(exitedSignal.Task, exitSignal);
+        Assert.True(process.HasExited);
+    }
+
+    [Fact]
+    public async Task ReadProcessLinesAsync_Should_Handle_Line_Endings_And_Final_Unterminated_Line()
+    {
+        var lines = new List<string>();
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("alpha\r\nbeta\n   \nfinal"));
+
+        await TargetAppProcess.ReadProcessLinesAsync(stream, lines.Add, CancellationToken.None);
+
+        Assert.Equal(["alpha", "beta", "final"], lines);
     }
 
     [Fact]
@@ -362,5 +471,54 @@ public class TargetAppProcessTests
         });
 
         Assert.IsType<TargetAppProcess>(process);
+    }
+
+    private sealed class TestConsoleProject : IDisposable
+    {
+        private TestConsoleProject(string directoryPath, string projectPath)
+        {
+            DirectoryPath = directoryPath;
+            ProjectPath = projectPath;
+        }
+
+        public string DirectoryPath { get; }
+
+        public string ProjectPath { get; }
+
+        public static TestConsoleProject Create(string programBody)
+        {
+            var directory = Path.Combine(Path.GetTempPath(), $"razorwire-target-app-test-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(directory);
+            var projectPath = Path.Combine(directory, "TargetHelper.csproj");
+            File.WriteAllText(
+                projectPath,
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <OutputType>Exe</OutputType>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <Nullable>enable</Nullable>
+                  </PropertyGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(directory, "Program.cs"), programBody);
+
+            return new TestConsoleProject(directory, projectPath);
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                Directory.Delete(DirectoryPath, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
     }
 }
