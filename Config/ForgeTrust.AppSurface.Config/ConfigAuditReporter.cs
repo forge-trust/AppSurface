@@ -570,11 +570,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                     exists = false;
                     return true;
                 }
-
-                continue;
             }
-
-            if (!TryGetMemberValue(current, segment, out current))
+            else if (!TryGetMemberValue(current, segment, out current))
             {
                 exists = false;
                 return true;

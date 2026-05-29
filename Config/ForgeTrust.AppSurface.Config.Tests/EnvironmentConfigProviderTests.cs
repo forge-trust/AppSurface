@@ -1091,6 +1091,56 @@ public class EnvironmentConfigProviderTests
     }
 
     [Fact]
+    public void TracePatch_RecordsEnvironmentScopedCollectionReplacementFacts()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("PRODUCTION__MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        var current = new AppSettings
+        {
+            Endpoints = ["https://file.example"]
+        };
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(AppSettings));
+
+        Assert.True(patch.Patched);
+        Assert.Equal(
+            ConfigAuditPriorPresence.Present,
+            patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
+        Assert.Equal(
+            ConfigAuditPriorPresence.Missing,
+            patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsUnknownPriorPresenceWhenProviderEvidenceCollectionIsNull()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        var current = new AppSettings
+        {
+            Endpoints = null!
+        };
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(AppSettings));
+
+        Assert.True(patch.Patched);
+        var fact = Assert.Single(patch.Facts, fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0");
+        Assert.Equal(ConfigAuditPriorPresence.Unknown, fact.PriorPresence);
+    }
+
+    [Fact]
     public void TracePatch_TreatsConstructorDefaultCollectionAsMissingWhenRootWasMissing()
     {
         var innerProvider = A.Fake<IEnvironmentProvider>();

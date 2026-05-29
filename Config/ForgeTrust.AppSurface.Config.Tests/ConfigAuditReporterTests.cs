@@ -1933,6 +1933,32 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_IgnoresMismatchedEnvironmentElementFactWhenBaseSourceUsesDifferentRoot()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "Endpoints",
+            new List<string> { "https://env.example" },
+            "Other.0");
+        services.AddSingleton<IConfigProvider>(
+            new SourcePathProvider(
+                "Endpoints",
+                new List<string> { "https://file.example" },
+                "Other"));
+        services.AddConfigAuditKey<List<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
+        Assert.Equal("https://env.example", child.DisplayValue);
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
     public void GetReport_MarksDirectEnvironmentCollectionBasePresenceUnknownForInvalidProvider()
     {
         var environment = A.Fake<IEnvironmentProvider>();
@@ -3577,6 +3603,58 @@ public class ConfigAuditReporterTests
                 Kind = ConfigAuditSourceKind.Provider,
                 ProviderName = Name,
                 ProviderPriority = Priority,
+                Role = role
+            };
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                _value,
+                [source],
+                []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
+    private sealed class SourcePathProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        private readonly string _key;
+        private readonly object _value;
+        private readonly string _sourcePath;
+
+        public SourcePathProvider(string key, object value, string sourcePath)
+        {
+            _key = key;
+            _value = value;
+            _sourcePath = sourcePath;
+        }
+
+        public int Priority => 20;
+
+        public string Name => nameof(SourcePathProvider);
+
+        public T? GetValue<T>(string environment, string key) =>
+            string.Equals(_key, key, StringComparison.Ordinal) ? (T)_value : default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(_key, key, StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            var source = new ConfigAuditSourceRecord
+            {
+                Kind = ConfigAuditSourceKind.Provider,
+                ProviderName = Name,
+                ProviderPriority = Priority,
+                ConfigPath = _sourcePath,
+                AppliedToPath = _sourcePath,
                 Role = role
             };
 
