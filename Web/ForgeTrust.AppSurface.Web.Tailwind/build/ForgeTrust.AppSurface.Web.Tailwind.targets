@@ -14,7 +14,7 @@
     <_TailwindTaskAssemblySource>$(MSBuildThisFileDirectory)..\..\ForgeTrust.AppSurface.Web.Tailwind.Tasks\bin\$(Configuration)\$(_TailwindTaskTargetFramework)\ForgeTrust.AppSurface.Web.Tailwind.Tasks.dll</_TailwindTaskAssemblySource>
     <_TailwindTaskAssemblySourceDisplay Condition="Exists('$(_TailwindTaskAssemblySourceProject)')">$(_TailwindTaskAssemblySource)</_TailwindTaskAssemblySourceDisplay>
     <_TailwindTaskAssembly Condition="Exists('$(_TailwindTaskAssemblyPackage)')">$(_TailwindTaskAssemblyPackage)</_TailwindTaskAssembly>
-    <_TailwindTaskAssembly Condition="'$(_TailwindTaskAssembly)' == '' and Exists('$(_TailwindTaskAssemblySource)')">$(_TailwindTaskAssemblySource)</_TailwindTaskAssembly>
+    <_TailwindTaskAssembly Condition="'$(_TailwindTaskAssembly)' == '' and Exists('$(_TailwindTaskAssemblySourceProject)')">$(_TailwindTaskAssemblySource)</_TailwindTaskAssembly>
     <_TailwindOutputPathNormalized>$([System.String]::Copy('$(TailwindOutputPath)').Replace('\', '/'))</_TailwindOutputPathNormalized>
     <_TailwindOutputPathNormalized Condition="$([System.String]::Copy('$(_TailwindOutputPathNormalized)').StartsWith('./'))">$([System.String]::Copy('$(_TailwindOutputPathNormalized)').Substring(2))</_TailwindOutputPathNormalized>
     <_TailwindOutputIsWebRootAsset>false</_TailwindOutputIsWebRootAsset>
@@ -31,7 +31,7 @@
 
   <UsingTask TaskName="ForgeTrust.AppSurface.Web.Tailwind.Tasks.RunTailwindBuildTask"
              AssemblyFile="$(_TailwindTaskAssembly)"
-             Condition="'$(_TailwindTaskAssembly)' != '' and Exists('$(_TailwindTaskAssembly)')" />
+             Condition="'$(_TailwindTaskAssembly)' != '' and (Exists('$(_TailwindTaskAssembly)') or '$(_TailwindTaskAssembly)' == '$(_TailwindTaskAssemblySource)')" />
 
   <ItemGroup Condition="'$(TailwindEnabled)' == 'true' and '$(_TailwindOutputIsWebRootAsset)' == 'true' and ('$(_TailwindUsesSdkDefaultContentItems)' == 'false' or !Exists('$(TailwindOutputPath)'))">
     <!--
@@ -63,6 +63,14 @@
 
     <Error Text="ASTW008: TailwindInputPath and TailwindOutputPath must point to different files. Cause: Tailwind would overwrite its own source input. Fix: Set TailwindOutputPath to a different generated CSS file. See: https://github.com/forge-trust/AppSurface/tree/main/Web/ForgeTrust.AppSurface.Web.Tailwind#tailwind-diagnostics"
            Condition="'$(_TailwindSameInputOutput)' == 'True'" />
+  </Target>
+
+  <Target Name="BuildTailwindSourceTaskAssembly"
+          BeforeTargets="RunTailwindBuild"
+          Condition="'$(TailwindEnabled)' == 'true' AND Exists('$(TailwindInputPath)') AND '$(_TailwindTaskAssembly)' == '$(_TailwindTaskAssemblySource)' AND !Exists('$(_TailwindTaskAssemblySource)')">
+    <MSBuild Projects="$(_TailwindTaskAssemblySourceProject)"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);TargetFramework=$(_TailwindTaskTargetFramework)" />
   </Target>
 
   <Target Name="RunTailwindBuild" AfterTargets="ResolveProjectReferences" BeforeTargets="PrepareResources;Compile"

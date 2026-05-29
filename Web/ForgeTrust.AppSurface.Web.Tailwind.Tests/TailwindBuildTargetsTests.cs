@@ -237,12 +237,12 @@ public sealed class TailwindBuildTargetsTests : IDisposable
                     StringComparison.Ordinal));
 
         Assert.Equal(
-            "'$(_TailwindTaskAssembly)' != '' and Exists('$(_TailwindTaskAssembly)')",
+            "'$(_TailwindTaskAssembly)' != '' and (Exists('$(_TailwindTaskAssembly)') or '$(_TailwindTaskAssembly)' == '$(_TailwindTaskAssemblySource)')",
             usingTask.Attribute("Condition")?.Value);
     }
 
     [Fact]
-    public void TailwindTargets_SetsSourceTaskAssemblyOnlyWhenAssemblyExists()
+    public void TailwindTargets_RetainsSourceTaskAssemblyPathForBootstrap()
     {
         var document = XDocument.Load(GetTailwindTargetsPath());
         var sourceTaskAssembly = Assert.Single(
@@ -253,8 +253,29 @@ public sealed class TailwindBuildTargetsTests : IDisposable
                 StringComparison.Ordinal));
 
         Assert.Equal(
-            "'$(_TailwindTaskAssembly)' == '' and Exists('$(_TailwindTaskAssemblySource)')",
+            "'$(_TailwindTaskAssembly)' == '' and Exists('$(_TailwindTaskAssemblySourceProject)')",
             sourceTaskAssembly.Attribute("Condition")?.Value);
+    }
+
+    [Fact]
+    public void TailwindTargets_BuildsSourceTaskAssemblyBeforeRunTailwindBuild()
+    {
+        var document = XDocument.Load(GetTailwindTargetsPath());
+        var bootstrapTarget = Assert.Single(
+            document.Descendants("Target"),
+            element => string.Equals(
+                element.Attribute("Name")?.Value,
+                "BuildTailwindSourceTaskAssembly",
+                StringComparison.Ordinal));
+        var buildTask = Assert.Single(bootstrapTarget.Descendants("MSBuild"));
+
+        Assert.Equal("RunTailwindBuild", bootstrapTarget.Attribute("BeforeTargets")?.Value);
+        Assert.Equal("$(_TailwindTaskAssemblySourceProject)", buildTask.Attribute("Projects")?.Value);
+        Assert.Equal("Build", buildTask.Attribute("Targets")?.Value);
+        Assert.Contains(
+            "!Exists('$(_TailwindTaskAssemblySource)')",
+            bootstrapTarget.Attribute("Condition")?.Value,
+            StringComparison.Ordinal);
     }
 
     [Fact]
