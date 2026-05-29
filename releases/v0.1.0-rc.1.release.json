@@ -2,7 +2,7 @@
   "version": "0.1.0-rc.1",
   "tag": "v0.1.0-rc.1",
   "date": "2026-05-29",
-  "sourceCommit": "6158265c83d2e7a05954b1fb83d108180e178439",
+  "sourceCommit": "b005b323b84cace6fa832e0c2a2ab835e117475e",
   "releaseClassification": "prerelease",
   "generatedFiles": [
     "releases/v0.1.0-rc.1.md",

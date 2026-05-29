@@ -110,7 +110,7 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
     }
 
     [Fact]
-    public async Task PublicPackageReadmes_LinkToReleasePreview()
+    public async Task PublicPackageReadmes_LinkToCurrentReleaseCandidate()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
@@ -121,8 +121,8 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         Assert.Equal(
-            "/docs/releases/v0.1-preview",
-            await page.GetAttributeAsync(".docs-content a[href='/docs/releases/v0.1-preview']", "href"));
+            "/docs/releases/v0.1.0-rc.1",
+            await page.GetAttributeAsync(".docs-content a[href='/docs/releases/v0.1.0-rc.1']", "href"));
 
         await page.GotoAsync($"{_fixture.DocsUrl}/web/forgetrust.appsurface.web.openapi");
         await page.WaitForFunctionAsync(
@@ -130,9 +130,9 @@ public sealed class AppSurfaceDocsPackageChooserPlaywrightTests
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-        await page.Locator(".docs-content a[href='/docs/releases/v0.1-preview']").First.ClickAsync();
-        await WaitForPathAndHeadingAsync(page, "/docs/releases/v0.1-preview", "AppSurface v0.1.0 Release Preview");
-        Assert.Equal("AppSurface v0.1.0 Release Preview", (await page.TextContentAsync("h1"))?.Trim());
+        await page.Locator(".docs-content a[href='/docs/releases/v0.1.0-rc.1']").First.ClickAsync();
+        await WaitForPathAndHeadingAsync(page, "/docs/releases/v0.1.0-rc.1", "AppSurface 0.1.0 RC 1");
+        Assert.Equal("AppSurface 0.1.0 RC 1", (await page.TextContentAsync("h1"))?.Trim());
     }
 
     [Fact]
