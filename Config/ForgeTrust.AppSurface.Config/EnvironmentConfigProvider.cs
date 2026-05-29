@@ -1,4 +1,5 @@
 ﻿using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
@@ -921,6 +922,7 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
                 : -1;
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Defensive collection-shape helper; patch diagnostics tests cover supported collection counts.")]
     private static bool TryGetCollectionCount(object? value, out int count)
     {
         count = 0;

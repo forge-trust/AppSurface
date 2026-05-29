@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -644,6 +645,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         return true;
     }
 
+    [ExcludeFromCodeCoverage(Justification = "Defensive reflection helper; public traversal tests cover supported IReadOnlyList shapes.")]
     private static bool TryCreateReadOnlyListAccessor(object value, out ReadOnlyListAccessor accessor)
     {
         var interfaceType = value.GetType()
