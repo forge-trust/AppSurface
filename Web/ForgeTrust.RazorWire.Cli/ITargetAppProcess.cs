@@ -463,13 +463,11 @@ internal sealed class TargetAppProcess : ITargetAppProcess
         {
             RaiseErrorLineForProcessFailure(ex);
         }
-#pragma warning disable CA1031 // Fire-and-forget observation must turn unexpected task failures into diagnostics.
-        catch (Exception ex)
+        catch (Exception ex) when (IsNonFatalException(ex))
         {
             // ObserveCompletionAsync is intentionally fire-and-forget; convert unexpected failures into diagnostics.
             RaiseErrorLineForProcessFailure(ex);
         }
-#pragma warning restore CA1031
         finally
         {
             MarkCompleting();
@@ -680,6 +678,14 @@ internal sealed class TargetAppProcess : ITargetAppProcess
             or InvalidOperationException
             or FileNotFoundException
             or DirectoryNotFoundException;
+    }
+
+    private static bool IsNonFatalException(Exception exception)
+    {
+        return exception is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException
+            and not AppDomainUnloadedException;
     }
 
     private enum TargetAppProcessState
