@@ -483,6 +483,15 @@ internal abstract class AppSurfaceDocsPreviewCommand : AppSurfaceDocsStrictRepos
     public int? Port { get; set; }
 
     /// <summary>
+    /// Gets a value indicating whether the port shortcut should bind all hosts instead of localhost only.
+    /// </summary>
+    /// <remarks>
+    /// Use this only with <see cref="Port"/> when LAN, container, or other non-loopback preview access is intentional.
+    /// </remarks>
+    [CommandOption("all-hosts", Description = "Bind --port previews to localhost and all hosts instead of localhost only.")]
+    public bool AllHosts { get; set; }
+
+    /// <summary>
     /// Executes the command through the CliFx console integration.
     /// </summary>
     /// <param name="console">Console abstraction used to register cancellation handling.</param>
@@ -504,7 +513,7 @@ internal abstract class AppSurfaceDocsPreviewCommand : AppSurfaceDocsStrictRepos
     /// </remarks>
     internal async ValueTask ExecuteAsync(CancellationToken cancellationToken)
     {
-        var hostArgs = BuildHostArgs(Urls, Port, defaultEnvironmentName: Environments.Development);
+        var hostArgs = BuildHostArgs(Urls, Port, AllHosts, defaultEnvironmentName: Environments.Development);
         _logger.LogInformation("Starting AppSurface Docs preview for {RepositoryRoot}.", hostArgs.RepositoryRoot);
         using var currentDirectory = CurrentDirectoryScope.ChangeTo(hostArgs.RepositoryRoot);
         try
@@ -601,7 +610,7 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     /// <returns>The repository root, forwarded host arguments, startup timeout, and resolved environment.</returns>
     internal AppSurfaceDocsHostArgs BuildHostArgs(string? defaultEnvironmentName)
     {
-        return BuildHostArgs(urls: null, port: null, defaultEnvironmentName);
+        return BuildHostArgs(urls: null, port: null, allHosts: false, defaultEnvironmentName);
     }
 
     /// <summary>
@@ -609,9 +618,10 @@ internal abstract class AppSurfaceDocsRepositoryCommand
     /// </summary>
     /// <param name="urls">Optional explicit preview URL binding.</param>
     /// <param name="port">Optional preview port shortcut.</param>
+    /// <param name="allHosts">Whether the preview port shortcut should bind all hosts instead of localhost only.</param>
     /// <param name="defaultEnvironmentName">Environment to use when <see cref="EnvironmentName"/> is blank.</param>
     /// <returns>The repository root, forwarded host arguments, startup timeout, and resolved environment.</returns>
-    internal AppSurfaceDocsHostArgs BuildHostArgs(string? urls, int? port, string? defaultEnvironmentName)
+    internal AppSurfaceDocsHostArgs BuildHostArgs(string? urls, int? port, bool allHosts, string? defaultEnvironmentName)
     {
         if (string.IsNullOrWhiteSpace(RepositoryRoot))
         {
@@ -632,6 +642,11 @@ internal abstract class AppSurfaceDocsRepositoryCommand
         };
 
         AddOptional(args, "--urls", urls);
+        if (allHosts && port is null)
+        {
+            throw new CommandException("The --all-hosts option requires --port.");
+        }
+
         if (port is not null)
         {
             if (port is < 1 or > 65535)
@@ -641,6 +656,10 @@ internal abstract class AppSurfaceDocsRepositoryCommand
 
             args.Add("--port");
             args.Add(port.Value.ToString(CultureInfo.InvariantCulture));
+            if (allHosts)
+            {
+                args.Add("--all-hosts");
+            }
         }
 
         if (StrictHarvest)

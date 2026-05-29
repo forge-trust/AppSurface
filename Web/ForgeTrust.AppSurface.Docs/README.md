@@ -20,6 +20,8 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 
 `appsurface docs` and `appsurface docs preview` run the standalone host for local inspection. `appsurface docs export` starts that same host in-process, binds an internal `http://127.0.0.1:0` listener, resolves the actual Kestrel address, and exports through RazorWire's static export engine.
 
+Preview `--port` values bind localhost only. Add `--all-hosts` to a `--port` preview only when LAN, container, or other non-loopback access is intentional; the all-hosts wildcard can expose the preview host beyond the local machine.
+
 Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands.
 
 Redirect aliases default to HTML fallback materialization. Omit `--redirects`, or pass `--redirects html`, for GitHub Pages and generic static hosts. Pass `--mode cdn --redirects netlify` for Netlify-compatible CDN publishing; export writes one root `_redirects` file with exact site-local `301!` rules and does not write alias HTML files. Netlify export validates the encoded provider rule paths, so self-redirects and same-source aliases that point at different canonical routes fail before files are written. Do not hand-author `_redirects` in the export output because the exporter reserves that file for validated redirect rules.

@@ -170,29 +170,37 @@ When an AppSurface web application starts in `Development` without explicit endp
 - AppSurface treats `--environment Development`, `ASPNETCORE_ENVIRONMENT=Development`, and `DOTNET_ENVIRONMENT=Development` as development for both the deterministic port resolver and module-level `StartupContext.IsDevelopment` decisions. Command-line environment parsing is shared with `DefaultEnvironmentProvider`, so duplicate `--environment` keys use the last valid value.
 - Override it any time with `--port`, `--urls`, `ASPNETCORE_URLS`/`URLS`, `ASPNETCORE_HTTP_PORTS`/`DOTNET_HTTP_PORTS`/`HTTP_PORTS`, `ASPNETCORE_HTTPS_PORTS`/`DOTNET_HTTPS_PORTS`/`HTTPS_PORTS`, `urls`/`http_ports`/`https_ports` in appsettings, or `Kestrel:Endpoints` in appsettings/environment variables.
 - Treat the startup log as the source of truth for the selected local URL.
-- The automatic fallback binds only `http://localhost:{port}`. Use `--port` or an explicit wildcard URL when you intentionally need LAN/container access.
+- The automatic fallback and `--port` shortcut bind only `http://localhost:{port}`. Add `--all-hosts` to the `--port` shortcut, or pass an explicit wildcard URL, only when you intentionally need LAN/container access.
 
 #### Port Overrides
 
 You can override the application's listening port using several methods:
 
-1.  **Command-Line**: Use `--port` (shortcut) or `--urls`.
+1.  **Command-Line**: Use `--port` (localhost-only shortcut), `--port` with `--all-hosts`, or `--urls`.
+
     ```bash
     dotnet run -- --port 5001
     # OR
+    dotnet run -- --port 5001 --all-hosts
+    # OR
     dotnet run -- --urls "http://localhost:5001"
     ```
+
 2.  **Environment Variables**: Set `ASPNETCORE_URLS`.
+
     ```bash
     export ASPNETCORE_URLS="http://localhost:5001"
     dotnet run
     ```
+
 3.  **App Settings**: Configure `urls` in `appsettings.json`.
+
     ```json
     {
       "urls": "http://localhost:5001"
     }
     ```
+
 4.  **Kestrel Endpoints**: Configure named endpoints when you need protocol, certificate, or endpoint-specific settings.
 
     ```json
@@ -208,7 +216,7 @@ You can override the application's listening port using several methods:
     ```
 
 > [!NOTE]
-> The `--port` flag is a convenience shortcut that maps to `http://localhost:{port};http://*:{port}`. This ensures the application is accessible on all interfaces while logging a clickable `localhost` URL in the console. If both `--port` and `--urls` are provided, `--port` takes precedence.
+> The `--port` flag is a convenience shortcut that maps to `http://localhost:{port}`. Add `--all-hosts` to map the same port to `http://localhost:{port};http://*:{port}` when all-interface access is intentional. The `*` host is a wildcard binding and can expose the preview host beyond the local machine. If both `--port` and `--urls` are provided, `--port` takes precedence.
 > [!TIP]
 > If you rely on the deterministic development-port fallback, different worktrees on the same machine will get different stable ports. If you need a predictable shared URL for docs, QA, or CI instructions, pass `--port` or `--urls` explicitly instead of depending on the fallback.
 
