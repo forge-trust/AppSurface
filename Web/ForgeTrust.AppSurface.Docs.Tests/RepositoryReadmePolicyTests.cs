@@ -45,7 +45,7 @@ public sealed partial class RepositoryReadmePolicyTests
     }
 
     [Fact]
-    public void PublicPackageReadmes_ShouldLinkToV01ReleasePreview()
+    public void PublicPackageReadmes_ShouldLinkToCurrentReleaseCandidate()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var entries = ReadPackageManifestEntries(repoRoot);
@@ -73,8 +73,8 @@ public sealed partial class RepositoryReadmePolicyTests
 
             Assert.Contains("## Release Guidance", content, StringComparison.Ordinal);
 
-            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1-preview.md"), repoRoot);
-            var linksToPreview = MarkdownLinkRegex()
+            var expectedTarget = Path.GetFullPath(Path.Join("releases", "v0.1.0-rc.1.md"), repoRoot);
+            var linksToReleaseNote = MarkdownLinkRegex()
                 .Matches(content)
                 .Select(match => ResolveRelativeLinkTarget(
                     Path.GetDirectoryName(fullReadmePath)!,
@@ -82,7 +82,7 @@ public sealed partial class RepositoryReadmePolicyTests
                     readmePath))
                 .Any(target => string.Equals(target, expectedTarget, StringComparison.Ordinal));
 
-            Assert.True(linksToPreview, $"{readmePath} must link to the v0.1 release preview.");
+            Assert.True(linksToReleaseNote, $"{readmePath} must link to the v0.1.0 RC 1 release note.");
         }
     }
 

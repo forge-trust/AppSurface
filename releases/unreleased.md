@@ -18,11 +18,11 @@ The next coordinated version is repository-wide. Packages, CLI tools, examples, 
 
 ### Release and docs surface
 
-The release surface becomes a product feature. AppSurface now publishes the install map, the proof artifact, the changelog, the preview note, and the tagged-release template together, so package adoption no longer depends on reading maintainer scripts or guessing which docs are current.
+The release surface becomes a product feature. AppSurface now publishes the install map, the proof artifact, the changelog, the current release note, and the tagged-release template together, so package adoption no longer depends on reading maintainer scripts or guessing which docs are current.
 
 - The `/docs` landing now promotes a Releases entry point alongside product proof paths.
 - AppSurface now ships a public release hub, a changelog, an unreleased page, and a tagged release template inside the repository.
-- AppSurface now has a consumer-facing [v0.1.0 release preview](./v0.1-preview.md) that package consumers can read before the tag exists. Package-facing docs route release-risk questions into that preview while this unreleased page remains the merged-work proof artifact.
+- AppSurface now has a package-facing [v0.1.0 RC 1 release note](./v0.1.0-rc.1.md), with older preview routes redirected to the current release-candidate story.
 - Release-note pages can show status, freshness, scope, migration guidance, and provenance in a shared trust bar instead of bespoke page chrome.
 - AppSurface now ships a generated package chooser that tells first-time adopters which package to install first, which optional modules to add next, and which proof paths to follow for release risk and working examples.
 - AppSurface now builds and uploads validated prerelease package artifacts on pull requests and manual workflow runs, using the package chooser manifest as the single source of truth for publish decisions, dependency expectations, tool packages, first-party DLL version identity, and Tailwind runtime payload presence before NuGet publishing is enabled.
