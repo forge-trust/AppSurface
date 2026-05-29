@@ -163,18 +163,22 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
     private ConfigAuditSensitivity GetDiscoveredKeyEntrySensitivity(string key)
     {
-        var exact = _knownEntries.FirstOrDefault(
-            knownEntry => string.Equals(knownEntry.Key, key, StringComparison.OrdinalIgnoreCase));
-        if (exact != null)
+        ConfigAuditKnownEntry? nearestParent = null;
+        foreach (var knownEntry in _knownEntries)
         {
-            return exact.OptionsSnapshot.Sensitivity;
+            if (string.Equals(knownEntry.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return knownEntry.OptionsSnapshot.Sensitivity;
+            }
+
+            if (IsKnownDescendantKey(key, knownEntry.Key)
+                && (nearestParent == null || knownEntry.Key.Length > nearestParent.Key.Length))
+            {
+                nearestParent = knownEntry;
+            }
         }
 
-        return _knownEntries
-            .Where(knownEntry => key.StartsWith($"{knownEntry.Key}.", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(knownEntry => knownEntry.Key.Length)
-            .Select(knownEntry => knownEntry.OptionsSnapshot.Sensitivity)
-            .FirstOrDefault();
+        return nearestParent?.OptionsSnapshot.Sensitivity ?? ConfigAuditSensitivity.Unknown;
     }
 
     private ConfigAuditDiscoveredKeyClassification ClassifyDiscoveredKey(string key)
@@ -184,13 +188,18 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             return ConfigAuditDiscoveredKeyClassification.Known;
         }
 
-        if (_knownEntries.Any(knownEntry => key.StartsWith($"{knownEntry.Key}.", StringComparison.OrdinalIgnoreCase)))
+        if (_knownEntries.Any(knownEntry => IsKnownDescendantKey(key, knownEntry.Key)))
         {
             return ConfigAuditDiscoveredKeyClassification.KnownDescendant;
         }
 
         return ConfigAuditDiscoveredKeyClassification.Unknown;
     }
+
+    private static bool IsKnownDescendantKey(string key, string knownKey) =>
+        key.Length > knownKey.Length
+        && key[knownKey.Length] == '.'
+        && key.StartsWith(knownKey, StringComparison.OrdinalIgnoreCase);
 
     private static void RemoveEntryLevelDiagnostics(
         List<ConfigAuditDiagnostic> reportDiagnostics,

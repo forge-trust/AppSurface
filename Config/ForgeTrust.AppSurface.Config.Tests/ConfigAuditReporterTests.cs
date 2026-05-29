@@ -1030,6 +1030,13 @@ public class ConfigAuditReporterTests
                     ["Hidden"] = new Dictionary<string, string>
                     {
                         ["public-name"] = "visible"
+                    },
+                    ["HiddenNested"] = new Dictionary<string, object?>
+                    {
+                        ["public-name"] = new Dictionary<string, string>
+                        {
+                            ["child-name"] = "visible"
+                        }
                     }
                 }));
         services.AddConfigAuditKey<Hashtable>(
@@ -1037,6 +1044,13 @@ public class ConfigAuditReporterTests
             options => options.TraverseCollectionElements = true);
         services.AddConfigAuditKey<Dictionary<string, string>>(
             "Hidden",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.DisplayDictionaryKeys = false;
+            });
+        services.AddConfigAuditKey<Dictionary<string, object?>>(
+            "HiddenNested",
             options =>
             {
                 options.TraverseCollectionElements = true;
@@ -1058,6 +1072,13 @@ public class ConfigAuditReporterTests
         Assert.Equal("Hidden[[key]]", hidden.Key);
         Assert.Equal("[key]", hidden.Element?.KeyLabel);
         Assert.True(hidden.Element?.IsKeyRedacted);
+
+        var hiddenParent = Assert.Single(AssertEntry(report, "HiddenNested", ConfigAuditEntryState.Resolved, null).Children);
+        var hiddenChild = Assert.Single(hiddenParent.Children);
+        Assert.Equal("HiddenNested[[key]][[key]]", hiddenChild.Key);
+        Assert.Equal("[key]", hiddenChild.Element?.KeyLabel);
+        Assert.True(hiddenChild.Element?.IsKeyRedacted);
+        Assert.DoesNotContain("[redacted-key", hiddenChild.Key, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2069,6 +2090,11 @@ public class ConfigAuditReporterTests
                   "SensitiveTree": {
                     "Child": "descendant-secret"
                   },
+                  "NestedTree": {
+                    "Branch": {
+                      "Leaf": "nearest-visible"
+                    }
+                  },
                   "App": {
                     "Mode": "file",
                     "Enabled": true,
@@ -2106,6 +2132,12 @@ public class ConfigAuditReporterTests
             services.AddConfigAuditKey<Dictionary<string, string>>(
                 "SensitiveTree",
                 options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+            services.AddConfigAuditKey<Dictionary<string, object?>>(
+                "NestedTree",
+                options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+            services.AddConfigAuditKey<Dictionary<string, string>>(
+                "NestedTree.Branch",
+                options => options.Sensitivity = ConfigAuditSensitivity.NonSensitive);
             services.AddConfigAuditKey<AppSettings>("App");
             services.AddConfigAuditKey<string>("App.Mode");
 
@@ -2125,6 +2157,12 @@ public class ConfigAuditReporterTests
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
                 "[redacted]");
             Assert.True(sensitiveChild.IsRedacted);
+            var nearestParentChild = AssertDiscovered(
+                report,
+                "NestedTree.Branch.Leaf",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                "nearest-visible");
+            Assert.False(nearestParentChild.IsRedacted);
             AssertDiscovered(report, "App", ConfigAuditDiscoveredKeyClassification.Known, null);
             AssertDiscovered(report, "App.Mode", ConfigAuditDiscoveredKeyClassification.Known, "file");
             AssertDiscovered(report, "App.Enabled", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "True");

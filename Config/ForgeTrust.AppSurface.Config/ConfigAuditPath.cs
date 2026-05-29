@@ -49,8 +49,8 @@ internal sealed record ConfigAuditPath(
         var keyIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(rawLabel);
         var normalizedSensitivity = ConfigAuditEntryOptions.NormalizeSensitivity(options.Sensitivity);
         var entryIsSensitive = normalizedSensitivity == ConfigAuditSensitivity.Sensitive;
-        var parentIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(DisplayPath)
-                                || ConfigAuditRedactor.ContainsSensitiveFragment(SourcePath);
+        var parentIsSensitive = ConfigAuditRedactor.ContainsSensitiveFragment(SourcePath)
+                                || HasRedactedDictionaryLabel(Element);
         var suppressLabel = !options.DisplayDictionaryKeys;
         var redactLabel = keyIsSensitive || entryIsSensitive || parentIsSensitive;
         var isRedacted = redactLabel || suppressLabel || conversionFailed;
@@ -80,6 +80,15 @@ internal sealed record ConfigAuditPath(
 
     private static string EscapeDictionaryLabel(string value) =>
         value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+
+    private static bool HasRedactedDictionaryLabel(ConfigAuditElementIdentity? element) =>
+        element is
+        {
+            Kind: ConfigAuditElementKind.DictionaryItem,
+            IsKeyRedacted: true,
+            KeyLabel: not null
+        }
+        && !string.Equals(element.KeyLabel, "[key]", StringComparison.Ordinal);
 
     private static string ConvertDictionaryKeyToLabel(object? key, out bool conversionFailed, out bool truncated)
     {
