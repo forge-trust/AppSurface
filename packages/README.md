@@ -74,6 +74,7 @@ Swipe to compare package details on narrow screens.
 
 ### Not in the direct-install matrix
 
+- `ForgeTrust.AppSurface.Web.Tailwind.Tasks`: Private compiled MSBuild task used by `ForgeTrust.AppSurface.Web.Tailwind`; consume it only through the packed Tailwind package. Release: excluded; not applicable; [notes](../releases/unreleased.md).
 - `ForgeTrust.RazorWire.Cli`: Held out of the direct-install chooser until issue #171 lands real .NET tool packaging and stable install guidance. Release: excluded; not applicable; [notes](../releases/unreleased.md).
 
 ## Maintainer notes

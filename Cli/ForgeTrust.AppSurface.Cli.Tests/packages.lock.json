@@ -462,6 +462,7 @@
       "forgetrust.appsurface.web.tailwind": {
         "type": "Project",
         "dependencies": {
+          "CliWrap": "[3.10.1, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64": "[0.1.0, )",
@@ -497,6 +498,7 @@
         "dependencies": {
           "AngleSharp": "[0.17.1, )",
           "CliFx": "[3.0.0, )",
+          "CliWrap": "[3.10.1, )",
           "ForgeTrust.AppSurface.Console": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web": "[0.1.0, )",
           "ForgeTrust.RazorWire": "[0.1.0, )"

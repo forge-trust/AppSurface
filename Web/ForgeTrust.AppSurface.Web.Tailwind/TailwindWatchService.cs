@@ -1,4 +1,5 @@
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Web.Tailwind.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -65,7 +66,7 @@ public class TailwindWatchService : BackgroundService
                 return;
             }
 
-            var tailwindPath = _cliManager.GetTailwindPath();
+            var tailwindPath = ResolveTailwindPath();
             var args = new List<string>
             {
                 "-i", _options.InputPath,
@@ -95,7 +96,7 @@ public class TailwindWatchService : BackgroundService
         {
             _logger.LogWarning(
                 ex,
-                "Tailwind CSS watch mode is disabled because the Tailwind CLI could not be found. The app will continue serving existing CSS. Install the platform runtime package or set TailwindCliPath to enable watch mode.");
+                "Tailwind CSS watch mode is disabled because the Tailwind CLI could not be found. The app will continue serving existing CSS. Install the platform runtime package or set TailwindOptions.CliPath to enable watch mode.");
         }
         catch (Exception ex)
         {
@@ -120,14 +121,29 @@ public class TailwindWatchService : BackgroundService
         string workingDirectory,
         CancellationToken cancellationToken)
     {
-        return ProcessUtils.ExecuteProcessAsync(
+        return ExecuteTailwindProcessCoreAsync(
             fileName,
             args,
             workingDirectory,
-            _logger,
-            cancellationToken,
-            streamOutput: true,
-            stderrLogLevelSelector: GetTailwindStderrLogLevel);
+            cancellationToken);
+    }
+
+    private async Task<CommandResult> ExecuteTailwindProcessCoreAsync(
+        string fileName,
+        IReadOnlyList<string> args,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var result = await TailwindProcessRunner.ExecuteAsync(
+            fileName,
+            args,
+            workingDirectory,
+            line => _logger.LogInformation("{FileName}: {Output}", fileName, line),
+            (line, level) => _logger.Log(ToLogLevel(level), "{FileName}: {Output}", fileName, line),
+            captureLimit: 0,
+            cancellationToken);
+
+        return new CommandResult(result.ExitCode, result.Stdout, result.Stderr);
     }
 
     /// <summary>
@@ -160,19 +176,31 @@ public class TailwindWatchService : BackgroundService
         return OperatingSystem.IsWindows();
     }
 
-    private static LogLevel GetTailwindStderrLogLevel(string line)
+    private string ResolveTailwindPath()
     {
-        if (string.IsNullOrWhiteSpace(line))
+        if (string.IsNullOrWhiteSpace(_options.CliPath))
         {
-            return LogLevel.Debug;
+            return _cliManager.GetTailwindPath();
         }
 
-        if (line.StartsWith("≈ tailwindcss v", StringComparison.Ordinal) ||
-            line.StartsWith("Done in ", StringComparison.Ordinal))
+        var fullPath = Path.GetFullPath(_options.CliPath, _environment.ContentRootPath);
+        if (!File.Exists(fullPath))
         {
-            return LogLevel.Information;
+            throw new FileNotFoundException(
+                $"TailwindOptions.CliPath was set to '{_options.CliPath}', but the resolved file '{fullPath}' does not exist.",
+                fullPath);
         }
 
-        return LogLevel.Error;
+        return fullPath;
+    }
+
+    private static LogLevel ToLogLevel(TailwindOutputLevel level)
+    {
+        return level switch
+        {
+            TailwindOutputLevel.Debug => LogLevel.Debug,
+            TailwindOutputLevel.Information => LogLevel.Information,
+            _ => LogLevel.Error
+        };
     }
 }

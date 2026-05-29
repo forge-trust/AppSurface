@@ -175,6 +175,15 @@ packages:
       - ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64
       - ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64
       - ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64
+  - project: Web/ForgeTrust.AppSurface.Web.Tailwind.Tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    publish_reason: The Tailwind MSBuild task is shipped inside the main Tailwind package as a private build asset, not as a standalone NuGet package.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 115
+    note: Private compiled MSBuild task used by `ForgeTrust.AppSurface.Web.Tailwind`; consume it only through the packed Tailwind package.
   - project: Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj
     classification: proof_host
     publish_decision: support_publish

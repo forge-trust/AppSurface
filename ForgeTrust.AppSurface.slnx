@@ -64,6 +64,7 @@
     <Project Path="Web/ForgeTrust.AppSurface.Web.Scalar.Tests/ForgeTrust.AppSurface.Web.Scalar.Tests.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web.Scalar/ForgeTrust.AppSurface.Web.Scalar.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj" />
+    <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind.Tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web.Tailwind.Tests/ForgeTrust.AppSurface.Web.Tailwind.Tests.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web.Tests/ForgeTrust.AppSurface.Web.Tests.csproj" />
     <Project Path="Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
