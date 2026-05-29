@@ -41,13 +41,17 @@ internal static class ReleaseReportRenderer
     /// <param name="result">Preparation result.</param>
     /// <returns>Markdown report.</returns>
     /// <remarks>
-    /// Preparation reports begin with the check report contract, then append either <c>## Dry-run plan</c> or <c>## Files written</c>
-    /// based on <see cref="ReleasePreparationResult.DryRun"/>. Paths are repository-relative bullets. This distinction is the only
-    /// dry-run marker in the report, so callers that publish the report should preserve that heading.
+    /// Preparation reports begin with the check report contract, then append a manual review gate and either <c>## Dry-run plan</c> or
+    /// <c>## Files written</c> based on <see cref="ReleasePreparationResult.DryRun"/>. Paths are repository-relative bullets. This
+    /// distinction is the only dry-run marker in the report, so callers that publish the report should preserve that heading.
     /// </remarks>
     internal static string RenderPreparation(ReleasePreparationResult result)
     {
         var builder = new StringBuilder(RenderCheck(result.Check));
+        builder.AppendLine();
+        builder.AppendLine("## Manual review gate");
+        builder.AppendLine("- Stop at this release pull request for maintainer review and manual merge.");
+        builder.AppendLine("- Do not create the annotated tag or start publish workflows until a maintainer gives an explicit post-review instruction.");
         builder.AppendLine();
         builder.AppendLine(result.DryRun ? "## Dry-run plan" : "## Files written");
         foreach (var path in result.PlannedOrWrittenFiles)

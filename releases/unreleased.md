@@ -16,6 +16,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 - Older `v0.1` preview routes now redirect to the current RC1 release note, so package consumers land on one canonical release story instead of a stale pre-RC preview.
 - Public package READMEs now link directly to the [v0.1.0 RC 1 release note](./v0.1.0-rc.1.md) for release risk, migration guidance, and package readiness.
 - The release authoring checklist now records the preview-rollup rule: when a tagged or release-candidate note supersedes a preview, remove the preview source file and carry its browser routes as `redirect_aliases` on the canonical note.
+- Release preparation now leaves `CHANGELOG.md` as a compact ledger, moves detailed release narrative into tagged release notes, and makes generated release PR reports stop at a manual maintainer review gate before merge, tag, or publish.
 
 ### Configuration diagnostics
 
