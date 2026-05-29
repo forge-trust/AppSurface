@@ -87,6 +87,19 @@ public class AppSurfaceStartupTests
         using var host = hostBuilder.Build();
 
         var config = host.Services.GetRequiredService<IConfiguration>();
+        Assert.Equal("http://localhost:5005", config["urls"]);
+    }
+
+    [Fact]
+    public void CreateHostBuilder_UsesAllHostsPortArgForWildcardUrls()
+    {
+        var context = new StartupContext(["--port", "5005", "--all-hosts"], new RootModule());
+        var startup = new TestStartup();
+
+        var hostBuilder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+        using var host = hostBuilder.Build();
+
+        var config = host.Services.GetRequiredService<IConfiguration>();
         Assert.Equal("http://localhost:5005;http://*:5005", config["urls"]);
     }
 
@@ -94,6 +107,21 @@ public class AppSurfaceStartupTests
     public void CreateHostBuilder_UrlsAndPortProvided_PortWins()
     {
         var context = new StartupContext(["--urls", "http://localhost:5001", "--port", "5005"], new RootModule());
+        var startup = new TestStartup();
+
+        var hostBuilder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+        using var host = hostBuilder.Build();
+
+        var config = host.Services.GetRequiredService<IConfiguration>();
+        Assert.Equal("http://localhost:5005", config["urls"]);
+    }
+
+    [Fact]
+    public void CreateHostBuilder_UrlsAndAllHostsPortProvided_AllHostsPortWins()
+    {
+        var context = new StartupContext(
+            ["--urls", "http://localhost:5001", "--port", "5005", "--all-hosts"],
+            new RootModule());
         var startup = new TestStartup();
 
         var hostBuilder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);

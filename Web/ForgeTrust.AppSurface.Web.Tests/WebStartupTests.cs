@@ -505,6 +505,20 @@ public class WebStartupTests
         using var host = builder.Build();
 
         var config = host.Services.GetRequiredService<IConfiguration>();
+        Assert.Equal("http://localhost:5005", config["urls"]);
+    }
+
+    [Fact]
+    public void CreateHostBuilder_UsesAllHostsPortArgOverride()
+    {
+        var root = new TestWebModule();
+        var startup = new TestWebStartup(root);
+        var context = new StartupContext(["--port", "5005", "--all-hosts"], root);
+
+        var builder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+        using var host = builder.Build();
+
+        var config = host.Services.GetRequiredService<IConfiguration>();
         Assert.Equal("http://localhost:5005;http://*:5005", config["urls"]);
     }
 

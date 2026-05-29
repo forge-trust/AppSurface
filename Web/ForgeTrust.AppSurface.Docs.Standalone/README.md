@@ -94,6 +94,7 @@ When you run this host in `Development` without explicit endpoint configuration,
 - The public `appsurface docs` and `appsurface docs preview` commands default the forwarded host environment to `Development`, so when no endpoint is configured they use this deterministic local URL behavior.
 - For direct standalone-host runs, use the host startup log as the source of truth for the selected local URL.
 - Pass `--port 5189`, `--urls http://127.0.0.1:5189`, `ASPNETCORE_HTTP_PORTS=5189`, or a `Kestrel:Endpoints` appsettings/environment entry when you intentionally want a fixed address.
+- Add `--all-hosts` to `--port` only when LAN, container, or other non-loopback preview access is intentional; it uses the `http://*:{port}` wildcard and can expose the preview host beyond the local machine.
 - The checked-in launch profile no longer pins a single shared localhost port, because that was the source of cross-worktree QA confusion.
 
 ## Contributor Provenance Smoke Testing

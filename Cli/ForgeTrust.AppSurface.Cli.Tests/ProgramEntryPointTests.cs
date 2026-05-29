@@ -54,6 +54,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("--repo", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--public-origin", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--all-hosts", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--startup-timeout-seconds", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--redirects", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
@@ -115,6 +116,23 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("--port", runner.Args);
         Assert.Contains("5189", runner.Args);
         Assert.Equal(TimeSpan.FromSeconds(10), runner.StartupTimeout);
+    }
+
+    [Fact]
+    public async Task DocsPreviewAlias_Should_Forward_AllHosts_When_Port_Is_Configured()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingAppSurfaceDocsHostRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "preview", "--repo", repository.Path, "--port", "5189", "--all-hosts"],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(runner.Args);
+        Assert.Contains("--port", runner.Args);
+        Assert.Contains("5189", runner.Args);
+        Assert.Contains("--all-hosts", runner.Args);
     }
 
     [Fact]
@@ -287,6 +305,21 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsCommand_Should_Reject_AllHosts_Without_Port()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingAppSurfaceDocsHostRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "--repo", repository.Path, "--all-hosts"],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("The --all-hosts option requires --port.", result.AllText, StringComparison.Ordinal);
+        Assert.Null(runner.Args);
+    }
+
+    [Fact]
     public async Task DocsCommand_Should_Reject_Missing_RepositoryRoot()
     {
         var missingRepository = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -319,6 +352,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--port", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--urls", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--all-hosts", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
     }
@@ -336,6 +370,7 @@ public sealed class ProgramEntryPointTests
         Assert.DoesNotContain("--strict", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--port", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--urls", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--all-hosts", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
     }
@@ -852,6 +887,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("Production", args.HostArgs.Args);
         Assert.DoesNotContain("--urls", args.HostArgs.Args);
         Assert.DoesNotContain("--port", args.HostArgs.Args);
+        Assert.DoesNotContain("--all-hosts", args.HostArgs.Args);
         Assert.Equal(TimeSpan.FromSeconds(10), args.HostArgs.StartupTimeout);
     }
 

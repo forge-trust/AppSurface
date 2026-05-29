@@ -51,6 +51,17 @@ Specialized startup types can call the protected `RegisterDependencies(StartupCo
 
 Call `RegisterDependencies` before reading `StartupContext.GetDependencies()` for startup-shaping decisions. Repeated calls with the same context are no-ops, but module registration is still part of startup composition, so avoid calling it from request-time code or from parallel threads.
 
+## Startup port shortcut
+
+`AppSurfaceStartup` treats `--port <port>` as a convenience shortcut for the Generic Host `urls` setting. The shortcut binds `http://localhost:<port>` so local preview commands do not expose the host beyond loopback by default.
+
+Add `--all-hosts` with `--port` only when all-interface access is intentional. That maps the same port to `http://localhost:<port>;http://*:<port>`, preserving a clickable local URL while also adding the ASP.NET Core wildcard host. Use `--urls` instead when you need a custom scheme, host, or multi-binding shape.
+
+Pitfalls:
+
+- Do not use `--all-hosts` for routine local preview. The wildcard host can expose the application beyond the local machine.
+- If both `--urls` and `--port` are supplied, the `--port` shortcut wins so scripted previews can override a broader endpoint setting with one option.
+
 ## Logging in Static Utilities
 
 Core static utilities stay host-agnostic: they do not reach into a global logger, service provider, or ambient startup state. When a public static helper has useful diagnostics, expose an additive overload with an explicit non-null `ILogger` parameter and keep the existing no-logger overload silent. Private shared implementations may accept `ILogger?` only to avoid duplicating logic between the silent and diagnostic paths.
