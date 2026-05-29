@@ -104,6 +104,19 @@ public class AppSurfaceStartupTests
     }
 
     [Fact]
+    public void CreateHostBuilder_UsesExplicitFalseAllHostsPortArgForLocalhostUrls()
+    {
+        var context = new StartupContext(["--port", "5005", "--all-hosts", "false"], new RootModule());
+        var startup = new TestStartup();
+
+        var hostBuilder = ((IAppSurfaceStartup)startup).CreateHostBuilder(context);
+        using var host = hostBuilder.Build();
+
+        var config = host.Services.GetRequiredService<IConfiguration>();
+        Assert.Equal("http://localhost:5005", config["urls"]);
+    }
+
+    [Fact]
     public void CreateHostBuilder_UrlsAndPortProvided_PortWins()
     {
         var context = new StartupContext(["--urls", "http://localhost:5001", "--port", "5005"], new RootModule());
