@@ -750,13 +750,14 @@ var routes = app.Services.GetRequiredService<DocsUrlBuilder>().Routes;
 var home = routes.Home;
 var search = routes.Search;
 var searchIndexRefresh = routes.SearchIndexRefresh;
+var searchIndexRefreshMethod = routes.SearchIndexRefreshMethod; // POST
 var healthJson = routes.HealthJson;
 var routeInspectorJson = routes.RouteInspectorJson;
 ```
 
-`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
+`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `SearchIndexRefreshMethod`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
-The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; keep `Routes.SearchIndexRefresh` for authenticated operator refresh flows.
+The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; operator UI should submit a browser form to `Routes.SearchIndexRefresh` with `Routes.SearchIndexRefreshMethod`.
 
 ### Document route identity
 
@@ -1306,6 +1307,54 @@ When the hidden frozen route manifest is present, mounted archives also use it b
 
 `AppSurfaceDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
 
+### Search index refresh
+
+`GET {DocsRootPath}/search-index.json` is a read-only reader endpoint. Legacy query strings such as `?refresh=1` and `?refresh=true` are ignored so crawlers, browser reloads, and copied reader links cannot mutate the server snapshot cache.
+
+Packaged operator refresh lives at `POST {DocsRootPath}/_search-index/refresh`. The endpoint always requires MVC anti-forgery validation and a host-owned authorization policy named by `AppSurfaceDocs:Diagnostics:SearchIndexRefreshPolicy`. Blank or whitespace policy names are normalized to `null`; when the policy is missing, the packaged endpoint denies refresh.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Diagnostics": {
+      "SearchIndexRefreshPolicy": "DocsSearchIndexRefresh"
+    }
+  }
+}
+```
+
+```csharp
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(
+        "DocsSearchIndexRefresh",
+        policy => policy.RequireAuthenticatedUser()
+            .RequireClaim("scope", "docs.search-index.refresh"));
+});
+```
+
+A Razor/MVC operator surface can post to the packaged endpoint with the normal anti-forgery token:
+
+```cshtml
+@inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrls
+
+<form method="@DocsUrls.Routes.SearchIndexRefreshMethod" action="@DocsUrls.Routes.SearchIndexRefresh">
+    @Html.AntiForgeryToken()
+    <button type="submit">Refresh search index</button>
+</form>
+```
+
+Host automation should usually use a host-owned admin or job endpoint instead of the browser-form-shaped packaged route. After applying host-specific authentication, authorization, audit logging, and replay controls, call `DocAggregator.InvalidateCache()` directly.
+
+| Request state | Response |
+| --- | --- |
+| Missing or invalid anti-forgery token | Framework anti-forgery failure, normally `400` |
+| No configured refresh policy, blank policy, missing policy provider/service, or policy not found | `403` |
+| Unauthenticated user after anti-forgery succeeds | `403` |
+| Authenticated user who fails the configured policy | `403` |
+| Authenticated user who satisfies the configured policy | `204`, cache invalidated |
+| Non-POST request to `{DocsRootPath}/_search-index/refresh` | `405` |
+
 Pitfalls:
 
 - Do not set `CacheExpirationMinutes` to `0` to disable caching. AppSurface Docs rejects zero and negative values because every request would rebuild the docs snapshot and search index.
@@ -1313,7 +1362,7 @@ Pitfalls:
 - Do not set fractional-second values such as `0.333` minutes. AppSurface Docs rejects values that cannot round-trip to a whole-second `max-age`.
 - Do not set huge finite values such as `double.MaxValue`. AppSurface Docs caps the value so the derived search-index `Cache-Control` `max-age` remains representable.
 - The search-index response uses the same duration for its private `Cache-Control` `max-age`, so client refresh behavior stays aligned with server-side snapshot reuse.
-- Manual refresh through `{DocsRootPath}/search-index.json?refresh=1` still invalidates the server snapshot generation immediately for authenticated users; it does not change the configured TTL for later entries. For example, when `AppSurfaceDocs:Routing:DocsRootPath` is `/docs/next`, use `/docs/next/search-index.json?refresh=1`.
+- Do not use `{DocsRootPath}/search-index.json?refresh=1` for operations. It is intentionally read-only compatibility noise; use the POST operator route or a host-owned automation path.
 
 ## Contributor Provenance
 
