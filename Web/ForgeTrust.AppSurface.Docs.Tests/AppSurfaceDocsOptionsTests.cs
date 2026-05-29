@@ -651,6 +651,22 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceDocs_ShouldNormalizeNullJavaScriptGroupNameRulesToEmpty()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+        services.Configure<AppSurfaceDocsOptions>(options => options.Harvest.JavaScript.GroupNameRules = null!);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Empty(options.Harvest.JavaScript.GroupNameRules);
+    }
+
+    [Fact]
     public void AddAppSurfaceDocs_ShouldSkipNullLocaleEntriesWhileNormalizingLocalizationOptions()
     {
         var services = new ServiceCollection();

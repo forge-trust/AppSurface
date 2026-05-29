@@ -2038,7 +2038,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         {
             return Tags
                 .Where(tag => tag.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-                .Select(tag => tag.Value?.Trim())
+                .Select(tag => tag.Value.Trim())
                 .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
         }
 

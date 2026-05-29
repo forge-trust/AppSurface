@@ -698,6 +698,11 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
             },
             new AppSurfaceDocsJavaScriptGroupNameRule
             {
+                Name = "Null Glob Rule",
+                IncludeGlobs = null!
+            },
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
                 Name = "Other Contracts",
                 IncludeGlobs = ["src/other/**/*.js"]
             }
@@ -711,6 +716,32 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal("public-api JavaScript API", page.Title);
         Assert.Equal(["API Reference", "JavaScript", "public-api"], page.Metadata?.Breadcrumbs);
         Assert.DoesNotContain(docs, doc => string.Equals(doc.Path, "api/javascript/other-contracts", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldUseFallbackWhenConfiguredGroupRulesAreNull()
+    {
+        await WriteAsync(
+            "src/browser/public-api.js",
+            """
+            /**
+             * Browser lifecycle event.
+             * @public
+             * @event browser:ready
+             * @target document
+             * @firesWhen the browser contracts are ready.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/**/*.js");
+        options.Harvest.JavaScript.GroupNameRules = null!;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal));
+        Assert.Equal("api/javascript/browser-public-api", page.Path);
+        Assert.Equal(["API Reference", "JavaScript", "public-api"], page.Metadata?.Breadcrumbs);
     }
 
     [Fact]
@@ -838,6 +869,18 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
              * @detail none
              */
             """);
+        await WriteAsync(
+            "src/admin/admin-api.js",
+            """
+            /**
+             * Admin lifecycle event.
+             * @public
+             * @event admin:ready
+             * @target document
+             * @firesWhen admin contracts are ready.
+             * @detail none
+             */
+            """);
         var harvester = CreateHarvester(CreateEnabledOptions("src/**/*.js"));
 
         var docs = await harvester.HarvestAsync(_testRoot);
@@ -845,9 +888,11 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var groupPages = docs
             .Where(doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal))
             .ToArray();
-        Assert.Equal(2, groupPages.Length);
+        Assert.Equal(3, groupPages.Length);
+        Assert.Contains(groupPages, doc => string.Equals(doc.Path, "api/javascript/admin-admin-api", StringComparison.Ordinal));
         Assert.Contains(groupPages, doc => string.Equals(doc.Path, "api/javascript/forms-public-api", StringComparison.Ordinal));
         Assert.Contains(groupPages, doc => string.Equals(doc.Path, "api/javascript/widgets-public-api", StringComparison.Ordinal));
+        Assert.Contains(groupPages, doc => doc.Metadata?.Breadcrumbs?.SequenceEqual(["API Reference", "JavaScript", "admin-api"]) == true);
         Assert.Contains(groupPages, doc => doc.Metadata?.Breadcrumbs?.SequenceEqual(["API Reference", "JavaScript", "forms/public-api"]) == true);
         Assert.Contains(groupPages, doc => doc.Metadata?.Breadcrumbs?.SequenceEqual(["API Reference", "JavaScript", "widgets/public-api"]) == true);
     }
