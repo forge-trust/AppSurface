@@ -86,6 +86,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs hosts that need operational status for source-backed docs should call `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` and diagnostic codes instead of scraping warning or critical log messages.
 - AppSurface Docs hosts with expensive or side-effecting harvesters can set `AppSurfaceDocs:Harvest:StartupMode` to `Disabled` or adjust `InitialRequestWaitBudgetMilliseconds`; the `Testing*DelayMilliseconds` options are intended only for local and automated observatory testing.
 
-## No tagged releases yet
+## 0.1.0-rc.1 - 2026-05-29
 
-AppSurface is still defining its first release boundary. The first tagged section will be added when the project is ready to cut `v0.1.0`.
+- Narrative release note: [v0.1.0-rc.1](./releases/v0.1.0-rc.1.md)
+- Release manifest: `releases/v0.1.0-rc.1.release.json`

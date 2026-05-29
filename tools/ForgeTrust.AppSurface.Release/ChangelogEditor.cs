@@ -25,7 +25,7 @@ internal static class ChangelogEditor
             {heading}
 
             - Narrative release note: [v{version}](./{releasePath})
-            - Release manifest: [v{version}.release.json](./releases/v{version}.release.json)
+            - Release manifest: `releases/v{version}.release.json`
 
             """;
 

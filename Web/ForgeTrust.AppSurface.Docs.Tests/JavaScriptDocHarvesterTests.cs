@@ -1177,7 +1177,11 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptParseFailed);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
+        var duplicateAnchorDiagnostic = Assert.Single(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
+        Assert.Contains("RazorWire", duplicateAnchorDiagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("name:RazorWire", duplicateAnchorDiagnostic.Problem, StringComparison.Ordinal);
         Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-duplicate", StringComparison.Ordinal));
         Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-duplicate-2", StringComparison.Ordinal));
     }

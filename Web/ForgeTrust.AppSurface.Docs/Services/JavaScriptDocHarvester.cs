@@ -770,7 +770,10 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     {
         foreach (var group in items.GroupBy(item => item.GroupIdentity, StringComparer.OrdinalIgnoreCase))
         {
-            foreach (var anchorGroup in group.GroupBy(item => BuildAnchorPrefix(item.Kind) + "-" + Slugify(item.Name), StringComparer.Ordinal))
+            var groupItems = group.ToArray();
+            var groupDisplayName = groupItems[0].GroupDisplayName;
+            var groupIdentity = group.Key;
+            foreach (var anchorGroup in groupItems.GroupBy(item => BuildAnchorPrefix(item.Kind) + "-" + Slugify(item.Name), StringComparer.Ordinal))
             {
                 var ordered = anchorGroup
                     .OrderBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
@@ -783,7 +786,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                     diagnostics.Add(CreateDiagnostic(
                         DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor,
                         DocHarvestDiagnosticSeverity.Warning,
-                        $"JavaScript API group '{group.First().GroupDisplayName}' has duplicate anchor '{anchorGroup.Key}'.",
+                        $"JavaScript API group '{groupDisplayName}' with identity '{groupIdentity}' has duplicate anchor '{anchorGroup.Key}'.",
                         "Multiple public JavaScript API items normalized to the same anchor, so AppSurface Docs appended deterministic suffixes.",
                         "Rename one of the public JavaScript items or set clearer doclet names if the suffixes are not reader-friendly."));
                 }
@@ -1017,16 +1020,27 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     {
         var groups = items
             .GroupBy(item => item.GroupIdentity, StringComparer.OrdinalIgnoreCase)
-            .Select(
-                group => new JavaScriptApiGroup(
+            .Select(group =>
+            {
+                var groupItems = group.ToArray();
+                var displayName = groupItems[0].GroupDisplayName;
+                var isPathFallback = groupItems.Any(item => item.GroupIsPathFallback);
+                var sourcePath = groupItems
+                    .Select(item => item.SourcePath)
+                    .Order(StringComparer.OrdinalIgnoreCase)
+                    .First();
+                var routeSlugSeed = isPathFallback
+                    ? BuildFallbackPathDisplayName(sourcePath)
+                    : displayName;
+
+                return new JavaScriptApiGroup(
                     group.Key,
-                    group.First().GroupDisplayName,
-                    group.Any(item => item.GroupIsPathFallback),
-                    group.Select(item => item.SourcePath).Order(StringComparer.OrdinalIgnoreCase).First(),
-                    group.Any(item => item.GroupIsPathFallback)
-                        ? BuildFallbackPathDisplayName(group.Select(item => item.SourcePath).Order(StringComparer.OrdinalIgnoreCase).First())
-                        : group.First().GroupDisplayName,
-                    group.ToArray()))
+                    displayName,
+                    isPathFallback,
+                    sourcePath,
+                    routeSlugSeed,
+                    groupItems);
+            })
             .ToArray();
         var duplicateFallbackLabels = groups
             .Where(group => group.IsPathFallback)
