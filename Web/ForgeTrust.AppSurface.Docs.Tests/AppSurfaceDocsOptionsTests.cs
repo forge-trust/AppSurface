@@ -621,6 +621,36 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AddAppSurfaceDocs_ShouldSkipNullJavaScriptGroupNameRulesWhileNormalizing()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+        services.Configure<AppSurfaceDocsOptions>(
+            options =>
+            {
+                options.Harvest.JavaScript.GroupNameRules =
+                [
+                    null!,
+                    new AppSurfaceDocsJavaScriptGroupNameRule
+                    {
+                        Name = " Browser Contracts ",
+                        IncludeGlobs = [" src\\browser\\**\\*.js "]
+                    }
+                ];
+            });
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        var rule = Assert.Single(options.Harvest.JavaScript.GroupNameRules);
+        Assert.Equal("Browser Contracts", rule.Name);
+        Assert.Equal(["src/browser/**/*.js"], rule.IncludeGlobs);
+    }
+
+    [Fact]
     public void AddAppSurfaceDocs_ShouldSkipNullLocaleEntriesWhileNormalizingLocalizationOptions()
     {
         var services = new ServiceCollection();
@@ -2024,6 +2054,7 @@ public sealed class AppSurfaceDocsOptionsTests
                 {
                     GroupNameRules =
                     [
+                        null!,
                         new AppSurfaceDocsJavaScriptGroupNameRule
                         {
                             Name = " ",
@@ -2042,9 +2073,10 @@ public sealed class AppSurfaceDocsOptionsTests
         var result = validator.Validate(Options.DefaultName, options);
 
         Assert.True(result.Failed);
-        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:0:Name must not be blank.", StringComparison.Ordinal));
-        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:0:IncludeGlobs must contain at least one repository-relative glob pattern.", StringComparison.Ordinal));
-        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:1:IncludeGlobs must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:0 must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:1:Name must not be blank.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:1:IncludeGlobs must contain at least one repository-relative glob pattern.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:2:IncludeGlobs must not be null.", StringComparison.Ordinal));
     }
 
     [Fact]

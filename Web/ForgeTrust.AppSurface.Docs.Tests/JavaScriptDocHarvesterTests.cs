@@ -673,6 +673,47 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldSkipInvalidConfiguredGroupRules_AndUseFallbackWhenNoRuleMatches()
+    {
+        await WriteAsync(
+            "src/browser/public-api.js",
+            """
+            /**
+             * Browser lifecycle event.
+             * @public
+             * @event browser:ready
+             * @target document
+             * @firesWhen the browser contracts are ready.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/**/*.js");
+        options.Harvest.JavaScript.GroupNameRules =
+        [
+            null!,
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = " ",
+                IncludeGlobs = ["src/browser/**/*.js"]
+            },
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = "Other Contracts",
+                IncludeGlobs = ["src/other/**/*.js"]
+            }
+        ];
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal));
+        Assert.Equal("api/javascript/browser-public-api", page.Path);
+        Assert.Equal("public-api JavaScript API", page.Title);
+        Assert.Equal(["API Reference", "JavaScript", "public-api"], page.Metadata?.Breadcrumbs);
+        Assert.DoesNotContain(docs, doc => string.Equals(doc.Path, "api/javascript/other-contracts", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldPreferExplicitTagsOverConfiguredGroupRules_AndUseFirstNonblankTag()
     {
         await WriteAsync(
@@ -743,6 +784,31 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal("api/javascript/widgets-public-api", page.Path);
         Assert.Equal("public-api JavaScript API", page.Title);
         Assert.Equal(["API Reference", "JavaScript", "public-api"], page.Metadata?.Breadcrumbs);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldUseGenericFallbackDisplay_WhenFallbackPathHasNoSegments()
+    {
+        await WriteAsync(
+            ".js",
+            """
+            /**
+             * Root fallback lifecycle event.
+             * @public
+             * @event root:ready
+             * @target document
+             * @firesWhen the root fallback contract is ready.
+             * @detail none
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal));
+        Assert.Equal("api/javascript/javascript", page.Path);
+        Assert.Equal("JavaScript JavaScript API", page.Title);
+        Assert.Equal(["API Reference", "JavaScript", "JavaScript"], page.Metadata?.Breadcrumbs);
     }
 
     [Fact]
