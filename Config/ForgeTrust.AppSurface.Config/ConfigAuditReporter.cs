@@ -658,13 +658,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         var countProperty = interfaceType.GetInterfaces()
             .Append(interfaceType)
             .FirstOrDefault(type => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>))
-            ?.GetProperty(nameof(IReadOnlyCollection<object>.Count));
-        var itemProperty = interfaceType.GetProperty("Item");
-        if (countProperty == null || itemProperty == null)
-        {
-            accessor = default;
-            return false;
-        }
+            ?.GetProperty(nameof(IReadOnlyCollection<object>.Count))!;
+        var itemProperty = interfaceType.GetProperty("Item")!;
 
         accessor = new ReadOnlyListAccessor(
             (int)(countProperty.GetValue(value) ?? 0),

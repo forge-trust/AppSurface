@@ -926,11 +926,6 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         count = 0;
         if (value is Array array)
         {
-            if (array.Rank != 1)
-            {
-                return false;
-            }
-
             count = array.Length;
             return true;
         }

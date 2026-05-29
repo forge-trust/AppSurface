@@ -177,7 +177,12 @@ public class ConfigAuditReporterTests
 
     private sealed class ReadOnlyValues : IReadOnlyList<string>
     {
-        private readonly string[] _values = ["first", "second"];
+        private readonly string[] _values;
+
+        public ReadOnlyValues(params string[] values)
+        {
+            _values = values.Length == 0 ? ["first", "second"] : values;
+        }
 
         public string this[int index] => _values[index];
 
@@ -1637,6 +1642,27 @@ public class ConfigAuditReporterTests
         var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children);
         Assert.Equal("https://env.example", child.DisplayValue);
         Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
+        Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
+    }
+
+    [Fact]
+    public void GetReport_MarksDirectEnvironmentReadOnlyListTailElementCreatedWhenBaseIsShorter()
+    {
+        var services = CreateServicesWithDiagnosticEnvironment(
+            "Endpoints",
+            new ReadOnlyValues("first", "second", "third"),
+            "Endpoints.2");
+        services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Endpoints", new ReadOnlyValues()));
+        services.AddConfigAuditKey<IReadOnlyList<string>>(
+            "Endpoints",
+            options => options.TraverseCollectionElements = true);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var child = Assert.Single(AssertEntry(report, "Endpoints", ConfigAuditEntryState.Resolved, null).Children, child => child.Key == "Endpoints[2]");
+        Assert.Contains(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-created-element");
         Assert.DoesNotContain(child.Diagnostics, diagnostic => diagnostic.Code == "config-audit-environment-element-base-unknown");
     }
 
