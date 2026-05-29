@@ -1660,7 +1660,15 @@ public class MarkdownHarvesterTests : IDisposable
         {
             Directory.Delete(path, true);
         }
-        catch
+        catch (IOException)
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
+        catch (NotSupportedException)
         {
             // Best effort cleanup for temporary symlink tests.
         }

@@ -604,7 +604,11 @@ public sealed class AppSurfaceDocsHarvestPathPolicyTests
         {
             Directory.Delete(path, true);
         }
-        catch
+        catch (IOException)
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
+        catch (UnauthorizedAccessException)
         {
             // Best effort cleanup for temporary symlink tests.
         }
