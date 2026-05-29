@@ -10,9 +10,15 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 
 ### Release and docs surface
 
+- AppSurface Docs JavaScript API pages can now resolve public doclets into reader-facing API families. Explicit `@namespace` and `@module` tags remain authoritative, ordered `GroupNameRules` can name known source trees, and untagged fallback groups use path-aware identities so same-stem files in different folders do not merge.
 - Older `v0.1` preview routes now redirect to the current RC1 release note, so package consumers land on one canonical release story instead of a stale pre-RC preview.
 - Public package READMEs now link directly to the [v0.1.0 RC 1 release note](./v0.1.0-rc.1.md) for release risk, migration guidance, and package readiness.
 - The release authoring checklist now records the preview-rollup rule: when a tagged or release-candidate note supersedes a preview, remove the preview source file and carry its browser routes as `redirect_aliases` on the canonical note.
+
+### Configuration diagnostics
+
+- Config audit entries can now be explicitly classified with `ConfigAuditEntryOptions.Sensitivity`, letting package authors mark domain-specific provider-only or wrapper-discovered keys sensitive without changing key names. `Sensitive` redacts root values, traversed child values, and value-derived dictionary labels before structured/text output; `NonSensitive` documents intent but never downgrades conservative redaction from fragments or sources.
+- Config audit redaction now recognizes additional secret-bearing fragments such as passphrase, DSN, assertion, certificate, cookie, client secret, private key, JWT, bearer, access/refresh tokens, session IDs, and shared access signatures. This can create new false-positive redaction in operator reports by design; full reports remain internal support artifacts because source metadata can still be sensitive.
 
 ### Console and CLI polish
 
@@ -30,3 +36,5 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 
 - Existing RazorWire CLI users do not need command or flag changes for the process-execution migration. The main behavior difference is that target-app failures may now appear earlier with captured output instead of being hidden behind startup or readiness timeouts.
 - Tailwind package consumers do not need source changes for the compiled MSBuild task. Maintainers should keep the packed-package smoke path green when changing task dependencies or diagnostics.
+- AppSurface Docs JavaScript harvest consumers can keep explicit `@namespace` and `@module` tags when they need a stable API family name; otherwise the new fallback grouping may split same-stem files by path instead of merging them.
+- Operators may see more conservative redaction in config audit reports as the secret-fragment list expands. Treat that as the intended default, and use explicit sensitivity options only to document package-owned keys.

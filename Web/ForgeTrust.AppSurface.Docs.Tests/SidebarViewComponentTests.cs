@@ -526,6 +526,23 @@ public sealed class SidebarViewComponentTests
                             "RazorWire"
                         ],
                         Order = 250
+                    }),
+                new DocNode(
+                    "Browser Contracts JavaScript API",
+                    "api/javascript/browser-contracts",
+                    "<p>Browser contracts.</p>",
+                    Metadata: new DocMetadata
+                    {
+                        NavGroup = "API Reference",
+                        PageType = "javascript-api",
+                        CanonicalSlug = "api/javascript/browser-contracts",
+                        Breadcrumbs =
+                        [
+                            "API Reference",
+                            "JavaScript",
+                            "Browser Contracts"
+                        ],
+                        Order = 250
                     })
             ]);
         using (memo)
@@ -536,9 +553,18 @@ public sealed class SidebarViewComponentTests
             var section = Assert.Single(model.Sections);
             Assert.Equal(DocPublicSection.ApiReference, section.Section);
             var javaScriptGroup = Assert.Single(section.Groups, group => group.Title == "JavaScript");
-            var link = Assert.Single(javaScriptGroup.Links);
-            Assert.Equal("RazorWire JavaScript API", link.Title);
-            Assert.Equal("/docs/api/javascript/razorwire", link.Href);
+            Assert.Collection(
+                javaScriptGroup.Links,
+                link =>
+                {
+                    Assert.Equal("Browser Contracts JavaScript API", link.Title);
+                    Assert.Equal("/docs/api/javascript/browser-contracts", link.Href);
+                },
+                link =>
+                {
+                    Assert.Equal("RazorWire JavaScript API", link.Title);
+                    Assert.Equal("/docs/api/javascript/razorwire", link.Href);
+                });
             Assert.Contains(section.Groups, group => group.Title == "Web");
         }
     }
