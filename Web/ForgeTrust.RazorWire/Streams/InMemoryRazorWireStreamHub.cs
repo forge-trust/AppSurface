@@ -25,6 +25,8 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
     private readonly ConcurrentDictionary<string, Queue<string>> _replayMessages = new();
     private readonly object[] _replayLocks = CreateReplayLocks();
     private readonly ConcurrentDictionary<string, ReplayTouch> _replayTouched = new();
+    private readonly SortedSet<ReplayTouchEntry> _replayTouchesByAge = [];
+    private readonly object _replayPruneGate = new();
     private long _replayTouchSequence;
 
     /// <summary>
@@ -220,9 +222,7 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
             messages.Dequeue();
         }
 
-        _replayTouched[channel] = new ReplayTouch(
-            DateTimeOffset.UtcNow,
-            Interlocked.Increment(ref _replayTouchSequence));
+        TrackReplayTouch(channel);
     }
 
     private IReadOnlyList<string> GetReplayMessagesLocked(string channel)
@@ -242,17 +242,14 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
             return;
         }
 
-        foreach (var candidate in _replayTouched
-            .OrderBy(item => item.Value.TouchedUtc)
-            .ThenBy(item => item.Value.Sequence)
-            .ToArray())
+        foreach (var candidate in SnapshotReplayPruneCandidates())
         {
             if (_replayMessages.Count <= MaxReplayChannels)
             {
                 return;
             }
 
-            var channel = candidate.Key;
+            var channel = candidate.Channel;
             BeforeReplayPruneCandidateForTesting?.Invoke(channel);
 
             var gate = GetReplayLock(channel);
@@ -263,18 +260,70 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
                     return;
                 }
 
-                if (!_replayTouched.TryGetValue(channel, out var currentTouch) || currentTouch != candidate.Value)
+                if (!IsCurrentReplayTouch(channel, candidate.Touch))
                 {
                     continue;
                 }
 
-                if (!_replayMessages.ContainsKey(channel) || HasLiveSubscribers(channel))
+                if (!_replayMessages.ContainsKey(channel))
+                {
+                    RemoveReplayTouch(channel, candidate.Touch);
+                    continue;
+                }
+
+                if (HasLiveSubscribers(channel))
                 {
                     continue;
                 }
 
                 _replayMessages.TryRemove(channel, out _);
+                RemoveReplayTouch(channel, candidate.Touch);
+            }
+        }
+    }
+
+    private void TrackReplayTouch(string channel)
+    {
+        var touch = new ReplayTouch(
+            DateTimeOffset.UtcNow,
+            Interlocked.Increment(ref _replayTouchSequence));
+
+        lock (_replayPruneGate)
+        {
+            if (_replayTouched.TryGetValue(channel, out var previousTouch))
+            {
+                _replayTouchesByAge.Remove(new ReplayTouchEntry(channel, previousTouch));
+            }
+
+            _replayTouched[channel] = touch;
+            _replayTouchesByAge.Add(new ReplayTouchEntry(channel, touch));
+        }
+    }
+
+    private ReplayTouchEntry[] SnapshotReplayPruneCandidates()
+    {
+        lock (_replayPruneGate)
+        {
+            return [.. _replayTouchesByAge];
+        }
+    }
+
+    private bool IsCurrentReplayTouch(string channel, ReplayTouch touch)
+    {
+        lock (_replayPruneGate)
+        {
+            return _replayTouched.TryGetValue(channel, out var currentTouch) && currentTouch == touch;
+        }
+    }
+
+    private void RemoveReplayTouch(string channel, ReplayTouch touch)
+    {
+        lock (_replayPruneGate)
+        {
+            if (_replayTouched.TryGetValue(channel, out var currentTouch) && currentTouch == touch)
+            {
                 _replayTouched.TryRemove(channel, out _);
+                _replayTouchesByAge.Remove(new ReplayTouchEntry(channel, touch));
             }
         }
     }
@@ -431,4 +480,24 @@ public class InMemoryRazorWireStreamHub : IRazorWireStreamHub
         LiveChannelState State);
 
     private readonly record struct ReplayTouch(DateTimeOffset TouchedUtc, long Sequence);
+
+    private readonly record struct ReplayTouchEntry(string Channel, ReplayTouch Touch) : IComparable<ReplayTouchEntry>
+    {
+        public int CompareTo(ReplayTouchEntry other)
+        {
+            var touchedComparison = Touch.TouchedUtc.CompareTo(other.Touch.TouchedUtc);
+            if (touchedComparison != 0)
+            {
+                return touchedComparison;
+            }
+
+            var sequenceComparison = Touch.Sequence.CompareTo(other.Touch.Sequence);
+            if (sequenceComparison != 0)
+            {
+                return sequenceComparison;
+            }
+
+            return StringComparer.Ordinal.Compare(Channel, other.Channel);
+        }
+    }
 }
