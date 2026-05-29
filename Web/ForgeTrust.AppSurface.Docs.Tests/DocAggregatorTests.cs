@@ -5088,14 +5088,17 @@ public class DocAggregatorTests : IDisposable
             string rootPath,
             CancellationToken cancellationToken = default)
         {
-            var deadline = DateTimeOffset.UtcNow.AddSeconds(1);
-            while (!cancellationToken.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+            using var cancellationObserved = new ManualResetEventSlim();
+            using var registration = cancellationToken.Register(
+                static state => ((ManualResetEventSlim)state!).Set(),
+                cancellationObserved);
+
+            if (cancellationObserved.Wait(TimeSpan.FromSeconds(1)))
             {
-                System.Threading.Thread.Sleep(1);
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<IReadOnlyList<DocNode>>([]);
+            throw new TimeoutException("The test harvester did not observe the timeout cancellation token.");
         }
     }
 
