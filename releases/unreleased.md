@@ -155,6 +155,10 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 
 - RazorWire CLI process execution now follows an explicit reliability contract for one-shot commands and launched target apps. No action is expected: command names, flags, defaults, and export semantics are unchanged. Target-app failures that were previously hidden behind startup or readiness timeouts may now surface earlier with captured output and recovery guidance.
 
+### RazorWire streams
+
+- RazorWire's in-memory stream hub now releases empty live channel tracking after the last subscriber disconnects or publish-time cleanup prunes stale writers. Replay buffers remain separate from live subscriber state, keep 25 retained messages per channel, prune inactive replay channels after more than 256 replay channels are retained, and are not deleted just because the last live subscriber disconnects.
+
 ### Web host development defaults
 
 - Tailwind build execution now uses a compiled MSBuild task with stable `ASTW###` diagnostics, structured CLI arguments, bounded output capture, cancellation support, and a packed-package smoke test that proves task and dependency loading from a real nupkg consumer.
@@ -167,6 +171,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 ## Migration watch
 
 - Existing RazorWire CLI users do not need command or flag changes for the process-execution migration. The main behavior difference is that target-app failures may now appear earlier with captured output instead of being hidden behind startup or readiness timeouts.
+- RazorWire stream consumers do not need application code changes for the live-channel cleanup update. Public or demo stream endpoints should still validate or namespace channel names before opting into `AllowAll`; active connection cardinality limits are tracked separately from this cleanup work.
 - Tailwind package consumers do not need source changes for the compiled MSBuild task. Maintainers should keep the packed-package smoke path green when changing task dependencies or diagnostics.
 - AppSurface Docs JavaScript harvest consumers can keep explicit `@namespace` and `@module` tags when they need a stable API family name; otherwise the new fallback grouping may split same-stem files by path instead of merging them.
 - Operators may see more conservative redaction in config audit reports as the secret-fragment list expands. Treat that as the intended default, and use explicit sensitivity options only to document package-owned keys.

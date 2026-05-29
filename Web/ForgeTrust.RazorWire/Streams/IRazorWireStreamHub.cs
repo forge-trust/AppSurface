@@ -5,6 +5,11 @@ namespace ForgeTrust.RazorWire.Streams;
 /// <summary>
 /// Defines the contract for a message hub that supports pub/sub operations over named channels.
 /// </summary>
+/// <remarks>
+/// Implementations may keep live subscriber state and replay retention state separately. Live subscriptions should be
+/// released when readers disconnect, while opt-in replay buffers may outlive live subscribers until the implementation's
+/// bounded retention policy prunes them.
+/// </remarks>
 public interface IRazorWireStreamHub
 {
     /// <summary>
@@ -56,7 +61,8 @@ public interface IRazorWireStreamHub
     /// </returns>
     /// <remarks>
     /// Pitfall: <see cref="RazorWireStreamSubscribeOptions.Replay"/> is an opt-in contract between caller and hub
-    /// implementation; the interface fallback remains live-only for backward compatibility.
+    /// implementation; the interface fallback remains live-only for backward compatibility. Replay should be reserved for
+    /// idempotent retained state, not one-shot commands or sensitive payloads.
     /// </remarks>
     ChannelReader<string> Subscribe(string channel, RazorWireStreamSubscribeOptions? options)
     {
@@ -66,7 +72,11 @@ public interface IRazorWireStreamHub
     /// <summary>
     /// Unsubscribes the specified reader from the named channel so it no longer receives messages from that channel.
     /// </summary>
-    /// <param name="channel">The name of the channel to unsubscribe from.</param>
+    /// <param name="channel">
+    /// The name of the channel to unsubscribe from. Normal callers should pass the same channel used for subscription.
+    /// Endpoint cleanup paths usually have that value available; passing a different value can be surprising on
+    /// implementations that do not keep their own subscription ownership map.
+    /// </param>
     /// <param name="reader">The ChannelReader&lt;string&gt; instance to detach from the channel.</param>
     void Unsubscribe(string channel, ChannelReader<string> reader);
 }
