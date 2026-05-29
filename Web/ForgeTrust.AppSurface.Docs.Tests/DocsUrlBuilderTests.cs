@@ -39,7 +39,8 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs", disabledBuilder.DocsEntryRootPath);
         Assert.Equal("/docs/versions", disabledBuilder.DocsVersionsRootPath);
         Assert.Equal("/docs/search", disabledBuilder.Routes.Search);
-        Assert.Equal("/docs/search-index.json?refresh=1", disabledBuilder.Routes.SearchIndexRefresh);
+        Assert.Equal("/docs/_search-index/refresh", disabledBuilder.Routes.SearchIndexRefresh);
+        Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, disabledBuilder.Routes.SearchIndexRefreshMethod);
         Assert.Equal("/docs/_health", disabledBuilder.Routes.Health);
         Assert.Equal("/docs/_health.json", disabledBuilder.Routes.HealthJson);
         Assert.Equal("/docs/_routes", disabledBuilder.Routes.RouteInspector);
@@ -148,7 +149,8 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/next", builder.CurrentDocsRootPath);
         Assert.Equal("/versions", builder.BuildVersionsUrl());
         Assert.Equal("/v/1.2.3", builder.BuildVersionRootUrl("1.2.3"));
-        Assert.Equal("/next/search-index.json?refresh=1", builder.Routes.SearchIndexRefresh);
+        Assert.Equal("/next/_search-index/refresh", builder.Routes.SearchIndexRefresh);
+        Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, builder.Routes.SearchIndexRefreshMethod);
         Assert.Equal("/next/_health", builder.Routes.Health);
         Assert.Equal("/next/_health.json", builder.Routes.HealthJson);
         Assert.Equal("/next/_routes", builder.Routes.RouteInspector);
@@ -163,7 +165,7 @@ public sealed class DocsUrlBuilderTests
             Home = "/docs",
             Search = "/docs/search",
             SearchIndex = "/docs/search-index.json",
-            SearchIndexRefresh = "/docs/search-index.json?refresh=1",
+            SearchIndexRefresh = "/docs/_search-index/refresh",
             Versions = "/docs/versions",
             Health = "/docs/_health",
             HealthJson = "/docs/_health.json",
@@ -176,6 +178,7 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs/_health.json", routes.HealthJson);
         Assert.Equal("/docs/_routes", routes.RouteInspector);
         Assert.Equal("/docs/_routes.json", routes.RouteInspectorJson);
+        Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, routes.SearchIndexRefreshMethod);
     }
 
     [Fact]
@@ -185,7 +188,7 @@ public sealed class DocsUrlBuilderTests
             "/docs",
             "/docs/search",
             "/docs/search-index.json",
-            "/docs/search-index.json?refresh=1",
+            "/docs/_search-index/refresh",
             "/docs/versions");
 
         var (home, search, searchIndex, searchIndexRefresh, versions) = routes;
@@ -193,12 +196,13 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs", home);
         Assert.Equal("/docs/search", search);
         Assert.Equal("/docs/search-index.json", searchIndex);
-        Assert.Equal("/docs/search-index.json?refresh=1", searchIndexRefresh);
+        Assert.Equal("/docs/_search-index/refresh", searchIndexRefresh);
         Assert.Equal("/docs/versions", versions);
         Assert.Equal(string.Empty, routes.Health);
         Assert.Equal(string.Empty, routes.HealthJson);
         Assert.Equal(string.Empty, routes.RouteInspector);
         Assert.Equal(string.Empty, routes.RouteInspectorJson);
+        Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, routes.SearchIndexRefreshMethod);
     }
 
     [Fact]
@@ -208,7 +212,7 @@ public sealed class DocsUrlBuilderTests
             "/docs",
             "/docs/search",
             "/docs/search-index.json",
-            "/docs/search-index.json?refresh=1",
+            "/docs/_search-index/refresh",
             "/docs/versions",
             "/docs/_health",
             "/docs/_health.json");
@@ -218,10 +222,11 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs", home);
         Assert.Equal("/docs/search", search);
         Assert.Equal("/docs/search-index.json", searchIndex);
-        Assert.Equal("/docs/search-index.json?refresh=1", searchIndexRefresh);
+        Assert.Equal("/docs/_search-index/refresh", searchIndexRefresh);
         Assert.Equal("/docs/versions", versions);
         Assert.Equal("/docs/_health", health);
         Assert.Equal("/docs/_health.json", healthJson);
+        Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, routes.SearchIndexRefreshMethod);
     }
 
     [Fact]
@@ -231,7 +236,7 @@ public sealed class DocsUrlBuilderTests
             "/docs",
             "/docs/search",
             "/docs/search-index.json",
-            "/docs/search-index.json?refresh=1",
+            "/docs/_search-index/refresh",
             "/docs/versions",
             "/docs/_health",
             "/docs/_health.json",
@@ -243,12 +248,13 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/docs", home);
         Assert.Equal("/docs/search", search);
         Assert.Equal("/docs/search-index.json", searchIndex);
-        Assert.Equal("/docs/search-index.json?refresh=1", searchIndexRefresh);
+        Assert.Equal("/docs/_search-index/refresh", searchIndexRefresh);
         Assert.Equal("/docs/versions", versions);
         Assert.Equal("/docs/_health", health);
         Assert.Equal("/docs/_health.json", healthJson);
         Assert.Equal("/docs/_routes", routeInspector);
         Assert.Equal("/docs/_routes.json", routeInspectorJson);
+        Assert.Equal(DocsUrlBuilder.SearchIndexRefreshMethod, routes.SearchIndexRefreshMethod);
     }
 
     [Fact]
@@ -418,12 +424,14 @@ public sealed class DocsUrlBuilderTests
         Assert.Equal("/", builder.BuildHomeUrl());
         Assert.Equal("/search", builder.BuildSearchUrl());
         Assert.Equal("/search-index.json", builder.BuildSearchIndexUrl());
+        Assert.Equal("/_search-index/refresh", builder.BuildSearchIndexRefreshUrl());
         Assert.Equal("/search.css", builder.BuildAssetUrl("search.css"));
         Assert.Equal("/outline-client.js", builder.BuildAssetUrl("outline-client.js"));
         Assert.Equal("/guides/start.md", builder.BuildDocUrl("guides/start.md"));
         Assert.Equal("/sections/concepts", builder.BuildSectionUrl(DocPublicSection.Concepts));
         Assert.True(builder.IsCurrentDocsPath("/guides/start.md.html"));
         Assert.True(builder.IsCurrentDocsPath("/search"));
+        Assert.True(builder.IsCurrentDocsPath("/_search-index/refresh"));
         Assert.True(builder.IsCurrentDocsPath("/_routes"));
         Assert.True(builder.IsCurrentDocsPath("/_routes.json"));
         Assert.True(builder.IsCurrentDocsPath("/outline-client.js"));
@@ -447,6 +455,7 @@ public sealed class DocsUrlBuilderTests
         Assert.True(builder.IsCurrentDocsPath("/docs/next"));
         Assert.True(builder.IsCurrentDocsPath("/docs/next/guides/start.md.html"));
         Assert.True(builder.IsCurrentDocsPath("/DOCS/NEXT/search"));
+        Assert.True(builder.IsCurrentDocsPath("/docs/next/_search-index/refresh"));
         Assert.False(builder.IsCurrentDocsPath("/docs"));
         Assert.False(builder.IsCurrentDocsPath("/docs/v/1.0"));
         Assert.False(builder.IsCurrentDocsPath(null));

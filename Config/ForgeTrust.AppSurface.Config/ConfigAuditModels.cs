@@ -192,12 +192,51 @@ public sealed class ConfigAuditEntry
 }
 
 /// <summary>
+/// Describes a source coordinate inside a configuration file.
+/// </summary>
+/// <remarks>
+/// Both values are one-based. <see cref="ByteColumnNumber"/> counts UTF-8 bytes from the start of the physical line,
+/// so it can differ from an editor's character column when a line contains non-ASCII characters before the source token.
+/// </remarks>
+public sealed class ConfigAuditSourceLocation
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConfigAuditSourceLocation"/> class.
+    /// </summary>
+    /// <param name="lineNumber">The one-based physical line number containing the source token.</param>
+    /// <param name="byteColumnNumber">The one-based UTF-8 byte column containing the source token.</param>
+    public ConfigAuditSourceLocation(int lineNumber, int byteColumnNumber)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(lineNumber, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(byteColumnNumber, 1);
+
+        LineNumber = lineNumber;
+        ByteColumnNumber = byteColumnNumber;
+    }
+
+    /// <summary>
+    /// Gets the one-based physical line number containing the source token.
+    /// </summary>
+    public int LineNumber { get; }
+
+    /// <summary>
+    /// Gets the one-based UTF-8 byte column containing the source token.
+    /// </summary>
+    /// <remarks>
+    /// This is a byte coordinate over the UTF-8 file content, not a Unicode scalar, text element, or editor display
+    /// column. A non-ASCII character earlier on the same line can increase this value by more than one.
+    /// </remarks>
+    public int ByteColumnNumber { get; }
+}
+
+/// <summary>
 /// Describes the collection element represented by a child audit entry.
 /// </summary>
 /// <remarks>
 /// Array and list entries use zero-based <see cref="Index"/> values. Dictionary entries use <see cref="KeyLabel"/>,
 /// which is either the non-sensitive key label, a display-suppressed placeholder, or an in-report redaction label such
-/// as <c>[redacted-key-1]</c>. Labels are intended for display and comparison within one report only.
+/// as <c>[redacted-key-1]</c>. Labels are intended for display and comparison within one report only. When configured,
+/// <see cref="KeyCorrelationId"/> is the separate opaque value for comparing dictionary keys across reports.
 /// </remarks>
 public sealed class ConfigAuditElementIdentity
 {
@@ -220,6 +259,16 @@ public sealed class ConfigAuditElementIdentity
     /// Gets a value indicating whether the original dictionary key was redacted or intentionally hidden.
     /// </summary>
     public bool IsKeyRedacted { get; init; }
+
+    /// <summary>
+    /// Gets the opt-in opaque identifier for correlating the same dictionary key across reports.
+    /// </summary>
+    /// <remarks>
+    /// This value is populated only when entry options enable dictionary key correlation and global correlation key
+    /// material is valid. It is not reversible, is not part of the display path, and should still be treated as
+    /// sensitive support metadata because it reveals equality and churn across reports.
+    /// </remarks>
+    public string? KeyCorrelationId { get; init; }
 }
 
 /// <summary>
@@ -227,8 +276,10 @@ public sealed class ConfigAuditElementIdentity
 /// </summary>
 /// <remarks>
 /// Source records identify where a value came from and how it was applied. File paths, environment variable names, and
-/// config paths are optional because not every provider exposes the same provenance. The source role is especially
-/// important for mixed values: a base source can be combined with patch sources from higher-priority providers.
+/// config paths are optional because not every provider exposes the same provenance. File sources can also include
+/// <see cref="Location"/> when the provider can truthfully map the parsed value back to an exact file coordinate. The
+/// source role is especially important for mixed values: a base source can be combined with patch sources from
+/// higher-priority providers.
 /// </remarks>
 public sealed class ConfigAuditSourceRecord
 {
@@ -266,6 +317,16 @@ public sealed class ConfigAuditSourceRecord
     /// Gets the target config path affected by this source.
     /// </summary>
     public string? AppliedToPath { get; init; }
+
+    /// <summary>
+    /// Gets the exact file coordinate for this source when the provider can prove one.
+    /// </summary>
+    /// <remarks>
+    /// A <see langword="null"/> value means the source is still known but no truthful coordinate is available, such as
+    /// for non-file sources, ambiguous case-insensitive file paths, unsupported paths, parser mismatches, or collection
+    /// element descendants.
+    /// </remarks>
+    public ConfigAuditSourceLocation? Location { get; init; }
 
     /// <summary>
     /// Gets the role this source played in resolution.
@@ -325,7 +386,8 @@ public sealed class ConfigAuditDiagnostic
 /// <remarks>
 /// The built-in policy is always enabled and uses fragment matching before values are exposed through
 /// <see cref="ConfigAuditEntry.DisplayValue"/>. <see cref="MatchedFragments"/> is a snapshot for explanation, not a
-/// mutable policy hook.
+/// mutable policy hook. Dictionary key correlation metadata describes the configured report policy without exposing
+/// the secret key used for scoped HMAC derivation.
 /// </remarks>
 public sealed class ConfigAuditRedaction
 {
@@ -343,6 +405,36 @@ public sealed class ConfigAuditRedaction
     /// Gets the display placeholder used for redacted values.
     /// </summary>
     public required string Placeholder { get; init; }
+
+    /// <summary>
+    /// Gets the configured dictionary key correlation mode for the report.
+    /// </summary>
+    public ConfigAuditDictionaryKeyCorrelationMode DictionaryKeyCorrelationMode { get; init; } = ConfigAuditDictionaryKeyCorrelationMode.None;
+
+    /// <summary>
+    /// Gets the display-safe correlation key id when configured.
+    /// </summary>
+    public string? DictionaryKeyCorrelationKeyId { get; init; }
+
+    /// <summary>
+    /// Gets the configured application or product scope when configured.
+    /// </summary>
+    public string? DictionaryKeyCorrelationApplicationScope { get; init; }
+}
+
+/// <summary>
+/// Identifies how dictionary keys should receive cross-report correlation identifiers.
+/// </summary>
+/// <remarks>
+/// Values are explicit and append-only so serialized reports remain stable across releases.
+/// </remarks>
+public enum ConfigAuditDictionaryKeyCorrelationMode
+{
+    /// <summary>Dictionary keys use display labels only; redacted labels are report-local.</summary>
+    None = 0,
+
+    /// <summary>Dictionary keys receive scoped HMAC identifiers when global correlation key material is configured.</summary>
+    ScopedHmac = 1
 }
 
 /// <summary>

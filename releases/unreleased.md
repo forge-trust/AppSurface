@@ -1,16 +1,10 @@
 # Unreleased
 
-This is the living release note for the next coordinated AppSurface version. It is intentionally written in the same blog-style shape we want future tagged releases to use, but everything here remains provisional until a tag is cut.
+This is the living release note for the next coordinated AppSurface version after `0.1.0-rc.1`. It stays provisional until the next tag is cut.
 
 ## What is taking shape
 
-AppSurface is putting the release contract in place before `v0.1.0`. This slice is about making release notes auditable, public, and reusable:
-
-- a root changelog that acts as the compact ledger
-- a public unreleased proof artifact
-- a pre-1.0 upgrade policy with a clear migration home
-- a top-of-page trust bar for release notes and policy pages
-- pull-request guards that keep PR titles and unreleased entries aligned with future release automation
+- Add merged public changes here as they land.
 
 ## Included in the next coordinated version
 
@@ -210,30 +204,4 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 
 ## Migration watch
 
-There is no tagged migration guide yet because AppSurface has not cut `v0.1.0`. Until then:
-
-- breaking changes should be called out here as soon as they land
-- the stable policy lives in [Pre-1.0 upgrade policy](./upgrade-policy.md)
-- finalized migration steps move into the tagged release note when the version ships
-- custom AppSurface Docs harvesters that want detail-page outlines and search heading metadata should populate `DocNode.Outline`; pages without outline metadata continue to render without the optional outline section
-- AppSurface Docs hosts that need source-backed harvest status should use `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` plus diagnostic codes. Empty snapshots are not failures, degraded snapshots may still serve partial docs, and hosts that publish release artifacts should enable `AppSurfaceDocs:Harvest:FailOnFailure` when all-failed snapshots must stop startup.
-- AppSurface Docs hosts with expensive or side-effecting harvesters can opt out of startup warmup with `AppSurfaceDocs:Harvest:StartupMode=Disabled`, or tune `InitialRequestWaitBudgetMilliseconds` before cold requests switch to the observatory. The `TestingPreHarvestDelayMilliseconds`, `TestingDelayPerHarvesterMilliseconds`, and `TestingDelayPerDocumentMilliseconds` knobs are for local and automated testing only.
-- `DocAggregator.GetSearchIndexPayloadAsync(...)` is no longer a supported package-consumer API. The live search-index payload is now treated as an internal AppSurface Docs implementation detail so the host can rebase docs paths and serialize once per request. Consumers that previously called that method directly should switch to the public docs search endpoint or build their own search payload contract instead of depending on AppSurface Docs' internal snapshot shape.
-- existing `rw-active` forms opt into failed-form request markers and default fallback UI; applications with custom failure rendering can use `RazorWireOptions.Forms.FailureMode = Manual`, `RazorWireOptions.Forms.EnableFailureUx = false`, or per-form `data-rw-form-failure="off"`
-- RazorWire consumers do not need script-path or app-code changes for the TypeScript runtime pipeline. Maintainers should edit `Web/ForgeTrust.RazorWire/assets/src`, run the focused asset commands, and reserve `VerifyRazorWireGeneratedAssetsBeforePack=false` for emergency pack-only bypasses.
-- existing `rw:stream-source` subscriptions now return `403` until apps either configure `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll` for public/demo streams or register a custom `IRazorWireChannelAuthorizer`
-- AppSurface Docs authors should migrate flat `featured_pages` metadata to `featured_page_groups`. The old field is ignored and logs a warning; each group needs at least `label` or `intent`, plus a `pages` list containing the existing `question`, `path`, `supporting_copy`, and `order` entries.
-- Code that previously read `IHostEnvironment.ApplicationName` to recover a custom AppSurface display label should read `StartupContext.ApplicationName` instead. `IHostEnvironment.ApplicationName` now stays aligned with the host entry-assembly identity used for static web asset discovery unless `StartupContext.OverrideEntryPointAssembly` explicitly selects a different manifest identity. `StartupContext.EntryPointAssembly` still defaults to the root module assembly for command/controller/component discovery, so existing cross-assembly scanning behavior remains stable.
-- Web apps with custom conventional 404 views should change `@model ForgeTrust.AppSurface.Web.NotFoundPageModel` to `@model ForgeTrust.AppSurface.Web.BrowserStatusPageModel`. The old 404-only options API names have moved to `BrowserStatusPage*` names before `v0.1.0`; conventional production `500` exception pages now ship as the opt-in fix for issue #224.
-- Web apps that intentionally exposed AppSurface-owned OpenAPI or Scalar routes outside Development should set `AppSurfaceWebOpenApi:ExposeEndpoint=Always` and, when using Scalar, `AppSurfaceWebScalar:ExposeEndpoint=Always`. The new setting only controls endpoint mapping; apps still need host-owned authorization, private networking, or reverse-proxy protection for public environments.
-
-## Proof artifacts
-
-- [Release hub](./README.md)
-- [Changelog](../CHANGELOG.md)
-- [Pre-1.0 upgrade policy](./upgrade-policy.md)
-- [Release authoring checklist](./release-authoring-checklist.md)
-
-## Before the first tag
-
-The current intent is that everything already in this repository can be part of `v0.1.0` when AppSurface is ready to release. This page is where that pile becomes visible and reviewable before the tag exists.
+- Record breaking or behavior-changing guidance here before it moves into the tagged release note.

@@ -321,6 +321,7 @@ public class AppSurfaceConfigModuleTests
         services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();
         services.AddSingleton<IConfigProvider>(new DictionaryConfigProvider(values));
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigAuditRedactor>();
         services.AddSingleton<ConfigAuditTextRenderer>();
         foreach (var entry in discoveredEntries)

@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.Json;
+
 namespace ForgeTrust.AppSurface.Config.Tests;
 
 public class ConfigAuditModelsTests
@@ -10,6 +13,65 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigAuditSourceLocation_RejectsInvalidConstructorArguments()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigAuditSourceLocation(0, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigAuditSourceLocation(1, 0));
+    }
+
+    [Fact]
+    public void ConfigAuditSourceRecord_DefaultsLocationToNull()
+    {
+        var source = new ConfigAuditSourceRecord
+        {
+            Kind = ConfigAuditSourceKind.File,
+            Role = ConfigAuditSourceRole.Base
+        };
+
+        Assert.Null(source.Location);
+    }
+
+    [Fact]
+    public void ConfigAuditSourceRecord_WithRolePreservesLocation()
+    {
+        var location = new ConfigAuditSourceLocation(12, 34);
+        var source = new ConfigAuditSourceRecord
+        {
+            Kind = ConfigAuditSourceKind.File,
+            ProviderName = "Files",
+            FilePath = "/tmp/appsettings.json",
+            ConfigPath = "Feature.Enabled",
+            AppliedToPath = "Feature.Enabled",
+            Location = location,
+            Role = ConfigAuditSourceRole.Base
+        };
+
+        var patched = source.WithRole(ConfigAuditSourceRole.Patch);
+
+        Assert.Same(location, patched.Location);
+        Assert.Equal(ConfigAuditSourceRole.Patch, patched.Role);
+    }
+
+    [Fact]
+    public void ConfigAuditSourceRecord_SerializesLocationShape()
+    {
+        var source = new ConfigAuditSourceRecord
+        {
+            Kind = ConfigAuditSourceKind.File,
+            ConfigPath = "Feature.Enabled",
+            AppliedToPath = "Feature.Enabled",
+            Location = new ConfigAuditSourceLocation(2, 7),
+            Role = ConfigAuditSourceRole.Base
+        };
+
+        var json = JsonSerializer.Serialize(source);
+
+        Assert.Contains(@"""Location"":", json, StringComparison.Ordinal);
+        Assert.Contains(@"""LineNumber"":2", json, StringComparison.Ordinal);
+        Assert.Contains(@"""ByteColumnNumber"":7", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ConfigAuditKnownEntry_SnapshotsOptions()
     {
         var options = new ConfigAuditEntryOptions
@@ -18,7 +80,8 @@ public class ConfigAuditModelsTests
             MaxCollectionDepth = 2,
             MaxCollectionElements = 3,
             MaxReportNodes = 4,
-            DisplayDictionaryKeys = false
+            DisplayDictionaryKeys = false,
+            DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
         };
 
         var entry = new ConfigAuditKnownEntry("Valid.Key", null, typeof(string), options);
@@ -28,6 +91,7 @@ public class ConfigAuditModelsTests
         Assert.Equal(3, entry.Options.MaxCollectionElements);
         Assert.Equal(4, entry.Options.MaxReportNodes);
         Assert.False(entry.Options.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac, entry.Options.DictionaryKeyCorrelationMode);
         Assert.NotSame(options, entry.Options);
     }
 
@@ -40,7 +104,8 @@ public class ConfigAuditModelsTests
             MaxCollectionDepth = 2,
             MaxCollectionElements = 3,
             MaxReportNodes = 4,
-            DisplayDictionaryKeys = false
+            DisplayDictionaryKeys = false,
+            DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
         };
 
         var options = builder.ToOptions();
@@ -52,6 +117,7 @@ public class ConfigAuditModelsTests
         Assert.Equal(3, options.MaxCollectionElements);
         Assert.Equal(4, options.MaxReportNodes);
         Assert.False(options.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac, options.DictionaryKeyCorrelationMode);
     }
 
     [Fact]
@@ -62,7 +128,8 @@ public class ConfigAuditModelsTests
             MaxCollectionDepth = 9,
             MaxCollectionElements = 7,
             MaxReportNodes = 11,
-            DisplayDictionaryKeys = false
+            DisplayDictionaryKeys = false,
+            DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
         }.ToOptions();
         var builder = new ConfigAuditEntryOptionsBuilder
         {
@@ -70,7 +137,8 @@ public class ConfigAuditModelsTests
             MaxCollectionDepth = 4,
             MaxCollectionElements = 128,
             MaxReportNodes = 4096,
-            DisplayDictionaryKeys = true
+            DisplayDictionaryKeys = true,
+            DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.None
         };
 
         var merged = wrapperOptions.ApplyAssignedOverrides(builder.ToOptions());
@@ -80,6 +148,7 @@ public class ConfigAuditModelsTests
         Assert.Equal(128, merged.MaxCollectionElements);
         Assert.Equal(4096, merged.MaxReportNodes);
         Assert.True(merged.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, merged.DictionaryKeyCorrelationMode);
     }
 
     [Fact]
@@ -94,6 +163,7 @@ public class ConfigAuditModelsTests
         Assert.Equal(128, options.MaxCollectionElements);
         Assert.Equal(4096, options.MaxReportNodes);
         Assert.True(options.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, options.DictionaryKeyCorrelationMode);
     }
 
     [Fact]
@@ -122,6 +192,7 @@ public class ConfigAuditModelsTests
         Assert.Equal(128, options.MaxCollectionElements);
         Assert.Equal(4096, options.MaxReportNodes);
         Assert.True(options.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, options.DictionaryKeyCorrelationMode);
     }
 
     [Fact]
@@ -133,7 +204,8 @@ public class ConfigAuditModelsTests
             MaxCollectionDepth = 2,
             MaxCollectionElements = 3,
             MaxReportNodes = 4,
-            DisplayDictionaryKeys = false
+            DisplayDictionaryKeys = false,
+            DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
         };
 
         var normalized = options.Normalize();
@@ -143,6 +215,131 @@ public class ConfigAuditModelsTests
         Assert.Equal(3, normalized.MaxCollectionElements);
         Assert.Equal(4, normalized.MaxReportNodes);
         Assert.False(normalized.DisplayDictionaryKeys);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac, normalized.DictionaryKeyCorrelationMode);
+    }
+
+    [Fact]
+    public void ConfigAuditEntryOptions_ReportsAndNormalizesInvalidCorrelationMode()
+    {
+        var options = new ConfigAuditEntryOptions
+        {
+            TraverseCollectionElements = true,
+            DictionaryKeyCorrelationMode = (ConfigAuditDictionaryKeyCorrelationMode)999
+        };
+
+        var diagnostics = options.Validate("Tenants");
+        var normalized = options.Normalize();
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("config-audit-options-invalid", diagnostic.Code);
+        Assert.Contains(nameof(ConfigAuditEntryOptions.DictionaryKeyCorrelationMode), diagnostic.Message, StringComparison.Ordinal);
+        Assert.True(normalized.TraverseCollectionElements);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, normalized.DictionaryKeyCorrelationMode);
+    }
+
+    [Fact]
+    public void ConfigAuditEntryOptions_ReportsAndNormalizesCorrelationWithoutCollectionTraversal()
+    {
+        var options = new ConfigAuditEntryOptions
+        {
+            TraverseCollectionElements = false,
+            DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
+        };
+
+        var diagnostics = options.Validate("Tenants");
+        var normalized = options.Normalize();
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("config-audit-options-invalid", diagnostic.Code);
+        Assert.Contains(nameof(ConfigAuditEntryOptions.DictionaryKeyCorrelationMode), diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(ConfigAuditEntryOptions.TraverseCollectionElements), diagnostic.Message, StringComparison.Ordinal);
+        Assert.False(normalized.TraverseCollectionElements);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, normalized.DictionaryKeyCorrelationMode);
+    }
+
+    [Fact]
+    public void ConfigAuditEntryOptions_RejectsNullAssignedOverrides()
+    {
+        var options = new ConfigAuditEntryOptions();
+
+        Assert.Throws<ArgumentNullException>(() => options.ApplyAssignedOverrides(null!));
+    }
+
+    [Fact]
+    public void ConfigAuditDictionaryKeyCorrelator_ReportsMissingOptionalConfiguration()
+    {
+        var nullOptionsContext = new ConfigAuditDictionaryKeyCorrelator(null).CreateContext("Production", "Tenants");
+        var missingKeyIdContext = new ConfigAuditDictionaryKeyCorrelator(
+            new ConfigAuditDictionaryKeyCorrelationOptions
+            {
+                SecretKey = "0123456789abcdef0123456789abcdef",
+                ApplicationScope = "billing"
+            }).CreateContext("Production", "Tenants");
+        var missingScopeContext = new ConfigAuditDictionaryKeyCorrelator(
+            new ConfigAuditDictionaryKeyCorrelationOptions
+            {
+                SecretKey = "0123456789abcdef0123456789abcdef",
+                KeyId = "AZaz09._-"
+            }).CreateContext("Production", "Tenants");
+
+        Assert.False(nullOptionsContext.IsAvailable);
+        Assert.Equal("a secret key was not configured", nullOptionsContext.UnavailableReason);
+        Assert.False(missingKeyIdContext.IsAvailable);
+        Assert.Equal("a display-safe key id was not configured", missingKeyIdContext.UnavailableReason);
+        Assert.False(missingScopeContext.IsAvailable);
+        Assert.Equal("an application scope was not configured", missingScopeContext.UnavailableReason);
+    }
+
+    [Fact]
+    public void ConfigAuditDictionaryKeyCorrelationContext_ClonesSecretKey()
+    {
+        var secretKey = Encoding.UTF8.GetBytes("0123456789abcdef0123456789abcdef");
+        var context = ConfigAuditDictionaryKeyCorrelationContext.Available(
+            secretKey,
+            "kid",
+            "billing",
+            "Production",
+            "Tenants");
+        var beforeMutation = context.CreateCorrelationId("alpha");
+
+        Array.Fill(secretKey, (byte)'x');
+        var afterMutation = context.CreateCorrelationId("alpha");
+
+        Assert.Equal(beforeMutation, afterMutation);
+    }
+
+    [Fact]
+    public void ConfigAuditRedactor_CreatePolicySanitizesCorrelationMetadata()
+    {
+        var redactor = new ConfigAuditRedactor();
+
+        var unrequested = redactor.CreatePolicy(
+            new ConfigAuditDictionaryKeyCorrelationOptions
+            {
+                KeyId = "kid-a",
+                ApplicationScope = "billing"
+            },
+            dictionaryKeyCorrelationRequested: false);
+        var requestedWithoutOptions = redactor.CreatePolicy(
+            correlationOptions: null,
+            dictionaryKeyCorrelationRequested: true);
+        var requestedWithInvalidMetadata = redactor.CreatePolicy(
+            new ConfigAuditDictionaryKeyCorrelationOptions
+            {
+                KeyId = "kid-a\nforged",
+                ApplicationScope = " "
+            },
+            dictionaryKeyCorrelationRequested: true);
+
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, unrequested.DictionaryKeyCorrelationMode);
+        Assert.Null(unrequested.DictionaryKeyCorrelationKeyId);
+        Assert.Null(unrequested.DictionaryKeyCorrelationApplicationScope);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac, requestedWithoutOptions.DictionaryKeyCorrelationMode);
+        Assert.Null(requestedWithoutOptions.DictionaryKeyCorrelationKeyId);
+        Assert.Null(requestedWithoutOptions.DictionaryKeyCorrelationApplicationScope);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac, requestedWithInvalidMetadata.DictionaryKeyCorrelationMode);
+        Assert.Null(requestedWithInvalidMetadata.DictionaryKeyCorrelationKeyId);
+        Assert.Null(requestedWithInvalidMetadata.DictionaryKeyCorrelationApplicationScope);
     }
 
     [Fact]
@@ -162,11 +359,12 @@ public class ConfigAuditModelsTests
     public void ConfigAuditPath_SeparatesDisplayLabelsFromSourceSegments()
     {
         var labels = new ConfigAuditDictionaryLabelSet();
+        var correlation = ConfigAuditDictionaryKeyCorrelationContext.Unavailable("not configured");
         var root = ConfigAuditPath.Root("Root");
 
-        var safe = root.AppendDictionaryKey("tenant-1", new ConfigAuditEntryOptions(), labels);
-        var empty = root.AppendDictionaryKey(null, new ConfigAuditEntryOptions(), labels);
-        var inherited = empty.AppendDictionaryKey("safe", new ConfigAuditEntryOptions(), labels);
+        var safe = root.AppendDictionaryKey("tenant-1", new ConfigAuditEntryOptions(), labels, correlation);
+        var empty = root.AppendDictionaryKey(null, new ConfigAuditEntryOptions(), labels, correlation);
+        var inherited = empty.AppendDictionaryKey("safe", new ConfigAuditEntryOptions(), labels, correlation);
 
         Assert.Equal("Root[\"tenant-1\"]", safe.DisplayPath);
         Assert.Equal("Root.tenant-1", safe.SourcePath);
@@ -303,6 +501,9 @@ public class ConfigAuditModelsTests
         Assert.Equal(0, (int)ConfigAuditElementKind.ArrayItem);
         Assert.Equal(1, (int)ConfigAuditElementKind.ListItem);
         Assert.Equal(2, (int)ConfigAuditElementKind.DictionaryItem);
+
+        Assert.Equal(0, (int)ConfigAuditDictionaryKeyCorrelationMode.None);
+        Assert.Equal(1, (int)ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac);
 
         Assert.Equal(0, (int)ConfigAuditSourceKind.Provider);
         Assert.Equal(1, (int)ConfigAuditSourceKind.File);

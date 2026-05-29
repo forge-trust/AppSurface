@@ -11,6 +11,9 @@ namespace ForgeTrust.AppSurface.Config.Tests;
 
 public class ConfigAuditReporterTests
 {
+    private const string CorrelationSecretA = "0123456789abcdef0123456789abcdef";
+    private const string CorrelationSecretB = "abcdef0123456789abcdef0123456789";
+
     [ConfigKey("Region", root: true)]
     private sealed class RegionConfig : Config<string>
     {
@@ -280,7 +283,9 @@ public class ConfigAuditReporterTests
                 report.Diagnostics,
                 diagnostic => diagnostic.Message.Contains("appsettings.Development.Broken.json", StringComparison.Ordinal)
                               || diagnostic.Message.Contains("appsettings.Development.Array.json", StringComparison.Ordinal));
-            AssertEntry(report, "Feature.Enabled", ConfigAuditEntryState.Resolved, "True");
+            var feature = AssertEntry(report, "Feature.Enabled", ConfigAuditEntryState.Resolved, "True");
+            var featureSource = Assert.Single(feature.Sources, source => source.Kind == ConfigAuditSourceKind.File);
+            AssertLocation(featureSource, lineNumber: 3, byteColumnNumber: 5);
             Assert.DoesNotContain(
                 report.Entries.SelectMany(entry => entry.Diagnostics),
                 diagnostic => diagnostic.Code == "config-file-null-skipped");
@@ -292,10 +297,17 @@ public class ConfigAuditReporterTests
             Assert.Contains(settings.Sources, source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
             Assert.Contains(settings.Sources, source => source.EnvironmentVariableName == "MYAPP__SETTINGS__DATABASE__PORT");
             Assert.Contains(settings.Diagnostics, diagnostic => diagnostic.Message.Contains("MYAPP__SETTINGS__DATABASE__TIMEOUTSECONDS", StringComparison.Ordinal));
+            var settingsFileSource = Assert.Single(
+                settings.Sources,
+                source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
+            AssertLocation(settingsFileSource, lineNumber: 6, byteColumnNumber: 5);
 
             var database = settings.Children
                 .Single(child => child.Key == "MyApp.Settings.Database");
             Assert.Equal(ConfigAuditEntryState.PartiallyResolved, database.State);
+            var host = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Host");
+            var hostFileSource = Assert.Single(host.Sources, source => source.Kind == ConfigAuditSourceKind.File);
+            AssertLocation(hostFileSource, lineNumber: 9, byteColumnNumber: 9);
 
             var port = database.Children.Single(child => child.Key == "MyApp.Settings.Database.Port");
             Assert.Equal("6543", port.DisplayValue);
@@ -317,6 +329,7 @@ public class ConfigAuditReporterTests
 
             var rendered = provider.GetRequiredService<ConfigAuditTextRenderer>().Render(report);
             Assert.Contains("Environment: Staging", rendered, StringComparison.Ordinal);
+            Assert.Contains("appsettings.Staging.json:6:5 :: MyApp.Settings", rendered, StringComparison.Ordinal);
             Assert.Contains("Payment.ApiKey = [redacted]", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("super-secret", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("soon", rendered, StringComparison.Ordinal);
@@ -587,6 +600,304 @@ public class ConfigAuditReporterTests
         Assert.DoesNotContain("tenant-password", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain("alpha", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("beta", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_LeavesDictionaryKeyCorrelationAbsentByDefault()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            enableEntryCorrelation: false);
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+
+        Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, report.Redaction.DictionaryKeyCorrelationMode);
+        Assert.Null(report.Redaction.DictionaryKeyCorrelationKeyId);
+        Assert.Null(report.Redaction.DictionaryKeyCorrelationApplicationScope);
+    }
+
+    [Fact]
+    public void GetReport_UsesEffectiveDictionaryKeyCorrelationPolicyForRedactionMetadata()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
+        {
+            options.SecretKey = CorrelationSecretA;
+            options.KeyId = "kid-a";
+            options.ApplicationScope = "app-a";
+        });
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Tenants"] = new Dictionary<string, string>
+                    {
+                        ["tenant-secret-token"] = "alpha-secret-value"
+                    }
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "Tenants",
+            options =>
+            {
+                options.TraverseCollectionElements = false;
+                options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+
+        Assert.Empty(entry.Children);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.None, report.Redaction.DictionaryKeyCorrelationMode);
+        Assert.Null(report.Redaction.DictionaryKeyCorrelationKeyId);
+        Assert.Null(report.Redaction.DictionaryKeyCorrelationApplicationScope);
+        Assert.Contains(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Code == "config-audit-options-invalid"
+                          && diagnostic.Message.Contains(
+                              nameof(ConfigAuditEntryOptions.DictionaryKeyCorrelationMode),
+                              StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Code == "config-audit-key-correlation-unavailable");
+    }
+
+    [Fact]
+    public void GetReport_CreatesStableScopedDictionaryKeyCorrelationIds()
+    {
+        var firstReport = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token");
+        var first = GetSingleCorrelationId(firstReport);
+        var duplicate = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token"));
+        var differentKey = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-password"));
+
+        Assert.Equal(first, duplicate);
+        Assert.NotEqual(first, differentKey);
+        Assert.StartsWith("v1:kid-a:", first, StringComparison.Ordinal);
+        Assert.Equal("v1:kid-a:".Length + 24, first.Length);
+        Assert.Equal(ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac, firstReport.Redaction.DictionaryKeyCorrelationMode);
+        Assert.Equal("kid-a", firstReport.Redaction.DictionaryKeyCorrelationKeyId);
+        Assert.Equal("app-a", firstReport.Redaction.DictionaryKeyCorrelationApplicationScope);
+    }
+
+    [Fact]
+    public void GetReport_ScopesDictionaryKeyCorrelationIds()
+    {
+        var baseline = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token"));
+        var changedEnvironment = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Staging",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token"));
+        var changedRootKey = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Accounts",
+            rawDictionaryKey: "tenant-secret-token"));
+        var changedScope = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            applicationScope: "other-app"));
+        var changedKeyId = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            keyId: "kid-b"));
+        var changedSecret = GetSingleCorrelationId(CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            secretKey: CorrelationSecretB));
+
+        Assert.NotEqual(baseline, changedEnvironment);
+        Assert.NotEqual(baseline, changedRootKey);
+        Assert.NotEqual(baseline, changedScope);
+        Assert.NotEqual(baseline, changedKeyId);
+        Assert.NotEqual(baseline, changedSecret);
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationReportsMissingGlobalKeyMaterial()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            configureGlobalOptions: false,
+            enableEntryCorrelation: true);
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+
+        Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Contains(entry.Diagnostics, diagnostic => diagnostic.Code == "config-audit-key-correlation-unavailable");
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationReportsInvalidGlobalKeyMaterial()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            secretKey: "too-short");
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+
+        Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Contains(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Code == "config-audit-key-correlation-unavailable"
+                          && diagnostic.Message.Contains("at least 32 UTF-8 bytes", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationRejectsUnsafeKeyIds()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            keyId: "kid-a\nforged-line");
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+        var rendered = new ConfigAuditTextRenderer().Render(report);
+
+        Assert.Null(child.Element?.KeyCorrelationId);
+        Assert.Null(report.Redaction.DictionaryKeyCorrelationKeyId);
+        Assert.Contains(
+            entry.Diagnostics,
+            diagnostic => diagnostic.Code == "config-audit-key-correlation-unavailable"
+                          && diagnostic.Message.Contains("ASCII letters", StringComparison.Ordinal));
+        Assert.DoesNotContain("forged-line", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationUsesTrimmedMetadata()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token",
+            applicationScope: " app-a ",
+            keyId: " kid-a ");
+        var correlationId = GetSingleCorrelationId(report);
+
+        Assert.StartsWith("v1:kid-a:", correlationId, StringComparison.Ordinal);
+        Assert.Equal("kid-a", report.Redaction.DictionaryKeyCorrelationKeyId);
+        Assert.Equal("app-a", report.Redaction.DictionaryKeyCorrelationApplicationScope);
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationDoesNotExposeRawKeys()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-secret-token");
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+        var correlationId = child.Element?.KeyCorrelationId;
+        Assert.NotNull(correlationId);
+        var rendered = new ConfigAuditTextRenderer().Render(report);
+        var serialized = JsonSerializer.Serialize(report);
+
+        Assert.DoesNotContain(correlationId!, child.Key, StringComparison.Ordinal);
+        Assert.Contains($"Key correlation: {correlationId}", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-token", child.Key, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-token", child.Element?.KeyLabel, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-token", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-token", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha-secret-value", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha-secret-value", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_DictionaryKeyCorrelationWorksWhenDictionaryKeyDisplayIsDisabled()
+    {
+        var report = CreateCorrelationReport(
+            environmentName: "Production",
+            rootKey: "Tenants",
+            rawDictionaryKey: "tenant-a",
+            displayDictionaryKeys: false);
+
+        var entry = AssertEntry(report, "Tenants", ConfigAuditEntryState.Resolved, null);
+        var child = Assert.Single(entry.Children);
+        var correlationId = child.Element?.KeyCorrelationId;
+        Assert.NotNull(correlationId);
+        var rendered = new ConfigAuditTextRenderer().Render(report);
+        var serialized = JsonSerializer.Serialize(report);
+
+        Assert.Equal("Tenants[[key]]", child.Key);
+        Assert.Equal("[key]", child.Element?.KeyLabel);
+        Assert.True(child.Element?.IsKeyRedacted);
+        Assert.Contains($"Key correlation: {correlationId}", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-a", child.Key, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-a", child.Element?.KeyLabel, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-a", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-a", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_ManualOptionOverridesWrapperDictionaryCorrelationPolicy()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
+        {
+            options.SecretKey = CorrelationSecretA;
+            options.KeyId = "kid-a";
+            options.ApplicationScope = "app-a";
+        });
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Tenants"] = new Dictionary<string, string>
+                    {
+                        ["tenant-secret-token"] = "alpha-secret-value"
+                    }
+                }));
+        services.AddSingleton(new ConfigAuditKnownEntry(
+            "Tenants",
+            typeof(object),
+            typeof(Dictionary<string, string>),
+            new ConfigAuditEntryOptions
+            {
+                TraverseCollectionElements = true,
+                DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.None
+            }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            "tenants",
+            options => options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac);
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        Assert.NotNull(GetSingleCorrelationId(report));
     }
 
     [Fact]
@@ -1272,6 +1583,7 @@ public class ConfigAuditReporterTests
                 Mode = "file"
             }));
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigAuditRedactor>();
         services.AddConfigAuditKey<AppSettings>("MyApp.Settings");
 
@@ -1305,6 +1617,90 @@ public class ConfigAuditReporterTests
         var entry = AssertEntry(report, "Cycle.Options", ConfigAuditEntryState.Resolved, null);
         Assert.Equal("root", entry.Children.Single(child => child.Key == "Cycle.Options.Name").DisplayValue);
         Assert.Empty(entry.Children.Single(child => child.Key == "Cycle.Options.Self").Children);
+    }
+
+    [Fact]
+    public void TextRenderer_UsesFileLocationsWhenPresentAndFallsBackWhenNull()
+    {
+        var rendered = new ConfigAuditTextRenderer().Render(
+            new ConfigAuditReport
+            {
+                Environment = "Production",
+                GeneratedAt = DateTimeOffset.UtcNow,
+                Providers = [],
+                Entries =
+                [
+                    new ConfigAuditEntry
+                    {
+                        Key = "Located.Value",
+                        State = ConfigAuditEntryState.Resolved,
+                        Sources =
+                        [
+                            new ConfigAuditSourceRecord
+                            {
+                                Kind = ConfigAuditSourceKind.File,
+                                ProviderName = "Files",
+                                FilePath = "/tmp/appsettings.json",
+                                ConfigPath = "Located.Value",
+                                AppliedToPath = "Located.Value",
+                                Location = new ConfigAuditSourceLocation(4, 12),
+                                Role = ConfigAuditSourceRole.Base
+                            }
+                        ]
+                    },
+                    new ConfigAuditEntry
+                    {
+                        Key = "Unlocated.Value",
+                        State = ConfigAuditEntryState.Resolved,
+                        Sources =
+                        [
+                            new ConfigAuditSourceRecord
+                            {
+                                Kind = ConfigAuditSourceKind.File,
+                                ProviderName = "Files",
+                                FilePath = "/tmp/appsettings.json",
+                                ConfigPath = "Unlocated.Value",
+                                AppliedToPath = "Unlocated.Value",
+                                Role = ConfigAuditSourceRole.Base
+                            }
+                        ]
+                    }
+                ],
+                Redaction = new ConfigAuditRedaction
+                {
+                    Enabled = true,
+                    MatchedFragments = [],
+                    Placeholder = "[redacted]"
+                }
+            });
+
+        Assert.Contains("Files appsettings.json:4:12 :: Located.Value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Files appsettings.json :: Unlocated.Value", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetReport_RemovesInheritedParentLocationFromChildSource()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        services.AddSingleton<IConfigProvider>(new ParentLocatedSourceProvider());
+        services.AddConfigAuditKey<AppSettings>("Located.Parent");
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var entry = AssertEntry(report, "Located.Parent", ConfigAuditEntryState.Resolved, null);
+        var parentSource = Assert.Single(entry.Sources, source => source.ProviderName == nameof(ParentLocatedSourceProvider));
+        AssertLocation(parentSource, lineNumber: 10, byteColumnNumber: 4);
+
+        var mode = Assert.Single(entry.Children, child => child.Key == "Located.Parent.Mode");
+        var childSource = Assert.Single(mode.Sources, source => source.ProviderName == nameof(ParentLocatedSourceProvider));
+        Assert.Equal("Located.Parent", childSource.ConfigPath);
+        Assert.Equal("Located.Parent", childSource.AppliedToPath);
+        Assert.Null(childSource.Location);
     }
 
     [Fact]
@@ -1714,6 +2110,7 @@ public class ConfigAuditReporterTests
         services.AddSingleton<IConfigProvider>(new ThrowingKeyEnumeratorProvider());
         services.AddSingleton<IConfigProvider>(new StaticConfigProvider("Ignored.Key", "ignored"));
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigAuditRedactor>();
         services.AddSingleton<ConfigAuditTextRenderer>();
 
@@ -1743,9 +2140,69 @@ public class ConfigAuditReporterTests
         services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();
         services.AddSingleton<IConfigProvider, FileBasedConfigProvider>();
         services.AddSingleton<IConfigAuditReporter, ConfigAuditReporter>();
+        services.AddOptions<ConfigAuditDictionaryKeyCorrelationOptions>();
         services.AddSingleton<ConfigAuditRedactor>();
         services.AddSingleton<ConfigAuditTextRenderer>();
         return services;
+    }
+
+    private static ConfigAuditReport CreateCorrelationReport(
+        string environmentName,
+        string rootKey,
+        string rawDictionaryKey,
+        string applicationScope = "app-a",
+        string keyId = "kid-a",
+        string secretKey = CorrelationSecretA,
+        bool configureGlobalOptions = true,
+        bool enableEntryCorrelation = true,
+        bool displayDictionaryKeys = true)
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+
+        var services = CreateServices("/missing", environment);
+        if (configureGlobalOptions)
+        {
+            services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
+            {
+                options.SecretKey = secretKey;
+                options.KeyId = keyId;
+                options.ApplicationScope = applicationScope;
+            });
+        }
+
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    [rootKey] = new Dictionary<string, string>
+                    {
+                        [rawDictionaryKey] = "alpha-secret-value"
+                    }
+                }));
+        services.AddConfigAuditKey<Dictionary<string, string>>(
+            rootKey,
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.DisplayDictionaryKeys = displayDictionaryKeys;
+                if (enableEntryCorrelation)
+                {
+                    options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac;
+                }
+            });
+
+        return services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport(environmentName);
+    }
+
+    private static string GetSingleCorrelationId(ConfigAuditReport report)
+    {
+        var entry = Assert.Single(report.Entries);
+        var child = Assert.Single(entry.Children);
+        Assert.NotNull(child.Element?.KeyCorrelationId);
+        return child.Element!.KeyCorrelationId!;
     }
 
     private static ConfigAuditEntry AssertEntry(
@@ -1758,6 +2215,13 @@ public class ConfigAuditReporterTests
         Assert.Equal(state, entry.State);
         Assert.Equal(displayValue, entry.DisplayValue);
         return entry;
+    }
+
+    private static void AssertLocation(ConfigAuditSourceRecord source, int lineNumber, int byteColumnNumber)
+    {
+        Assert.NotNull(source.Location);
+        Assert.Equal(lineNumber, source.Location.LineNumber);
+        Assert.Equal(byteColumnNumber, source.Location.ByteColumnNumber);
     }
 
     private static ConfigAuditDiscoveredKey AssertDiscovered(
@@ -2114,6 +2578,51 @@ public class ConfigAuditReporterTests
                         ConfigPath = "Patch.Source.Mode",
                         AppliedToPath = "Patch.Source.Mode",
                         Role = ConfigAuditSourceRole.Patch
+                    }
+                ],
+                []);
+        }
+
+        public IReadOnlyList<ConfigAuditDiagnostic> GetReportDiagnostics(string environment) => [];
+    }
+
+    private sealed class ParentLocatedSourceProvider : IConfigProvider, IConfigDiagnosticProvider
+    {
+        public int Priority => 40;
+
+        public string Name => nameof(ParentLocatedSourceProvider);
+
+        public T? GetValue<T>(string environment, string key) => default;
+
+        public ConfigValueResolution Resolve(
+            string environment,
+            string key,
+            Type valueType,
+            ConfigAuditSourceRole role)
+        {
+            if (!string.Equals(key, "Located.Parent", StringComparison.Ordinal))
+            {
+                return ConfigValueResolution.Missing(key);
+            }
+
+            return new ConfigValueResolution(
+                key,
+                ConfigAuditEntryState.Resolved,
+                new AppSettings
+                {
+                    Mode = "located"
+                },
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.File,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        FilePath = "/tmp/appsettings.json",
+                        ConfigPath = key,
+                        AppliedToPath = key,
+                        Location = new ConfigAuditSourceLocation(10, 4),
+                        Role = role
                     }
                 ],
                 []);

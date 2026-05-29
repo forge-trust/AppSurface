@@ -473,7 +473,22 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("Release and readiness:");
         builder.AppendLine($"- {FormatMarkdownLink("Release hub", GetRelativeDocPath(request, ReleaseHubPath))} keeps the public release story, adoption risk, and policy links in one place.");
-        if (RepositoryFileExists(repositoryRoot, V01PreviewPath))
+        var currentReleaseNotePath = GetSharedPublicReleaseNotePath(publicEntries);
+        if (!string.IsNullOrWhiteSpace(currentReleaseNotePath)
+            && !string.Equals(currentReleaseNotePath, UnreleasedPath, StringComparison.Ordinal)
+            && RepositoryFileExists(repositoryRoot, currentReleaseNotePath))
+        {
+            if (string.Equals(currentReleaseNotePath, V01PreviewPath, StringComparison.Ordinal))
+            {
+                builder.AppendLine($"- {FormatMarkdownLink("v0.1.0 Release Preview", GetRelativeDocPath(request, V01PreviewPath))} is the consumer-facing story for the first coordinated release. It stays provisional until the tag is cut.");
+            }
+            else
+            {
+                var label = $"{Path.GetFileNameWithoutExtension(currentReleaseNotePath)} release note";
+                builder.AppendLine($"- {FormatMarkdownLink(label, GetRelativeDocPath(request, currentReleaseNotePath))} is the current package-facing story for this coordinated release.");
+            }
+        }
+        else if (RepositoryFileExists(repositoryRoot, V01PreviewPath))
         {
             builder.AppendLine($"- {FormatMarkdownLink("v0.1.0 Release Preview", GetRelativeDocPath(request, V01PreviewPath))} is the consumer-facing story for the first coordinated release. It stays provisional until the tag is cut.");
         }
@@ -602,6 +617,23 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so AppSurface Docs metadata, trust-bar copy, and section placement stay intentional.");
 
         return NormalizeMarkdownNewlines(builder.ToString()).TrimEnd('\n') + "\n";
+    }
+
+    /// <summary>
+    /// Finds the release note all publishable public package rows currently share.
+    /// </summary>
+    /// <param name="publicEntries">Public chooser rows resolved from the package manifest.</param>
+    /// <returns>The shared release-note path, or <see langword="null" /> when rows point at mixed or missing release notes.</returns>
+    private static string? GetSharedPublicReleaseNotePath(IReadOnlyList<ResolvedPackageEntry> publicEntries)
+    {
+        var releaseNotePaths = publicEntries
+            .Where(entry => entry.Manifest.PublishDecision == PackagePublishDecision.Publish)
+            .Select(entry => entry.Manifest.ReleaseNotesPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        return releaseNotePaths.Length == 1 ? releaseNotePaths[0] : null;
     }
 
     private static string GetRelativeDocPath(PackageIndexRequest request, string repositoryRelativePath)

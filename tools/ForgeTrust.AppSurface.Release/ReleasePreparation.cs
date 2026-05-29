@@ -1,0 +1,103 @@
+namespace ForgeTrust.AppSurface.Release;
+
+/// <summary>
+/// Creates release artifacts from the living unreleased note.
+/// </summary>
+internal sealed class ReleasePreparation
+{
+    private readonly ReleaseWorkspace _workspace;
+    private readonly ReleaseChecker _checker;
+    private readonly IReleaseClock _clock;
+
+    /// <summary>
+    /// Creates release preparation workflow.
+    /// </summary>
+    /// <param name="workspace">Repository workspace paths.</param>
+    /// <param name="checker">Release readiness checker.</param>
+    /// <param name="clock">Clock for default dates.</param>
+    internal ReleasePreparation(ReleaseWorkspace workspace, ReleaseChecker checker, IReleaseClock clock)
+    {
+        _workspace = workspace;
+        _checker = checker;
+        _clock = clock;
+    }
+
+    /// <summary>
+    /// Generates release files or, in dry-run mode, returns the planned edits.
+    /// </summary>
+    /// <param name="options">Release command options. Date defaults to the injected clock when omitted.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Preparation result containing readiness diagnostics and planned or written repository-relative paths.</returns>
+    /// <remarks>
+    /// Preparation is a deterministic repository-file rewrite: it runs readiness checks, reads the unreleased note and sidecar,
+    /// builds versioned release artifacts, rolls <c>CHANGELOG.md</c>, updates public published package note paths, resets unreleased
+    /// files, and records diagnostics in the release manifest. Dry-run mode performs all reads and rendering but does not write files.
+    /// The method does not create git branches, tags, commits, package artifacts, or GitHub Releases; workflows own those operations.
+    /// Callers should treat any readiness errors as blocking and should avoid running against a dirty or concurrently modified tree.
+    /// Writes are sequential rather than transactional. If the local process fails after some files are written, rerun <c>git status</c>
+    /// and remove or revert the partial generated artifacts before retrying so create-only target checks do not stop the next run.
+    /// </remarks>
+    internal async Task<ReleasePreparationResult> PrepareAsync(ReleaseOptions options, CancellationToken cancellationToken)
+    {
+        var check = await _checker.CheckAsync(options, cancellationToken);
+        if (check.HasErrors)
+        {
+            return new ReleasePreparationResult(check, [], options.DryRun);
+        }
+
+        var date = options.Date ?? _clock.TodayUtc();
+        var unreleased = await File.ReadAllTextAsync(_workspace.UnreleasedPath, cancellationToken);
+        var sidecar = await ReleaseSidecar.LoadAsync(_workspace.UnreleasedSidecarPath, cancellationToken);
+        var packageSummary = await PackageIndexSummary.LoadAsync(_workspace.PackageIndexPath, cancellationToken);
+        var generatedPaths = new List<string>();
+        var releaseNotePath = _workspace.ReleaseNotePath(options.Version);
+        var releaseSidecarPath = _workspace.ReleaseSidecarPath(options.Version);
+        var releaseManifestPath = _workspace.ReleaseManifestPath(options.Version);
+        var releasePath = $"releases/v{options.Version}.md";
+
+        var releaseNote = ReleaseNoteBuilder.Build(options.Version, date, unreleased);
+        var releaseSidecar = sidecar.ToTaggedRelease(options.Version, date);
+        var manifest = new ReleaseManifest(
+            options.Version.ToString(),
+            options.Version.TagName,
+            date.ToString("yyyy-MM-dd"),
+            check.SourceCommit,
+            check.ReleaseClassification,
+            check.GeneratedFiles,
+            packageSummary.PublicPublishedPackages.Select(package => package.Project).ToArray(),
+            packageSummary.PublicPublishedPackages.Select(package => new PackagePathUpdate(package.Project, package.ReleaseNotesPath, releasePath)).ToArray(),
+            check.Errors.Concat(check.Warnings).Select(ReleaseDiagnosticRecord.FromDiagnostic).ToArray(),
+            check.Warnings.Select(warning => warning.Code).ToArray());
+
+        var changelog = await File.ReadAllTextAsync(_workspace.ChangelogPath, cancellationToken);
+        var packageIndex = await File.ReadAllTextAsync(_workspace.PackageIndexPath, cancellationToken);
+        var nextUnreleased = ReleaseNoteBuilder.ResetUnreleased(options.Version);
+
+        var writes = new Dictionary<string, string>
+        {
+            [releaseNotePath] = releaseNote,
+            [releaseSidecarPath] = releaseSidecar,
+            [releaseManifestPath] = JsonSerializer.Serialize(manifest, ReleaseJson.Options) + Environment.NewLine,
+            [_workspace.ChangelogPath] = ChangelogEditor.RollForward(changelog, options.Version, date, releasePath),
+            [_workspace.PackageIndexPath] = PackageIndexEditor.UpdatePublicPublishedReleaseNotes(packageIndex, releasePath),
+            [_workspace.UnreleasedPath] = nextUnreleased,
+            [_workspace.UnreleasedSidecarPath] = ReleaseSidecar.UnreleasedTemplate()
+        };
+
+        if (!options.DryRun)
+        {
+            foreach (var (path, content) in writes)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                await File.WriteAllTextAsync(path, content, cancellationToken);
+                generatedPaths.Add(_workspace.DisplayPath(path));
+            }
+        }
+        else
+        {
+            generatedPaths.AddRange(writes.Keys.Select(_workspace.DisplayPath));
+        }
+
+        return new ReleasePreparationResult(check, generatedPaths, options.DryRun);
+    }
+}
