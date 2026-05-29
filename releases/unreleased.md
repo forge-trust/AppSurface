@@ -4,24 +4,21 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ## What is taking shape
 
-This release is the first time AppSurface has to explain itself as a product instead of as a repository. That makes the note long by design: package identity, CLI behavior, docs publishing, web defaults, configuration validation, RazorWire, and the release process are all becoming public at the same time.
+This release turns AppSurface from a repository of building blocks into a coordinated package family. Package identity, CLI behavior, docs publishing, web defaults, configuration validation, RazorWire, and the release process all become part of one public surface.
 
-The story is not "many things changed." The story is that AppSurface is making adoption inspectable before asking anyone to trust the package family:
+The center of the release is adoption you can inspect. AppSurface now connects the first install path, the release-risk story, generated documentation, package validation, and publishing evidence back to the same repository state.
 
-- First-time adopters get a package chooser, a hello-world path, release-risk guidance, and visible proof that docs and packages are generated from the same source of truth.
-- Maintainers get a release cockpit, package validation, protected publishing checks, and CI paths that treat docs changes as part of the product.
-- Application teams get safer defaults around startup, CORS, OpenAPI/Scalar exposure, browser error pages, configuration validation, and command output.
-- RazorWire moves from useful reactive primitives toward a documented package contract: typed assets, explicit stream authorization, form failure UX, export reliability, and package-owned UI rules.
+For first-time adopters, that means a package chooser, a hello-world path, release-risk guidance, and visible proof that docs and packages are generated together. For maintainers, it means a release cockpit, package validation, protected publishing checks, and CI paths that treat docs changes as product changes. For application teams, it means safer defaults around startup, CORS, OpenAPI/Scalar exposure, browser error pages, configuration validation, and command output.
 
-Read this page as a map. The bullets stay detailed because this is the first public release surface for several systems. Start with the section introductions, then use the bullets for exact API names, flags, defaults, and migration clues.
+RazorWire also grows from reactive primitives into a package contract: typed assets, explicit stream authorization, form failure UX, export reliability, and package-owned UI rules.
 
 ## Included in the next coordinated version
 
-The next coordinated version is repository-wide. Packages, CLI tools, examples, and docs-facing behavior move together, so each section below names both the user-facing change and the system that owns it.
+The next coordinated version is repository-wide. Packages, CLI tools, examples, and docs-facing behavior move together, so the release is organized around the systems an adopter will touch.
 
 ### Release and docs surface
 
-This is the adoption layer. A consumer should be able to answer "which package do I install?", "how fresh is this release note?", and "what will happen when the tag exists?" without reading maintainer scripts.
+The release surface becomes a product feature. AppSurface now publishes the install map, the proof artifact, the changelog, the preview note, and the tagged-release template together, so package adoption no longer depends on reading maintainer scripts or guessing which docs are current.
 
 - The `/docs` landing now promotes a Releases entry point alongside product proof paths.
 - AppSurface now ships a public release hub, a changelog, an unreleased page, and a tagged release template inside the repository.
@@ -37,7 +34,7 @@ This is the adoption layer. A consumer should be able to answer "which package d
 
 ### Contribution contract
 
-The repository is tightening the loop between changes, release notes, and public proof. The point is not ceremony. It is making future release automation possible without making maintainers reconstruct intent from merge history.
+The repository now treats release notes as part of the change contract. Pull request titles, unreleased entries, issue forms, security routing, and docs deployment all feed the same public story instead of leaving maintainers to reconstruct intent from merge history.
 
 - Pull request titles are now expected to follow Conventional Commits so the merge history is machine-readable for future automation.
 - Pull requests are expected to update this page unless maintainers explicitly mark the change as outside the public release story.
@@ -51,7 +48,7 @@ The repository is tightening the loop between changes, release notes, and public
 
 ### Console and CLI polish
 
-The command-line story is moving from repo-local utilities to installable tools with predictable output, help, validation, process cleanup, and export behavior. The result should feel quieter on success and more useful on failure.
+The command-line story moves from repo-local utilities to installable tools with predictable output, help, validation, process cleanup, and export behavior. Successful commands get quieter. Failed commands get concrete recovery hints, captured diagnostics, and less hidden process state.
 
 - AppSurface console apps can now opt into a command-first output contract so public CLI help and validation flows stay quiet instead of printing Generic Host lifecycle chatter.
 - AppSurface now publishes the public `appsurface` .NET tool for repository-level workflows, starting with `appsurface docs` for AppSurface Docs preview and `appsurface docs export` for repo-owned AppSurface Docs static export. RazorWire-specific export workflows remain owned by the separate `razorwire` tool.
@@ -74,14 +71,14 @@ The command-line story is moving from repo-local utilities to installable tools 
 
 ### Core diagnostics
 
-Core changes are small but load-bearing. They make low-level process and path behavior visible enough for hosts and tests to explain failures without changing the public startup model.
+Core diagnostics make low-level process and path behavior visible enough for hosts and tests to explain failures without changing the public startup model.
 
 - Core static utilities now use explicit `ILogger` overloads and source-generated `[LoggerMessage]` definitions for host-owned diagnostics. `PathUtils.FindRepositoryRoot` can warn when discovery falls back from a missing path, and parallel enumerable cleanup paths now log suppressed cleanup failures at `Debug` when a caller supplies a logger.
 - `ProcessUtils` now runs through CliWrap while keeping the existing AppSurface process contract for captured output, streaming logs, cancellation, and non-throwing non-zero exit codes.
 
 ### Dependency maintenance
 
-Dependency updates are part of the release contract because AppSurface publishes a coordinated package set. Lock files and smoke paths are being kept current so restore behavior is repeatable across CI and local machines.
+The coordinated package set now carries current lock files, package updates, and smoke coverage together. Restore behavior stays repeatable across CI and local development while AppSurface moves toward public package publishing.
 
 - The dotnet dependency group has been refreshed to the latest compatible package set, with affected NuGet lock files regenerated. CliFx now targets 3.0.0, and AppSurface Console registers source-generated command descriptors while preserving the existing `ConsoleApp<TModule>` and `ConsoleStartup<TModule>` hosting model.
 - The centrally managed `YamlDotNet` dependency now targets `17.0.1`, and the affected PackageIndex, AppSurface Docs, and Aspire lock files have been regenerated.
@@ -91,7 +88,7 @@ Dependency updates are part of the release contract because AppSurface publishes
 
 ### Configuration validation
 
-Configuration is becoming one of AppSurface's clearest value propositions: strongly typed settings should fail early, explain where values came from, redact secrets, and still let operators diagnose nested or collection-heavy configuration safely.
+Configuration becomes a first-class AppSurface value proposition. Strongly typed settings fail early, explain where values came from, redact secrets, and still let operators diagnose nested or collection-heavy configuration safely.
 
 - Strongly typed config wrappers now validate resolved object values with DataAnnotations during startup, including defaults, and report operator-friendly `ConfigurationValidationException` failures without echoing attempted values.
 - Configuration audits can now produce a source-aware report for discovered wrappers and explicitly registered keys, showing provider order, file and environment provenance, defaults, validation diagnostics, and redacted display-safe values.
@@ -109,7 +106,7 @@ Configuration is becoming one of AppSurface's clearest value propositions: stron
 
 ### Web host development defaults
 
-The web work is about making local development boring and production exposure explicit. AppSurface now picks safer defaults, names the knobs that change them, and gives browser users recovery pages instead of empty failures where that makes sense.
+Web hosts get quieter local startup and more explicit production exposure. AppSurface chooses safer defaults, names the knobs that change them, and gives browser users recovery pages instead of empty failures where that makes sense.
 
 - AppSurface web hosts now choose a deterministic localhost-only development URL when no endpoint is configured, while production, staging, container, and appsettings-based endpoint choices remain untouched.
 - AppSurface startup environment resolution now treats command-line `--environment` as the highest-priority source before `ASPNETCORE_ENVIRONMENT` and `DOTNET_ENVIRONMENT`, keeping module startup context aligned with Generic Host configuration.
@@ -130,7 +127,7 @@ The web work is about making local development boring and production exposure ex
 
 ### RazorWire package guidance
 
-RazorWire is being shaped as a package consumers can reason about, not just a set of interactive demos. The release defines where generated UI belongs, which browser assets are public, and how streams and forms should fail by default.
+RazorWire becomes easier to reason about as a package. The release defines where generated UI belongs, which browser assets are public, and how streams and forms fail by default.
 
 - RazorWire now has a generated UI design contract for package-owned nodes. The contract separates RazorWire UI from app-authored markup and AppSurface Docs chrome, establishes `data-rw-*` attributes plus `--rw-ui-*` custom properties as the default styling surface, and documents global, form-level, and target-level override expectations for future generated UI.
 - RazorWire browser runtime assets now have an authored TypeScript pipeline under `Web/ForgeTrust.RazorWire/assets/src`, generated committed outputs under `wwwroot/razorwire`, focused pnpm typecheck/test/build/verify commands, a pack-only freshness guard, and a docs-only JavaScript contract manifest so public API harvesting survives minification.
@@ -140,7 +137,7 @@ RazorWire is being shaped as a package consumers can reason about, not just a se
 
 ### AppSurface Docs product example
 
-This is the longest section because AppSurface Docs is doing two jobs at once. It is the documentation product AppSurface will ship for other teams, and it is also the live proof that AppSurface can publish its own package docs, release notes, API references, search, provenance, and static exports without hand-built pages.
+AppSurface Docs does two jobs in this release. It becomes the documentation product AppSurface can ship for other teams, and it proves the same product by publishing AppSurface's own package docs, release notes, API references, search, provenance, and static exports without hand-built pages.
 
 - AppSurface's own release pages now double as a working AppSurface Docs example for consumers who want better release notes.
 - AppSurface Docs now supports a static-first versioned docs surface: `/docs` can point at the recommended released tree, `/docs/next` can stay on the live preview, `/docs/v/{version}` can serve exact historical releases, and `/docs/versions` can act as the public archive.
@@ -227,7 +224,7 @@ This is the longest section because AppSurface Docs is doing two jobs at once. I
 
 ### RazorWire form UX
 
-Forms are the first RazorWire UX path where failure handling is package-owned by default. The goal is that validation, anti-forgery, authorization, malformed requests, and server failures have predictable local behavior before an app adds custom rendering.
+Forms become the first RazorWire UX path where failure handling is package-owned by default. Validation, anti-forgery, authorization, malformed requests, and server failures get predictable local behavior before an app adds custom rendering.
 
 - RazorWire-enhanced forms now get a convention-based failed-submission stack: durable request markers, default form-local fallback UI, handled server validation helpers, and runtime events for custom consumers.
 - Development anti-forgery failures from RazorWire forms now return useful diagnostics with safe production copy, so stale or missing token problems are easier to fix without exposing implementation detail to users.
@@ -237,7 +234,7 @@ Forms are the first RazorWire UX path where failure handling is package-owned by
 
 ## Migration watch
 
-Use this section to decide whether a pre-tag change affects existing source builds, prerelease package users, or teams following the docs from `main`. Final migration steps move into the tagged release note when the version ships.
+These behavior changes can affect existing source builds, prerelease package users, and teams following the docs from `main`. Final migration steps move into the tagged release note when the version ships.
 
 - RazorWire stream subscriptions are denied by default until an app chooses `RazorWireStreamAuthorizationMode.AllowAll` for public/demo streams or registers an `IRazorWireChannelAuthorizer`.
 - RazorWire CLI export now defaults to CDN-safe output. Use `--mode hybrid` if an existing workflow depends on extensionless, server-routed internal URLs.
