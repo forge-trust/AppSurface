@@ -462,6 +462,7 @@
       "forgetrust.appsurface.web.tailwind": {
         "type": "Project",
         "dependencies": {
+          "CliWrap": "[3.10.1, )",
           "ForgeTrust.AppSurface.Core": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64": "[0.1.0, )",
           "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64": "[0.1.0, )",

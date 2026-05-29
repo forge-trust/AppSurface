@@ -1968,6 +1968,10 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                     "Identity": "../Ignored/Ignored.csproj"
                   },
                   {
+                    "FullPath": "/repo/src/BuildTask/BuildTask.csproj",
+                    "ReferenceOutputAssembly": "false"
+                  },
+                  {
                     "FullPath": "/repo/src/Dependency/Dependency.csproj"
                   }
                 ]

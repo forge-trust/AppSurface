@@ -11,6 +11,7 @@ namespace ForgeTrust.AppSurface.Web.Tailwind;
 /// <item><description><see cref="Enabled"/> defaults to <c>true</c>.</description></item>
 /// <item><description><see cref="InputPath"/> defaults to <c>wwwroot/css/app.css</c>.</description></item>
 /// <item><description><see cref="OutputPath"/> defaults to <c>wwwroot/css/site.gen.css</c>.</description></item>
+/// <item><description><see cref="CliPath"/> defaults to <see langword="null" />, which uses the packaged runtime and then the development <c>PATH</c> fallback.</description></item>
 /// </list>
 /// Paths are resolved relative to the app content root. Common misconfigurations include pointing at a missing
 /// input file, using whitespace-only paths, or choosing an output path whose parent directory is not writable.
@@ -45,4 +46,15 @@ public class TailwindOptions
     /// pointing this at the same file as <see cref="InputPath"/>.
     /// </remarks>
     public string OutputPath { get; set; } = "wwwroot/css/site.gen.css";
+
+    /// <summary>
+    /// Gets or sets an explicit Tailwind CLI path for development watch mode.
+    /// </summary>
+    /// <remarks>
+    /// When this value is set, watch mode launches this binary instead of probing packaged runtimes or the
+    /// development <c>PATH</c>. Relative paths are resolved against the application content root. Use this for
+    /// custom standalone Tailwind binaries or plugin-heavy setups that are managed outside the AppSurface
+    /// runtime packages. Build mode uses the MSBuild <c>TailwindCliPath</c> property for the same concept.
+    /// </remarks>
+    public string? CliPath { get; set; }
 }

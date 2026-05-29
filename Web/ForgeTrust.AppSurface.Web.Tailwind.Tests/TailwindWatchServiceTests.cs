@@ -11,7 +11,8 @@ namespace ForgeTrust.AppSurface.Web.Tailwind.Tests;
 
 public class TailwindWatchServiceTests : IDisposable
 {
-    private static readonly string TestContentRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "tailwind-watch-tests"));
+    private readonly string _testContentRoot = Path.GetFullPath(
+        Path.Join(Path.GetTempPath(), $"tailwind-watch-tests-{Guid.NewGuid():N}"));
     private readonly TailwindCliManager _cliManager;
     private readonly IOptions<TailwindOptions> _options;
     private readonly ILogger<TailwindWatchService> _logger;
@@ -20,6 +21,7 @@ public class TailwindWatchServiceTests : IDisposable
 
     public TailwindWatchServiceTests()
     {
+        Directory.CreateDirectory(_testContentRoot);
         _cliManager = A.Fake<TailwindCliManager>(x => x.WithArgumentsForConstructor([A.Fake<ILogger<TailwindCliManager>>()]));
         _tailwindOptions = new TailwindOptions
         {
@@ -32,13 +34,18 @@ public class TailwindWatchServiceTests : IDisposable
         _environment = A.Fake<IHostEnvironment>();
 
         A.CallTo(() => _environment.EnvironmentName).Returns(Environments.Development);
-        A.CallTo(() => _environment.ContentRootPath).Returns(TestContentRoot);
+        A.CallTo(() => _environment.ContentRootPath).Returns(_testContentRoot);
         A.CallTo(() => _cliManager.GetTailwindPath()).Returns("/path/to/tailwind");
     }
 
     public void Dispose()
     {
         TailwindCliManager.IsOSPlatformOverride = null;
+        if (Directory.Exists(_testContentRoot))
+        {
+            Directory.Delete(_testContentRoot, recursive: true);
+        }
+
         GC.SuppressFinalize(this);
     }
 
@@ -89,6 +96,37 @@ public class TailwindWatchServiceTests : IDisposable
         Assert.Contains("-o", service.ExecutedArgs);
         Assert.Contains("output.css", service.ExecutedArgs);
         Assert.Contains("--watch", service.ExecutedArgs);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UsesConfiguredCliPath_WhenProvided()
+    {
+        var cliPath = Path.Join(_testContentRoot, "tools", RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "tailwindcss.exe" : "tailwindcss");
+        Directory.CreateDirectory(Path.GetDirectoryName(cliPath)!);
+        await File.WriteAllTextAsync(cliPath, "stub");
+        _tailwindOptions.CliPath = $"tools/{Path.GetFileName(cliPath)}";
+
+        var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
+        service.ResultToReturn = new CommandResult(0, "", "");
+
+        await service.ExecuteAsyncPublic(CancellationToken.None);
+
+        Assert.True(service.ProcessExecuted);
+        Assert.Equal(cliPath, service.ExecutedFileName);
+        A.CallTo(() => _cliManager.GetTailwindPath()).MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LogsWarning_WhenConfiguredCliPathIsMissing()
+    {
+        _tailwindOptions.CliPath = "tools/missing-tailwind";
+        var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
+
+        await service.ExecuteAsyncPublic(CancellationToken.None);
+
+        Assert.False(service.ProcessExecuted);
+        AssertWarningLogged();
+        A.CallTo(() => _cliManager.GetTailwindPath()).MustNotHaveHappened();
     }
 
     [Fact]
@@ -143,7 +181,7 @@ public class TailwindWatchServiceTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_LogsError_WhenInputAndOutputResolveToSameFile()
     {
-        _tailwindOptions.InputPath = Path.Combine("styles", "..", "app.css");
+        _tailwindOptions.InputPath = Path.Join("styles", "..", "app.css");
         _tailwindOptions.OutputPath = "app.css";
         var service = new TestTailwindWatchService(_cliManager, _options, _logger, _environment);
 
@@ -307,9 +345,10 @@ public class TailwindWatchServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteTailwindProcessAsync_ReturnsCommandResult()
+    public async Task ExecuteTailwindProcessAsync_StreamsOutputWithoutCapturingWatchBuffer()
     {
-        var service = new TailwindWatchService(_cliManager, _options, _logger, _environment);
+        var logger = new ListLogger<TailwindWatchService>();
+        var service = new TailwindWatchService(_cliManager, _options, logger, _environment);
         var (fileName, args) = CreateShellCommand(
             "(echo watch-out) & (echo watch-err 1>&2) & exit /b 2",
             "printf 'watch-out\\n'; printf 'watch-err\\n' >&2; exit 2");
@@ -321,8 +360,10 @@ public class TailwindWatchServiceTests : IDisposable
             CancellationToken.None);
 
         Assert.Equal(2, result.ExitCode);
-        Assert.Contains("watch-out", result.Stdout);
-        Assert.Contains("watch-err", result.Stderr);
+        Assert.Equal(string.Empty, result.Stdout);
+        Assert.Equal(string.Empty, result.Stderr);
+        Assert.Contains(logger.Messages, entry => entry.Message.Contains("watch-out", StringComparison.Ordinal));
+        Assert.Contains(logger.Messages, entry => entry.Message.Contains("watch-err", StringComparison.Ordinal));
     }
 
     [Fact]
