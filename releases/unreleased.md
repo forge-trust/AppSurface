@@ -67,6 +67,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 ### Dependency maintenance
 
 - The dotnet dependency group has been refreshed to the latest compatible package set, with affected NuGet lock files regenerated. CliFx now targets 3.0.0, and AppSurface Console registers source-generated command descriptors while preserving the existing `ConsoleApp<TModule>` and `ConsoleStartup<TModule>` hosting model.
+- The central .NET dependency set now carries `Microsoft.Extensions.Caching.Memory`, `Microsoft.Extensions.Hosting`, and `Microsoft.Extensions.Logging.Console` `10.0.8`, while the ABP benchmark host now uses ABP `10.4.0`; solution lock files were regenerated so locked restore sees the same graph in CI and local development.
 - The centrally managed `YamlDotNet` dependency now targets `17.0.1`, and the affected PackageIndex, AppSurface Docs, and Aspire lock files have been regenerated.
 - The Autofac dependency package now has dedicated test coverage for AppSurface module integration, host container setup, dependent module loading, and implementation scanning.
 - The GitHub Actions dependency group now refreshes pinned workflow actions for build, release, package, benchmark, and quality jobs while keeping Codecov uploads token-gated so Dependabot validation can still pass when repository secrets are unavailable.
