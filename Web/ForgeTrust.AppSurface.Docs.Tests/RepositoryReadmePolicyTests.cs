@@ -62,7 +62,7 @@ public sealed partial class RepositoryReadmePolicyTests
             .Select(entry => entry.StartHerePath!)
             .ToArray();
 
-        Assert.Equal(12, requiredReadmes.Length);
+        Assert.Equal(13, requiredReadmes.Length);
         Assert.Contains("Web/ForgeTrust.AppSurface.Docs/README.md", nonRequiredReadmes);
         Assert.Contains("Web/ForgeTrust.RazorWire.Cli/README.md", nonRequiredReadmes);
 

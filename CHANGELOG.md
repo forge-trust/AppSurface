@@ -44,6 +44,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Config now supports first-class scalar value validation on `Config<T>` and `ConfigStruct<T>` wrappers with `ConfigValueNotEmpty`, `ConfigValueRange`, `ConfigValueMinLength`, and a `ValidateValue` override for custom rules.
 - AppSurface Web CORS options now expose `AllowedHeaders` and `AllowedMethods` so applications can define explicit production preflight contracts without replacing the framework-managed policy.
 - AppSurface Web OpenAPI and Scalar modules now expose API documentation endpoints only in Development by default, with explicit `Always` and `Never` options for hosts that need production exposure or stricter local hiding.
+- `ForgeTrust.AppSurface.Auth` now exists as a boundary-preview composition package for future AppSurface auth contracts. It registers only `AppSurfaceAuthModule` and `AppSurfaceAuthOptions`; host applications still own request security decisions, identity-provider integration, and route access rules.
 
 ### Changed
 
