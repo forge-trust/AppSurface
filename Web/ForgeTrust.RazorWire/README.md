@@ -158,7 +158,8 @@ services.AddRazorWire(options =>
 });
 ```
 
-Stream subscriptions are denied by default. Choose `AllowAll` only for public/demo streams:
+Stream subscriptions are denied by default. Choose `AllowAll` only for public/demo streams. Public channels should use
+validated, intentionally namespaced channel names so arbitrary client input cannot fan out into unlimited channel names:
 
 ```csharp
 services.AddRazorWire(options =>
@@ -204,6 +205,8 @@ RazorWire can push Turbo Stream updates to one or more clients over Server-Sent 
 
 RazorWire can also send a narrow same-origin visit command with `Visit(...)`. Visit streams are one-shot navigation commands, not replayable state. Use them for active subscribers only, and keep normal links or retained state available when late subscribers or no-JavaScript users need to continue.
 
+The in-memory stream hub keeps live subscriber tracking separate from opt-in replay retention. Empty live channel tracking is released after the last subscriber disconnects or publish-time cleanup prunes stale writers. Retained replay buffers are not deleted by live disconnects; they stay bounded by the replay retention policy.
+
 ### Form Enhancement
 
 Standard HTML forms can return targeted stream updates instead of full reloads or redirect-first flows. The counter example above is the smallest version of that story: submit a normal MVC form, return RazorWire updates, and change only the DOM you care about.
@@ -239,7 +242,7 @@ RazorWire is designed for a fast feedback loop during development:
 - `Subscribe(channel)` receives only live messages published after subscription.
 - `Subscribe(channel, new RazorWireStreamSubscribeOptions { Replay = true })` receives retained replay messages first, then continues with live messages.
 
-Replay is opt-in and intentionally small. The in-memory hub keeps a bounded per-channel buffer and drops the oldest retained fragments first. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
+Replay is opt-in and intentionally small. The in-memory hub keeps up to 25 retained fragments per replay channel and prunes inactive replay channels when more than 256 replay channels are retained, dropping the oldest retained fragments and inactive replay channels first. Replay subscriptions to channels with no retained messages do not allocate durable per-channel replay metadata. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
 
 ### `IRazorWireChannelAuthorizer`
 
@@ -313,8 +316,8 @@ Subscribes the page to a RazorWire stream channel.
 
 - `channel`: required channel name.
 - `permanent`: keeps the stream source alive across Turbo visits.
-- Stream endpoints deny subscriptions by default; configure `RazorWireStreamAuthorizationMode.AllowAll` for public/demo channels or provide a custom `IRazorWireChannelAuthorizer`.
-- `replay`: when `true`, appends `?replay=1` to the stream endpoint so the page receives retained channel messages before live updates.
+- Stream endpoints deny subscriptions by default; configure `RazorWireStreamAuthorizationMode.AllowAll` only for public/demo channels or provide a custom `IRazorWireChannelAuthorizer`. Public/demo channels should validate or namespace channel names instead of accepting arbitrary user-supplied channel identifiers.
+- `replay`: when `true`, appends `?replay=1` to the stream endpoint so the page receives retained channel messages before live updates. The in-memory hub retains at most 25 messages per replay channel and prunes inactive replay channels when more than 256 replay channels are retained.
 
 ```html
 <rw:stream-source id="rw-stream-reactivity" channel="reactivity" permanent="true"></rw:stream-source>
