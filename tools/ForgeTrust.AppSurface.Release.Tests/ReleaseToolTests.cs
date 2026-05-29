@@ -172,6 +172,11 @@ public sealed class ReleaseToolTests : IDisposable
             commandRunner: FakeCommandRunner.WithSourceCommit("abc123"));
 
         Assert.Equal(0, exitCode);
+        var report = stdout.ToString();
+        Assert.Contains("## Manual review gate", report, StringComparison.Ordinal);
+        Assert.Contains("## Files written", report, StringComparison.Ordinal);
+        Assert.Contains("releases/v0.1.0-preview.1.md", report, StringComparison.Ordinal);
+        Assert.Contains("CHANGELOG.md", report, StringComparison.Ordinal);
 
         var releaseNote = await ReadFileAsync("releases/v0.1.0-preview.1.md");
         Assert.Contains("# Release 0.1.0-preview.1", releaseNote, StringComparison.Ordinal);

@@ -15,6 +15,7 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - run `./eng/release prepare --version x.y.z --date YYYY-MM-DD` from an up-to-date `main` branch
 - review the generated `releases/vx.y.z.md`, `releases/vx.y.z.md.yml`, and `releases/vx.y.z.release.json`
 - confirm the generated package path updates described in the [package registry](../packages/README.md) point every `classification: public` plus `publish_decision: publish` package at the tagged note
+- when a tagged or release-candidate note supersedes a preview page, remove the preview source file and carry its browser routes as `redirect_aliases` on the new canonical note
 - keep the trust bar accurate for the release state and archive location
 - link the tagged note from [`CHANGELOG.md`](../CHANGELOG.md)
 - open the release preparation pull request and stop for manual maintainer review; automation and coding agents must not merge release PRs or create release tags without an explicit post-review instruction
