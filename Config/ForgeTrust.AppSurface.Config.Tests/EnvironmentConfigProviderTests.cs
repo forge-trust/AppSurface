@@ -1131,6 +1131,54 @@ public class EnvironmentConfigProviderTests
         Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
     }
 
+    [Fact]
+    public void TracePatch_RecordsArrayPriorPresenceForCollectionReplacement()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        var current = new ArrayEndpointSettings
+        {
+            Endpoints = ["https://file.example"]
+        };
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(ArrayEndpointSettings));
+
+        Assert.True(patch.Patched);
+        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+    }
+
+    [Fact]
+    public void TracePatch_RecordsReadOnlyCollectionPriorPresenceForCollectionReplacement()
+    {
+        var innerProvider = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => innerProvider.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__0", A<string?>._))
+            .Returns("https://one.example");
+        A.CallTo(() => innerProvider.GetEnvironmentVariable("MYAPP__SETTINGS__ENDPOINTS__1", A<string?>._))
+            .Returns("https://two.example");
+        var current = new ReadOnlyEndpointSettings
+        {
+            Endpoints = new ReadOnlyEndpointList("https://file.example")
+        };
+
+        var provider = new EnvironmentConfigProvider(innerProvider);
+
+        var patch = ((IConfigDiagnosticPatcher)provider)
+            .TracePatch("Production", "MyApp.Settings", current, typeof(ReadOnlyEndpointSettings));
+
+        Assert.True(patch.Patched);
+        Assert.Equal(ConfigAuditPriorPresence.Present, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.0").PriorPresence);
+        Assert.Equal(ConfigAuditPriorPresence.Missing, patch.Facts.Single(fact => fact.ConfigPath == "MyApp.Settings.Endpoints.1").PriorPresence);
+    }
+
     private sealed class AppSettings
     {
         public string? Mode { get; set; }
@@ -1152,6 +1200,34 @@ public class EnvironmentConfigProviderTests
     private sealed class ConstructorDefaultCollectionOptions
     {
         public List<string> Endpoints { get; set; } = ["https://constructor.example"];
+    }
+
+    private sealed class ArrayEndpointSettings
+    {
+        public string[] Endpoints { get; set; } = [];
+    }
+
+    private sealed class ReadOnlyEndpointSettings
+    {
+        public IReadOnlyList<string> Endpoints { get; set; } = [];
+    }
+
+    private sealed class ReadOnlyEndpointList : IReadOnlyList<string>
+    {
+        private readonly string[] _values;
+
+        public ReadOnlyEndpointList(params string[] values)
+        {
+            _values = values;
+        }
+
+        public string this[int index] => _values[index];
+
+        public int Count => _values.Length;
+
+        public IEnumerator<string> GetEnumerator() => ((IEnumerable<string>)_values).GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private interface IConfigPatchContract
