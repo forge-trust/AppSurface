@@ -177,6 +177,7 @@ When an AppSurface web application starts in `Development` without explicit endp
 You can override the application's listening port using several methods:
 
 1.  **Command-Line**: Use `--port` (localhost-only shortcut), `--port` with `--all-hosts`, or `--urls`.
+
     ```bash
     dotnet run -- --port 5001
     # OR
@@ -184,17 +185,22 @@ You can override the application's listening port using several methods:
     # OR
     dotnet run -- --urls "http://localhost:5001"
     ```
+
 2.  **Environment Variables**: Set `ASPNETCORE_URLS`.
+
     ```bash
     export ASPNETCORE_URLS="http://localhost:5001"
     dotnet run
     ```
+
 3.  **App Settings**: Configure `urls` in `appsettings.json`.
+
     ```json
     {
       "urls": "http://localhost:5001"
     }
     ```
+
 4.  **Kestrel Endpoints**: Configure named endpoints when you need protocol, certificate, or endpoint-specific settings.
 
     ```json
