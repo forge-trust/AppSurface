@@ -926,6 +926,53 @@ public class ConfigAuditReporterTests
     }
 
     [Fact]
+    public void GetReport_DictionaryKeyCorrelationOmitsIdsForUnprintableDictionaryKeys()
+    {
+        var environment = A.Fake<IEnvironmentProvider>();
+        A.CallTo(() => environment.GetEnvironmentVariable(A<string>._, A<string?>._)).Returns(null);
+        var services = CreateServices("/missing", environment);
+        services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
+        {
+            options.SecretKey = CorrelationSecretA;
+            options.KeyId = "kid-a";
+            options.ApplicationScope = "app-a";
+        });
+        services.AddSingleton<IConfigProvider>(
+            new DictionaryConfigProvider(
+                new Dictionary<string, object?>
+                {
+                    ["Labels.Items"] = new Hashtable
+                    {
+                        [new ThrowingDictionaryKey()] = "throwing",
+                        [new FormatFailingDictionaryKey()] = "format",
+                        [new NullReturningDictionaryKey()] = "null",
+                        ["safe"] = "safe"
+                    }
+                }));
+        services.AddConfigAuditKey<Hashtable>(
+            "Labels.Items",
+            options =>
+            {
+                options.TraverseCollectionElements = true;
+                options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac;
+            });
+
+        var report = services.BuildServiceProvider()
+            .GetRequiredService<IConfigAuditReporter>()
+            .GetReport("Production");
+
+        var children = AssertEntry(report, "Labels.Items", ConfigAuditEntryState.Resolved, null).Children;
+        var unprintableChildren = children
+            .Where(child => child.Element?.KeyLabel == "[key]")
+            .ToList();
+        var safeChild = Assert.Single(children, child => child.Element?.KeyLabel == "safe");
+
+        Assert.Equal(3, unprintableChildren.Count);
+        Assert.All(unprintableChildren, child => Assert.Null(child.Element?.KeyCorrelationId));
+        Assert.NotNull(safeChild.Element?.KeyCorrelationId);
+    }
+
+    [Fact]
     public void GetReport_ManualOptionOverridesWrapperDictionaryCorrelationPolicy()
     {
         var environment = A.Fake<IEnvironmentProvider>();

@@ -54,6 +54,7 @@ internal sealed record ConfigAuditPath(
         var suppressLabel = !options.DisplayDictionaryKeys;
         var redactLabel = keyIsSensitive || entryIsSensitive || parentIsSensitive;
         var isRedacted = redactLabel || suppressLabel || conversionFailed;
+        var canCreateCorrelationId = key != null && !conversionFailed;
         var label = redactLabel
             ? labels.GetRedactedLabel(conversionFailed ? $"unprintable:{key?.GetType().FullName}" : rawLabel)
             : suppressLabel || conversionFailed ? "[key]" : displayLabel;
@@ -70,7 +71,7 @@ internal sealed record ConfigAuditPath(
                 Kind = ConfigAuditElementKind.DictionaryItem,
                 KeyLabel = label,
                 IsKeyRedacted = isRedacted,
-                KeyCorrelationId = options.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac
+                KeyCorrelationId = options.DictionaryKeyCorrelationMode == ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac && canCreateCorrelationId
                     ? correlation.CreateCorrelationId(rawLabel)
                     : null
             },
