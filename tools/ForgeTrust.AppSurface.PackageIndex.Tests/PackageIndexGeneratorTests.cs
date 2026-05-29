@@ -639,6 +639,45 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateAsync_RendersSharedTaggedReleaseNoteInReadinessSummary()
+    {
+        await WriteProgramRepoAsync(releaseNotesPath: "releases/v0.1.0-rc.1.md");
+        await WriteFileAsync("releases/v0.1.0-rc.1.md", "# AppSurface 0.1.0 RC 1");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var markdown = await generator.GenerateAsync(CreateRequest());
+
+        Assert.Contains("[v0.1.0-rc.1 release note](../releases/v0.1.0-rc.1.md)", markdown, StringComparison.Ordinal);
+        Assert.Contains("current package-facing story", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("v0.1.0 Release Preview", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_PreservesPreviewCopyForSharedPreviewReleaseNote()
+    {
+        await WriteProgramRepoAsync(releaseNotesPath: "releases/v0.1-preview.md");
+        await WriteFileAsync("releases/v0.1-preview.md", "# v0.1 Preview");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web")
+        });
+
+        var markdown = await generator.GenerateAsync(CreateRequest());
+
+        Assert.Contains("[v0.1.0 Release Preview](../releases/v0.1-preview.md)", markdown, StringComparison.Ordinal);
+        Assert.Contains("stays provisional until the tag is cut", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GenerateAsync_ThrowsWhenStaticChooserLinkTargetIsMissing()
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: true);
