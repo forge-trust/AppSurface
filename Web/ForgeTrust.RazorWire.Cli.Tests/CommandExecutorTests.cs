@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FakeItEasy;
 using Microsoft.Extensions.Logging;
 
@@ -48,7 +49,7 @@ public class CommandExecutorTests
     [Fact]
     public async Task ExecuteCommandAsync_Should_Return_Result_When_WorkingDirectory_Is_Missing()
     {
-        var missingDirectory = Path.Combine(Path.GetTempPath(), $"razorwire-missing-{Guid.NewGuid():N}");
+        var missingDirectory = Path.Join(Path.GetTempPath(), $"razorwire-missing-{Guid.NewGuid():N}");
 
         var result = await CreateExecutor().ExecuteCommandAsync(
             "dotnet",
@@ -144,9 +145,9 @@ public class CommandExecutorTests
 
         public static TestConsoleProject Create(string programBody)
         {
-            var directory = Path.Combine(Path.GetTempPath(), $"razorwire-cli-test-{Guid.NewGuid():N}");
+            var directory = Path.Join(Path.GetTempPath(), $"razorwire-cli-test-{Guid.NewGuid():N}");
             Directory.CreateDirectory(directory);
-            var projectPath = Path.Combine(directory, "Helper.csproj");
+            var projectPath = Path.Join(directory, "Helper.csproj");
             File.WriteAllText(
                 projectPath,
                 """
@@ -159,7 +160,7 @@ public class CommandExecutorTests
                   </PropertyGroup>
                 </Project>
                 """);
-            File.WriteAllText(Path.Combine(directory, "Program.cs"), programBody);
+            File.WriteAllText(Path.Join(directory, "Program.cs"), programBody);
 
             return new TestConsoleProject(directory, projectPath);
         }
@@ -170,11 +171,13 @@ public class CommandExecutorTests
             {
                 Directory.Delete(DirectoryPath, recursive: true);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                Debug.WriteLine($"Unable to delete temporary test project '{DirectoryPath}': {ex.Message}");
             }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException ex)
             {
+                Debug.WriteLine($"Unable to delete temporary test project '{DirectoryPath}': {ex.Message}");
             }
         }
     }

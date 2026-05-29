@@ -487,9 +487,9 @@ public class TargetAppProcessTests
 
         public static TestConsoleProject Create(string programBody)
         {
-            var directory = Path.Combine(Path.GetTempPath(), $"razorwire-target-app-test-{Guid.NewGuid():N}");
+            var directory = Path.Join(Path.GetTempPath(), $"razorwire-target-app-test-{Guid.NewGuid():N}");
             Directory.CreateDirectory(directory);
-            var projectPath = Path.Combine(directory, "TargetHelper.csproj");
+            var projectPath = Path.Join(directory, "TargetHelper.csproj");
             File.WriteAllText(
                 projectPath,
                 """
@@ -502,7 +502,7 @@ public class TargetAppProcessTests
                   </PropertyGroup>
                 </Project>
                 """);
-            File.WriteAllText(Path.Combine(directory, "Program.cs"), programBody);
+            File.WriteAllText(Path.Join(directory, "Program.cs"), programBody);
 
             return new TestConsoleProject(directory, projectPath);
         }
@@ -513,11 +513,13 @@ public class TargetAppProcessTests
             {
                 Directory.Delete(DirectoryPath, recursive: true);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                Debug.WriteLine($"Unable to delete temporary test project '{DirectoryPath}': {ex.Message}");
             }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException ex)
             {
+                Debug.WriteLine($"Unable to delete temporary test project '{DirectoryPath}': {ex.Message}");
             }
         }
     }
