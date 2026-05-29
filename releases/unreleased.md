@@ -10,6 +10,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Release and docs surface
 
+- AppSurface now has `ForgeTrust.AppSurface.Auth` as a boundary-preview composition package for future AppSurface auth contracts. It registers only the neutral module/options boundary and does not sign users in, enforce authorization, or integrate with identity providers.
 - AppSurface Docs JavaScript API pages can now resolve public doclets into reader-facing API families. Explicit `@namespace` and `@module` tags remain authoritative, ordered `GroupNameRules` can name known source trees, and untagged fallback groups use path-aware identities so same-stem files in different folders do not merge.
 - The `/docs` landing now promotes a Releases entry point alongside product proof paths.
 - AppSurface now ships a public release hub, a changelog, an unreleased page, and a tagged release template inside the repository.

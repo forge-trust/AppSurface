@@ -59,6 +59,10 @@ This approach aims to:
 
 - [**ForgeTrust.AppSurface.Core**](./ForgeTrust.AppSurface.Core/README.md) – Core abstractions for defining modules, starting an application via `AppSurfaceStartup` and `StartupContext`, and running AppSurface-owned process workflows through a CliWrap-backed policy surface.
 
+### [Auth](./Auth/ForgeTrust.AppSurface.Auth/README.md)
+
+- [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Boundary-preview composition package with `AppSurfaceAuthModule`, `AppSurfaceAuthOptions`, and no runtime request or identity-provider behavior.
+
 ### [Console](./Console/README.md)
 
 - [**ForgeTrust.AppSurface.Console**](./Console/ForgeTrust.AppSurface.Console/README.md) – Helpers for building command line apps with [CliFx](https://github.com/Tyrrrz/CliFx), source-generated command descriptors, a `CriticalService`-based command runner, and helpers for configuring services.

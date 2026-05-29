@@ -3,6 +3,10 @@
     <Project Path="Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj" />
     <Project Path="Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" />
   </Folder>
+  <Folder Name="/Auth/">
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth.Tests/ForgeTrust.AppSurface.Auth.Tests.csproj" />
+    <Project Path="Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj" />
+  </Folder>
   <Folder Name="/Benchmarks/">
     <Project Path="benchmarks/AbpSimpleController/AbpSimpleController.csproj" />
     <Project Path="benchmarks/DependencyInjectionControllers/DependencyInjectionControllers.csproj" />
