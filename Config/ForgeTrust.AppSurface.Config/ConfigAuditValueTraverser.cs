@@ -320,11 +320,12 @@ internal sealed class ConfigAuditValueTraverser
         ref int budget)
     {
         var selectedSources = SelectChildSources(sources, path);
-        var redacted = _redactor.FormatValue(path.DisplayPath, value, selectedSources.Sources);
+        var redactionSources = path.RequiresInheritedSource ? sources : selectedSources.Sources;
+        var redacted = _redactor.FormatValue(path.DisplayPath, value, redactionSources, options.Sensitivity);
         var traversal = BuildChildren(path, value, sources, options, visited, labels, correlation, ref budget);
         var diagnostics = selectedSources.Diagnostics.Concat(traversal.Diagnostics).ToList();
         var state = traversal.Children.Any(ConfigAuditEntryStateHelpers.IsPartiallyResolved)
-                    || selectedSources.Sources.Any(source => source.Role == ConfigAuditSourceRole.Patch)
+                    || redactionSources.Any(source => source.Role == ConfigAuditSourceRole.Patch)
             ? ConfigAuditEntryState.PartiallyResolved
             : ConfigAuditEntryState.Resolved;
 

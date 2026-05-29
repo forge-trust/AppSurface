@@ -136,11 +136,17 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
 
             foreach (var providerKey in providerKeys)
             {
-                var redacted = _redactor.FormatValue(providerKey.Key, providerKey.RawValue, providerKey.Sources);
+                var classification = ClassifyDiscoveredKey(providerKey.Key);
+                var entrySensitivity = GetDiscoveredKeyEntrySensitivity(providerKey.Key);
+                var redacted = _redactor.FormatValue(
+                    providerKey.Key,
+                    providerKey.RawValue,
+                    providerKey.Sources,
+                    entrySensitivity);
                 discoveredKeys.Add(new ConfigAuditDiscoveredKey
                 {
                     Key = providerKey.Key,
-                    Classification = ClassifyDiscoveredKey(providerKey.Key),
+                    Classification = classification,
                     DisplayValue = redacted.DisplayValue,
                     IsRedacted = redacted.IsRedacted,
                     Sources = providerKey.Sources,
@@ -155,6 +161,39 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             .ToList();
     }
 
+    private ConfigAuditSensitivity GetDiscoveredKeyEntrySensitivity(string key)
+    {
+        ConfigAuditSensitivity? exactSensitivity = null;
+        ConfigAuditSensitivity? nearestSpecifiedParentSensitivity = null;
+        var nearestSpecifiedParentLength = -1;
+        foreach (var knownEntry in _knownEntries)
+        {
+            var sensitivity = knownEntry.OptionsSnapshot.Sensitivity;
+            if (string.Equals(knownEntry.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                if (ConfigAuditEntryOptions.NormalizeSensitivity(sensitivity) != ConfigAuditSensitivity.Unknown)
+                {
+                    return sensitivity;
+                }
+
+                exactSensitivity = sensitivity;
+                continue;
+            }
+
+            if (IsKnownDescendantKey(key, knownEntry.Key)
+                && ConfigAuditEntryOptions.NormalizeSensitivity(sensitivity) != ConfigAuditSensitivity.Unknown
+                && knownEntry.Key.Length > nearestSpecifiedParentLength)
+            {
+                nearestSpecifiedParentSensitivity = sensitivity;
+                nearestSpecifiedParentLength = knownEntry.Key.Length;
+            }
+        }
+
+        return nearestSpecifiedParentSensitivity
+            ?? exactSensitivity
+            ?? ConfigAuditSensitivity.Unknown;
+    }
+
     private ConfigAuditDiscoveredKeyClassification ClassifyDiscoveredKey(string key)
     {
         if (_knownEntries.Any(knownEntry => string.Equals(knownEntry.Key, key, StringComparison.OrdinalIgnoreCase)))
@@ -162,13 +201,18 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             return ConfigAuditDiscoveredKeyClassification.Known;
         }
 
-        if (_knownEntries.Any(knownEntry => key.StartsWith($"{knownEntry.Key}.", StringComparison.OrdinalIgnoreCase)))
+        if (_knownEntries.Any(knownEntry => IsKnownDescendantKey(key, knownEntry.Key)))
         {
             return ConfigAuditDiscoveredKeyClassification.KnownDescendant;
         }
 
         return ConfigAuditDiscoveredKeyClassification.Unknown;
     }
+
+    private static bool IsKnownDescendantKey(string key, string knownKey) =>
+        key.Length > knownKey.Length
+        && key[knownKey.Length] == '.'
+        && key.StartsWith(knownKey, StringComparison.OrdinalIgnoreCase);
 
     private static void RemoveEntryLevelDiagnostics(
         List<ConfigAuditDiagnostic> reportDiagnostics,
@@ -290,7 +334,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
             state = ConfigAuditEntryState.PartiallyResolved;
         }
 
-        var redacted = _redactor.FormatValue(knownEntry.Key, rawValue, sources);
+        var redacted = _redactor.FormatValue(knownEntry.Key, rawValue, sources, options.Sensitivity);
         return new ConfigAuditEntry
         {
             Key = knownEntry.Key,
