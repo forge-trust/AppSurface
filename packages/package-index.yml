@@ -36,6 +36,19 @@ packages:
     start_here_path: Caching/ForgeTrust.AppSurface.Caching/README.md
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
+  - project: Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj
+    classification: public
+    publish_decision: publish
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_notes_path: releases/v0.1-preview.md
+    order: 35
+    use_when: Add this only when authoring AppSurface modules that need a stable cross-surface auth composition boundary.
+    includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, and Microsoft Options registration for the boundary-preview options root.
+    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policies, middleware, endpoint filters, user/session contracts, challenges, forbids, or UI.
+    start_here_path: Auth/ForgeTrust.AppSurface.Auth/README.md
+    expected_dependency_package_ids:
+      - ForgeTrust.AppSurface.Core
   - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
     classification: public
     publish_decision: publish
