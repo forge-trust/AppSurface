@@ -141,12 +141,12 @@ For both `--project` and `--dll`:
 
 #### If export fails
 
-Process failures are reported with the command stage, exit code or startup exception when available, recent target-app stdout/stderr, and the next recovery step. Common branches:
+Process failures are reported with the command stage, exit code or startup exception when available, captured target-app stdout/stderr, and the next recovery step. Target-app output is fully captured for the current export attempt; the CLI does not apply a line-count or byte-count truncation limit. Common branches:
 
 - **Missing source option or multiple sources**: choose exactly one of `--url`, `--project`, or `--dll`; run `razorwire export --help` for the current command shape.
 - **Multi-targeted project without `--framework`**: pass `-f|--framework <TFM>`, such as `--framework net10.0`, so publish and DLL resolution use the same target.
 - **Project publish fails**: read the captured `dotnet publish` stdout/stderr, fix the build error, and rerun the same export command.
-- **Target app exits before listening**: inspect the recent target-app output in the error. The app failed during startup before the exporter could discover a base URL.
+- **Target app exits before listening**: inspect the captured target-app output in the error. The app failed during startup before the exporter could discover a base URL.
 - **Readiness timeout after a listening URL**: verify the app can serve requests at the emitted loopback URL and that startup work is not blocking the first response.
 - **Cancellation or interrupted export**: the CLI performs best-effort shutdown of the launched target app before returning.
 

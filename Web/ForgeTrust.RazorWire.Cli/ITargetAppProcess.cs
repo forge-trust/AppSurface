@@ -37,6 +37,16 @@ public interface ITargetAppProcess : IAsyncDisposable
     /// <summary>
     /// Gets a value indicating whether the process has exited.
     /// </summary>
+    /// <remarks>
+    /// This value reflects the wrapper lifecycle, not only operating-system
+    /// process liveness. It returns <see langword="true"/> before
+    /// <see cref="Start"/> is called, while completion is being observed, and
+    /// after disposal. It returns <see langword="false"/> only while the target
+    /// app is actively running. Callers that need to distinguish
+    /// not-started, running, completing, and disposed states should use the
+    /// surrounding lifecycle ordering instead of treating this as a simple
+    /// liveness probe.
+    /// </remarks>
     bool HasExited { get; }
 
     /// <summary>
@@ -206,44 +216,40 @@ internal sealed class TargetAppProcess : ITargetAppProcess
 
     public void Start()
     {
-        lock (_gate)
-        {
-            if (_state == TargetAppProcessState.Disposed)
-            {
-                throw new ObjectDisposedException(nameof(TargetAppProcess));
-            }
-
-            if (_state != TargetAppProcessState.NotStarted)
-            {
-                throw new InvalidOperationException("Target application process has already been started.");
-            }
-
-            _state = TargetAppProcessState.Running;
-        }
-
         if (_hooks?.StartOverride is { } startOverride)
         {
+            lock (_gate)
+            {
+                ThrowIfCannotStart();
+                _state = TargetAppProcessState.Running;
+            }
+
             startOverride(this);
             return;
         }
 
         CancellationTokenSource? cancellation = null;
+        CommandTask<CliCommandResult>? commandTask = null;
+        var launchAttempted = false;
         try
         {
-            cancellation = new CancellationTokenSource();
-            var commandTask = BuildCliWrapCommand().ExecuteAsync(cancellation.Token);
             lock (_gate)
             {
+                ThrowIfCannotStart();
+                cancellation = new CancellationTokenSource();
                 _processCancellation = cancellation;
+                launchAttempted = true;
+                commandTask = BuildCliWrapCommand().ExecuteAsync(cancellation.Token);
                 _commandTask = commandTask;
+                _state = TargetAppProcessState.Running;
             }
 
             _ = ObserveCompletionAsync(commandTask, cancellation.Token);
         }
-        catch (Exception ex) when (ex is CliWrapException or Win32Exception or InvalidOperationException)
+        catch (Exception ex) when (launchAttempted && IsStartupFailureException(ex))
         {
             cancellation?.Dispose();
-            MarkCompleting();
+            MarkCompletingAfterStartupFailure();
             RaiseErrorLineForProcessFailure(ex);
             RaiseExitedOnce();
         }
@@ -296,13 +302,13 @@ internal sealed class TargetAppProcess : ITargetAppProcess
         using var commandTaskToDispose = commandTask;
         using var hookProcessToDispose = hookProcess;
 
-        if (hookProcess is not null || _hooks is not null)
-        {
-            await DisposeHookProcessAsync(hookProcess, previousState == TargetAppProcessState.Running);
-        }
-        else if (commandTask is not null && previousState == TargetAppProcessState.Running)
+        if (commandTask is not null && previousState == TargetAppProcessState.Running)
         {
             await DisposeCliWrapProcessAsync(commandTask, cancellation);
+        }
+        else if (hookProcess is not null || _hooks is not null)
+        {
+            await DisposeHookProcessAsync(hookProcess, previousState == TargetAppProcessState.Running);
         }
     }
 
@@ -379,6 +385,17 @@ internal sealed class TargetAppProcess : ITargetAppProcess
             for (var index = 0; index < read; index++)
             {
                 var current = buffer[index];
+                if (current == '\r')
+                {
+                    EmitPendingLine(pending, lineReceived);
+                    if (index + 1 < read && buffer[index + 1] == '\n')
+                    {
+                        index++;
+                    }
+
+                    continue;
+                }
+
                 if (current == '\n')
                 {
                     EmitPendingLine(pending, lineReceived);
@@ -446,6 +463,13 @@ internal sealed class TargetAppProcess : ITargetAppProcess
         {
             RaiseErrorLineForProcessFailure(ex);
         }
+#pragma warning disable CA1031 // Fire-and-forget observation must turn unexpected task failures into diagnostics.
+        catch (Exception ex)
+        {
+            // ObserveCompletionAsync is intentionally fire-and-forget; convert unexpected failures into diagnostics.
+            RaiseErrorLineForProcessFailure(ex);
+        }
+#pragma warning restore CA1031
         finally
         {
             MarkCompleting();
@@ -589,6 +613,30 @@ internal sealed class TargetAppProcess : ITargetAppProcess
         }
     }
 
+    private void MarkCompletingAfterStartupFailure()
+    {
+        lock (_gate)
+        {
+            if (_state != TargetAppProcessState.Disposed)
+            {
+                _state = TargetAppProcessState.Completing;
+            }
+        }
+    }
+
+    private void ThrowIfCannotStart()
+    {
+        if (_state == TargetAppProcessState.Disposed)
+        {
+            throw new ObjectDisposedException(nameof(TargetAppProcess));
+        }
+
+        if (_state != TargetAppProcessState.NotStarted)
+        {
+            throw new InvalidOperationException("Target application process has already been started.");
+        }
+    }
+
     private void RaiseErrorLineForProcessExitCode(int exitCode)
     {
         RaiseErrorLineForTesting($"Target application process exited with code {exitCode} before export completed.");
@@ -623,6 +671,15 @@ internal sealed class TargetAppProcess : ITargetAppProcess
             or CliWrapException
             or Win32Exception
             or NotSupportedException;
+    }
+
+    private static bool IsStartupFailureException(Exception exception)
+    {
+        return exception is CliWrapException
+            or Win32Exception
+            or InvalidOperationException
+            or FileNotFoundException
+            or DirectoryNotFoundException;
     }
 
     private enum TargetAppProcessState

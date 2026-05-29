@@ -204,14 +204,86 @@ public class TargetAppProcessTests
     }
 
     [Fact]
+    public async Task DisposeAsync_Should_Prefer_CliWrap_Cleanup_When_HookProcess_Is_Injected()
+    {
+        using var project = TestConsoleProject.Create(
+            """
+            Console.WriteLine("ready");
+            await Task.Delay(TimeSpan.FromSeconds(30));
+            """);
+        var outputReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var exitedSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var process = new TargetAppProcess(
+            new ProcessLaunchSpec
+            {
+                FileName = "dotnet",
+                Arguments = ["run", "--project", project.ProjectPath],
+                WorkingDirectory = project.DirectoryPath
+            },
+            hooks: null,
+            process: new Process(),
+            started: false);
+        process.OutputLineReceived += line => outputReceived.TrySetResult(line);
+        process.Exited += () => exitedSignal.TrySetResult();
+        process.Start();
+
+        var startupSignal = await Task.WhenAny(outputReceived.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+        Assert.Same(outputReceived.Task, startupSignal);
+
+        await process.DisposeAsync();
+
+        var exitSignal = await Task.WhenAny(exitedSignal.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.Same(exitedSignal.Task, exitSignal);
+        Assert.True(process.HasExited);
+    }
+
+    [Fact]
+    public async Task Start_Should_Surface_NonZeroExitCode_After_Successful_Start()
+    {
+        using var project = TestConsoleProject.Create(
+            """
+            Console.WriteLine("ready");
+            Environment.Exit(3);
+            """);
+        var outputReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var errorReceived = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var exitedSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var process = new TargetAppProcess(new ProcessLaunchSpec
+        {
+            FileName = "dotnet",
+            Arguments = ["run", "--project", project.ProjectPath],
+            WorkingDirectory = project.DirectoryPath
+        });
+        process.OutputLineReceived += line => outputReceived.TrySetResult(line);
+        process.ErrorLineReceived += line => errorReceived.TrySetResult(line);
+        process.Exited += () => exitedSignal.TrySetResult();
+
+        process.Start();
+
+        var startupSignal = await Task.WhenAny(outputReceived.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+        Assert.Same(outputReceived.Task, startupSignal);
+        Assert.Equal("ready", await outputReceived.Task);
+
+        var exitSignal = await Task.WhenAny(exitedSignal.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        Assert.Same(exitedSignal.Task, exitSignal);
+        var errorSignal = await Task.WhenAny(errorReceived.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.Same(errorReceived.Task, errorSignal);
+
+        Assert.Contains("exited with code 3", await errorReceived.Task, StringComparison.OrdinalIgnoreCase);
+        Assert.True(process.HasExited);
+    }
+
+    [Fact]
     public async Task ReadProcessLinesAsync_Should_Handle_Line_Endings_And_Final_Unterminated_Line()
     {
         var lines = new List<string>();
-        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("alpha\r\nbeta\n   \nfinal"));
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("alpha\r\nbeta\nprogress\rfinal"));
 
         await TargetAppProcess.ReadProcessLinesAsync(stream, lines.Add, CancellationToken.None);
 
-        Assert.Equal(["alpha", "beta", "final"], lines);
+        Assert.Equal(["alpha", "beta", "progress", "final"], lines);
     }
 
     [Fact]
