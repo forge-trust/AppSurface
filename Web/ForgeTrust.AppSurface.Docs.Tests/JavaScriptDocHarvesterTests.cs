@@ -630,6 +630,163 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldUseConfiguredGroupRules_WhenDocletHasNoExplicitGroup()
+    {
+        await WriteAsync(
+            "src/browser/public-api.js",
+            """
+            /**
+             * Browser lifecycle event.
+             * @public
+             * @event browser:ready
+             * @target document
+             * @firesWhen the browser contracts are ready.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/**/*.js");
+        options.Harvest.JavaScript.GroupNameRules =
+        [
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = "Browser Contracts",
+                IncludeGlobs = ["src/browser/**/*.js"]
+            },
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = "Fallback Contracts",
+                IncludeGlobs = ["src/**/*.js"]
+            }
+        ];
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Path, "api/javascript/browser-contracts", StringComparison.Ordinal));
+        Assert.Equal("Browser Contracts JavaScript API", page.Title);
+        Assert.Equal(["API Reference", "JavaScript", "Browser Contracts"], page.Metadata?.Breadcrumbs);
+        var eventStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/browser-contracts#event-browser-ready",
+            StringComparison.Ordinal));
+        Assert.Equal("Browser Contracts", eventStub.Metadata?.Component);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldPreferExplicitTagsOverConfiguredGroupRules_AndUseFirstNonblankTag()
+    {
+        await WriteAsync(
+            "src/browser/razorwire.js",
+            """
+            /**
+             * RazorWire lifecycle event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:ready
+             * @target document
+             * @firesWhen RazorWire starts.
+             * @detail none
+             */
+            """);
+        await WriteAsync(
+            "src/browser/module.js",
+            """
+            /**
+             * Module lifecycle event.
+             * @public
+             * @namespace
+             * @module Module Contracts
+             * @event module:ready
+             * @target document
+             * @firesWhen the module starts.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/browser/**/*.js");
+        options.Harvest.JavaScript.GroupNameRules =
+        [
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = "Configured Browser",
+                IncludeGlobs = ["src/browser/**/*.js"]
+            }
+        ];
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => string.Equals(doc.Path, "api/javascript/razorwire", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => string.Equals(doc.Path, "api/javascript/module-contracts", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => string.Equals(doc.Path, "api/javascript/configured-browser", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldUsePathAwareFallbackRoute_WhenFileStemIsCurrentlyUnique()
+    {
+        await WriteAsync(
+            "src/widgets/public-api.js",
+            """
+            /**
+             * Widget lifecycle event.
+             * @public
+             * @event widget:ready
+             * @target document
+             * @firesWhen widgets are ready.
+             * @detail none
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/**/*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal));
+        Assert.Equal("api/javascript/widgets-public-api", page.Path);
+        Assert.Equal("public-api JavaScript API", page.Title);
+        Assert.Equal(["API Reference", "JavaScript", "public-api"], page.Metadata?.Breadcrumbs);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepPathFallbackGroupsDistinct_WhenFileStemsMatch()
+    {
+        await WriteAsync(
+            "src/widgets/public-api.js",
+            """
+            /**
+             * Widget lifecycle event.
+             * @public
+             * @event widget:ready
+             * @target document
+             * @firesWhen widgets are ready.
+             * @detail none
+             */
+            """);
+        await WriteAsync(
+            "src/forms/public-api.js",
+            """
+            /**
+             * Form lifecycle event.
+             * @public
+             * @event form:ready
+             * @target document
+             * @firesWhen forms are ready.
+             * @detail none
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/**/*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var groupPages = docs
+            .Where(doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(2, groupPages.Length);
+        Assert.Contains(groupPages, doc => string.Equals(doc.Path, "api/javascript/forms-public-api", StringComparison.Ordinal));
+        Assert.Contains(groupPages, doc => string.Equals(doc.Path, "api/javascript/widgets-public-api", StringComparison.Ordinal));
+        Assert.Contains(groupPages, doc => doc.Metadata?.Breadcrumbs?.SequenceEqual(["API Reference", "JavaScript", "forms/public-api"]) == true);
+        Assert.Contains(groupPages, doc => doc.Metadata?.Breadcrumbs?.SequenceEqual(["API Reference", "JavaScript", "widgets/public-api"]) == true);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldKeepDistinctGroupPages_WhenNamespaceSlugsCollide()
     {
         await WriteAsync(
@@ -1417,6 +1574,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal("JavaScript Event", document.PageTypeLabel);
         Assert.Equal("javascript", document.Language);
         Assert.Equal("JavaScript", document.LanguageLabel);
+        Assert.Equal(["API Reference", "JavaScript", "RazorWire"], document.Breadcrumbs);
         Assert.Contains("detail.statusCode", document.BodyText, StringComparison.Ordinal);
         Assert.Contains("razorwire:form:failure", document.BodyText, StringComparison.OrdinalIgnoreCase);
     }

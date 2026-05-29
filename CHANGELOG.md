@@ -33,6 +33,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs recommended aliases now canonicalize duplicate metadata to the matching exact-version route while keeping reader navigation, search, and assets rooted at the friendly alias.
 - AppSurface Docs export can now choose redirect materialization with `--redirects html|netlify`; the Netlify strategy writes a validated root `_redirects` file with exact `301!` alias rules instead of alias HTML files.
 - AppSurface Docs generated C# and JavaScript API documentation now carries source-language metadata, renders language chips, and exposes a searchable `Language` facet.
+- AppSurface Docs JavaScript API pages can now group public doclets into explicit API families with ordered source-path naming rules, namespace/module precedence, and path-aware fallback routes.
 - RazorWire browser runtime assets now have an authored TypeScript pipeline with focused typecheck, test, build, and freshness verification commands, plus a docs-only JavaScript contract manifest for public browser APIs.
 - AppSurface Docs cold requests now show a RazorWire-powered harvest observatory while the first source snapshot is being assembled, with background startup warmup, operator-safe progress, and local testing delays for deterministic QA.
 - RazorWire streams now support opt-in bounded replay, letting late subscribers receive the latest retained state snapshots before live stream events.

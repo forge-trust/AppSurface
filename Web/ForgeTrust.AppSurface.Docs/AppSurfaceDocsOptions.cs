@@ -1526,6 +1526,48 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
         ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
         ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+        ValidateJavaScriptGroupNameRules(options.GroupNameRules, $"{configurationPath}:GroupNameRules", failures);
+    }
+
+    private static void ValidateJavaScriptGroupNameRules(
+        IReadOnlyList<AppSurfaceDocsJavaScriptGroupNameRule>? rules,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (rules is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        for (var index = 0; index < rules.Count; index++)
+        {
+            var rulePath = $"{configurationPath}:{index}";
+            var rule = rules[index];
+            if (rule is null)
+            {
+                failures.Add($"{rulePath} must not be null.");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(rule.Name))
+            {
+                failures.Add($"{rulePath}:Name must not be blank.");
+            }
+
+            if (rule.IncludeGlobs is null)
+            {
+                failures.Add($"{rulePath}:IncludeGlobs must not be null.");
+                continue;
+            }
+
+            if (!rule.IncludeGlobs.Any(pattern => !string.IsNullOrWhiteSpace(pattern)))
+            {
+                failures.Add($"{rulePath}:IncludeGlobs must contain at least one repository-relative glob pattern.");
+            }
+
+            ValidateGlobPatterns(rule.IncludeGlobs, $"{rulePath}:IncludeGlobs", failures);
+        }
     }
 
     private static void ValidateGlobPatterns(

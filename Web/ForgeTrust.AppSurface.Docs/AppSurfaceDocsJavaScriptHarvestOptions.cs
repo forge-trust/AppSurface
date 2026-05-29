@@ -1,15 +1,16 @@
 namespace ForgeTrust.AppSurface.Docs;
 
 /// <summary>
-/// JavaScript public API harvest path policy, parser, and strict-health settings.
+/// JavaScript public API harvest path policy, parser, grouping, and strict-health settings.
 /// </summary>
 /// <remarks>
 /// JavaScript harvesting is enabled by default and scans policy-approved <c>.js</c> files for explicit
 /// <c>@public</c> browser-contract doclets. Unannotated JavaScript is ignored. Global
 /// <see cref="AppSurfaceDocsHarvestOptions.Paths"/> rules apply first, then these source-specific include, exclude, and
 /// default-exclusion settings refine the JavaScript candidate set. <see cref="IncludeGlobs"/> is an optional narrowing
-/// boundary, not an enable switch. Tags such as <c>@internal</c>, <c>@private</c>, and <c>@ignore</c> always exclude a
-/// doclet from the generated public API surface.
+/// boundary, not an enable switch. <see cref="GroupNameRules"/> names already-eligible JavaScript source trees but never
+/// includes files on its own. Tags such as <c>@internal</c>, <c>@private</c>, and <c>@ignore</c> always exclude a doclet
+/// from the generated public API surface.
 /// </remarks>
 public sealed class AppSurfaceDocsJavaScriptHarvestOptions
 {
@@ -55,6 +56,17 @@ public sealed class AppSurfaceDocsJavaScriptHarvestOptions
     public AppSurfaceDocsHarvestDefaultExclusionOptions DefaultExclusions { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets ordered JavaScript API group naming rules for policy-approved source paths.
+    /// </summary>
+    /// <remarks>
+    /// Rules are evaluated in order and the first matching rule supplies the JavaScript API family name only when a public
+    /// doclet does not provide a nonblank <c>@namespace</c> or <c>@module</c> tag. Rule globs use the same
+    /// repository-relative forward-slash syntax as <see cref="IncludeGlobs"/>. Naming rules do not include or exclude
+    /// source files; global and JavaScript harvest path policy still decides which files are parsed.
+    /// </remarks>
+    public AppSurfaceDocsJavaScriptGroupNameRule[] GroupNameRules { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets a value indicating whether supported doclets must include <c>@public</c>.
     /// </summary>
     /// <remarks>
@@ -97,4 +109,31 @@ public sealed class AppSurfaceDocsJavaScriptHarvestOptions
     /// AppSurface Docs authored browser assets with headroom.
     /// </remarks>
     public long MaxFileSizeBytes { get; set; } = DefaultMaxFileSizeBytes;
+}
+
+/// <summary>
+/// Names JavaScript API groups for already-eligible source paths that do not declare <c>@namespace</c> or
+/// <c>@module</c>.
+/// </summary>
+/// <remarks>
+/// AppSurface Docs evaluates rules in configured order and uses the first rule whose <see cref="IncludeGlobs"/> match
+/// the repository-relative JavaScript source path. Prefer explicit doclet tags when the source itself owns a stable API
+/// family name; use rules to keep package-owned contract manifests readable without repeating the same tag in every
+/// doclet.
+/// </remarks>
+public sealed class AppSurfaceDocsJavaScriptGroupNameRule
+{
+    /// <summary>
+    /// Gets or sets the reader-facing JavaScript API family name to use for matching source paths.
+    /// </summary>
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// Gets or sets repository-relative JavaScript source globs covered by this naming rule.
+    /// </summary>
+    /// <remarks>
+    /// Patterns are matched case-insensitively with the same safe glob syntax as JavaScript harvest include globs. The
+    /// rule only names files that the normal harvest path policy already accepted.
+    /// </remarks>
+    public string[] IncludeGlobs { get; set; } = [];
 }
