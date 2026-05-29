@@ -189,6 +189,8 @@ public sealed class ReleaseToolTests : IDisposable
 
         var changelog = await ReadFileAsync("CHANGELOG.md");
         Assert.Contains("## 0.1.0-preview.1 - 2026-05-25", changelog, StringComparison.Ordinal);
+        Assert.Contains("- Release manifest: `releases/v0.1.0-preview.1.release.json`", changelog, StringComparison.Ordinal);
+        Assert.DoesNotContain("[v0.1.0-preview.1.release.json]", changelog, StringComparison.Ordinal);
         Assert.DoesNotContain("## No tagged releases yet", changelog, StringComparison.Ordinal);
     }
 
@@ -517,6 +519,7 @@ public sealed class ReleaseToolTests : IDisposable
             new DateOnly(2026, 5, 25),
             "releases/v0.1.0-preview.1.md");
         Assert.Contains("## 0.1.0-preview.1 - 2026-05-25", changelog, StringComparison.Ordinal);
+        Assert.Contains("- Release manifest: `releases/v0.1.0-preview.1.release.json`", changelog, StringComparison.Ordinal);
         Assert.DoesNotContain("## No tagged releases yet", changelog, StringComparison.Ordinal);
 
         var packageIndex = PackageIndexEditor.UpdatePublicPublishedReleaseNotes(
