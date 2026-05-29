@@ -23,5 +23,6 @@ public sealed class AppSurfaceDocsStandaloneConfigurationTests
             .ToArray();
 
         Assert.Contains("CHANGELOG.md", includeGlobs);
+        Assert.Contains("Web/ForgeTrust.RazorWire/assets/contracts/*.js", includeGlobs);
     }
 }
