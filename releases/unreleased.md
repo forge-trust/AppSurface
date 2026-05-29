@@ -24,6 +24,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 ### Contribution contract
 
+- Release preparation now leaves `CHANGELOG.md` as a compact ledger, moves detailed release narrative into tagged release notes, and makes generated release PR reports stop at a manual maintainer review gate before merge, tag, or publish.
 - Pull request titles are now expected to follow Conventional Commits so the merge history is machine-readable for future automation.
 - Pull requests are expected to update this page unless maintainers explicitly mark the change as outside the public release story.
 - Test and integration process helpers now use CliWrap for child-process execution, keeping stdout and stderr diagnostics available while aligning test infrastructure with the preferred process-launch abstraction.

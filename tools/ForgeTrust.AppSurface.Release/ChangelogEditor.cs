@@ -50,7 +50,7 @@ internal static class ChangelogEditor
         var suffix = string.Empty;
         if (nextHeading >= 0)
         {
-            var headingStart = changelog[nextHeading] == '\n' ? nextHeading + 1 : nextHeading;
+            var headingStart = nextHeading + 1;
             if (changelog.AsSpan(headingStart).StartsWith(firstReleasePlaceholder, StringComparison.Ordinal))
             {
                 var followingHeading = changelog.IndexOf("\n## ", headingStart + firstReleasePlaceholder.Length, StringComparison.Ordinal);
