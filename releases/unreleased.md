@@ -29,6 +29,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 ### Web host development defaults
 
 - Tailwind build execution now uses a compiled MSBuild task with stable `ASTW###` diagnostics, structured CLI arguments, bounded output capture, cancellation support, and a packed-package smoke test that proves task and dependency loading from a real nupkg consumer.
+- AppSurface preview startup now treats `--port` as a loopback-only shortcut that binds `http://localhost:<port>`. Add `--all-hosts` with `--port` only when LAN, container, or other all-interface preview access is intentional; that opt-in preserves the previous `http://localhost:<port>;http://*:<port>` wildcard shape.
 
 ### Dependency maintenance
 
@@ -40,3 +41,4 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 - Tailwind package consumers do not need source changes for the compiled MSBuild task. Maintainers should keep the packed-package smoke path green when changing task dependencies or diagnostics.
 - AppSurface Docs JavaScript harvest consumers can keep explicit `@namespace` and `@module` tags when they need a stable API family name; otherwise the new fallback grouping may split same-stem files by path instead of merging them.
 - Operators may see more conservative redaction in config audit reports as the secret-fragment list expands. Treat that as the intended default, and use explicit sensitivity options only to document package-owned keys.
+- AppSurface preview users who depended on `--port` listening beyond loopback should add `--all-hosts` or pass explicit `--urls`. The wildcard host can expose the preview process beyond the local machine, so keep the default localhost binding for routine docs and web previews.
