@@ -17,10 +17,11 @@ Use this checklist when turning the living unreleased story into a tagged AppSur
 - confirm the generated package path updates described in the [package registry](../packages/README.md) point every `classification: public` plus `publish_decision: publish` package at the tagged note
 - keep the trust bar accurate for the release state and archive location
 - link the tagged note from [`CHANGELOG.md`](../CHANGELOG.md)
+- open the release preparation pull request and stop for manual maintainer review; automation and coding agents must not merge release PRs or create release tags without an explicit post-review instruction
 
 ## After the tag ships
 
-- create the annotated tag outside the release tool; v1 never creates tags automatically
+- create the annotated tag from the maintainer-reviewed merge commit outside the release tool; v1 never creates tags automatically
 - run `./eng/release publish --version x.y.z --tag vx.y.z --dry-run` before the publish workflow creates the GitHub Release
 - keep stable releases blocked until a protected stable NuGet publish workflow exists and the release cockpit verifies it; `v0.1.0` must not become a GitHub-only release
 - verify the `/docs` release hub resolves to the new tagged note and current policy pages

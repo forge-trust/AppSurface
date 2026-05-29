@@ -126,6 +126,7 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Equal(0, result.ExitCode);
         Assert.False(File.Exists(Path.Join(_repositoryRoot, "releases", "v0.1.0-preview.1.md")));
+        Assert.Contains("## Manual review gate", result.Stdout, StringComparison.Ordinal);
         Assert.Contains("## Dry-run plan", result.Stdout, StringComparison.Ordinal);
         Assert.Contains("releases/v0.1.0-preview.1.release.json", result.Stdout, StringComparison.Ordinal);
     }
@@ -151,7 +152,9 @@ public sealed class ReleaseToolTests : IDisposable
 
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(reportPath));
-        Assert.Contains("# Release readiness report", await File.ReadAllTextAsync(reportPath), StringComparison.Ordinal);
+        var report = await File.ReadAllTextAsync(reportPath);
+        Assert.Contains("# Release readiness report", report, StringComparison.Ordinal);
+        Assert.Contains("## Manual review gate", report, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -189,7 +192,9 @@ public sealed class ReleaseToolTests : IDisposable
 
         var changelog = await ReadFileAsync("CHANGELOG.md");
         Assert.Contains("## 0.1.0-preview.1 - 2026-05-25", changelog, StringComparison.Ordinal);
+        Assert.Contains("- Narrative release note: [Upcoming release note](./releases/unreleased.md)", changelog, StringComparison.Ordinal);
         Assert.Contains("- Release manifest: `releases/v0.1.0-preview.1.release.json`", changelog, StringComparison.Ordinal);
+        Assert.DoesNotContain("- Current work.", changelog, StringComparison.Ordinal);
         Assert.DoesNotContain("[v0.1.0-preview.1.release.json]", changelog, StringComparison.Ordinal);
         Assert.DoesNotContain("## No tagged releases yet", changelog, StringComparison.Ordinal);
     }
@@ -538,6 +543,7 @@ public sealed class ReleaseToolTests : IDisposable
             version,
             new DateOnly(2026, 5, 25),
             "releases/v0.1.0-preview.1.md");
+        Assert.Contains("- Narrative release note: [Upcoming release note](./releases/unreleased.md)", appendedChangelog, StringComparison.Ordinal);
         Assert.Contains("## 0.1.0-preview.1 - 2026-05-25", appendedChangelog, StringComparison.Ordinal);
 
         var terminalUnreleasedChangelog = ChangelogEditor.RollForward(
@@ -545,7 +551,8 @@ public sealed class ReleaseToolTests : IDisposable
             version,
             new DateOnly(2026, 5, 25),
             "releases/v0.1.0-preview.1.md");
-        Assert.Contains("- Current work.", terminalUnreleasedChangelog, StringComparison.Ordinal);
+        Assert.DoesNotContain("- Current work.", terminalUnreleasedChangelog, StringComparison.Ordinal);
+        Assert.Contains("- Narrative release note: [Upcoming release note](./releases/unreleased.md)", terminalUnreleasedChangelog, StringComparison.Ordinal);
         Assert.Contains("## 0.1.0-preview.1 - 2026-05-25", terminalUnreleasedChangelog, StringComparison.Ordinal);
 
         var multiReleaseChangelog = ChangelogEditor.RollForward(
@@ -553,6 +560,7 @@ public sealed class ReleaseToolTests : IDisposable
             version,
             new DateOnly(2026, 5, 25),
             "releases/v0.1.0-preview.1.md");
+        Assert.Contains("- Narrative release note: [Upcoming release note](./releases/unreleased.md)", multiReleaseChangelog, StringComparison.Ordinal);
         Assert.Matches("## Unreleased[\\s\\S]*## 0\\.1\\.0-preview\\.1 - 2026-05-25[\\s\\S]*## 0\\.0\\.1 - 2026-01-01", multiReleaseChangelog);
 
         var packageIndexWithoutOrder = PackageIndexEditor.UpdatePublicPublishedReleaseNotes(

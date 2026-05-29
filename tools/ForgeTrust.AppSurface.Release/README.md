@@ -28,13 +28,21 @@ For prereleases, `check` warns when the version cannot trigger protected NuGet p
 - `releases/v{version}.md`
 - `releases/v{version}.md.yml`
 - `releases/v{version}.release.json`
-- `CHANGELOG.md` rollover entries
+- `CHANGELOG.md` compact rollover entries
 - `packages/package-index.yml` release note paths for every `classification: public` plus `publish_decision: publish` package
 - reset `releases/unreleased.md` and `releases/unreleased.md.yml`
 
-`--dry-run` prints the readiness report and planned file list without changing repository files. `--date` is parsed as invariant `YYYY-MM-DD`; malformed sidecar YAML fails with the standard diagnostic envelope instead of a raw parser exception.
+The changelog is a compact ledger, not the detailed release narrative. During preparation, the detailed `CHANGELOG.md` `Unreleased`
+body is reset to the standard pointer list while the full story moves from `releases/unreleased.md` into the generated tagged release
+note.
+
+`--dry-run` prints the readiness report, manual review gate, and planned file list without changing repository files. `--date` is parsed as invariant `YYYY-MM-DD`; malformed sidecar YAML fails with the standard diagnostic envelope instead of a raw parser exception.
 
 Non-dry-run preparation writes files sequentially. If a local write fails partway through, inspect `git status` and remove or revert the partial generated files before retrying; otherwise the create-only target checks may report `release-target-exists` for the partially written versioned artifacts.
+
+Release preparation ends at a pull request. Maintainers must manually review and merge release PRs before any annotated tag is created
+or any publish workflow is started; automation and coding agents should stop at the ready-for-review PR unless a maintainer gives an
+explicit post-review instruction to continue.
 
 ## Publish
 
