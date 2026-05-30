@@ -352,6 +352,18 @@ public sealed class AppSurfaceAuthContractTests
         Assert.Equal("oidc", prompt.Metadata["provider"]);
     }
 
+    [Theory]
+    [InlineData("relative")]
+    [InlineData("//example.com")]
+    [InlineData("/\\example")]
+    [InlineData("/some\\path")]
+    [InlineData("/line\rbreak")]
+    [InlineData("/line\nbreak")]
+    public void LogoutPrompt_WhenTargetIsUnsafe_Throws(string targetPath)
+    {
+        Assert.Throws<ArgumentException>(() => new AppSurfaceLogoutPrompt(targetPath));
+    }
+
     [Fact]
     public void AuthAssembly_DoesNotReferenceAspNetCore()
     {
