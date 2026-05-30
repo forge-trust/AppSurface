@@ -48,7 +48,7 @@ public class CSharpDocHarvester : IDocHarvester
     /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
     /// <returns>A collection of DocNode objects; each contains a title, a relative file path including a fragment anchor, and the extracted HTML documentation.</returns>
     /// <remarks>
-    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", "Tests", and "examples") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included.
+    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", "Tests", and "examples") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included. File and directory reparse points are skipped so symlinks and junctions cannot point the built-in harvester outside <paramref name="rootPath"/>.
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(
         string rootPath,

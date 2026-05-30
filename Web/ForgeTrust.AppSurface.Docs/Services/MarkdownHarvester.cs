@@ -151,7 +151,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// <param name="cancellationToken">An optional token to observe for cancellation requests.</param>
     /// <returns>A collection of DocNode objects representing each processed Markdown source file, including the display title, path relative to <paramref name="rootPath"/>, generated HTML, metadata, and <see cref="DocNode.Outline"/> entries when outline headings are available.</returns>
     /// <remarks>
-    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", and "Tests") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included. The root <c>LICENSE</c> file is also included when present so repository-relative license links can resolve in static exports. If a file's name is "README" (case-insensitive), its title is set to the parent directory name or "Home" for a repository root README. The Markdown body is parsed once with <c>Markdown.Parse(markdownBody, _pipeline)</c>; HTML is rendered from that AST and <see cref="DocNode.Outline"/> is populated from the same AST with <see cref="ExtractOutline"/>, then filtered through the resolved Markdown outline policy so callers can rely on display outline data being present when eligible headings are available. Files that fail to process are skipped and an error is logged.
+    /// Skips files in excluded directories (for example "node_modules", "bin", "obj", and "Tests") and hidden dot-prefixed directories unless explicitly allowlisted. Dot-prefixed files are included. File and directory reparse points are skipped so symlinks and junctions cannot point the built-in harvester outside <paramref name="rootPath"/>. The root <c>LICENSE</c> file is also included when present and not a reparse point so repository-relative license links can resolve in static exports. If a file's name is "README" (case-insensitive), its title is set to the parent directory name or "Home" for a repository root README. The Markdown body is parsed once with <c>Markdown.Parse(markdownBody, _pipeline)</c>; HTML is rendered from that AST and <see cref="DocNode.Outline"/> is populated from the same AST with <see cref="ExtractOutline"/>, then filtered through the resolved Markdown outline policy so callers can rely on display outline data being present when eligible headings are available. Files that fail to process are skipped and an error is logged.
     /// </remarks>
     public async Task<IReadOnlyList<DocNode>> HarvestAsync(string rootPath, CancellationToken cancellationToken = default)
     {
@@ -262,7 +262,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         }
 
         var rootLicensePath = Path.Combine(rootPath, "LICENSE");
-        if (File.Exists(rootLicensePath))
+        if (AppSurfaceDocsHarvestFileSystem.IsNonReparsePointFile(rootLicensePath))
         {
             yield return rootLicensePath;
         }
@@ -290,9 +290,10 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     /// <returns>The parsed sidecar metadata, or <c>null</c> when no valid sidecar applies.</returns>
     /// <remarks>
     /// AppSurface Docs supports paired metadata files named <c>{file}.yml</c> and <c>{file}.yaml</c> such as
-    /// <c>README.md.yml</c>. When both extensions exist for the same Markdown file, AppSurface Docs logs a warning and ignores
-    /// both sidecars until the ambiguity is removed. Inline front matter remains the primary metadata source and overrides
-    /// any overlapping sidecar fields.
+    /// <c>README.md.yml</c>. Reparse-point sidecars are ignored so metadata cannot be imported through a symlink or
+    /// junction outside the harvest root. When both non-reparse extensions exist for the same Markdown file, AppSurface
+    /// Docs logs a warning and ignores both sidecars until the ambiguity is removed. Inline front matter remains the
+    /// primary metadata source and overrides any overlapping sidecar fields.
     /// </remarks>
     internal async Task<DocMetadata?> ReadMetadataSidecarAsync(
         string markdownFilePath,
@@ -305,7 +306,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 
         var existingSidecars = SidecarExtensions
             .Select(extension => markdownFilePath + extension)
-            .Where(File.Exists)
+            .Where(AppSurfaceDocsHarvestFileSystem.IsNonReparsePointFile)
             .ToArray();
 
         if (existingSidecars.Length == 0)

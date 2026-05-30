@@ -332,8 +332,9 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy : IHarvestPathPolicy
     /// Enumerates candidate files under <paramref name="rootPath"/> while pruning policy-excluded subtrees.
     /// </summary>
     /// <remarks>
-    /// The <paramref name="searchPattern"/> is passed to <see cref="Directory.EnumerateFiles(string, string, SearchOption)"/>
-    /// for each visited directory. Cancellation is observed between directory visits.
+    /// The <paramref name="searchPattern"/> is applied to each visited directory. File and directory reparse points are
+    /// skipped before they can be harvested or traversed, so symlinks and junctions cannot point built-in harvesters
+    /// outside the selected repository root. Cancellation is observed between directory visits.
     /// </remarks>
     public IEnumerable<string> EnumerateCandidateFiles(
         string rootPath,
@@ -344,30 +345,11 @@ internal sealed class AppSurfaceDocsHarvestPathPolicy : IHarvestPathPolicy
         ArgumentNullException.ThrowIfNull(rootPath);
         ArgumentNullException.ThrowIfNull(searchPattern);
 
-        var pendingDirectories = new Stack<string>();
-        pendingDirectories.Push(rootPath);
-
-        while (pendingDirectories.Count > 0)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var currentDirectory = pendingDirectories.Pop();
-            foreach (var file in Directory.EnumerateFiles(currentDirectory, searchPattern, SearchOption.TopDirectoryOnly))
-            {
-                yield return file;
-            }
-
-            foreach (var directory in Directory.EnumerateDirectories(currentDirectory))
-            {
-                var relativeDirectory = Path.GetRelativePath(rootPath, directory).Replace('\\', '/');
-                if (ShouldPruneDirectory(relativeDirectory, sourceKind))
-                {
-                    continue;
-                }
-
-                pendingDirectories.Push(directory);
-            }
-        }
+        return AppSurfaceDocsHarvestFileSystem.EnumerateCandidateFiles(
+            rootPath,
+            searchPattern,
+            relativeDirectory => ShouldPruneDirectory(relativeDirectory, sourceKind),
+            cancellationToken);
     }
 
     /// <summary>

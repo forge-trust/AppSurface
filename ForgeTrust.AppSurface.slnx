@@ -38,6 +38,7 @@
     <Project Path="examples/config-validation/ConfigValidationExample.csproj" />
     <Project Path="examples/console-app/ConsoleAppExample.csproj" />
     <Project Path="examples/web-app/WebAppExample.csproj" />
+    <Project Path="examples/web-error-pages/WebErrorPagesExample.csproj" />
   </Folder>
   <Folder Name="/Examples/razorwire-mvc/">
     <Project Path="examples/razorwire-mvc/RazorWireWebExample.csproj" />

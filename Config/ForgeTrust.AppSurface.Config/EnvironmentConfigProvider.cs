@@ -1,4 +1,5 @@
 ﻿using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
@@ -190,6 +191,7 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
     {
         var diagnostics = new List<ConfigAuditDiagnostic>();
         var sources = new List<ConfigAuditSourceRecord>();
+        var facts = new List<ConfigPatchProvenanceFact>();
         if (!IsPatchableComplexType(valueType) && currentValue == null)
         {
             return new ConfigPatchDiagnosticResult(false, null, sources, diagnostics);
@@ -231,11 +233,16 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
             envPrefix,
             hierarchicalKey,
             key,
+            currentValue,
             visited,
             sources,
+            facts,
             diagnostics);
 
-        return new ConfigPatchDiagnosticResult(patched, patched ? target : null, sources, diagnostics);
+        return new ConfigPatchDiagnosticResult(patched, patched ? target : null, sources, diagnostics)
+        {
+            Facts = facts
+        };
     }
 
     /// <summary>
@@ -557,7 +564,7 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
                 }
 
                 if (property.GetMethod != null
-                    && TryPatchExistingCollection(property.GetValue(target), propertyValue))
+                    && TryPatchExistingCollection(property.GetValue(target), propertyValue, out _))
                 {
                     patched = true;
                     continue;
@@ -723,8 +730,10 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         string envPrefix,
         string hierarchicalKey,
         string configPath,
+        object? providerEvidenceValue,
         HashSet<object> visited,
         List<ConfigAuditSourceRecord> sources,
+        List<ConfigPatchProvenanceFact> facts,
         List<ConfigAuditDiagnostic> diagnostics)
     {
         if (!visited.Add(target))
@@ -742,10 +751,20 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
 
             var childKey = CombineHierarchicalKey(hierarchicalKey, property.Name);
             var childPath = CombineConfigPath(configPath, property.Name);
+            var priorValue = property.GetMethod == null ? null : property.GetValue(target);
+            var evidencePriorValue = providerEvidenceValue != null && property.GetMethod != null
+                ? property.GetValue(providerEvidenceValue)
+                : null;
             if (TryReadMemberValueDiagnostic(property.PropertyType, envPrefix, childKey, childPath, diagnostics, out var propertyValue, out var propertySources))
             {
                 if (HasPublicSetter(property))
                 {
+                    AddCollectionElementFacts(
+                        facts,
+                        propertySources,
+                        ConfigPatchProvenanceAction.ReplacedCollection,
+                        evidencePriorValue,
+                        providerEvidenceValue != null ? null : 0);
                     property.SetValue(target, propertyValue);
                     sources.AddRange(propertySources);
                     patched = true;
@@ -753,8 +772,14 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
                 }
 
                 if (property.GetMethod != null
-                    && TryPatchExistingCollection(property.GetValue(target), propertyValue))
+                    && TryPatchExistingCollection(priorValue, propertyValue, out var priorCount))
                 {
+                    AddCollectionElementFacts(
+                        facts,
+                        propertySources,
+                        ConfigPatchProvenanceAction.PatchedExistingCollection,
+                        evidencePriorValue,
+                        providerEvidenceValue != null ? null : 0);
                     sources.AddRange(propertySources);
                     patched = true;
                     continue;
@@ -768,7 +793,7 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
                 continue;
             }
 
-            object? child = property.GetMethod == null ? null : property.GetValue(target);
+            object? child = priorValue;
             if (child == null)
             {
                 if (!HasPublicSetter(property)
@@ -779,7 +804,17 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
             }
 
             var childToPatch = child!;
-            if (TryPatchObjectDiagnostic(childToPatch, childToPatch.GetType(), envPrefix, childKey, childPath, visited, sources, diagnostics))
+            if (TryPatchObjectDiagnostic(
+                childToPatch,
+                childToPatch.GetType(),
+                envPrefix,
+                childKey,
+                childPath,
+                evidencePriorValue,
+                visited,
+                sources,
+                facts,
+                diagnostics))
             {
                 if (HasPublicSetter(property))
                 {
@@ -799,8 +834,16 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
 
             var childKey = CombineHierarchicalKey(hierarchicalKey, field.Name);
             var childPath = CombineConfigPath(configPath, field.Name);
+            var priorValue = field.GetValue(target);
+            var evidencePriorValue = providerEvidenceValue == null ? null : field.GetValue(providerEvidenceValue);
             if (TryReadMemberValueDiagnostic(field.FieldType, envPrefix, childKey, childPath, diagnostics, out var fieldValue, out var fieldSources))
             {
+                AddCollectionElementFacts(
+                    facts,
+                    fieldSources,
+                    ConfigPatchProvenanceAction.ReplacedCollection,
+                    evidencePriorValue,
+                    providerEvidenceValue != null ? null : 0);
                 field.SetValue(target, fieldValue);
                 sources.AddRange(fieldSources);
                 patched = true;
@@ -812,13 +855,23 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
                 continue;
             }
 
-            var child = field.GetValue(target);
+            var child = priorValue;
             if (child == null && !TryCreateInstance(field.FieldType, out child))
             {
                 continue;
             }
 
-            if (TryPatchObjectDiagnostic(child!, child!.GetType(), envPrefix, childKey, childPath, visited, sources, diagnostics))
+            if (TryPatchObjectDiagnostic(
+                child!,
+                child!.GetType(),
+                envPrefix,
+                childKey,
+                childPath,
+                evidencePriorValue,
+                visited,
+                sources,
+                facts,
+                diagnostics))
             {
                 field.SetValue(target, child);
                 patched = true;
@@ -829,8 +882,78 @@ internal class EnvironmentConfigProvider : IEnvironmentConfigProvider, IConfigVa
         return patched;
     }
 
-    private static bool TryPatchExistingCollection(object? targetCollection, object? replacement)
+    private static void AddCollectionElementFacts(
+        List<ConfigPatchProvenanceFact> facts,
+        IReadOnlyList<ConfigAuditSourceRecord> sources,
+        ConfigPatchProvenanceAction action,
+        object? priorValue,
+        int? priorCount = null)
     {
+        priorCount ??= TryGetCollectionCount(priorValue, out var count) ? count : null;
+        foreach (var source in sources)
+        {
+            if (source.ConfigPath == null || !IsIndexedElementSource(source.ConfigPath))
+            {
+                continue;
+            }
+
+            facts.Add(new ConfigPatchProvenanceFact(
+                source.ConfigPath,
+                source,
+                action,
+                priorCount == null
+                    ? ConfigAuditPriorPresence.Unknown
+                    : GetSourceIndex(source.ConfigPath) < priorCount.Value
+                        ? ConfigAuditPriorPresence.Present
+                        : ConfigAuditPriorPresence.Missing));
+        }
+    }
+
+    private static bool IsIndexedElementSource(string configPath) =>
+        GetSourceIndex(configPath) >= 0;
+
+    private static int GetSourceIndex(string configPath)
+    {
+        var separator = configPath.LastIndexOf('.');
+        return separator >= 0
+            && separator < configPath.Length - 1
+            && int.TryParse(configPath[(separator + 1)..], out var index)
+                ? index
+                : -1;
+    }
+
+    [ExcludeFromCodeCoverage(Justification = "Defensive collection-shape helper; patch diagnostics tests cover supported collection counts.")]
+    private static bool TryGetCollectionCount(object? value, out int count)
+    {
+        count = 0;
+        if (value is Array array)
+        {
+            count = array.Length;
+            return true;
+        }
+
+        if (value is ICollection collection)
+        {
+            count = collection.Count;
+            return true;
+        }
+
+        var interfaceType = value?.GetType()
+            .GetInterfaces()
+            .FirstOrDefault(type => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>));
+        var countProperty = interfaceType?.GetProperty(nameof(IReadOnlyCollection<object>.Count));
+        if (countProperty == null)
+        {
+            return false;
+        }
+
+        count = (int)(countProperty.GetValue(value) ?? 0);
+        return true;
+    }
+
+    private static bool TryPatchExistingCollection(object? targetCollection, object? replacement, out int? priorCount)
+    {
+        priorCount = TryGetCollectionCount(targetCollection, out var count) ? count : null;
         if (targetCollection is not IList targetList
             || replacement is not IEnumerable replacementValues
             || targetList.IsReadOnly

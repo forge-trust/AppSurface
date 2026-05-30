@@ -61,7 +61,7 @@ This approach aims to:
 
 ### [Auth](./Auth/ForgeTrust.AppSurface.Auth/README.md)
 
-- [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Boundary-preview composition package with `AppSurfaceAuthModule`, `AppSurfaceAuthOptions`, and no runtime request or identity-provider behavior.
+- [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 
 ### [Console](./Console/README.md)
 
@@ -113,6 +113,14 @@ Hello World from the root!
 ```
 
 That example is the smallest concrete path through `ForgeTrust.AppSurface.Web`: a root module, one mapped endpoint, and the AppSurface startup pipeline doing the hosting work.
+
+To verify the browser/API error-page contract instead, run the focused proof:
+
+```bash
+bash examples/web-error-pages/verify.sh
+```
+
+That proof starts a local production-mode web app, checks conventional browser `401`, `403`, `404`, and `500` pages, and verifies API requests do not receive surprise browser HTML.
 
 If you are evaluating packages from your own app project rather than running this repo, start with the generated package chooser in [packages/README.md](./packages/README.md). Use the package matrix to pick the module your app actually needs, then run the matching install command from your app project, for example:
 
@@ -184,6 +192,9 @@ how to use this project.
   descriptors.
 - [Web app example](examples/web-app/README.md) – shows a minimal ASP.NET Core app that
   composes middleware and endpoints from modules.
+- [Web error-page proof](examples/web-error-pages/README.md) – runs a one-command verifier
+  for AppSurface Web browser status pages, production exception pages, and API-friendly
+  non-HTML behavior.
 - [Config validation example](examples/config-validation/README.md) – shows scalar
   validation on a strongly typed config wrapper and the startup failure shape.
 
