@@ -1148,12 +1148,82 @@ public class AppSurfaceDocsWebModuleTests
             Assert.Single(providers);
             Assert.Equal("/docs/v/1.2.3", mounts[0].MountRootPath);
             Assert.Equal("/docs/v/1.2.3", mounts[0].CanonicalRootPath);
+            Assert.Equal(Path.TrimEndingDirectorySeparator(Path.GetFullPath(exactTreePath)), mounts[0].ExactTreeRootPath);
             Assert.Equal("/docs", mounts[1].MountRootPath);
             Assert.Equal("/docs/v/1.2.3", mounts[1].CanonicalRootPath);
+            Assert.Equal(Path.TrimEndingDirectorySeparator(Path.GetFullPath(exactTreePath)), mounts[1].ExactTreeRootPath);
             Assert.Same(mounts[0].FileProvider, mounts[1].FileProvider);
             Assert.NotNull(mounts[0].FrozenRouteManifest);
             Assert.NotNull(mounts[1].FrozenRouteManifest);
             Assert.Same(mounts[0].FrozenRouteManifest, mounts[1].FrozenRouteManifest);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void BuildPublishedTreeMounts_ShouldNotReuseProvider_ForCaseNeighborTreesOnCaseSensitivePlatforms()
+    {
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "appsurfacedocs-web-module-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            var firstTreePath = Path.Combine(tempDirectory, "Release");
+            var secondTreePath = Path.Combine(tempDirectory, "release");
+            Directory.CreateDirectory(firstTreePath);
+            if (Directory.Exists(secondTreePath))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(secondTreePath);
+            var firstVersion = new AppSurfaceDocsResolvedVersion(
+                Version: "1.0.0",
+                Label: "1.0.0",
+                Summary: null,
+                ExactTreePath: firstTreePath,
+                ExactRootUrl: "/docs/v/1.0.0",
+                SupportState: AppSurfaceDocsVersionSupportState.Current,
+                Visibility: AppSurfaceDocsVersionVisibility.Public,
+                AdvisoryState: AppSurfaceDocsVersionAdvisoryState.None,
+                IsAvailable: true,
+                AvailabilityIssue: null);
+            var secondVersion = firstVersion with
+            {
+                Version = "1.0.1",
+                Label = "1.0.1",
+                ExactTreePath = secondTreePath,
+                ExactRootUrl = "/docs/v/1.0.1"
+            };
+            var catalog = new AppSurfaceDocsResolvedVersionCatalog(
+                AppSurfaceDocsResolvedVersionCatalogStatus.Resolved,
+                CatalogPath: Path.Combine(tempDirectory, "catalog.json"),
+                Versions: [firstVersion, secondVersion],
+                RecommendedVersion: null);
+            var docsUrlBuilder = new DocsUrlBuilder(
+                new AppSurfaceDocsOptions
+                {
+                    Versioning = new AppSurfaceDocsVersioningOptions
+                    {
+                        Enabled = true,
+                        CatalogPath = "catalog.json"
+                    }
+                });
+
+            var (mounts, providers) = AppSurfaceDocsWebModule.BuildPublishedTreeMounts(catalog, docsUrlBuilder);
+
+            Assert.Equal(2, mounts.Count);
+            Assert.Equal(2, providers.Count);
+            Assert.NotSame(mounts[0].FileProvider, mounts[1].FileProvider);
         }
         finally
         {

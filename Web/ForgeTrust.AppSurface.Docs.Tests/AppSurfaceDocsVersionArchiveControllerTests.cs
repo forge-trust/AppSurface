@@ -38,7 +38,7 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "1.0.0",
-                        ExactTreePath = versionTree,
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, versionTree),
                         SupportState = AppSurfaceDocsVersionSupportState.Current
                     }
                 ]
@@ -72,7 +72,7 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "2.0.0",
-                        ExactTreePath = brokenTree,
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, brokenTree),
                         SupportState = AppSurfaceDocsVersionSupportState.Current
                     }
                 ]
@@ -106,7 +106,7 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "2.0.0",
-                        ExactTreePath = brokenTree,
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, brokenTree),
                         SupportState = AppSurfaceDocsVersionSupportState.Current
                     }
                 ]
@@ -123,6 +123,33 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
     }
 
     [Fact]
+    public void Versions_ShouldSurfaceCatalogLevelAvailabilityMessage_WhenTrustedReleaseRootIsMissing()
+    {
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = "1.2.3"
+                    }
+                ]
+            });
+        var controller = CreateController(catalogPath, trustedReleaseRootPath: "missing-release-store");
+
+        var result = controller.Versions();
+
+        var view = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<AppSurfaceDocsVersionArchiveViewModel>(view.Model);
+        Assert.Contains("Trusted release root", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_tempDirectory, model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(model.Versions);
+    }
+
+
+    [Fact]
     public void Versions_ShouldKeepArchiveHrefsAppRelative_ForViewPathBaseHandling()
     {
         var versionTree = CreateExactTree("2.1.0");
@@ -134,7 +161,7 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "2.1.0",
-                        ExactTreePath = versionTree,
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, versionTree),
                         SupportState = AppSurfaceDocsVersionSupportState.Current
                     }
                 ]
@@ -187,13 +214,13 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "1.10.0",
-                        ExactTreePath = firstTree,
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, firstTree),
                         SupportState = AppSurfaceDocsVersionSupportState.Maintained
                     },
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "1.2.0",
-                        ExactTreePath = secondTree,
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, secondTree),
                         SupportState = AppSurfaceDocsVersionSupportState.Current
                     }
                 ]
@@ -224,21 +251,21 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "1.1.0",
-                        ExactTreePath = deprecatedTree,
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, deprecatedTree),
                         SupportState = AppSurfaceDocsVersionSupportState.Deprecated,
                         AdvisoryState = AppSurfaceDocsVersionAdvisoryState.Vulnerable
                     },
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "1.0.0",
-                        ExactTreePath = archivedTree,
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, archivedTree),
                         SupportState = AppSurfaceDocsVersionSupportState.Archived,
                         AdvisoryState = AppSurfaceDocsVersionAdvisoryState.SecurityRisk
                     },
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "0.9.0",
-                        ExactTreePath = customTree,
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, customTree),
                         SupportState = (AppSurfaceDocsVersionSupportState)999,
                         AdvisoryState = (AppSurfaceDocsVersionAdvisoryState)999
                     }
@@ -277,7 +304,8 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
         string? catalogPath,
         bool versioningEnabled = true,
         string docsRootPath = "/docs/next",
-        string pathBase = "")
+        string pathBase = "",
+        string? trustedReleaseRootPath = null)
     {
         var docsOptions = new AppSurfaceDocsOptions
         {
@@ -288,7 +316,8 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
             Versioning = new AppSurfaceDocsVersioningOptions
             {
                 Enabled = versioningEnabled,
-                CatalogPath = catalogPath
+                CatalogPath = catalogPath,
+                TrustedReleaseRootPath = trustedReleaseRootPath
             }
         };
         var docsUrlBuilder = new DocsUrlBuilder(docsOptions);

@@ -1,8 +1,10 @@
 using System.Text.Json;
+using FakeItEasy;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
@@ -79,6 +81,277 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         Assert.All(catalog.PublicVersions, version => Assert.True(version.IsAvailable));
         Assert.Contains(catalog.PublicVersions, version => version.ExactRootUrl == "/docs/v/1.2.0");
         Assert.Contains(catalog.PublicVersions, version => version.AdvisoryState == AppSurfaceDocsVersionAdvisoryState.Vulnerable);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldResolveExactTreePathFromTrustedReleaseRoot()
+    {
+        var releaseStore = Path.Combine(_tempDirectory, "release-store");
+        Directory.CreateDirectory(releaseStore);
+        var stableTree = CreateExactTree(Path.Combine("release-store", "1.2.3"));
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                RecommendedVersion = "1.2.3",
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = "1.2.3"
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath, trustedReleaseRootPath: "release-store");
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.True(version.IsAvailable);
+        Assert.Equal(stableTree, version.ExactTreePath);
+        Assert.NotNull(catalog.RecommendedVersion);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldAcceptDotSlashTreePathUnderDefaultCatalogDirectoryRoot()
+    {
+        var stableTree = CreateExactTree(Path.Combine("releases", "1.2.3"));
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = "./releases/1.2.3"
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.True(version.IsAvailable);
+        Assert.Equal(stableTree, version.ExactTreePath);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldMarkAbsoluteExactTreePathUnavailable_AndLogMigrationHint()
+    {
+        var stableTree = CreateExactTree("absolute-tree");
+        var logger = A.Fake<ILogger<AppSurfaceDocsVersionCatalogService>>();
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                RecommendedVersion = "1.2.3",
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = stableTree
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath, logger: logger);
+
+        var catalog = service.GetCatalog();
+
+        Assert.Null(catalog.RecommendedVersion);
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Contains("relative", version.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_tempDirectory, version.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        AssertWarningLogged(logger, "Set TrustedReleaseRootPath");
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldMarkEscapingExactTreePathUnavailable()
+    {
+        var outsideTree = CreateExactTree("outside-tree");
+        var catalogDirectory = Path.Combine(_tempDirectory, "catalog");
+        Directory.CreateDirectory(catalogDirectory);
+        var catalogPath = Path.Combine(catalogDirectory, "catalog.json");
+        File.WriteAllText(
+            catalogPath,
+            JsonSerializer.Serialize(
+                new AppSurfaceDocsVersionCatalog
+                {
+                    Versions =
+                    [
+                        new AppSurfaceDocsPublishedVersion
+                        {
+                            Version = "1.2.3",
+                            ExactTreePath = "../outside-tree"
+                        }
+                    ]
+                }));
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Contains("inside the trusted release root", version.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(outsideTree, version.ExactTreePath);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldReturnCatalogAvailabilityIssue_WhenTrustedReleaseRootIsMissing()
+    {
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = "1.2.3"
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath, trustedReleaseRootPath: "missing-store");
+
+        var catalog = service.GetCatalog();
+
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalog.Status);
+        Assert.Empty(catalog.PublicVersions);
+        Assert.Contains("Trusted release root", catalog.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_tempDirectory, catalog.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldRejectTrustedReleaseRootSymlink()
+    {
+        if (!TryCreateSymbolicLinkTestDirectory(out _, out var linkPath))
+        {
+            return;
+        }
+
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = "1.2.3"
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath, trustedReleaseRootPath: Path.GetRelativePath(_tempDirectory, linkPath));
+
+        var catalog = service.GetCatalog();
+
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalog.Status);
+        Assert.Contains("ordinary directory", catalog.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldRejectExactTreeRootSymlink()
+    {
+        if (!TryCreateSymbolicLinkTestDirectory(out var targetPath, out var linkPath))
+        {
+            return;
+        }
+
+        CreateExactTree(Path.GetRelativePath(_tempDirectory, targetPath));
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, linkPath)
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Contains("ordinary directory", version.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldRejectIntermediateSymlinkBetweenTrustedRootAndExactTree()
+    {
+        if (!TryCreateSymbolicLinkTestDirectory(out var targetPath, out var linkPath))
+        {
+            return;
+        }
+
+        CreateExactTree(Path.Combine(Path.GetRelativePath(_tempDirectory, targetPath), "1.2.3"));
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = Path.Combine(Path.GetFileName(linkPath), "1.2.3")
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Contains("ordinary directory", version.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldRejectRequiredFileSymlink()
+    {
+        if (!TryCreateSymbolicLinkTestFile(out _))
+        {
+            return;
+        }
+
+        var stableTree = CreateExactTree("required-file-symlink");
+        var outsideSearchIndex = Path.Combine(_tempDirectory, "outside-search-index.json");
+        File.WriteAllText(outsideSearchIndex, "{\"documents\":[]}");
+        File.Delete(Path.Combine(stableTree, "search-index.json"));
+        File.CreateSymbolicLink(Path.Combine(stableTree, "search-index.json"), outsideSearchIndex);
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = "required-file-symlink"
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Contains("search-index.json", version.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -949,7 +1222,9 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         string? catalogPath,
         bool versioningEnabled = true,
         string routeRootPath = "/docs",
-        string docsRootPath = "/docs/next")
+        string docsRootPath = "/docs/next",
+        string? trustedReleaseRootPath = null,
+        ILogger<AppSurfaceDocsVersionCatalogService>? logger = null)
     {
         var options = new AppSurfaceDocsOptions
         {
@@ -961,14 +1236,15 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
             Versioning = new AppSurfaceDocsVersioningOptions
             {
                 Enabled = versioningEnabled,
-                CatalogPath = catalogPath
+                CatalogPath = catalogPath,
+                TrustedReleaseRootPath = trustedReleaseRootPath
             }
         };
 
         return new AppSurfaceDocsVersionCatalogService(
             options,
             new TestWebHostEnvironment { ContentRootPath = _tempDirectory, WebRootPath = _tempDirectory },
-            NullLogger<AppSurfaceDocsVersionCatalogService>.Instance);
+            logger ?? NullLogger<AppSurfaceDocsVersionCatalogService>.Instance);
     }
 
     private string CreateExactTree(string name)
@@ -983,6 +1259,59 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
         File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
         return root;
+    }
+
+    private bool TryCreateSymbolicLinkTestFile(out string linkPath)
+    {
+        var targetPath = Path.Combine(_tempDirectory, "symlink-target.txt");
+        linkPath = Path.Combine(_tempDirectory, "symlink-link.txt");
+        try
+        {
+            File.WriteAllText(targetPath, "target");
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private bool TryCreateSymbolicLinkTestDirectory(out string targetPath, out string linkPath)
+    {
+        targetPath = Path.Combine(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}");
+        linkPath = Path.Combine(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(targetPath);
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static void AssertWarningLogged(
+        ILogger<AppSurfaceDocsVersionCatalogService> logger,
+        string expectedMessageFragment)
+    {
+        var logged = Fake.GetCalls(logger)
+            .Any(call => IsWarningLog(call, expectedMessageFragment));
+
+        Assert.True(logged, $"Expected warning log containing '{expectedMessageFragment}'.");
+    }
+
+    private static bool IsWarningLog(FakeItEasy.Core.IFakeObjectCall call, string expectedMessageFragment)
+    {
+        if (call.Method.Name != nameof(ILogger.Log) || call.GetArgument<LogLevel>(0) != LogLevel.Warning)
+        {
+            return false;
+        }
+
+        var message = call.GetArgument<object>(2)?.ToString();
+        return message?.Contains(expectedMessageFragment, StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private string WriteCatalog(AppSurfaceDocsVersionCatalog catalog)

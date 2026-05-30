@@ -428,6 +428,87 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldRejectSymlinkedEmbeddedAssets()
+    {
+        if (!TryCreateSymbolicLinkTestFile(out var targetPath, out _))
+        {
+            return;
+        }
+
+        var tree = CreatePublishedTree("symlinked-asset");
+        Directory.CreateDirectory(Path.Combine(tree, "img"));
+        File.WriteAllBytes(targetPath, [0x89, 0x50, 0x4E, 0x47]);
+        File.CreateSymbolicLink(Path.Combine(tree, "img", "hero.png"), targetPath);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/img/hero.png");
+
+        Assert.False(await handler.TryHandleAsync(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRejectAssetsUnderSymlinkedDirectories()
+    {
+        if (!TryCreateSymbolicLinkTestDirectory(out var targetPath, out var linkPath))
+        {
+            return;
+        }
+
+        var tree = CreatePublishedTree("symlinked-asset-directory");
+        Directory.CreateDirectory(Path.Combine(targetPath, "nested"));
+        File.WriteAllBytes(Path.Combine(targetPath, "nested", "hero.png"), [0x89, 0x50, 0x4E, 0x47]);
+        Directory.Move(linkPath, Path.Combine(tree, "linked-img"));
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/linked-img/nested/hero.png");
+
+        Assert.False(await handler.TryHandleAsync(request));
+    }
+
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRejectSymlinkedFallbackHtml()
+    {
+        if (!TryCreateSymbolicLinkTestFile(out var targetPath, out _))
+        {
+            return;
+        }
+
+        var tree = CreatePublishedTree("symlinked-fallback");
+        File.WriteAllText(targetPath, "<!DOCTYPE html><html><body>external</body></html>");
+        File.CreateSymbolicLink(Path.Combine(tree, "external.html"), targetPath);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/external");
+
+        Assert.False(await handler.TryHandleAsync(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldIgnoreSymlinkedFrozenRouteManifest()
+    {
+        if (!TryCreateSymbolicLinkTestFile(out var targetPath, out _))
+        {
+            return;
+        }
+
+        var tree = CreatePublishedTree("symlinked-manifest");
+        File.WriteAllText(
+            targetPath,
+            """
+            {
+              "aliases": [
+                { "aliasRoute": "old-guide", "canonicalRoute": "guide" }
+              ]
+            }
+            """);
+        File.CreateSymbolicLink(Path.Combine(tree, ".appsurface-docs-route-manifest.json"), targetPath);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/old-guide");
+
+        Assert.False(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
+        Assert.False(request.Response.Headers.ContainsKey("Location"));
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldRewriteSearchIndexAndHonorHeadRequests()
     {
         var tree = CreatePublishedTree("release");
@@ -992,6 +1073,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
                 new AppSurfaceDocsPublishedTreeMount(
                     mountRootPath,
                     provider,
+                    treePath,
                     new AppSurfaceDocsFrozenRouteManifestCache(provider, treePath),
                     canonicalRootPath)
             ],
@@ -1036,6 +1118,38 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         File.WriteAllText(Path.Join(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
 
         return root;
+    }
+
+    private bool TryCreateSymbolicLinkTestFile(out string targetPath, out string linkPath)
+    {
+        targetPath = Path.Combine(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}.txt");
+        linkPath = Path.Combine(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}.txt");
+        try
+        {
+            File.WriteAllText(targetPath, "target");
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private bool TryCreateSymbolicLinkTestDirectory(out string targetPath, out string linkPath)
+    {
+        targetPath = Path.Combine(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}");
+        linkPath = Path.Combine(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(targetPath);
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static void WriteCanonicalPage(string treePath, string canonicalHref, string rel = "canonical")
