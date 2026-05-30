@@ -88,10 +88,31 @@ public sealed class AppSurfaceAuthContractTests
         var startedAt = new DateTimeOffset(2026, 5, 29, 12, 0, 0, TimeSpan.FromHours(-4));
         var expiresAt = startedAt.AddMinutes(30);
 
-        var session = new AppSurfaceSession("session-1", startedAt, expiresAt);
+        var session = new AppSurfaceSession(
+            "session-1",
+            startedAt,
+            expiresAt,
+            new Dictionary<string, string> { ["issuer"] = "host" });
 
+        Assert.Equal("session-1", session.Id);
         Assert.Equal(startedAt, session.StartedAt);
         Assert.Equal(expiresAt, session.ExpiresAt);
+        Assert.Equal("host", session.Metadata["issuer"]);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Session_AllowsPartialTimestampPairs(bool includeStartedAt)
+    {
+        var timestamp = new DateTimeOffset(2026, 5, 29, 12, 0, 0, TimeSpan.Zero);
+
+        var session = includeStartedAt
+            ? new AppSurfaceSession("session-1", startedAt: timestamp)
+            : new AppSurfaceSession("session-1", expiresAt: timestamp);
+
+        Assert.Equal(includeStartedAt ? timestamp : null, session.StartedAt);
+        Assert.Equal(includeStartedAt ? null : timestamp, session.ExpiresAt);
     }
 
     [Fact]
@@ -102,6 +123,25 @@ public sealed class AppSurfaceAuthContractTests
         Assert.Null(context.User);
         Assert.Null(context.Session);
         Assert.False(context.IsAuthenticated);
+    }
+
+    [Fact]
+    public void Context_WhenUserAndSessionArePresent_IsAuthenticated()
+    {
+        var user = new AppSurfaceUser("user-1");
+        var session = new AppSurfaceSession("session-1");
+
+        var context = new AppSurfaceAuthContext(
+            user,
+            session,
+            new Dictionary<string, string> { ["tenant"] = "alpha" });
+
+        Assert.Same(user, context.User);
+        Assert.Same(session, context.Session);
+        Assert.True(context.IsAuthenticated);
+        Assert.Equal("alpha", context.Metadata["tenant"]);
+        Assert.Null(AppSurfaceAuthContext.Anonymous.User);
+        Assert.Empty(AppSurfaceAuthContext.Anonymous.Metadata);
     }
 
     [Fact]
@@ -175,7 +215,17 @@ public sealed class AppSurfaceAuthContractTests
     [Fact]
     public void Result_ExposesHelperProperties()
     {
-        Assert.True(AppSurfaceAuthResult.Allowed().IsAllowed);
+        var context = AppSurfaceAuthContext.Anonymous;
+        var allowed = AppSurfaceAuthResult.Allowed(
+            context,
+            " Access granted ",
+            new Dictionary<string, string> { ["policy"] = "reader" });
+
+        Assert.Same(context, allowed.Context);
+        Assert.Equal(" Access granted ", allowed.Message);
+        Assert.Equal("reader", allowed.Metadata["policy"]);
+        Assert.True(allowed.IsAllowed);
+        Assert.Null(AppSurfaceAuthResult.Forbid(message: " ").Message);
         Assert.True(AppSurfaceAuthResult.Challenge().RequiresAuthentication);
         Assert.True(AppSurfaceAuthResult.MissingPolicy().IsConfigurationFailure);
     }
@@ -217,6 +267,26 @@ public sealed class AppSurfaceAuthContractTests
     }
 
     [Fact]
+    public void AuditEvent_WhenForbidOutcomeHasWrongReason_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new AppSurfaceAuthAuditEvent(
+            "auth.denied",
+            DateTimeOffset.UtcNow,
+            AppSurfaceAuthOutcome.Forbid,
+            AppSurfaceAuthReason.Unauthenticated));
+    }
+
+    [Fact]
+    public void AuditEvent_WhenOutcomeIsUnknown_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new AppSurfaceAuthAuditEvent(
+            "auth.unknown",
+            DateTimeOffset.UtcNow,
+            (AppSurfaceAuthOutcome)999,
+            AppSurfaceAuthReason.None));
+    }
+
+    [Fact]
     public void AuditEvent_IsPassiveValue()
     {
         var timestamp = new DateTimeOffset(2026, 5, 29, 10, 0, 0, TimeSpan.Zero);
@@ -247,9 +317,14 @@ public sealed class AppSurfaceAuthContractTests
     [InlineData("/account/login", "/account/login")]
     public void LoginPrompt_NormalizesSafeTargets(string? targetPath, string? expected)
     {
-        var prompt = new AppSurfaceLoginPrompt(targetPath);
+        var prompt = new AppSurfaceLoginPrompt(
+            targetPath,
+            displayText: " Sign in ",
+            metadata: new Dictionary<string, string> { ["provider"] = "oidc" });
 
         Assert.Equal(expected, prompt.TargetPath);
+        Assert.Equal(" Sign in ", prompt.DisplayText);
+        Assert.Equal("oidc", prompt.Metadata["provider"]);
     }
 
     [Theory]
@@ -267,10 +342,14 @@ public sealed class AppSurfaceAuthContractTests
     [Fact]
     public void LogoutPrompt_IsPassiveAndUsesSameTargetPolicy()
     {
-        var prompt = new AppSurfaceLogoutPrompt("/signed-out", displayText: " Sign out ");
+        var prompt = new AppSurfaceLogoutPrompt(
+            "/signed-out",
+            displayText: " Sign out ",
+            metadata: new Dictionary<string, string> { ["provider"] = "oidc" });
 
         Assert.Equal("/signed-out", prompt.TargetPath);
         Assert.Equal(" Sign out ", prompt.DisplayText);
+        Assert.Equal("oidc", prompt.Metadata["provider"]);
     }
 
     [Fact]
