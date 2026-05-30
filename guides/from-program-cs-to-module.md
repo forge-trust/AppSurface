@@ -54,7 +54,7 @@ The source-of-truth test classes are:
 - `Web/ForgeTrust.AppSurface.Web.Tests/BrowserStatusPageTests.cs`
 - `Web/ForgeTrust.AppSurface.Web.Tests/ConventionalExceptionPageTests.cs`
 
-For a runnable local proof that exercises the same browser/API split through a real AppSurface host, run:
+For an executable local proof that exercises the same browser/API split through a real AppSurface host, run:
 
 ```bash
 bash examples/web-error-pages/verify.sh

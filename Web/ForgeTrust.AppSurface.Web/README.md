@@ -158,7 +158,7 @@ The conventional exception page uses ASP.NET Core exception handling, not status
 - API-only apps, JSON problem-details APIs, tenant-specific error pages, or apps with telemetry-first exception middleware should leave this disabled and register their own exception handling.
 - Once ASP.NET Core has started a response, exception handling cannot replace it with the conventional page. Design streaming endpoints so failures are reported through the stream protocol rather than relying on a late 500 page.
 
-### Runnable error-page proof
+### Executable error-page proof
 
 Use the focused [web error-page proof](../../examples/web-error-pages/README.md) when you want executable evidence rather than API reference prose:
 
