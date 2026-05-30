@@ -84,6 +84,51 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     }
 
     [Fact]
+    public async Task ExecutableRunAsync_ShouldPreserveStandaloneRootDocsRoutesAndAssets()
+    {
+        var repositoryRoot = CreateRepositoryRoot();
+        var port = GetAvailableTcpPort();
+        using var process = StartStandaloneExecutable(port, repositoryRoot);
+
+        try
+        {
+            using var handler = new HttpClientHandler
+            {
+                AllowAutoRedirect = false
+            };
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri($"http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}")
+            };
+
+            _ = await WaitForStandaloneStatusPageAsync(client, process);
+
+            using var rootResponse = await client.GetAsync("/");
+            Assert.Equal(HttpStatusCode.Found, rootResponse.StatusCode);
+            Assert.Equal("/docs", rootResponse.Headers.Location?.OriginalString);
+
+            using var stylesheetResponse = await client.GetAsync("/css/site.gen.css?v=42");
+            Assert.Equal(HttpStatusCode.Found, stylesheetResponse.StatusCode);
+            Assert.Equal(
+                "/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css?v=42",
+                stylesheetResponse.Headers.Location?.OriginalString);
+
+            using var faviconResponse = await client.GetAsync("/favicon.ico");
+            Assert.Equal(HttpStatusCode.OK, faviconResponse.StatusCode);
+            Assert.Equal("image/svg+xml", faviconResponse.Content.Headers.ContentType?.MediaType);
+        }
+        finally
+        {
+            StopProcess(process);
+
+            if (Directory.Exists(repositoryRoot))
+            {
+                Directory.Delete(repositoryRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task ReservedNotFoundRoute_ShouldRenderStandaloneDocsRecoveryWithoutOriginalPath()
     {
         await using var runningHost = await StartStandaloneHostAsync();

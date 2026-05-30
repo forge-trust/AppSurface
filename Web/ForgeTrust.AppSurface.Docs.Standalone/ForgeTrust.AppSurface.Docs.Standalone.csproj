@@ -9,6 +9,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>AppSurfaceDocsRootHost</_Parameter1>
+      <_Parameter2>true</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ForgeTrust.AppSurface.Docs\ForgeTrust.AppSurface.Docs.csproj" />
   </ItemGroup>
 
