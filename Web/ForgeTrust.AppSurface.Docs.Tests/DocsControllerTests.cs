@@ -2185,6 +2185,35 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_ShouldRenderHarvestingWithoutLiveProgress_WhenProductionCustomAuthorizerCannotRun()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/search",
+            Environments.Production,
+            AppSurfaceDocsHarvestHealthExposure.Always,
+            new InvalidOperationHarvestProgressAuthorizer());
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: false);
+    }
+
+    [Fact]
+    public async Task Search_ShouldRethrowRequestCancellation_WhenProductionCustomAuthorizerIsCanceled()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/search",
+            Environments.Production,
+            AppSurfaceDocsHarvestHealthExposure.Always,
+            new CanceledHarvestProgressAuthorizer());
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        pending.Controller.HttpContext.RequestAborted = cancellation.Token;
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => pending.Controller.Search());
+    }
+
+    [Fact]
     public async Task Search_ShouldUseDocsHomeReturnUrl_WhenCurrentRequestIsNotSafeAppRelative()
     {
         await using var pending = CreatePendingHarvestController("//evil.example/docs/search");
@@ -4651,6 +4680,22 @@ public class DocsControllerTests : IDisposable
         public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
         {
             return new ValueTask<bool>(AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel));
+        }
+    }
+
+    private sealed class InvalidOperationHarvestProgressAuthorizer : IRazorWireChannelAuthorizer
+    {
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            throw new InvalidOperationException("Authorizer dependencies are unavailable.");
+        }
+    }
+
+    private sealed class CanceledHarvestProgressAuthorizer : IRazorWireChannelAuthorizer
+    {
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            throw new OperationCanceledException(context.RequestAborted);
         }
     }
 }
