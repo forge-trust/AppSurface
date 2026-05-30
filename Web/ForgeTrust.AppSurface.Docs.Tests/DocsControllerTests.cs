@@ -2185,6 +2185,20 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_ShouldRenderHarvestingWithLiveProgress_WhenDevelopmentHasNoRuntimeAuthorizer()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/search",
+            Environments.Development,
+            AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
+            registerAuthorizer: false);
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: true);
+    }
+
+    [Fact]
     public async Task Search_ShouldRenderHarvestingWithoutLiveProgress_WhenProductionCustomAuthorizerCannotRun()
     {
         await using var pending = CreatePendingHarvestController(
@@ -4463,7 +4477,8 @@ public class DocsControllerTests : IDisposable
         string requestPath,
         string environmentName = "Development",
         AppSurfaceDocsHarvestHealthExposure exposure = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
-        IRazorWireChannelAuthorizer? authorizer = null)
+        IRazorWireChannelAuthorizer? authorizer = null,
+        bool registerAuthorizer = true)
     {
         var release = new TaskCompletionSource<IReadOnlyList<DocNode>>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -4496,12 +4511,17 @@ public class DocsControllerTests : IDisposable
                                   ?? new AppSurfaceDocsHarvestChannelAuthorizer(
                                       options,
                                       environment);
-        var requestServices = new ServiceCollection()
+        var requestServicesBuilder = new ServiceCollection()
             .AddLogging()
             .AddControllersWithViews()
-            .Services
-            .AddSingleton<IRazorWireChannelAuthorizer>(effectiveAuthorizer)
-            .BuildServiceProvider();
+            .Services;
+
+        if (registerAuthorizer)
+        {
+            requestServicesBuilder.AddSingleton<IRazorWireChannelAuthorizer>(effectiveAuthorizer);
+        }
+
+        var requestServices = requestServicesBuilder.BuildServiceProvider();
 
         var aggregator = new DocAggregator(
             [harvester],
