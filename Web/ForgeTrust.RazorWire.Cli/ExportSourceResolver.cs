@@ -101,7 +101,13 @@ public sealed class ExportSourceResolver
         return new CommandExecutor(loggerFactory.CreateLogger<CommandExecutor>());
     }
 
-    internal async Task<ResolvedExportSource> ResolveAsync(
+    /// <summary>
+    /// Resolves a validated source request into a crawlable base URL, launching the target app when needed.
+    /// </summary>
+    /// <param name="request">The validated source request to resolve.</param>
+    /// <param name="cancellationToken">Cancellation token for publish, launch, and readiness probing.</param>
+    /// <returns>A resolved source that owns any launched process for the lifetime of the export.</returns>
+    public async Task<ResolvedExportSource> ResolveAsync(
         ExportSourceRequest request,
         CancellationToken cancellationToken = default)
     {

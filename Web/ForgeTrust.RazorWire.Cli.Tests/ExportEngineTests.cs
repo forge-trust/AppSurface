@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Web;
+using ForgeTrust.RazorWire;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
@@ -1853,6 +1854,493 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_RewriteManagedLiveReferencesAndLazyForms()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new HybridLiveOriginHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            Assert.Contains("data-rw-live-origin=\"https://api.example.com\"", html);
+            Assert.Contains("data-rw-hybrid-credentials=\"include\"", html);
+            Assert.Contains("data-rw-antiforgery-endpoint=\"/_rw/antiforgery/token\"", html);
+            Assert.Contains("src=\"https://api.example.com/rw/stream?channel=profile\"", html);
+            Assert.Contains("src=\"https://api.example.com/islands/profile\"", html);
+            Assert.Contains("action=\"https://api.example.com/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.DoesNotContain("crawler-token", html);
+            Assert.False(File.Exists(Path.Combine(tempDir, "islands", "profile.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_FailUnsafeStaticTokenForms()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new HybridUnsafeTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                                 && diagnostic.Message.Contains("not managed by RazorWire", StringComparison.Ordinal));
+            Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                                 && diagnostic.Message.Contains("points outside the exported application origin", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_FailLazyAntiforgeryWhenCredentialsAreOmitted()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new HybridLiveOriginHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Omit
+                });
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("hybrid credentials are explicitly omitted", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new StaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("CDN mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailFormAssociatedStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new FormAssociatedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("CDN mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailUnownedStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new UnownedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("not owned by any form", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailLazyAntiforgeryWithoutStaticToken()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new LazyAntiforgeryFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("CDN mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailCustomNamedStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new CustomNamedTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("CDN mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_ConvertLazyFormsForSameOriginPassthrough()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new StaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    CredentialsMode = RazorWireHybridCredentialsMode.Omit
+                });
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.DoesNotContain("crawler-token", html);
+            Assert.Empty(context.Diagnostics);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_ConvertFormAssociatedAntiforgeryTokens()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new FormAssociatedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.Contains("id=\"profile\"", html);
+            Assert.DoesNotContain("crawler-token", html);
+            Assert.Empty(context.Diagnostics);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_RemoveAllOwnedStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new DuplicateStaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.DoesNotContain("__RequestVerificationToken", html);
+            Assert.DoesNotContain("crawler-token", html);
+            Assert.Empty(context.Diagnostics);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_PreserveCustomAntiforgeryEndpoint()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new CustomEndpointHybridHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            Assert.Contains("data-rw-antiforgery-endpoint=\"/tokens/antiforgery\"", html);
+            Assert.DoesNotContain("data-rw-antiforgery-endpoint=\"/_rw/antiforgery/token\"", html);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_PreserveFragmentShapeWhenRewritingFrameForms()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var client = new HttpClient(new HybridLiveFragmentHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            await _sut.RunAsync(context);
+
+            var fragmentHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "frame", "content.html"));
+            Assert.StartsWith("<turbo-frame", fragmentHtml.TrimStart(), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("<html", fragmentHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("<body", fragmentHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("action=\"https://api.example.com/frame/save\"", fragmentHtml);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", fragmentHtml);
+            Assert.DoesNotContain("crawler-token", fragmentHtml);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_HybridMode_Should_Write_Text_Artifacts_Without_Buffering_Bodies()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
@@ -2634,6 +3122,247 @@ public class ExportEngineTests
             return path == "/" || path == "/index"
                 ? Html("""<html><body><turbo-frame src="/missing-frame"></turbo-frame></body></html>""")
                 : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class HybridLiveOriginHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <!doctype html>
+                    <html>
+                      <body>
+                        <script src="/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"></script>
+                        <rw-stream-source src="/rw/stream?channel=profile"></rw-stream-source>
+                        <turbo-frame id="profile" data-rw-island="true" src="/islands/profile"></turbo-frame>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                          <button>Save</button>
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class HybridUnsafeTokenHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="https://payments.example.test/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                        <form method="post" action="/newsletter">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class StaticTokenFormHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                          <button>Save</button>
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class FormAssociatedStaticTokenHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form id="profile" data-rw-form="true" method="post" action="/profile/save">
+                          <button>Save</button>
+                        </form>
+                        <input type="hidden" form="profile" name="__RequestVerificationToken" value="crawler-token">
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class DuplicateStaticTokenFormHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form id="profile" data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token-a">
+                          <button>Save</button>
+                        </form>
+                        <input type="hidden" form="profile" name="__RequestVerificationToken" value="crawler-token-b">
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class UnownedStaticTokenHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <input type="hidden" form="missing" name="__RequestVerificationToken" value="crawler-token">
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class LazyAntiforgeryFormHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" data-rw-antiforgery="lazy" method="post" action="/profile/save">
+                          <button>Save</button>
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class CustomNamedTokenFormHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="csrf-token" value="crawler-token">
+                          <button>Save</button>
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class CustomEndpointHybridHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <script src="/_content/ForgeTrust.RazorWire/razorwire/razorwire.js" data-rw-antiforgery-endpoint="/tokens/antiforgery"></script>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class HybridLiveFragmentHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <turbo-frame src="/frame/content"></turbo-frame>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            if (path == "/frame/content")
+            {
+                return Html("""
+                    <turbo-frame id="content">
+                      <form data-rw-form="true" method="post" action="/frame/save">
+                        <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                      </form>
+                    </turbo-frame>
+                    """);
+            }
+
+            return NotFound();
         }
     }
 

@@ -50,6 +50,347 @@ test('before fetch supports Headers-like request headers', () => {
   assert.equal(headers.get('X-RazorWire-Form'), 'true');
 });
 
+test('stream connections include credentials for configured live origin', () => {
+  const { context, document } = loadRuntime({
+    liveOrigin: 'https://api.example.test',
+    hybridCredentials: 'include'
+  });
+  const stream = new FakeElement('rw-stream-source');
+  stream.setAttribute('src', 'https://api.example.test/rw/stream');
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+
+  const source = context.window.RazorWire.connectionManager.sources.get('https://api.example.test/rw/stream');
+  assert.equal(source.es.options.withCredentials, true);
+});
+
+test('stream connections include credentials for auto mode with configured live origin', () => {
+  const { context, document } = loadRuntime({
+    liveOrigin: 'https://api.example.test',
+    hybridCredentials: 'auto'
+  });
+  const stream = new FakeElement('rw-stream-source');
+  stream.setAttribute('src', 'https://api.example.test/rw/stream');
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+
+  const source = context.window.RazorWire.connectionManager.sources.get('https://api.example.test/rw/stream');
+  assert.equal(source.es.options.withCredentials, true);
+});
+
+test('runtime normalizes live origin before matching hybrid credentials', () => {
+  const { context, document } = loadRuntime({
+    liveOrigin: ' https://api.example.test/ ',
+    hybridCredentials: 'auto'
+  });
+  const stream = new FakeElement('rw-stream-source');
+  stream.setAttribute('src', 'https://api.example.test/rw/stream');
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+
+  assert.equal(context.window.RazorWire.config.liveOrigin, 'https://api.example.test');
+  const source = context.window.RazorWire.connectionManager.sources.get('https://api.example.test/rw/stream');
+  assert.equal(source.es.options.withCredentials, true);
+});
+
+test('runtime ignores invalid live origin for hybrid credentials', () => {
+  const { context, document } = loadRuntime({
+    liveOrigin: 'https://api.example.test/forms',
+    hybridCredentials: 'include'
+  });
+  const stream = new FakeElement('rw-stream-source');
+  stream.setAttribute('src', 'https://api.example.test/rw/stream');
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+
+  assert.equal(context.window.RazorWire.config.liveOrigin, '');
+  const source = context.window.RazorWire.connectionManager.sources.get('https://api.example.test/rw/stream');
+  assert.equal(source.es.options.withCredentials, undefined);
+});
+
+test('before fetch lazily refreshes antiforgery token before submit resumes', async () => {
+  const fetches = [];
+  const { document } = loadRuntime({
+    liveOrigin: 'https://api.example.test',
+    hybridCredentials: 'include',
+    antiforgeryEndpoint: '/tokens/antiforgery',
+    fetch: async (url, options) => {
+      fetches.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          formFieldName: '__RequestVerificationToken',
+          requestToken: 'runtime-token',
+          headerName: 'RequestVerificationToken'
+        })
+      };
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', 'https://api.example.test/profile/save');
+  document.body.appendChild(form);
+
+  let resumed = false;
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers: {} },
+      resume: () => {
+        resumed = true;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.detail.fetchOptions.credentials, 'include');
+  assert.equal(fetches.length, 1);
+  assert.equal(fetches[0].url, 'https://api.example.test/tokens/antiforgery');
+  assert.equal(fetches[0].options.credentials, 'include');
+  assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'ready');
+  assert.equal(form.children.find(child => child.name === '__RequestVerificationToken')?.value, 'runtime-token');
+  assert.equal(resumed, true);
+});
+
+test('lazy antiforgery token fetch includes credentials for auto mode with live origin', async () => {
+  const fetches = [];
+  const { document } = loadRuntime({
+    liveOrigin: 'https://api.example.test',
+    hybridCredentials: 'auto',
+    fetch: async (url, options) => {
+      fetches.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          formFieldName: '__RequestVerificationToken',
+          requestToken: 'runtime-token'
+        })
+      };
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', 'https://api.example.test/profile/save');
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'focusin',
+    target: form
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(fetches.length, 1);
+  assert.equal(fetches[0].options.credentials, 'include');
+  assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'ready');
+});
+
+test('before fetch patches paused request body and header with refreshed antiforgery token', async () => {
+  const fetches = [];
+  const { document } = loadRuntime({
+    fetch: async (url, options) => {
+      fetches.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          formFieldName: 'csrf-token',
+          requestToken: 'runtime-token',
+          headerName: 'X-CSRF-TOKEN'
+        })
+      };
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', '/profile/save');
+  document.body.appendChild(form);
+
+  const body = new URLSearchParams('name=Andrew');
+  const headers = new FakeHeaders();
+  let resumed = false;
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers, body },
+      resume: () => {
+        resumed = true;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(fetches.length, 1);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(headers.get('X-CSRF-TOKEN'), 'runtime-token');
+  assert.equal(body.get('csrf-token'), 'runtime-token');
+  assert.equal(form.children.find(child => child.name === 'csrf-token')?.value, 'runtime-token');
+  assert.equal(resumed, true);
+});
+
+test('before fetch leaves non-form string bodies unchanged while setting antiforgery header', async () => {
+  const { document } = loadRuntime({
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        formFieldName: 'csrf-token',
+        requestToken: 'runtime-token',
+        headerName: 'X-CSRF-TOKEN'
+      })
+    })
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', '/profile/save');
+  document.body.appendChild(form);
+
+  const body = JSON.stringify({ name: 'Andrew' });
+  const headers = new FakeHeaders();
+  headers.set('content-type', 'application/json');
+  let resumed = false;
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers, body },
+      resume: () => {
+        resumed = true;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(event.detail.fetchOptions.body, body);
+  assert.equal(headers.get('X-CSRF-TOKEN'), 'runtime-token');
+  assert.equal(form.children.find(child => child.name === 'csrf-token')?.value, 'runtime-token');
+  assert.equal(resumed, true);
+});
+
+test('before fetch patches form-url-encoded string bodies with refreshed antiforgery token', async () => {
+  const { document } = loadRuntime({
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        formFieldName: 'csrf-token',
+        requestToken: 'runtime-token',
+        headerName: 'X-CSRF-TOKEN'
+      })
+    })
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', '/profile/save');
+  document.body.appendChild(form);
+
+  const headers = new FakeHeaders();
+  headers.set('content-type', 'application/x-www-form-urlencoded; charset=UTF-8');
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers, body: 'name=Andrew' },
+      resume: () => {
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(event.detail.fetchOptions.body, 'name=Andrew&csrf-token=runtime-token');
+  assert.equal(headers.get('X-CSRF-TOKEN'), 'runtime-token');
+});
+
+test('lazy antiforgery token refresh is shared between intent and submit', async () => {
+  const fetches = [];
+  let resolveFetch;
+  const { document } = loadRuntime({
+    fetch: async (url, options) => {
+      fetches.push({ url, options });
+      return new Promise(resolve => {
+        resolveFetch = () => resolve({
+          ok: true,
+          json: async () => ({
+            formFieldName: '__RequestVerificationToken',
+            requestToken: 'shared-token'
+          })
+        });
+      });
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', '/profile/save');
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'focusin',
+    target: form
+  });
+
+  let resumed = false;
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers: {} },
+      resume: () => {
+        resumed = true;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+
+  assert.equal(fetches.length, 1);
+  assert.equal(event.defaultPrevented, true);
+
+  resolveFetch();
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(fetches.length, 1);
+  assert.equal(form.children.find(child => child.name === '__RequestVerificationToken')?.value, 'shared-token');
+  assert.equal(resumed, true);
+});
+
 test('submit lifecycle disables only RazorWire-owned submitter state and restores it', () => {
   const { document } = loadRuntime();
   const form = new FakeForm();
@@ -408,7 +749,9 @@ function loadRuntime(runtimeOptions = {}) {
     clearInterval: () => {},
     Date,
     Intl,
-    URL
+    URL,
+    URLSearchParams,
+    fetch: runtimeOptions.fetch
   };
   if (turbo !== null) {
     context.Turbo = turbo;
@@ -467,8 +810,9 @@ class FakeHeaders {
 }
 
 class FakeEventSource {
-  constructor(url) {
+  constructor(url, options = {}) {
     this.url = url;
+    this.options = options;
     this.readyState = 0;
     this.closed = false;
     this.onopen = null;
@@ -491,6 +835,9 @@ class FakeElement {
     this.disabled = false;
     this.id = '';
     this.dataset = {};
+    this.name = '';
+    this.type = '';
+    this.value = '';
   }
 
   setAttribute(name, value) {
@@ -614,6 +961,9 @@ class FakeDocument {
     }
     this.currentScript.setAttribute('data-rw-form-failure-mode', runtimeOptions.failureMode ?? 'auto');
     this.currentScript.setAttribute('data-rw-default-failure-message', runtimeOptions.defaultFailureMessage ?? 'Default failure');
+    this.currentScript.setAttribute('data-rw-live-origin', runtimeOptions.liveOrigin ?? '');
+    this.currentScript.setAttribute('data-rw-hybrid-credentials', runtimeOptions.hybridCredentials ?? 'auto');
+    this.currentScript.setAttribute('data-rw-antiforgery-endpoint', runtimeOptions.antiforgeryEndpoint ?? '/_rw/antiforgery/token');
   }
 
   addEventListener(type, listener) {
@@ -674,6 +1024,13 @@ function matches(element, selector) {
   }
   if (selector === 'form[data-rw-form="true"]') {
     return element.tagName === 'FORM' && element.getAttribute('data-rw-form') === 'true';
+  }
+  if (selector.startsWith('input[name="')) {
+    const name = selector.match(/input\[name="([^"]+)"\]/)?.[1];
+    return element.tagName === 'INPUT' && (element.getAttribute('name') === name || element.name === name);
+  }
+  if (selector === 'input[data-rw-antiforgery-token="true"]') {
+    return element.tagName === 'INPUT' && element.getAttribute('data-rw-antiforgery-token') === 'true';
   }
   if (selector === '[data-rw-form-errors]') return element.hasAttribute('data-rw-form-errors');
   if (selector === '[data-rw-form-error-generated="true"]') {

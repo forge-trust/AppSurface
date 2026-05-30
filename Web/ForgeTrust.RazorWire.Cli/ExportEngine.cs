@@ -3,7 +3,10 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using AngleSharp.Dom;
+using AngleSharp.Html.Parser;
 using ForgeTrust.AppSurface.Web;
+using ForgeTrust.RazorWire;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.RazorWire.Cli;
@@ -17,6 +20,7 @@ public class ExportEngine
     private readonly ILogger<ExportEngine> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ExportReferenceProcessor _referenceProcessor;
+    private readonly HtmlParser _htmlParser = new();
 
     /// <summary>
     /// Attribute emitted by AppSurface Docs to mark maintainer diagnostics chrome that RazorWire strips from exports.
@@ -177,6 +181,8 @@ public class ExportEngine
             if (isHtml)
             {
                 var html = StripAppSurfaceDocsDiagnosticsChrome(await response.Content.ReadAsStringAsync(cancellationToken));
+                html = ApplyPublicOriginRewrites(html, route, context);
+                html = ApplyHybridRuntimeRewrites(html, route, context);
                 var docContentFrame = ExtractDocContentFrame(html);
                 context.RouteOutcomes[route] = context.Mode == ExportMode.Cdn
                     ? ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, html)
@@ -360,6 +366,415 @@ public class ExportEngine
             default:
                 throw new InvalidOperationException($"Unsupported redirect strategy '{context.RedirectStrategy}'.");
         }
+    }
+
+    private string ApplyPublicOriginRewrites(string html, string route, ExportContext context)
+    {
+        if (string.IsNullOrWhiteSpace(context.PublicOrigin))
+        {
+            return html;
+        }
+
+        var document = _htmlParser.ParseDocument(html);
+        var changed = false;
+
+        foreach (var link in document.QuerySelectorAll("link[rel~=\"canonical\"][href]"))
+        {
+            changed |= TrySetPublicOriginUrl(link, "href", route, context);
+        }
+
+        foreach (var meta in document.QuerySelectorAll("meta[content]"))
+        {
+            var key = meta.GetAttribute("property") ?? meta.GetAttribute("name") ?? string.Empty;
+            if (string.Equals(key, "og:url", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "twitter:url", StringComparison.OrdinalIgnoreCase))
+            {
+                changed |= TrySetPublicOriginUrl(meta, "content", route, context);
+            }
+        }
+
+        return changed ? SerializeDocument(document, html) : html;
+    }
+
+    private bool TrySetPublicOriginUrl(IElement element, string attributeName, string route, ExportContext context)
+    {
+        if (!TryResolveOriginUrl(element.GetAttribute(attributeName), route, context, context.PublicOrigin!, out var publicUrl, out _))
+        {
+            return false;
+        }
+
+        element.SetAttribute(attributeName, publicUrl);
+        return true;
+    }
+
+    private string ApplyHybridRuntimeRewrites(string html, string route, ExportContext context)
+    {
+        if (context.Mode != ExportMode.Hybrid && !MayContainAntiforgerySurface(html))
+        {
+            return html;
+        }
+
+        var document = _htmlParser.ParseDocument(html);
+        var changed = false;
+
+        if (context.Mode == ExportMode.Hybrid && context.Hybrid.HasLiveOrigin)
+        {
+            foreach (var script in document.QuerySelectorAll("script[src]"))
+            {
+                var src = script.GetAttribute("src") ?? string.Empty;
+                if (!src.Contains("/razorwire/razorwire.js", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                script.SetAttribute("data-rw-live-origin", context.Hybrid.LiveOrigin!);
+                script.SetAttribute("data-rw-hybrid-credentials", ResolveHybridCredentialsAttribute(context));
+                if (string.IsNullOrWhiteSpace(script.GetAttribute("data-rw-antiforgery-endpoint")))
+                {
+                    script.SetAttribute("data-rw-antiforgery-endpoint", "/_rw/antiforgery/token");
+                }
+
+                changed = true;
+            }
+
+            foreach (var streamSource in document.QuerySelectorAll("rw-stream-source[src]"))
+            {
+                if (TryResolveOriginUrl(streamSource.GetAttribute("src"), route, context, context.Hybrid.LiveOrigin!, out var liveUrl, out _))
+                {
+                    streamSource.SetAttribute("src", liveUrl);
+                    changed = true;
+                }
+            }
+
+            foreach (var island in document.QuerySelectorAll("turbo-frame[data-rw-island=\"true\"][src]"))
+            {
+                if (TryResolveOriginUrl(island.GetAttribute("src"), route, context, context.Hybrid.LiveOrigin!, out var liveUrl, out _))
+                {
+                    island.SetAttribute("src", liveUrl);
+                    changed = true;
+                }
+            }
+        }
+
+        foreach (var form in document.QuerySelectorAll("form[data-rw-form=\"true\"]"))
+        {
+            changed |= TryRewriteHybridForm(form, route, context, document);
+        }
+
+        foreach (var form in document.QuerySelectorAll("form"))
+        {
+            if (string.Equals(form.GetAttribute("data-rw-form"), "true", StringComparison.OrdinalIgnoreCase)
+                || !HasExportAntiforgerySurface(form, document))
+            {
+                continue;
+            }
+
+            AddExportAntiforgeryDiagnostic(
+                context,
+                route,
+                "Static anti-forgery token cannot be exported because the form is not managed by RazorWire. Problem: the form contains a request-specific __RequestVerificationToken minted for the export crawler. Cause: static hosts cannot mint a token for the real user, and RazorWire can only auto-refresh forms it owns. Fix: add rw-active to let RazorWire manage the form, load the form from a live endpoint, or remove the static token before export.");
+        }
+
+        AddUnownedAntiforgeryTokenDiagnostics(document, context, route);
+
+        return changed ? SerializeDocument(document, html) : html;
+    }
+
+    private bool TryRewriteHybridForm(IElement form, string route, ExportContext context, IDocument document)
+    {
+        var tokenInputs = FindAntiforgeryTokenInputs(form, document);
+        var antiforgeryMode = form.GetAttribute("data-rw-antiforgery") ?? string.Empty;
+        var hasBakedToken = tokenInputs.Count > 0;
+        var wantsLazy = string.Equals(antiforgeryMode, "lazy", StringComparison.OrdinalIgnoreCase);
+        var optsOut = string.Equals(antiforgeryMode, "off", StringComparison.OrdinalIgnoreCase);
+
+        if (!hasBakedToken && !wantsLazy)
+        {
+            return false;
+        }
+
+        if (context.Mode == ExportMode.Cdn)
+        {
+            AddExportAntiforgeryDiagnostic(
+                context,
+                route,
+                "Static RazorWire form anti-forgery token cannot be exported in CDN mode. Problem: the form contains a request-specific __RequestVerificationToken minted for the export crawler. Cause: a plain static host cannot mint or refresh a token for the real user. Fix: use --mode hybrid with backend passthrough for RazorWire endpoints, use --mode hybrid --live-origin for split-origin live calls, or load the form from a live endpoint instead of static HTML.");
+            return false;
+        }
+
+        if (optsOut)
+        {
+            AddExportAntiforgeryDiagnostic(
+                context,
+                route,
+                "Static RazorWire form anti-forgery token cannot be exported because the form opts out of lazy refresh. Problem: the form contains a request-specific __RequestVerificationToken minted for the export crawler. Cause: static hosts cannot mint a token for the real user. Fix: remove data-rw-antiforgery=\"off\", allow export to auto-convert the form, or load the form from a live RazorWire frame.");
+            return false;
+        }
+
+        if (context.Hybrid.HasLiveOrigin && !context.Hybrid.IncludesCredentials)
+        {
+            AddExportAntiforgeryDiagnostic(
+                context,
+                route,
+                "Static RazorWire form anti-forgery token cannot be exported because hybrid credentials are explicitly omitted. Problem: lazy anti-forgery needs the token cookie to round-trip to the live origin. Cause: --hybrid-credentials omit disables credentialed managed live calls. Fix: use the default hybrid credentials behavior or remove --hybrid-credentials omit for forms that use anti-forgery.");
+            return false;
+        }
+
+        var action = form.GetAttribute("action");
+        if (context.Hybrid.HasLiveOrigin)
+        {
+            if (!TryResolveOriginUrl(action, route, context, context.Hybrid.LiveOrigin!, out var liveAction, out var error))
+            {
+                AddExportAntiforgeryDiagnostic(
+                    context,
+                    route,
+                    $"Static RazorWire form anti-forgery token cannot be exported because the form action cannot be rewritten to the live origin. Problem: the form contains a request-specific __RequestVerificationToken minted for the export crawler. Cause: {error} Fix: use a root-relative, relative, empty, or same-origin form action, mark the form for live-frame rendering, or remove RazorWire form enhancement.");
+                return false;
+            }
+
+            form.SetAttribute("action", liveAction);
+        }
+        else if (!TryResolveManagedUrl(action, route, context, out var managedAction, out var error))
+        {
+            AddExportAntiforgeryDiagnostic(
+                context,
+                route,
+                $"Static RazorWire form anti-forgery token cannot be exported because the form action cannot be preserved as an app-owned hybrid route. Problem: the form contains a request-specific __RequestVerificationToken minted for the export crawler. Cause: {error} Fix: use a root-relative, relative, empty, or same-origin form action, mark the form for live-frame rendering, or remove RazorWire form enhancement.");
+            return false;
+        }
+        else
+        {
+            form.SetAttribute("action", managedAction);
+        }
+
+        form.SetAttribute("data-rw-antiforgery", "lazy");
+        foreach (var tokenInput in tokenInputs)
+        {
+            tokenInput.Remove();
+        }
+
+        _logger.LogInformation(
+            "RWEXPORT006 Static RazorWire anti-forgery token on {Route} was converted to lazy runtime refresh.",
+            route);
+        return true;
+    }
+
+    private static bool MayContainAntiforgerySurface(string html)
+    {
+        return html.Contains("data-rw-antiforgery", StringComparison.OrdinalIgnoreCase)
+               || html.Contains("__RequestVerificationToken", StringComparison.Ordinal)
+               || html.Contains("VerificationToken", StringComparison.OrdinalIgnoreCase)
+               || html.Contains("antiforgery", StringComparison.OrdinalIgnoreCase)
+               || html.Contains("csrf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void AddUnownedAntiforgeryTokenDiagnostics(IDocument document, ExportContext context, string route)
+    {
+        foreach (var input in document.QuerySelectorAll("input"))
+        {
+            if (!IsAntiforgeryTokenInput(input)
+                || FindOwningForm(input, document) is not null)
+            {
+                continue;
+            }
+
+            AddExportAntiforgeryDiagnostic(
+                context,
+                route,
+                "Static anti-forgery token cannot be exported because the token input is not owned by any form in the document. Problem: the input contains a request-specific __RequestVerificationToken minted for the export crawler. Cause: static hosts cannot mint a token for the real user, and RazorWire can only auto-refresh tokens that submit with a RazorWire-managed form. Fix: attach the token to a RazorWire form, load the form from a live endpoint, or remove the static token before export.");
+        }
+    }
+
+    private static IReadOnlyList<IElement> FindAntiforgeryTokenInputs(IElement form, IDocument document)
+    {
+        var tokens = form.QuerySelectorAll("input")
+            .Where(input => IsAntiforgeryTokenInput(input)
+                            && FindOwningForm(input, document) == form)
+            .ToList();
+
+        var formId = form.GetAttribute("id");
+        if (string.IsNullOrWhiteSpace(formId))
+        {
+            return tokens;
+        }
+
+        foreach (var token in document.QuerySelectorAll("input[form]")
+                     .Where(input => IsAntiforgeryTokenInput(input)
+                                     && string.Equals(input.GetAttribute("form"), formId, StringComparison.Ordinal)))
+        {
+            if (!tokens.Contains(token))
+            {
+                tokens.Add(token);
+            }
+        }
+
+        return tokens;
+    }
+
+    private static bool HasExportAntiforgerySurface(IElement form, IDocument document)
+    {
+        var antiforgeryMode = form.GetAttribute("data-rw-antiforgery") ?? string.Empty;
+        return FindAntiforgeryTokenInputs(form, document).Count > 0
+               || string.Equals(antiforgeryMode, "lazy", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IElement? FindOwningForm(IElement input, IDocument document)
+    {
+        if (input.HasAttribute("form"))
+        {
+            var formId = input.GetAttribute("form");
+            if (string.IsNullOrEmpty(formId))
+            {
+                return null;
+            }
+
+            var explicitOwner = document.GetElementById(formId);
+            return string.Equals(explicitOwner?.LocalName, "form", StringComparison.OrdinalIgnoreCase)
+                ? explicitOwner
+                : null;
+        }
+
+        for (var ancestor = input.ParentElement; ancestor is not null; ancestor = ancestor.ParentElement)
+        {
+            if (string.Equals(ancestor.LocalName, "form", StringComparison.OrdinalIgnoreCase))
+            {
+                return ancestor;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsAntiforgeryTokenInput(IElement input)
+    {
+        var name = input.GetAttribute("name") ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        return string.Equals(name, "__RequestVerificationToken", StringComparison.Ordinal)
+               || name.Contains("RequestVerificationToken", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("VerificationToken", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("Antiforgery", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("AntiForgery", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("csrf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool TryResolveOriginUrl(
+        string? rawValue,
+        string route,
+        ExportContext context,
+        string targetOrigin,
+        out string resolvedUrl,
+        out string error)
+    {
+        resolvedUrl = string.Empty;
+        error = string.Empty;
+
+        if (!TryResolveManagedUrl(rawValue, route, context, out var managedUrl, out error))
+        {
+            return false;
+        }
+
+        resolvedUrl = targetOrigin.TrimEnd('/') + managedUrl;
+        return true;
+    }
+
+    private bool TryResolveManagedUrl(
+        string? rawValue,
+        string route,
+        ExportContext context,
+        out string managedUrl,
+        out string error)
+    {
+        managedUrl = string.Empty;
+        error = string.Empty;
+
+        var value = rawValue?.Trim();
+        if (string.IsNullOrEmpty(value))
+        {
+            value = route;
+        }
+
+        if (value.StartsWith("//", StringComparison.Ordinal)
+            || value.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
+        {
+            error = $"'{value}' is not an app-owned HTTP route.";
+            return false;
+        }
+
+        string resolved;
+        if (!value.StartsWith("/", StringComparison.Ordinal)
+            && Uri.TryCreate(value, UriKind.Absolute, out var absoluteUri))
+        {
+            if (absoluteUri.Scheme != Uri.UriSchemeHttp && absoluteUri.Scheme != Uri.UriSchemeHttps)
+            {
+                error = $"'{value}' is not an app-owned HTTP route.";
+                return false;
+            }
+
+            if (!Uri.TryCreate(context.BaseUrl + "/", UriKind.Absolute, out var baseUri)
+                || !HasSameOrigin(absoluteUri, baseUri))
+            {
+                error = $"'{value}' points outside the exported application origin.";
+                return false;
+            }
+
+            resolved = absoluteUri.PathAndQuery + absoluteUri.Fragment;
+        }
+        else
+        {
+            resolved = _referenceProcessor.ResolveRelativeUrl(route, value);
+        }
+
+        if (!ExportReferenceProcessor.TrySplitManagedUrl(resolved, out var path, out var query, out var fragment))
+        {
+            error = $"'{value}' is not a root-relative managed route after normalization.";
+            return false;
+        }
+
+        managedUrl = path + query + fragment;
+        return true;
+    }
+
+    private static string ResolveHybridCredentialsAttribute(ExportContext context)
+    {
+        return context.Hybrid.IncludesCredentials ? "include" : "omit";
+    }
+
+    private static string SerializeDocument(IDocument document, string originalHtml)
+    {
+        var html = document.DocumentElement.OuterHtml;
+        var trimmedOriginal = originalHtml.TrimStart();
+        if (trimmedOriginal.StartsWith("<!doctype", StringComparison.OrdinalIgnoreCase))
+        {
+            return "<!doctype html>" + Environment.NewLine + html;
+        }
+
+        if (trimmedOriginal.StartsWith("<html", StringComparison.OrdinalIgnoreCase))
+        {
+            return html;
+        }
+
+        return document.Body?.InnerHtml ?? html;
+    }
+
+    private static void AddExportAntiforgeryDiagnostic(
+        ExportContext context,
+        string route,
+        string message)
+    {
+        if (context.Diagnostics.Any(diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                  && diagnostic.Route == route
+                                                  && diagnostic.Message == message))
+        {
+            return;
+        }
+
+        context.Diagnostics.Add(new ExportDiagnostic("RWEXPORT006", message, route));
     }
 
     private async Task MaterializeHtmlRedirectArtifactsAsync(ExportContext context, CancellationToken cancellationToken)
@@ -1011,6 +1426,8 @@ public class ExportEngine
 
             const string route = "/404.html";
             var html = StripAppSurfaceDocsDiagnosticsChrome(await response.Content.ReadAsStringAsync(cancellationToken));
+            html = ApplyPublicOriginRewrites(html, route, context);
+            html = ApplyHybridRuntimeRewrites(html, route, context);
             var filePath = MapRouteToFilePath(route, context.OutputPath, isHtml: true);
             var artifactUrl = MapFilePathToArtifactUrl(filePath, context.OutputPath, route);
             context.ArtifactUrls[route] = artifactUrl;

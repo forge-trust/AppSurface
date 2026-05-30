@@ -1,8 +1,10 @@
 using System.Threading.Channels;
+using Microsoft.AspNetCore.Antiforgery;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -40,7 +42,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
     {
         var options = endpoints.ServiceProvider.GetRequiredService<RazorWireOptions>();
 
-        endpoints.MapGet(
+        var streamEndpoint = endpoints.MapGet(
                 $"{options.Streams.BasePath}/{{channel}}",
                 async context =>
                 {
@@ -135,6 +137,33 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     }
                 })
             .ExcludeFromDescription();
+
+        if (!string.IsNullOrWhiteSpace(options.Hybrid.CorsPolicyName))
+        {
+            streamEndpoint.RequireCors(options.Hybrid.CorsPolicyName);
+        }
+
+        var tokenEndpoint = endpoints.MapGet(
+                options.Forms.Antiforgery.TokenEndpointPath,
+                (HttpContext context, [FromServices] IAntiforgery antiforgery) =>
+                {
+                    var tokens = antiforgery.GetAndStoreTokens(context);
+                    context.Response.Headers.CacheControl = "no-store";
+                    context.Response.Headers.Pragma = "no-cache";
+
+                    return Results.Json(new
+                    {
+                        formFieldName = tokens.FormFieldName ?? "__RequestVerificationToken",
+                        requestToken = tokens.RequestToken ?? string.Empty,
+                        headerName = tokens.HeaderName ?? "RequestVerificationToken"
+                    });
+                })
+            .ExcludeFromDescription();
+
+        if (!string.IsNullOrWhiteSpace(options.Hybrid.CorsPolicyName))
+        {
+            tokenEndpoint.RequireCors(options.Hybrid.CorsPolicyName);
+        }
 
         return endpoints;
     }

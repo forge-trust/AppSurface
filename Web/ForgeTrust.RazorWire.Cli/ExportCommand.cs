@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+using ForgeTrust.RazorWire;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.RazorWire.Cli;
@@ -43,6 +44,18 @@ public partial class ExportCommand : ICommand
     /// </remarks>
     [CommandOption("mode", 'm', Description = "Export mode: cdn (default) or hybrid.")]
     public ExportMode Mode { get; set; } = ExportMode.Cdn;
+
+    /// <summary>
+    /// Gets or sets the live origin used for RazorWire-managed live references in hybrid exports.
+    /// </summary>
+    [CommandOption("live-origin", Description = "Live origin for RazorWire-managed hybrid interactions, such as https://api.example.com.")]
+    public string? LiveOrigin { get; set; }
+
+    /// <summary>
+    /// Gets or sets credential behavior for RazorWire-managed live references.
+    /// </summary>
+    [CommandOption("hybrid-credentials", Description = "Hybrid credentials mode: auto (default), include, or omit.")]
+    public RazorWireHybridCredentialsMode HybridCredentials { get; set; } = RazorWireHybridCredentialsMode.Auto;
 
     /// <summary>
     /// Gets or sets the base URL of a running application to crawl.
@@ -135,7 +148,23 @@ public partial class ExportCommand : ICommand
 
         _logger.LogInformation("Exporting to {OutputPath}...", OutputPath);
 
-        var context = new ExportContext(OutputPath, SeedRoutesPath, resolvedSource.BaseUrl, Mode);
+        if (!ExportHybridOptions.TryNormalizeOrigin(LiveOrigin, out var normalizedLiveOrigin))
+        {
+            throw new CommandException("The --live-origin value must be an absolute http or https origin, such as 'https://api.example.com', with no path, query string, fragment, or userinfo.");
+        }
+
+        var context = new ExportContext(
+            OutputPath,
+            SeedRoutesPath,
+            initialSeedRoutes: null,
+            resolvedSource.BaseUrl,
+            Mode,
+            ExportRedirectStrategy.Html,
+            new ExportHybridOptions
+            {
+                LiveOrigin = normalizedLiveOrigin,
+                CredentialsMode = HybridCredentials
+            });
         try
         {
             await _engine.RunAsync(context, cancellationToken);

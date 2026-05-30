@@ -72,6 +72,20 @@ public class ExportContext
     public ExportRedirectStrategy RedirectStrategy { get; }
 
     /// <summary>
+    /// Gets split-origin hybrid export options.
+    /// </summary>
+    public ExportHybridOptions Hybrid { get; }
+
+    /// <summary>
+    /// Gets the optional public origin used when export rewrites same-origin metadata for the published static host.
+    /// </summary>
+    /// <remarks>
+    /// This origin does not change the crawl source or application links. It is intended for metadata such as canonical
+    /// links that must identify the public static host even though the exporter crawls a loopback or private source URL.
+    /// </remarks>
+    public string? PublicOrigin { get; }
+
+    /// <summary>
     /// Gets the set of URLs that have already been visited during the crawl.
     /// </summary>
     public HashSet<string> Visited { get; } = new();
@@ -326,6 +340,30 @@ public class ExportContext
         string baseUrl,
         ExportMode mode,
         ExportRedirectStrategy redirectStrategy)
+        : this(outputPath, seedRoutesPath, initialSeedRoutes, baseUrl, mode, redirectStrategy, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="ExportContext"/> with in-memory seed routes, export mode, redirect strategy, and hybrid options.
+    /// </summary>
+    /// <param name="outputPath">The target directory for export.</param>
+    /// <param name="seedRoutesPath">The path to initial seed routes, if any.</param>
+    /// <param name="initialSeedRoutes">Optional in-memory initial seed routes used when <paramref name="seedRoutesPath"/> is null or blank.</param>
+    /// <param name="baseUrl">The base URL of the site to export.</param>
+    /// <param name="mode">The export mode.</param>
+    /// <param name="redirectStrategy">Strategy used to materialize redirect aliases.</param>
+    /// <param name="hybridOptions">Optional split-origin hybrid options.</param>
+    /// <param name="publicOrigin">Optional public origin for same-origin metadata rewrites.</param>
+    public ExportContext(
+        string outputPath,
+        string? seedRoutesPath,
+        IEnumerable<string>? initialSeedRoutes,
+        string baseUrl,
+        ExportMode mode,
+        ExportRedirectStrategy redirectStrategy,
+        ExportHybridOptions? hybridOptions,
+        string? publicOrigin = null)
     {
         OutputPath = outputPath;
         SeedRoutesPath = seedRoutesPath;
@@ -333,6 +371,8 @@ public class ExportContext
         BaseUrl = baseUrl.TrimEnd('/');
         Mode = mode;
         RedirectStrategy = redirectStrategy;
+        Hybrid = hybridOptions ?? new ExportHybridOptions();
+        PublicOrigin = publicOrigin;
     }
 
     private static string NormalizeRedirectArtifactRoute(string route, string paramName)

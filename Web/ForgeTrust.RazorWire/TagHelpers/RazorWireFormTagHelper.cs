@@ -34,6 +34,12 @@ public class RazorWireFormTagHelper : TagHelper
     [HtmlAttributeName("rw-target")]
     public string? TargetFrame { get; set; }
 
+    /// <summary>
+    /// Gets or sets the anti-forgery behavior assertion for this form.
+    /// Use <c>lazy</c> for hybrid/static exports that should refresh a token at runtime, or <c>off</c> to opt out.
+    /// </summary>
+    [HtmlAttributeName("rw-antiforgery")]
+    public string? Antiforgery { get; set; }
 
     /// <summary>
     /// Processes a form tag by removing attributes that start with "rw-" and configuring Turbo attributes based on the tag helper's properties.
@@ -64,7 +70,28 @@ public class RazorWireFormTagHelper : TagHelper
             output.Attributes.SetAttribute("data-turbo-frame", TargetFrame);
         }
 
+        ApplyAntiforgeryConvention(output);
+
         ApplyFormFailureConvention(output);
+    }
+
+    private void ApplyAntiforgeryConvention(TagHelperOutput output)
+    {
+        if (string.IsNullOrWhiteSpace(Antiforgery))
+        {
+            return;
+        }
+
+        if (string.Equals(Antiforgery, "lazy", StringComparison.OrdinalIgnoreCase))
+        {
+            output.Attributes.SetAttribute("data-rw-antiforgery", "lazy");
+            return;
+        }
+
+        if (string.Equals(Antiforgery, "off", StringComparison.OrdinalIgnoreCase))
+        {
+            output.Attributes.SetAttribute("data-rw-antiforgery", "off");
+        }
     }
 
     private void ApplyFormFailureConvention(TagHelperOutput output)

@@ -80,6 +80,7 @@ public class IslandTagHelper : TagHelper
         }
 
         output.Attributes.SetAttribute("id", Id);
+        output.Attributes.SetAttribute("data-rw-island", "true");
 
         if (!string.IsNullOrEmpty(Src))
         {

@@ -13,6 +13,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web;
+using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Cli;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -117,6 +118,18 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
     public ExportMode Mode { get; set; } = ExportMode.Cdn;
 
     /// <summary>
+    /// Gets the live origin used for RazorWire-managed live references in hybrid exports.
+    /// </summary>
+    [CommandOption("live-origin", Description = "Live origin for RazorWire-managed hybrid interactions, such as https://api.example.com.")]
+    public string? LiveOrigin { get; set; }
+
+    /// <summary>
+    /// Gets credential behavior for RazorWire-managed live references.
+    /// </summary>
+    [CommandOption("hybrid-credentials", Description = "Hybrid credentials mode: auto (default), include, or omit.")]
+    public RazorWireHybridCredentialsMode HybridCredentials { get; set; } = RazorWireHybridCredentialsMode.Auto;
+
+    /// <summary>
     /// Gets the redirect alias materialization strategy used by the underlying RazorWire exporter.
     /// </summary>
     /// <remarks>
@@ -196,6 +209,11 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
             throw new CommandException("The --redirects netlify strategy requires --mode cdn because Netlify rules point at publish-root static routes.");
         }
 
+        if (!ExportHybridOptions.TryNormalizeOrigin(LiveOrigin, out var normalizedLiveOrigin))
+        {
+            throw new CommandException("The --live-origin value must be an absolute http or https origin, such as 'https://api.example.com', with no path, query string, fragment, or userinfo.");
+        }
+
         var outputPath = Path.GetFullPath(OutputPath);
         if (File.Exists(outputPath))
         {
@@ -227,7 +245,12 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
             initialSeedRoutes,
             Mode,
             RedirectStrategy,
-            DefaultExportUrl);
+            DefaultExportUrl,
+            new ExportHybridOptions
+            {
+                LiveOrigin = normalizedLiveOrigin,
+                CredentialsMode = HybridCredentials
+            });
     }
 
     /// <summary>
@@ -809,6 +832,7 @@ internal readonly record struct AppSurfaceDocsHostArgs(
 /// affects only alias materialization after the loopback host is crawled from <paramref name="RequestedBaseUrl"/>.
 /// </param>
 /// <param name="RequestedBaseUrl">Loopback URL passed to Kestrel. The default uses port 0 so the OS chooses a free port.</param>
+/// <param name="HybridOptions">Optional split-origin hybrid settings forwarded into the RazorWire export context.</param>
 internal readonly record struct AppSurfaceDocsExportArgs(
     AppSurfaceDocsHostArgs HostArgs,
     string OutputPath,
@@ -816,7 +840,8 @@ internal readonly record struct AppSurfaceDocsExportArgs(
     IReadOnlyList<string>? InitialSeedRoutes,
     ExportMode Mode,
     ExportRedirectStrategy RedirectStrategy,
-    string RequestedBaseUrl);
+    string RequestedBaseUrl,
+    ExportHybridOptions? HybridOptions = null);
 
 /// <summary>
 /// Describes a one-shot AppSurface Docs harvest-health verification request.
@@ -1760,7 +1785,8 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
                 args.InitialSeedRoutes,
                 baseUrl,
                 args.Mode,
-                args.RedirectStrategy);
+                args.RedirectStrategy,
+                args.HybridOptions);
 
             await _contextConfigurator.ConfigureAsync(host, context, cancellationToken);
 

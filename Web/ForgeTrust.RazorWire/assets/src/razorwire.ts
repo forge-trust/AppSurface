@@ -33,12 +33,21 @@ interface RuntimeConfig {
     failureUxEnabled: boolean;
     failureMode: string;
     defaultFailureMessage: string;
+    liveOrigin: string;
+    hybridCredentials: string;
+    antiforgeryEndpoint: string;
 }
 
 interface FormSubmitState {
     submitter: (HTMLElement & { disabled: boolean }) | null;
     disabledByRazorWire: boolean;
     describedById: string | null;
+}
+
+interface AntiforgeryTokenPayload {
+    fieldName: string;
+    requestToken: string;
+    headerName: string;
 }
 
 declare const Turbo: TurboRuntime | undefined;
@@ -51,8 +60,10 @@ declare const Turbo: TurboRuntime | undefined;
         sources: Map<string, StreamSourceRegistration>;
         channelStates: Map<string, string>;
         observer: MutationObserver;
+        config: RuntimeConfig;
 
-        constructor() {
+        constructor(config: RuntimeConfig) {
+            this.config = config;
             this.sources = new Map(); // src -> { es: EventSource, elements: Set<Element>, closeTimer: int, state: string }
             this.channelStates = new Map(); // Channel -> State (for global access and dependent elements)
             this.observer = new MutationObserver(this.handleMutations.bind(this));
@@ -179,7 +190,9 @@ declare const Turbo: TurboRuntime | undefined;
             if (!source) {
                 console.log('[ConnectionManager] Creating NEW connection for:', src);
                 // Create new persistent connection
-                const es = new EventSource(src);
+                const es = this.shouldIncludeCredentials(src)
+                    ? new EventSource(src, { withCredentials: true })
+                    : new EventSource(src);
                 this.connectStreamSource(es);
 
                 source = {
@@ -379,6 +392,23 @@ declare const Turbo: TurboRuntime | undefined;
             if (typeof turbo?.disconnectStreamSource === 'function') {
                 turbo.disconnectStreamSource(source);
             }
+        }
+
+        shouldIncludeCredentials(src) {
+            if (!this.shouldUseHybridCredentials() || !this.config.liveOrigin) {
+                return false;
+            }
+
+            try {
+                return new URL(src, window.location.href).origin === this.config.liveOrigin;
+            } catch {
+                return false;
+            }
+        }
+
+        shouldUseHybridCredentials() {
+            const mode = (this.config.hybridCredentials || '').toLowerCase();
+            return mode === 'include' || (mode === 'auto' && !!this.config.liveOrigin);
         }
     }
 
@@ -719,12 +749,14 @@ declare const Turbo: TurboRuntime | undefined;
     class FormFailureManager {
         config: RuntimeConfig;
         state: WeakMap<HTMLFormElement, Partial<FormSubmitState>>;
+        antiforgeryRefreshes: WeakMap<HTMLFormElement, Promise<AntiforgeryTokenPayload | null>>;
         nextId: number;
         styleId: string;
 
         constructor(config: RuntimeConfig) {
             this.config = config;
             this.state = new WeakMap();
+            this.antiforgeryRefreshes = new WeakMap();
             this.nextId = 1;
             this.styleId = 'rw-form-failure-default-styles';
         }
@@ -734,6 +766,9 @@ declare const Turbo: TurboRuntime | undefined;
                 this.injectStyles();
             }
 
+            document.addEventListener('focusin', event => this.handleAntiforgeryIntent(event));
+            document.addEventListener('pointerdown', event => this.handleAntiforgeryIntent(event));
+            document.addEventListener('keydown', event => this.handleAntiforgeryIntent(event));
             document.addEventListener('turbo:before-fetch-request', event => this.handleBeforeFetchRequest(event));
             document.addEventListener('turbo:submit-start', event => this.handleSubmitStart(event));
             document.addEventListener('turbo:submit-end', event => this.handleSubmitEnd(event));
@@ -745,6 +780,10 @@ declare const Turbo: TurboRuntime | undefined;
             if (!this.isRazorWireForm(form)) return;
 
             event.detail.fetchOptions = event.detail.fetchOptions || {};
+            if (this.shouldIncludeCredentials(form)) {
+                event.detail.fetchOptions.credentials = 'include';
+            }
+
             const headers = event.detail.fetchOptions.headers || {};
             if (typeof headers.set === 'function') {
                 headers.set('X-RazorWire-Form', 'true');
@@ -753,6 +792,23 @@ declare const Turbo: TurboRuntime | undefined;
             }
 
             event.detail.fetchOptions.headers = headers;
+
+            if (this.isLazyAntiforgeryForm(form) && !this.hasAntiforgeryToken(form)) {
+                event.preventDefault?.();
+                this.ensureAntiforgeryToken(form)
+                    .then(token => {
+                        this.applyAntiforgeryTokenToFetchOptions(event.detail?.fetchOptions, token);
+                        event.detail?.resume?.();
+                    })
+                    .catch(error => this.handleAntiforgeryRefreshFailure(form, error));
+            }
+        }
+
+        handleAntiforgeryIntent(event) {
+            const form = this.getForm(event.target);
+            if (!this.isRazorWireForm(form) || !this.isLazyAntiforgeryForm(form) || this.hasAntiforgeryToken(form)) return;
+
+            this.ensureAntiforgeryToken(form).catch(error => this.handleAntiforgeryRefreshFailure(form, error));
         }
 
         handleSubmitStart(event) {
@@ -896,6 +952,193 @@ declare const Turbo: TurboRuntime | undefined;
             if (target instanceof HTMLFormElement) return target;
             if (target instanceof Element) return target.closest('form[data-rw-form="true"]');
             return null;
+        }
+
+        isLazyAntiforgeryForm(form) {
+            return form.getAttribute('data-rw-antiforgery') === 'lazy';
+        }
+
+        hasAntiforgeryToken(form) {
+            const input = (form.querySelector('input[name="__RequestVerificationToken"]') as HTMLInputElement | null)
+                || (form.querySelector('input[data-rw-antiforgery-token="true"]') as HTMLInputElement | null);
+            return !!input?.value;
+        }
+
+        shouldIncludeCredentials(form) {
+            if (this.shouldUseHybridCredentials()) {
+                return this.isLiveOriginUrl(form.getAttribute('action') || window.location.href);
+            }
+
+            return false;
+        }
+
+        shouldUseHybridCredentials() {
+            const mode = (this.config.hybridCredentials || '').toLowerCase();
+            return mode === 'include' || (mode === 'auto' && !!this.config.liveOrigin);
+        }
+
+        isLiveOriginUrl(rawUrl) {
+            if (!this.config.liveOrigin) return false;
+            try {
+                return new URL(rawUrl || window.location.href, window.location.href).origin === this.config.liveOrigin;
+            } catch {
+                return false;
+            }
+        }
+
+        async ensureAntiforgeryToken(form): Promise<AntiforgeryTokenPayload | null> {
+            if (this.hasAntiforgeryToken(form)) return null;
+
+            const pendingRefresh = this.antiforgeryRefreshes.get(form);
+            if (pendingRefresh) {
+                return pendingRefresh;
+            }
+
+            const refresh = this.refreshAntiforgeryToken(form)
+                .finally(() => this.antiforgeryRefreshes.delete(form));
+            this.antiforgeryRefreshes.set(form, refresh);
+            return refresh;
+        }
+
+        async refreshAntiforgeryToken(form): Promise<AntiforgeryTokenPayload> {
+            form.setAttribute('data-rw-antiforgery-state', 'refreshing');
+            const endpoint = this.resolveAntiforgeryEndpoint();
+            const response = await fetch(endpoint, {
+                method: 'GET',
+                credentials: this.shouldUseHybridCredentials() ? 'include' : 'same-origin',
+                headers: { 'Accept': 'application/json' },
+                cache: 'no-store'
+            });
+
+            if (!response.ok) {
+                throw new Error(`Token endpoint returned ${response.status}`);
+            }
+
+            const payload = await response.json();
+            const fieldName = payload.formFieldName || '__RequestVerificationToken';
+            const requestToken = payload.requestToken || '';
+            if (!requestToken) {
+                throw new Error('Token endpoint did not return a request token.');
+            }
+
+            let input = form.querySelector(`input[name="${this.escapeAttributeValue(fieldName)}"]`) as HTMLInputElement | null;
+            if (!input) {
+                input = document.createElement('input') as HTMLInputElement;
+                input.type = 'hidden';
+                input.name = fieldName;
+                form.appendChild(input);
+            }
+
+            input.setAttribute('data-rw-antiforgery-token', 'true');
+            input.value = requestToken;
+            form.setAttribute('data-rw-antiforgery-state', 'ready');
+            return {
+                fieldName,
+                requestToken,
+                headerName: payload.headerName || 'RequestVerificationToken'
+            };
+        }
+
+        applyAntiforgeryTokenToFetchOptions(fetchOptions, token) {
+            if (!fetchOptions || !token) return;
+
+            const headerName = token.headerName || 'RequestVerificationToken';
+            const headers = fetchOptions.headers || {};
+            if (typeof headers.set === 'function') {
+                headers.set(headerName, token.requestToken);
+            } else {
+                headers[headerName] = token.requestToken;
+            }
+
+            fetchOptions.headers = headers;
+
+            const body = fetchOptions.body;
+            if (typeof FormData !== 'undefined' && body instanceof FormData) {
+                body.set(token.fieldName, token.requestToken);
+                return;
+            }
+
+            if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+                body.set(token.fieldName, token.requestToken);
+                return;
+            }
+
+            if (typeof body === 'string' && this.isFormUrlEncodedFetchBody(fetchOptions)) {
+                const parameters = new URLSearchParams(body);
+                parameters.set(token.fieldName, token.requestToken);
+                fetchOptions.body = parameters.toString();
+            }
+        }
+
+        isFormUrlEncodedFetchBody(fetchOptions) {
+            const contentType = this.readRequestHeader(fetchOptions.headers, 'content-type');
+            return typeof contentType === 'string'
+                && contentType.toLowerCase().split(';', 1)[0].trim() === 'application/x-www-form-urlencoded';
+        }
+
+        readRequestHeader(headers, name) {
+            if (!headers) return null;
+
+            if (typeof headers.get === 'function') {
+                return headers.get(name);
+            }
+
+            const expectedName = name.toLowerCase();
+            if (Array.isArray(headers)) {
+                const entry = headers.find(([key]) => String(key).toLowerCase() === expectedName);
+                return entry ? entry[1] : null;
+            }
+
+            const key = Object.keys(headers).find(item => item.toLowerCase() === expectedName);
+            return key ? headers[key] : null;
+        }
+
+        resolveAntiforgeryEndpoint() {
+            const endpoint = this.config.antiforgeryEndpoint || '/_rw/antiforgery/token';
+            if (this.config.liveOrigin) {
+                return this.config.liveOrigin.replace(/\/$/, '') + endpoint;
+            }
+
+            return endpoint;
+        }
+
+        handleAntiforgeryRefreshFailure(form, error) {
+            form.setAttribute('data-rw-antiforgery-state', 'failed');
+            const target = this.resolveTarget(form);
+            const detail = {
+                form,
+                submitter: null,
+                statusCode: null,
+                handled: false,
+                responseKind: 'network',
+                target: target.element,
+                message: 'We could not prepare this form. Check your connection and try again.',
+                developmentDiagnostic: this.config.developmentDiagnostics
+                    ? this.diagnostic(
+                        form,
+                        null,
+                        'RazorWire anti-forgery token refresh failed',
+                        String(error?.message || error || 'The token endpoint could not be reached.'),
+                        [
+                            'Check that the live origin is reachable.',
+                            'Check CORS credentials and allowed origins.',
+                            'Check that MapRazorWire() is mapped on the live app.'
+                        ])
+                    : null
+            };
+
+            const failureEvent = this.dispatch(form, 'razorwire:form:failure', detail, true);
+            if (detail.developmentDiagnostic) {
+                this.dispatch(form, 'razorwire:form:diagnostic', detail.developmentDiagnostic);
+            }
+
+            if (!failureEvent.defaultPrevented && this.getMode(form) === 'auto') {
+                this.renderFailure(form, target.element, detail);
+            }
+        }
+
+        escapeAttributeValue(value) {
+            return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
         }
 
         getMode(form) {
@@ -1162,8 +1405,32 @@ declare const Turbo: TurboRuntime | undefined;
                 ? (dataset.rwFormFailureMode || 'auto').toLowerCase() !== 'off'
                 : dataset.rwFormFailureEnabled !== 'false',
             failureMode: dataset.rwFormFailureMode || 'auto',
-            defaultFailureMessage: dataset.rwDefaultFailureMessage || 'We could not submit this form. Check your input and try again.'
+            defaultFailureMessage: dataset.rwDefaultFailureMessage || 'We could not submit this form. Check your input and try again.',
+            liveOrigin: normalizeOrigin(dataset.rwLiveOrigin || ''),
+            hybridCredentials: dataset.rwHybridCredentials || 'auto',
+            antiforgeryEndpoint: dataset.rwAntiforgeryEndpoint || '/_rw/antiforgery/token'
         };
+    }
+
+    function normalizeOrigin(rawOrigin) {
+        if (!rawOrigin) return '';
+
+        try {
+            const url = new URL(rawOrigin);
+            const hasPath = url.pathname.replace(/\/+$/, '').length > 0;
+            if ((url.protocol !== 'http:' && url.protocol !== 'https:')
+                || hasPath
+                || url.search
+                || url.hash
+                || url.username
+                || url.password) {
+                return '';
+            }
+
+            return url.origin;
+        } catch {
+            return '';
+        }
     }
 
     function installVisitStreamAction() {
@@ -1249,7 +1516,7 @@ declare const Turbo: TurboRuntime | undefined;
     // Initialize
     const runtimeConfig = readRuntimeConfig();
     installVisitStreamAction();
-    const connectionManager = new ConnectionManager();
+    const connectionManager = new ConnectionManager(runtimeConfig);
     const localTimeFormatter = new LocalTimeFormatter();
     const formFailureManager = new FormFailureManager(runtimeConfig);
 

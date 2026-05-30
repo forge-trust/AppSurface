@@ -12,7 +12,18 @@ public class ExportSourceRequestFactory
 
     private const string HelpHint = " Run `razorwire export --help` for usage.";
 
-    internal ExportSourceRequest Create(
+    /// <summary>
+    /// Creates a validated export source request from mutually exclusive CLI source options.
+    /// </summary>
+    /// <param name="baseUrl">Optional running application base URL.</param>
+    /// <param name="projectPath">Optional project path to publish and launch.</param>
+    /// <param name="dllPath">Optional compiled DLL path to launch.</param>
+    /// <param name="framework">Optional target framework for project exports.</param>
+    /// <param name="appArgs">Arguments forwarded to launched project or DLL exports.</param>
+    /// <param name="noBuild">Whether project exports should skip publishing before launch.</param>
+    /// <returns>A validated source request.</returns>
+    /// <exception cref="CommandException">Thrown when source selection or source values are invalid.</exception>
+    public ExportSourceRequest Create(
         string? baseUrl,
         string? projectPath,
         string? dllPath,

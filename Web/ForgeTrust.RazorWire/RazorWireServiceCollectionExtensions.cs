@@ -40,6 +40,8 @@ public static class RazorWireServiceCollectionExtensions
         services.AddOptions<RazorWireOptions>();
 
         services.Configure(configure ?? (_ => { }));
+        services.AddLogging();
+        services.AddAntiforgery();
 
         services.AddSingleton(sp =>
             sp.GetRequiredService<IOptions<RazorWireOptions>>().Value);

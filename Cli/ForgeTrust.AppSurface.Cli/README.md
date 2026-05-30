@@ -45,6 +45,19 @@ dotnet tool update ForgeTrust.AppSurface.Cli --prerelease
 
 ## Commands
 
+### `appsurface export`
+
+Export a general AppSurface or RazorWire application through the product-facing CLI.
+
+```bash
+appsurface export --mode hybrid \
+  --public-origin https://www.example.com \
+  --live-origin https://api.example.com \
+  --project ./src/MyApp/MyApp.csproj
+```
+
+The command shares the RazorWire export engine and accepts the same source choices as `razorwire export`: exactly one of `--url`, `--project`, or `--dll`, plus `--framework`, `--app-args`, and `--no-build` for launched apps. `--public-origin` rewrites same-origin canonical metadata to the public static host; it does not change crawl routing or app links. `--mode hybrid` by itself preserves application-style URLs and can support same-origin backend passthrough for RazorWire endpoints, including lazy anti-forgery token refresh. Adding `--live-origin` enables split-origin rewriting for RazorWire-managed live surfaces. `--hybrid-credentials auto` is the default and includes credentials for managed live calls when a live origin is configured; `omit` is an advanced escape hatch for anonymous split-origin live endpoints.
+
 ### `appsurface docs`
 
 Preview AppSurface Docs for a repository checkout.
@@ -91,6 +104,8 @@ Options:
 - `--route-root`: Route-family root for version and archive routes.
 - `--docs-root`: Live docs root. When `--seeds` is omitted, export seeds `/` and this resolved docs root, `/docs` by default.
 - `--public-origin`: Public origin used for absolute canonical metadata in exported pages, such as `https://docs.example.com`. Use an absolute `http://` or `https://` origin only, with no path, query, or fragment. The export host still crawls loopback internally; this option keeps public canonical links from using that private listener. When unset, canonical metadata remains app-relative and app routes do not change.
+- `--live-origin`: Optional live origin for split-origin hybrid docs export, such as `https://api.example.com`. Use an absolute `http://` or `https://` origin only, with no path, query, or fragment.
+- `--hybrid-credentials`: Credential behavior for RazorWire-managed live calls in split-origin hybrid export: `auto` (default), `include`, or `omit`. `auto` includes credentials when `--live-origin` is set.
 - `--environment`, `-e`: Host environment forwarded to the AppSurface Docs host. Defaults to `Production` for export.
 - `--startup-timeout-seconds`: Seconds to wait for the in-process AppSurface Docs host to start before failing fast. Defaults to `10`; use `0` to disable while investigating intentional pre-bind delays.
 
@@ -106,7 +121,7 @@ Migration map for repo-owned AppSurface Docs export:
 | `--seeds <file>` | `--seeds <file>` |
 | `--output <dir>` | `--output <dir>` |
 | `AppSurfaceDocs__Routing__PublicOrigin=https://docs.example.com` | `--public-origin https://docs.example.com` |
-| `--project`, `--dll`, `--url`, `--app-args`, `--no-build`, `--framework` | remain RazorWire-only for arbitrary app export |
+| `--project`, `--dll`, `--url`, `--app-args`, `--no-build`, `--framework` | use `appsurface export` for arbitrary app export |
 
 ## Development
 
