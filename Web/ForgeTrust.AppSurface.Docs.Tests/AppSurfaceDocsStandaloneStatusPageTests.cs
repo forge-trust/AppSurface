@@ -145,8 +145,8 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     [Fact]
     public async Task ReservedNotFoundRoute_ShouldUseLiveDocsRootForVersionedSearchRecovery()
     {
-        var catalogDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), Path.GetRandomFileName()));
-        var catalogPath = Path.Join(catalogDirectory.FullName, "catalog.json");
+        var catalogDirectory = Directory.CreateDirectory(TestPathUtils.PathUnder(Path.GetTempPath(), Path.GetRandomFileName()));
+        var catalogPath = TestPathUtils.PathUnder(catalogDirectory.FullName, "catalog.json");
 
         try
         {
@@ -251,10 +251,10 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
 
     private static string CreateRepositoryRoot()
     {
-        var repositoryRoot = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var repositoryRoot = TestPathUtils.PathUnder(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(repositoryRoot);
         File.WriteAllText(
-            Path.Join(repositoryRoot, "README.md"),
+            TestPathUtils.PathUnder(repositoryRoot, "README.md"),
             """
             # Test Docs
 
@@ -339,11 +339,11 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var relativeProjectPath = Path.Combine(
+            var candidate = TestPathUtils.PathUnder(
+                directory.FullName,
                 "Web",
                 "ForgeTrust.AppSurface.Docs.Standalone",
                 "ForgeTrust.AppSurface.Docs.Standalone.csproj");
-            var candidate = Path.Join(directory.FullName, relativeProjectPath);
 
             if (File.Exists(candidate))
             {
