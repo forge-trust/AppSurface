@@ -25,6 +25,16 @@ internal sealed class PackageIndexGenerator
     private const string ChangelogPath = "CHANGELOG.md";
     private const string UpgradePolicyPath = "releases/upgrade-policy.md";
     private const string WebExamplePath = "examples/web-app/README.md";
+    private const string RepositoryIssuePrefix = "https://github.com/forge-trust/AppSurface/issues/";
+    private const string RepositoryPullPrefix = "https://github.com/forge-trust/AppSurface/pull/";
+    private static readonly string[] ProductFamilyValues =
+    [
+        "appsurface",
+        "razorwire",
+        "forge_trust",
+        "internal_support"
+    ];
+
     private static readonly HashSet<string> ReservedWindowsDeviceNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "con",
@@ -73,23 +83,25 @@ internal sealed class PackageIndexGenerator
     }
 
     /// <summary>
-    /// Generates chooser markdown and writes it to the configured output path.
+    /// Generates package chooser and readiness dashboard markdown and writes both configured output paths.
     /// </summary>
-    /// <param name="request">Generation request describing the repository root, manifest path, and output path.</param>
+    /// <param name="request">Generation request describing the repository root, manifest path, chooser output, and readiness output.</param>
     /// <param name="cancellationToken">Cancellation token used for manifest loading, metadata evaluation, and file writes.</param>
-    /// <returns>A task that completes when the chooser file has been written.</returns>
+    /// <returns>A task that completes when the generated files have been written.</returns>
     /// <exception cref="PackageIndexException">
     /// Thrown when the repository layout is invalid, required docs are missing, or the manifest cannot be rendered safely.
     /// </exception>
     /// <remarks>
-    /// This method creates the output directory when it does not already exist and overwrites the chooser file atomically
-    /// from the generated markdown payload.
+    /// This method creates output directories when they do not already exist and overwrites the generated files from the
+    /// generated markdown payloads.
     /// </remarks>
     internal async Task GenerateToFileAsync(PackageIndexRequest request, CancellationToken cancellationToken = default)
     {
-        var markdown = await GenerateAsync(request, cancellationToken);
-        Directory.CreateDirectory(Path.GetDirectoryName(request.OutputPath)!);
-        await File.WriteAllTextAsync(request.OutputPath, markdown, cancellationToken);
+        var documents = await GenerateDocumentsAsync(request, cancellationToken);
+        Directory.CreateDirectory(Path.GetDirectoryName(request.ChooserOutputPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(request.ReadinessOutputPath)!);
+        await File.WriteAllTextAsync(request.ChooserOutputPath, documents.ChooserMarkdown, cancellationToken);
+        await File.WriteAllTextAsync(request.ReadinessOutputPath, documents.ReadinessMarkdown, cancellationToken);
     }
 
     /// <summary>
@@ -103,40 +115,51 @@ internal sealed class PackageIndexGenerator
     /// </exception>
     internal async Task<string> GenerateAsync(PackageIndexRequest request, CancellationToken cancellationToken = default)
     {
-        ValidateRequest(request);
-
-        var manifest = await _manifestLoader.LoadAsync(request.ManifestPath, cancellationToken);
-        var candidateProjects = _scanner.DiscoverProjects(request.RepositoryRoot);
-        var metadata = await LoadMetadataAsync(request.RepositoryRoot, candidateProjects, cancellationToken);
-        var entries = ResolveEntries(request.RepositoryRoot, manifest, candidateProjects, metadata);
-        ValidateStaticDocumentationTargets(request.RepositoryRoot);
-        return RenderMarkdown(request, entries);
+        var documents = await GenerateDocumentsAsync(request, cancellationToken);
+        return documents.ChooserMarkdown;
     }
 
     /// <summary>
-    /// Verifies that the checked-in chooser file matches the current repository truth.
+    /// Generates the package chooser and package-index evidence dashboard without writing either file to disk.
     /// </summary>
-    /// <param name="request">Verification request describing the repository root, manifest path, and generated chooser file.</param>
-    /// <param name="cancellationToken">Cancellation token used while regenerating and reading the existing chooser file.</param>
+    /// <param name="request">Generation request describing repository inputs and output path contexts.</param>
+    /// <param name="cancellationToken">Cancellation token used while loading the manifest and project metadata.</param>
+    /// <returns>Generated chooser and readiness markdown payloads.</returns>
+    internal async Task<PackageIndexDocuments> GenerateDocumentsAsync(
+        PackageIndexRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var entries = await ResolveGenerationEntriesAsync(request, cancellationToken);
+        var readiness = PackageReadinessEvaluator.Evaluate(request.RepositoryRoot, entries);
+        return new PackageIndexDocuments(
+            RenderMarkdown(request, entries),
+            RenderReadinessMarkdown(request, entries, readiness));
+    }
+
+    /// <summary>
+    /// Verifies that the checked-in chooser and readiness dashboard files match the current repository truth.
+    /// </summary>
+    /// <param name="request">Verification request describing the repository root, manifest path, and generated files.</param>
+    /// <param name="cancellationToken">Cancellation token used while regenerating and reading the existing generated files.</param>
     /// <returns>A task that completes when verification succeeds.</returns>
     /// <exception cref="PackageIndexException">
-    /// Thrown when the generated chooser is missing or differs from the freshly generated markdown.
+    /// Thrown when either generated file is missing or differs from freshly generated markdown.
     /// </exception>
     internal async Task VerifyAsync(PackageIndexRequest request, CancellationToken cancellationToken = default)
     {
-        var expected = await GenerateAsync(request, cancellationToken);
-        if (!File.Exists(request.OutputPath))
-        {
-            throw new PackageIndexException(
-                $"Missing generated file '{Path.GetRelativePath(request.RepositoryRoot, request.OutputPath)}'. Run the package index generator.");
-        }
-
-        var current = await File.ReadAllTextAsync(request.OutputPath, cancellationToken);
-        if (!string.Equals(current, expected, StringComparison.Ordinal))
-        {
-            throw new PackageIndexException(
-                $"Generated file '{Path.GetRelativePath(request.RepositoryRoot, request.OutputPath)}' is stale. Run the package index generator.");
-        }
+        var documents = await GenerateDocumentsAsync(request, cancellationToken);
+        await VerifyGeneratedFileAsync(
+            request.RepositoryRoot,
+            request.ChooserOutputPath,
+            documents.ChooserMarkdown,
+            "package chooser",
+            cancellationToken);
+        await VerifyGeneratedFileAsync(
+            request.RepositoryRoot,
+            request.ReadinessOutputPath,
+            documents.ReadinessMarkdown,
+            "package readiness dashboard",
+            cancellationToken);
     }
 
     /// <summary>
@@ -152,6 +175,15 @@ internal sealed class PackageIndexGenerator
         PackageIndexRequest request,
         CancellationToken cancellationToken = default)
     {
+        var entries = await ResolveGenerationEntriesAsync(request, cancellationToken);
+
+        return PackageGateValidator.Validate(request.RepositoryRoot, entries);
+    }
+
+    private async Task<IReadOnlyList<ResolvedPackageEntry>> ResolveGenerationEntriesAsync(
+        PackageIndexRequest request,
+        CancellationToken cancellationToken)
+    {
         ValidateRequest(request);
 
         var manifest = await _manifestLoader.LoadAsync(request.ManifestPath, cancellationToken);
@@ -159,8 +191,29 @@ internal sealed class PackageIndexGenerator
         var metadata = await LoadMetadataAsync(request.RepositoryRoot, candidateProjects, cancellationToken);
         var entries = ResolveEntries(request.RepositoryRoot, manifest, candidateProjects, metadata);
         ValidateStaticDocumentationTargets(request.RepositoryRoot);
+        return entries;
+    }
 
-        return PackageGateValidator.Validate(request.RepositoryRoot, entries);
+    private static async Task VerifyGeneratedFileAsync(
+        string repositoryRoot,
+        string outputPath,
+        string expected,
+        string documentLabel,
+        CancellationToken cancellationToken)
+    {
+        var displayPath = Path.GetRelativePath(repositoryRoot, outputPath).Replace('\\', '/');
+        if (!File.Exists(outputPath))
+        {
+            throw new PackageIndexException(
+                $"Missing generated {documentLabel} '{displayPath}'. Run the package index generator.");
+        }
+
+        var current = await File.ReadAllTextAsync(outputPath, cancellationToken);
+        if (!string.Equals(current, expected, StringComparison.Ordinal))
+        {
+            throw new PackageIndexException(
+                $"Generated {documentLabel} '{displayPath}' is stale. Run the package index generator.");
+        }
     }
 
     private static void ValidateRequest(PackageIndexRequest request)
@@ -176,7 +229,7 @@ internal sealed class PackageIndexGenerator
                 $"Manifest '{Path.GetRelativePath(request.RepositoryRoot, request.ManifestPath)}' does not exist.");
         }
 
-        var sidecarPath = Path.Combine(Path.GetDirectoryName(request.OutputPath)!, "README.md.yml");
+        var sidecarPath = Path.Combine(Path.GetDirectoryName(request.ChooserOutputPath)!, "README.md.yml");
         if (!File.Exists(sidecarPath))
         {
             throw new PackageIndexException(
@@ -261,6 +314,9 @@ internal sealed class PackageIndexGenerator
         PackageProjectMetadata metadata,
         IReadOnlySet<string> knownPackageIds)
     {
+        ValidateProductFamily(entry);
+        ValidateReadinessAnnotations(entry);
+
         if (entry.Classification == PackageClassification.Public)
         {
             RequireValue(entry.Project, nameof(entry.UseWhen), entry.UseWhen);
@@ -292,6 +348,68 @@ internal sealed class PackageIndexGenerator
 
         ValidateToolCommandName(entry, metadata);
         ValidatePublishContract(entry, knownPackageIds);
+    }
+
+    private static void ValidateProductFamily(PackageManifestEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.ProductFamily))
+        {
+            throw new PackageIndexException(
+                $"Manifest entry '{entry.Project}' must define 'product_family'. Allowed values: {string.Join(", ", ProductFamilyValues)}.");
+        }
+
+        if (!ProductFamilyValues.Contains(entry.ProductFamily, StringComparer.Ordinal))
+        {
+            throw new PackageIndexException(
+                $"Manifest entry '{entry.Project}' has product_family '{entry.ProductFamily}'. Allowed values: {string.Join(", ", ProductFamilyValues)}. Choose the family that owns this package surface.");
+        }
+    }
+
+    private static void ValidateReadinessAnnotations(PackageManifestEntry entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.ReadinessBlocker)
+            && !IsValidReadinessBlocker(entry.ReadinessBlocker))
+        {
+            throw new PackageIndexException(
+                $"Manifest entry '{entry.Project}' has invalid readiness_blocker '{entry.ReadinessBlocker}'. Use '#123' or a same-repository GitHub issue/PR URL under forge-trust/AppSurface.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(entry.ReadinessNote)
+            && entry.ReadinessNote.Any(IsUnsafeReadinessNoteCharacter))
+        {
+            throw new PackageIndexException(
+                $"Manifest entry '{entry.Project}' has invalid readiness_note. Notes must be plain text without raw HTML angle brackets or control characters.");
+        }
+    }
+
+    private static bool IsValidReadinessBlocker(string blocker)
+    {
+        var trimmed = blocker.Trim();
+        if (trimmed.Length > 1
+            && trimmed[0] == '#'
+            && trimmed.Skip(1).All(char.IsAsciiDigit))
+        {
+            return true;
+        }
+
+        return IsSameRepositoryIssueOrPullRequestUrl(trimmed, RepositoryIssuePrefix)
+            || IsSameRepositoryIssueOrPullRequestUrl(trimmed, RepositoryPullPrefix);
+    }
+
+    private static bool IsSameRepositoryIssueOrPullRequestUrl(string value, string prefix)
+    {
+        if (!value.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var suffix = value[prefix.Length..];
+        return suffix.Length > 0 && suffix.All(char.IsAsciiDigit);
+    }
+
+    private static bool IsUnsafeReadinessNoteCharacter(char value)
+    {
+        return char.IsControl(value) || value is '<' or '>';
     }
 
     /// <summary>
@@ -609,14 +727,171 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine("## Maintainer notes");
         builder.AppendLine();
         builder.AppendLine($"- Edit `packages/package-index.yml` when the public package story changes.");
+        builder.AppendLine($"- Review {FormatMarkdownLink("package readiness evidence", GetRelativeOutputPath(request.ChooserOutputPath, request.ReadinessOutputPath))} when deciding whether the package manifest, release metadata, blockers, and dependency evidence are ready for release review.");
         builder.AppendLine("- Keep `publish_decision` and `expected_dependency_package_ids` in `packages/package-index.yml` aligned with the package artifact workflow so the chooser and release contract share one package source of truth.");
         builder.AppendLine("- Keep `tool_command_name` aligned with each public .NET tool project's `ToolCommandName` so package validation and post-publish smoke tests run the command users will type. The value must be one file-name-safe command token, not a path: no whitespace, path separators, reserved `.`/`..` segments, trailing periods, Windows reserved device names or dotted aliases, control characters, or Windows-invalid file-name characters.");
-        builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications or package READMEs.");
+        builder.AppendLine($"- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` after changing package classifications, package READMEs, product families, readiness blockers, or readiness notes.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` before publishing changes that affect package metadata, project references, or Tailwind runtime payloads.");
         builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- gate` before publishing rebrand or release metadata changes.");
         builder.AppendLine("- Keep `packages/README.md.yml` hand-authored so AppSurface Docs metadata, trust-bar copy, and section placement stay intentional.");
 
         return NormalizeMarkdownNewlines(builder.ToString()).TrimEnd('\n') + "\n";
+    }
+
+    private static string RenderReadinessMarkdown(
+        PackageIndexRequest request,
+        IReadOnlyList<ResolvedPackageEntry> entries,
+        IReadOnlyList<PackageReadinessEvidence> readiness)
+    {
+        var readinessByProject = readiness.ToDictionary(item => item.ProjectPath, StringComparer.OrdinalIgnoreCase);
+        var statusCounts = readiness
+            .GroupBy(item => item.Status)
+            .OrderBy(group => group.Key)
+            .Select(group => $"{FormatReadinessStatus(group.Key)}: {group.Count()}")
+            .ToArray();
+        var familyCounts = entries
+            .GroupBy(entry => entry.Manifest.ProductFamily!, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => $"{FormatProductFamily(group.Key)}: {group.Count()}")
+            .ToArray();
+
+        var builder = new StringBuilder();
+        builder.AppendLine("# Package readiness evidence");
+        builder.AppendLine();
+        builder.AppendLine("> Generated from `packages/package-index.yml`, evaluated project metadata, and package-index validation evidence. Do not edit this file by hand.");
+        builder.AppendLine();
+        builder.AppendLine("This dashboard is a maintainer review surface for package-index evidence. It is not a live NuGet publish, artifact, or smoke-install status board; use the release cockpit and protected package workflows for per-version publish proof.");
+        builder.AppendLine();
+        builder.AppendLine("## Summary");
+        builder.AppendLine();
+        builder.AppendLine($"- Packages: {entries.Count}");
+        builder.AppendLine($"- Evidence status: {string.Join("; ", statusCounts)}");
+        builder.AppendLine($"- Product families: {string.Join("; ", familyCounts)}");
+        builder.AppendLine();
+        builder.AppendLine("## Package evidence matrix");
+        builder.AppendLine();
+        builder.AppendLine("| Family | Package | Classification | Publish decision | Package-index evidence | Blockers and notes | Conceptual deps | Expected package deps | Start here | Release notes |");
+        builder.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+
+        foreach (var entry in entries)
+        {
+            var evidence = readinessByProject[entry.Manifest.Project];
+            builder.Append("| ");
+            builder.Append(EscapeTableCell(FormatProductFamily(entry.Manifest.ProductFamily!)));
+            builder.Append(" | ");
+            builder.Append(EscapeTableCell($"`{entry.Metadata.PackageId}`"));
+            builder.Append(" | ");
+            builder.Append(EscapeTableCell(FormatEnumLabel(entry.Manifest.Classification)));
+            builder.Append(" | ");
+            builder.Append(EscapeTableCell(entry.Manifest.PublishDecision is null ? "Not declared" : FormatEnumLabel(entry.Manifest.PublishDecision.Value)));
+            builder.Append(" | ");
+            builder.Append(EscapeTableCell(FormatReadinessStatus(evidence.Status)));
+            builder.Append(" | ");
+            builder.Append(EscapeTableCell(FormatBlockersAndNotes(entry.Manifest, evidence)));
+            builder.Append(" | ");
+            builder.Append(EscapeTableCell(FormatPackageIds(entry.Manifest.DependsOn)));
+            builder.Append(" | ");
+            builder.Append(EscapeTableCell(FormatPackageIds(entry.Manifest.ExpectedDependencyPackageIds)));
+            builder.Append(" | ");
+            builder.Append(EscapeTableCell(FormatStartHereCell(request, entry.Manifest, request.ReadinessOutputPath)));
+            builder.Append(" | ");
+            builder.Append(EscapeTableCell(FormatReleaseNotesCell(request, entry.Manifest, request.ReadinessOutputPath)));
+            builder.AppendLine(" |");
+        }
+
+        var blocked = readiness.Where(entry => entry.Status == PackageReadinessStatus.Blocked).ToArray();
+        if (blocked.Length > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Blocking evidence");
+            builder.AppendLine();
+            foreach (var item in blocked)
+            {
+                builder.AppendLine($"- `{item.PackageId}`: {string.Join("; ", item.BlockingReasons)} Fix: {string.Join("; ", item.FixHints)}");
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Maintainer workflow");
+        builder.AppendLine();
+        builder.AppendLine("- Edit `packages/package-index.yml` for product family, publish decision, release metadata, dependency expectations, blockers, and notes.");
+        builder.AppendLine("- Use `readiness_blocker` only for same-repository ownership. When the underlying blocker is external, create a local tracking issue and put the external context in `readiness_note`.");
+        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- generate` to refresh this dashboard and the adopter-facing package chooser.");
+        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify` before review to confirm both generated files are current.");
+        builder.AppendLine("- Run `dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- verify-packages --package-version 0.0.0-ci.local` for package artifact proof; this dashboard does not replace that workflow.");
+
+        return NormalizeMarkdownNewlines(builder.ToString()).TrimEnd('\n') + "\n";
+    }
+
+    private static string FormatBlockersAndNotes(
+        PackageManifestEntry entry,
+        PackageReadinessEvidence evidence)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(entry.ReadinessBlocker))
+        {
+            parts.Add($"Blocker: {entry.ReadinessBlocker}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(entry.ReadinessNote))
+        {
+            parts.Add($"Note: {entry.ReadinessNote}");
+        }
+
+        parts.AddRange(evidence.BlockingReasons);
+        return parts.Count == 0 ? "None" : string.Join("<br />", parts);
+    }
+
+    private static string FormatPackageIds(IReadOnlyList<string> packageIds)
+    {
+        return packageIds.Count == 0
+            ? "None"
+            : string.Join("<br />", packageIds.Select(packageId => $"`{packageId}`"));
+    }
+
+    private static string FormatStartHereCell(
+        PackageIndexRequest request,
+        PackageManifestEntry entry,
+        string outputPath)
+    {
+        return string.IsNullOrWhiteSpace(entry.StartHerePath)
+            ? "Not applicable"
+            : FormatMarkdownLink(entry.StartHereLabel ?? "README", GetRelativeDocPath(request, entry.StartHerePath, outputPath));
+    }
+
+    private static string FormatReleaseNotesCell(
+        PackageIndexRequest request,
+        PackageManifestEntry entry,
+        string outputPath)
+    {
+        return string.IsNullOrWhiteSpace(entry.ReleaseNotesPath)
+            ? "Not declared"
+            : FormatMarkdownLink("notes", GetRelativeDocPath(request, entry.ReleaseNotesPath, outputPath));
+    }
+
+    private static string FormatReadinessStatus(PackageReadinessStatus status)
+    {
+        return status switch
+        {
+            PackageReadinessStatus.ManifestReady => "manifest evidence complete",
+            PackageReadinessStatus.TransitiveReady => "transitive package evidence complete",
+            PackageReadinessStatus.ProofReady => "proof-host evidence complete",
+            PackageReadinessStatus.Excluded => "excluded by publish decision",
+            PackageReadinessStatus.Blocked => "blocked",
+            _ => status.ToString()
+        };
+    }
+
+    private static string FormatProductFamily(string productFamily)
+    {
+        return productFamily switch
+        {
+            "appsurface" => "AppSurface",
+            "razorwire" => "RazorWire",
+            "forge_trust" => "Forge Trust",
+            "internal_support" => "Internal support",
+            _ => productFamily.Replace('_', ' ')
+        };
     }
 
     /// <summary>
@@ -638,13 +913,27 @@ internal sealed class PackageIndexGenerator
 
     private static string GetRelativeDocPath(PackageIndexRequest request, string repositoryRelativePath)
     {
-        var outputDirectory = Path.GetDirectoryName(request.OutputPath)
-            ?? throw new PackageIndexException($"Output path '{request.OutputPath}' does not have a parent directory.");
+        return GetRelativeDocPath(request, repositoryRelativePath, request.ChooserOutputPath);
+    }
+
+    private static string GetRelativeDocPath(PackageIndexRequest request, string repositoryRelativePath, string outputPath)
+    {
+        var outputDirectory = Path.GetDirectoryName(outputPath)
+            ?? throw new PackageIndexException($"Output path '{outputPath}' does not have a parent directory.");
         var targetPath = ResolveRepositoryFilePath(
             request.RepositoryRoot,
             repositoryRelativePath,
             $"Chooser link target '{repositoryRelativePath}'");
         return Path.GetRelativePath(outputDirectory, targetPath)
+            .Replace('\\', '/');
+    }
+
+    private static string GetRelativeOutputPath(string fromOutputPath, string toOutputPath)
+    {
+        var outputDirectory = Path.GetDirectoryName(fromOutputPath)
+            ?? throw new PackageIndexException($"Output path '{fromOutputPath}' does not have a parent directory.");
+
+        return Path.GetRelativePath(outputDirectory, toOutputPath)
             .Replace('\\', '/');
     }
 
@@ -805,12 +1094,51 @@ internal sealed class PackageIndexGenerator
 }
 
 /// <summary>
-/// Describes one package chooser generation or verification request.
+/// Describes one package chooser and readiness dashboard generation or verification request.
 /// </summary>
 /// <param name="RepositoryRoot">Absolute repository root that contains the manifest, docs, and project files.</param>
 /// <param name="ManifestPath">Absolute path to the chooser manifest file.</param>
-/// <param name="OutputPath">Absolute path to the generated chooser markdown file.</param>
-internal sealed record PackageIndexRequest(string RepositoryRoot, string ManifestPath, string OutputPath);
+/// <param name="ChooserOutputPath">Absolute path to the generated chooser markdown file.</param>
+/// <param name="ReadinessOutputPath">Absolute path to the generated package readiness dashboard markdown file.</param>
+internal sealed record PackageIndexRequest(
+    string RepositoryRoot,
+    string ManifestPath,
+    string ChooserOutputPath,
+    string ReadinessOutputPath)
+{
+    /// <summary>
+    /// Creates a request with the readiness dashboard beside the chooser output.
+    /// </summary>
+    /// <param name="repositoryRoot">Absolute repository root that contains the manifest, docs, and project files.</param>
+    /// <param name="manifestPath">Absolute path to the chooser manifest file.</param>
+    /// <param name="outputPath">Absolute path to the generated chooser markdown file.</param>
+    internal PackageIndexRequest(string repositoryRoot, string manifestPath, string outputPath)
+        : this(
+            repositoryRoot,
+            manifestPath,
+            outputPath,
+            Path.Combine(GetOutputDirectory(outputPath), "readiness.md"))
+    {
+    }
+
+    /// <summary>
+    /// Gets the chooser output path retained for compatibility with existing tests and callers.
+    /// </summary>
+    internal string OutputPath => ChooserOutputPath;
+
+    private static string GetOutputDirectory(string outputPath)
+    {
+        var directory = Path.GetDirectoryName(outputPath);
+        return string.IsNullOrEmpty(directory) ? "." : directory;
+    }
+}
+
+/// <summary>
+/// Generated markdown documents produced from one package index resolution pass.
+/// </summary>
+/// <param name="ChooserMarkdown">Generated adopter-facing package chooser markdown.</param>
+/// <param name="ReadinessMarkdown">Generated maintainer-facing package readiness evidence markdown.</param>
+internal sealed record PackageIndexDocuments(string ChooserMarkdown, string ReadinessMarkdown);
 
 /// <summary>
 /// Couples one manifest row with the evaluated package metadata used to render the chooser.
@@ -818,6 +1146,382 @@ internal sealed record PackageIndexRequest(string RepositoryRoot, string Manifes
 /// <param name="Manifest">The manifest row that provides classification, prose, and docs pointers.</param>
 /// <param name="Metadata">The evaluated project metadata that provides package identity and install details.</param>
 internal sealed record ResolvedPackageEntry(PackageManifestEntry Manifest, PackageProjectMetadata Metadata);
+
+/// <summary>
+/// Computes package-index readiness evidence for the maintainer dashboard without treating the dashboard as live
+/// publish proof.
+/// </summary>
+internal static class PackageReadinessEvaluator
+{
+    /// <summary>
+    /// Evaluates package-index evidence for resolved package rows.
+    /// </summary>
+    /// <param name="repositoryRoot">Absolute repository root used to validate release-note paths.</param>
+    /// <param name="entries">Resolved package rows.</param>
+    /// <returns>Per-package readiness evidence with blocking reasons and fix hints.</returns>
+    internal static IReadOnlyList<PackageReadinessEvidence> Evaluate(
+        string repositoryRoot,
+        IReadOnlyList<ResolvedPackageEntry> entries)
+    {
+        var metadataByProjectPath = entries.ToDictionary(
+            entry => NormalizeRepositoryPath(entry.Manifest.Project),
+            entry => entry.Metadata,
+            StringComparer.OrdinalIgnoreCase);
+
+        return entries
+            .Select(entry => EvaluateEntry(repositoryRoot, entry, metadataByProjectPath))
+            .ToArray();
+    }
+
+    private static PackageReadinessEvidence EvaluateEntry(
+        string repositoryRoot,
+        ResolvedPackageEntry entry,
+        IReadOnlyDictionary<string, PackageProjectMetadata> metadataByProjectPath)
+    {
+        var blockingReasons = new List<string>();
+        var fixHints = new List<string>();
+        var evidence = new List<string>();
+
+        AddReleaseMetadataEvidence(repositoryRoot, entry, evidence, blockingReasons, fixHints);
+        AddPackageClassEvidence(entry, evidence, blockingReasons, fixHints);
+        AddPublishDecisionEvidence(repositoryRoot, entry, metadataByProjectPath, evidence, blockingReasons, fixHints);
+
+        if (!string.IsNullOrWhiteSpace(entry.Manifest.ReadinessBlocker))
+        {
+            blockingReasons.Add($"Maintainer blocker {entry.Manifest.ReadinessBlocker} is open.");
+            fixHints.Add("Resolve the linked issue or PR, then remove readiness_blocker from packages/package-index.yml.");
+        }
+
+        var status = DetermineStatus(entry, blockingReasons);
+        return new PackageReadinessEvidence(
+            entry.Manifest.Project,
+            entry.Metadata.PackageId,
+            status,
+            evidence,
+            blockingReasons,
+            fixHints);
+    }
+
+    private static void AddReleaseMetadataEvidence(
+        string repositoryRoot,
+        ResolvedPackageEntry entry,
+        List<string> evidence,
+        List<string> blockingReasons,
+        List<string> fixHints)
+    {
+        var expectedReleaseStatus = entry.Manifest.Classification switch
+        {
+            PackageClassification.Public => PackageReleaseStatus.PublicPreview,
+            PackageClassification.Support => PackageReleaseStatus.SupportRuntime,
+            PackageClassification.ProofHost => PackageReleaseStatus.ProofHost,
+            PackageClassification.Excluded => PackageReleaseStatus.Excluded,
+            _ => PackageReleaseStatus.Unknown
+        };
+        if (entry.Manifest.ReleaseStatus == expectedReleaseStatus
+            && expectedReleaseStatus != PackageReleaseStatus.Unknown)
+        {
+            evidence.Add($"release_status is {FormatReadinessEnum(entry.Manifest.ReleaseStatus)}");
+        }
+        else
+        {
+            blockingReasons.Add($"release_status is {FormatReadinessEnum(entry.Manifest.ReleaseStatus)}, expected {FormatReadinessEnum(expectedReleaseStatus)}.");
+            fixHints.Add($"Set release_status: {FormatManifestEnum(expectedReleaseStatus)} for {entry.Manifest.Project}.");
+        }
+
+        var expectedCommercialStatus = entry.Manifest.Classification == PackageClassification.Public
+            ? PackageCommercialStatus.CommercialReady
+            : PackageCommercialStatus.NotApplicable;
+        if (entry.Manifest.CommercialStatus == expectedCommercialStatus)
+        {
+            evidence.Add($"commercial_status is {FormatReadinessEnum(entry.Manifest.CommercialStatus)}");
+        }
+        else
+        {
+            blockingReasons.Add($"commercial_status is {FormatReadinessEnum(entry.Manifest.CommercialStatus)}, expected {FormatReadinessEnum(expectedCommercialStatus)}.");
+            fixHints.Add($"Set commercial_status: {FormatManifestEnum(expectedCommercialStatus)} for {entry.Manifest.Project}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(entry.Manifest.ReleaseNotesPath))
+        {
+            blockingReasons.Add("release_notes_path is missing.");
+            fixHints.Add($"Add release_notes_path to {entry.Manifest.Project} in packages/package-index.yml.");
+            return;
+        }
+
+        try
+        {
+            PackageIndexGenerator.ResolveRepositoryFilePath(
+                repositoryRoot,
+                entry.Manifest.ReleaseNotesPath,
+                $"Manifest entry '{entry.Manifest.Project}' release_notes_path");
+            evidence.Add("release_notes_path resolves inside the repository");
+        }
+        catch (PackageIndexException ex)
+        {
+            blockingReasons.Add(ex.Message);
+            fixHints.Add($"Point release_notes_path for {entry.Manifest.Project} at an existing repository Markdown file.");
+        }
+    }
+
+    private static void AddPackageClassEvidence(
+        ResolvedPackageEntry entry,
+        List<string> evidence,
+        List<string> blockingReasons,
+        List<string> fixHints)
+    {
+        if (entry.Manifest.Classification is PackageClassification.Public or PackageClassification.Support)
+        {
+            if (entry.Metadata.IsPackable)
+            {
+                evidence.Add("project is packable");
+            }
+            else
+            {
+                blockingReasons.Add("Project is selected for publish evidence but is not packable.");
+                fixHints.Add($"Make {entry.Manifest.Project} packable or change its classification/publish_decision.");
+            }
+        }
+
+        if (entry.Manifest.Classification == PackageClassification.Public
+            && entry.Metadata.IsTool
+            && !string.Equals(entry.Metadata.OutputType, "Exe", StringComparison.OrdinalIgnoreCase))
+        {
+            blockingReasons.Add($"Public tool package output type is {entry.Metadata.OutputType}, expected Exe.");
+            fixHints.Add($"Set OutputType Exe for {entry.Manifest.Project} or remove PackAsTool.");
+        }
+        else if (entry.Manifest.Classification == PackageClassification.Public
+                 && !entry.Metadata.IsTool
+                 && !string.Equals(entry.Metadata.OutputType, "Library", StringComparison.OrdinalIgnoreCase))
+        {
+            blockingReasons.Add($"Public direct-install package output type is {entry.Metadata.OutputType}, expected Library.");
+            fixHints.Add($"Set OutputType Library for {entry.Manifest.Project} or move it out of the public classification.");
+        }
+        else
+        {
+            evidence.Add($"output type {entry.Metadata.OutputType} matches classification");
+        }
+    }
+
+    private static void AddPublishDecisionEvidence(
+        string repositoryRoot,
+        ResolvedPackageEntry entry,
+        IReadOnlyDictionary<string, PackageProjectMetadata> metadataByProjectPath,
+        List<string> evidence,
+        List<string> blockingReasons,
+        List<string> fixHints)
+    {
+        if (entry.Manifest.Classification == PackageClassification.Public
+            && entry.Manifest.PublishDecision != PackagePublishDecision.Publish)
+        {
+            blockingReasons.Add("Public package is not marked publish.");
+            fixHints.Add($"Set publish_decision: publish for {entry.Manifest.Project}.");
+        }
+        else if (entry.Manifest.Classification == PackageClassification.Support
+                 && entry.Manifest.PublishDecision == PackagePublishDecision.Publish)
+        {
+            blockingReasons.Add("Support package uses direct publish instead of support_publish or do_not_publish.");
+            fixHints.Add($"Set publish_decision: support_publish or do_not_publish for {entry.Manifest.Project}.");
+        }
+        else if (entry.Manifest.Classification == PackageClassification.ProofHost
+                 && entry.Manifest.PublishDecision == PackagePublishDecision.Publish)
+        {
+            blockingReasons.Add("Proof-host package uses direct publish instead of support_publish or do_not_publish.");
+            fixHints.Add($"Set publish_decision: support_publish or do_not_publish for {entry.Manifest.Project}.");
+        }
+        else if (entry.Manifest.Classification == PackageClassification.Excluded
+                 && entry.Manifest.PublishDecision != PackagePublishDecision.DoNotPublish)
+        {
+            blockingReasons.Add("Excluded package is not marked do_not_publish.");
+            fixHints.Add($"Set publish_decision: do_not_publish for {entry.Manifest.Project}.");
+        }
+        else if (entry.Manifest.PublishDecision is not null)
+        {
+            evidence.Add($"publish_decision is {FormatReadinessEnum(entry.Manifest.PublishDecision.Value)}");
+        }
+
+        if (entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Manifest.PublishReason))
+            {
+                blockingReasons.Add("publish_reason is missing for do_not_publish.");
+                fixHints.Add($"Add publish_reason for {entry.Manifest.Project}.");
+            }
+            else
+            {
+                evidence.Add("publish_reason explains why this row is not published");
+            }
+
+            return;
+        }
+
+        if (entry.Manifest.PublishDecision is not (PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish))
+        {
+            return;
+        }
+
+        if (entry.Metadata.IsTool)
+        {
+            if (entry.Manifest.ExpectedDependencyPackageIds.Count > 0)
+            {
+                blockingReasons.Add("Tool packages must not define expected package dependencies because project references are embedded.");
+                fixHints.Add($"Remove expected_dependency_package_ids from {entry.Manifest.Project}.");
+            }
+            else
+            {
+                evidence.Add("tool package has no expected package dependencies");
+            }
+
+            return;
+        }
+
+        var actualPackageIds = entry.Metadata.ProjectReferences
+            .Select(reference => NormalizeProjectReferencePath(repositoryRoot, reference))
+            .Where(metadataByProjectPath.ContainsKey)
+            .Select(referencePath => metadataByProjectPath[referencePath].PackageId)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var expectedPackageIds = entry.Manifest.ExpectedDependencyPackageIds
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (actualPackageIds.SequenceEqual(expectedPackageIds, StringComparer.OrdinalIgnoreCase))
+        {
+            evidence.Add("expected_dependency_package_ids match project references");
+            return;
+        }
+
+        blockingReasons.Add(
+            $"expected_dependency_package_ids [{string.Join(", ", expectedPackageIds)}] do not match project references [{string.Join(", ", actualPackageIds)}].");
+        fixHints.Add($"Update expected_dependency_package_ids for {entry.Manifest.Project} to match first-party project references.");
+    }
+
+    private static PackageReadinessStatus DetermineStatus(
+        ResolvedPackageEntry entry,
+        IReadOnlyCollection<string> blockingReasons)
+    {
+        if (blockingReasons.Count > 0)
+        {
+            return PackageReadinessStatus.Blocked;
+        }
+
+        if (entry.Manifest.Classification == PackageClassification.Support
+            && entry.Manifest.PublishDecision == PackagePublishDecision.SupportPublish)
+        {
+            return PackageReadinessStatus.TransitiveReady;
+        }
+
+        if (entry.Manifest.Classification == PackageClassification.ProofHost)
+        {
+            return PackageReadinessStatus.ProofReady;
+        }
+
+        if (entry.Manifest.PublishDecision == PackagePublishDecision.DoNotPublish)
+        {
+            return PackageReadinessStatus.Excluded;
+        }
+
+        return PackageReadinessStatus.ManifestReady;
+    }
+
+    private static string NormalizeProjectReferencePath(string repositoryRoot, string referencePath)
+    {
+        var path = Path.IsPathRooted(referencePath)
+            ? Path.GetRelativePath(repositoryRoot, referencePath)
+            : referencePath;
+        return NormalizeRepositoryPath(path);
+    }
+
+    private static string NormalizeRepositoryPath(string path)
+    {
+        return path.Replace('\\', '/').TrimStart('/');
+    }
+
+    private static string FormatReadinessEnum<TEnum>(TEnum value)
+        where TEnum : struct, Enum
+    {
+        return value.ToString()
+            .Aggregate(
+                new StringBuilder(),
+                (builder, character) =>
+                {
+                    if (builder.Length > 0 && char.IsUpper(character))
+                    {
+                        builder.Append(' ');
+                    }
+
+                    builder.Append(char.ToLowerInvariant(character));
+                    return builder;
+                })
+            .ToString();
+    }
+
+    private static string FormatManifestEnum<TEnum>(TEnum value)
+        where TEnum : struct, Enum
+    {
+        return value.ToString()
+            .Aggregate(
+                new StringBuilder(),
+                (builder, character) =>
+                {
+                    if (builder.Length > 0 && char.IsUpper(character))
+                    {
+                        builder.Append('_');
+                    }
+
+                    builder.Append(char.ToLowerInvariant(character));
+                    return builder;
+                })
+            .ToString();
+    }
+}
+
+/// <summary>
+/// Package-index evidence status rendered in the maintainer readiness dashboard.
+/// </summary>
+internal enum PackageReadinessStatus
+{
+    /// <summary>
+    /// Public or directly published package evidence is complete for package-index review.
+    /// </summary>
+    ManifestReady,
+
+    /// <summary>
+    /// Support package evidence is complete for transitive package restore.
+    /// </summary>
+    TransitiveReady,
+
+    /// <summary>
+    /// Proof-host evidence is complete, but the package is not positioned as a first-install surface.
+    /// </summary>
+    ProofReady,
+
+    /// <summary>
+    /// The package is intentionally excluded from publishing.
+    /// </summary>
+    Excluded,
+
+    /// <summary>
+    /// The package has maintainer blockers or incomplete package-index evidence.
+    /// </summary>
+    Blocked
+}
+
+/// <summary>
+/// Per-package readiness evidence rendered in the generated maintainer dashboard.
+/// </summary>
+/// <param name="ProjectPath">Repository-relative project path from the package manifest.</param>
+/// <param name="PackageId">Evaluated package id.</param>
+/// <param name="Status">Computed package-index evidence status.</param>
+/// <param name="Evidence">Non-blocking evidence that passed.</param>
+/// <param name="BlockingReasons">Reasons the package-index evidence is blocked.</param>
+/// <param name="FixHints">Maintainer-facing fix hints for blocking reasons.</param>
+internal sealed record PackageReadinessEvidence(
+    string ProjectPath,
+    string PackageId,
+    PackageReadinessStatus Status,
+    IReadOnlyList<string> Evidence,
+    IReadOnlyList<string> BlockingReasons,
+    IReadOnlyList<string> FixHints);
 
 /// <summary>
 /// Summarizes the package gate coverage used by CI and local release checks.
@@ -1430,9 +2134,24 @@ internal sealed class PackageManifestEntry
     public PackagePublishDecision? PublishDecision { get; init; }
 
     /// <summary>
+    /// Gets the product family that owns this package row for maintainer readiness review.
+    /// </summary>
+    public string? ProductFamily { get; init; }
+
+    /// <summary>
     /// Gets the required maintainer-facing reason for entries that are intentionally not published.
     /// </summary>
     public string? PublishReason { get; init; }
+
+    /// <summary>
+    /// Gets the optional same-repository issue or pull request that blocks package-index evidence completion.
+    /// </summary>
+    public string? ReadinessBlocker { get; init; }
+
+    /// <summary>
+    /// Gets optional escaped plain-text maintainer context for package readiness evidence.
+    /// </summary>
+    public string? ReadinessNote { get; init; }
 
     /// <summary>
     /// Gets the stable display order within the chooser section.

@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace ForgeTrust.AppSurface.PackageIndex;
 
 /// <summary>
-/// CLI entry point for generating or verifying the package chooser.
+/// CLI entry point for generating or verifying the package chooser and maintainer readiness dashboard.
 /// </summary>
 internal static class Program
 {
@@ -17,14 +17,14 @@ internal static class Program
     private static readonly string Usage = """
         ForgeTrust.AppSurface.PackageIndex
 
-        Generates and verifies the public AppSurface package chooser, release gate, and prerelease package artifacts.
+        Generates and verifies the public AppSurface package chooser, maintainer readiness dashboard, release gate, and prerelease package artifacts.
 
         Usage:
           dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- <command> [options]
 
         Commands:
-          generate    Rewrites packages/README.md from packages/package-index.yml and project metadata.
-          verify      Check that packages/README.md is already up to date.
+          generate    Rewrites packages/README.md and packages/readiness.md from packages/package-index.yml and project metadata.
+          verify      Check that packages/README.md and packages/readiness.md are already up to date.
           verify-packages
                       Pack and validate prerelease .nupkg artifacts without publishing them.
           publish-prerelease
@@ -37,6 +37,8 @@ internal static class Program
           --repo-root <path>    Repository root. Defaults to the current directory.
           --manifest <path>     Package manifest path. Defaults to packages/package-index.yml.
           --output <path>       Generated chooser path. Defaults to packages/README.md.
+          --readiness-output <path>
+                                Generated package readiness dashboard path. Defaults to packages/readiness.md.
           --artifacts-output <path>
                                 Package artifact output directory. Defaults to artifacts/packages.
           --artifacts-input <path>
@@ -139,9 +141,8 @@ internal static class Program
             if (normalizedCommand == GenerateCommand)
             {
                 await generator.GenerateToFileAsync(options.Request, cancellationToken);
-                var outputPath = Path.GetRelativePath(options.Request.RepositoryRoot, options.Request.OutputPath)
-                    .Replace('\\', '/');
-                await standardOut.WriteLineAsync($"Generated {outputPath}.");
+                await standardOut.WriteLineAsync(
+                    $"Generated {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ChooserOutputPath)} and {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ReadinessOutputPath)}.");
                 return 0;
             }
 
@@ -181,7 +182,8 @@ internal static class Program
             if (normalizedCommand == VerifyCommand)
             {
                 await generator.VerifyAsync(options.Request, cancellationToken);
-                await standardOut.WriteLineAsync("Package chooser is up to date.");
+                await standardOut.WriteLineAsync(
+                    $"Package chooser and readiness dashboard are up to date: {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ChooserOutputPath)}, {FormatDisplayPath(options.Request.RepositoryRoot, options.Request.ReadinessOutputPath)}.");
                 return 0;
             }
 
@@ -272,7 +274,7 @@ internal static class Program
 /// <summary>
 /// Parsed CLI options for one package chooser command invocation.
 /// </summary>
-/// <param name="Request">Resolved package chooser request derived from command-line options.</param>
+/// <param name="Request">Resolved package chooser and readiness dashboard request derived from command-line options.</param>
 /// <param name="ArtifactsOutputPath">Resolved package artifact output directory.</param>
 /// <param name="ReportPath">Resolved package artifact validation report path.</param>
 /// <param name="PackageVersion">Optional package version supplied for package artifact verification.</param>
@@ -308,6 +310,7 @@ internal sealed record CommandLineOptions(
         string? repositoryRoot = null;
         string? manifestPath = null;
         string? outputPath = null;
+        string? readinessOutputPath = null;
         string? artifactsOutputPath = null;
         string? artifactsInputPath = null;
         string? artifactManifestPath = null;
@@ -337,6 +340,12 @@ internal sealed record CommandLineOptions(
             if (string.Equals(argument, "--output", StringComparison.Ordinal))
             {
                 outputPath = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+
+            if (string.Equals(argument, "--readiness-output", StringComparison.Ordinal))
+            {
+                readinessOutputPath = ReadRequiredValue(args, ref index, argument);
                 continue;
             }
 
@@ -406,6 +415,7 @@ internal sealed record CommandLineOptions(
         var repoRoot = ResolvePath(repositoryRoot, currentDirectory, currentDirectory);
         var resolvedManifestPath = ResolvePath(manifestPath, repoRoot, Path.Combine(repoRoot, "packages", "package-index.yml"));
         var resolvedOutputPath = ResolvePath(outputPath, repoRoot, Path.Combine(repoRoot, "packages", "README.md"));
+        var resolvedReadinessOutputPath = ResolvePath(readinessOutputPath, repoRoot, Path.Combine(repoRoot, "packages", "readiness.md"));
         var resolvedArtifactsOutputPath = ResolvePath(artifactsOutputPath, repoRoot, Path.Combine(repoRoot, "artifacts", "packages"));
         var resolvedArtifactsInputPath = ResolvePath(artifactsInputPath, repoRoot, resolvedArtifactsOutputPath);
         var resolvedArtifactManifestPath = ResolvePath(artifactManifestPath, repoRoot, Path.Combine(repoRoot, "artifacts", "package-artifact-manifest.json"));
@@ -415,7 +425,7 @@ internal sealed record CommandLineOptions(
         var resolvedSmokeReportPath = ResolvePath(smokeReportPath, repoRoot, Path.Combine(repoRoot, "artifacts", "package-smoke-report.md"));
 
         return new CommandLineOptions(
-            new PackageIndexRequest(repoRoot, resolvedManifestPath, resolvedOutputPath),
+            new PackageIndexRequest(repoRoot, resolvedManifestPath, resolvedOutputPath, resolvedReadinessOutputPath),
             resolvedArtifactsOutputPath,
             resolvedReportPath,
             packageVersion,
