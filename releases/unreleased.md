@@ -10,11 +10,12 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 
 ### Release and docs surface
 
-- AppSurface now has `ForgeTrust.AppSurface.Auth` as a boundary-preview composition package for future AppSurface auth contracts. It registers only the neutral module/options boundary and does not sign users in, enforce authorization, or integrate with identity providers.
+- AppSurface now has `ForgeTrust.AppSurface.Auth` as a surface-neutral auth vocabulary package for module authors and host integrations. It defines passive user, session, context, result, login/logout prompt, audit-event, and metadata-key contracts while still avoiding runtime authentication, authorization policy evaluation, redirects, audit sinks, and identity-provider integration.
 - AppSurface Docs JavaScript API pages can now resolve public doclets into reader-facing API families. Explicit `@namespace` and `@module` tags remain authoritative, ordered `GroupNameRules` can name known source trees, and untagged fallback groups use path-aware identities so same-stem files in different folders do not merge.
 - AppSurface Docs built-in Markdown and C# harvesters now skip file and directory reparse points during direct and aggregated source traversal, and Markdown root `LICENSE` plus paired sidecar metadata reads use the same non-reparse boundary so symlinks cannot pull documentation content from outside the selected repository root.
 - Older `v0.1` preview routes now redirect to the current RC1 release note, so package consumers land on one canonical release story instead of a stale pre-RC preview.
 - Public package READMEs now link directly to the [v0.1.0 RC 1 release note](./v0.1.0-rc.1.md) for release risk, migration guidance, and package readiness.
+- Package maintainers now have a generated `packages/readiness.md` evidence dashboard that groups packages by product family, reports package-index readiness evidence, and keeps blocker/notes annotations separate from live NuGet publish status.
 - The release authoring checklist now records the preview-rollup rule: when a tagged or release-candidate note supersedes a preview, remove the preview source file and carry its browser routes as `redirect_aliases` on the canonical note.
 - Release preparation now leaves `CHANGELOG.md` as a compact ledger, moves detailed release narrative into tagged release notes, and makes generated release PR reports stop at a manual maintainer review gate before merge, tag, or publish.
 
@@ -44,6 +45,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 - AppSurface's conventional browser 404 page now prioritizes user recovery paths, including documentation search for missing `/docs/...` routes and a home link for other misses, while still documenting how app owners can override the default page.
 - AppSurface Web now ships conventional browser status pages for empty HTML `401`, `403`, and `404` responses. The public surface is now `BrowserStatusPageMode`, `BrowserStatusPageModel`, `UseConventionalBrowserStatusPages()`, and `DisableBrowserStatusPages()`, with preview routes at `/_appsurface/errors/401`, `/_appsurface/errors/403`, and `/_appsurface/errors/404`.
 - Browser status page overrides are status-specific: use `~/Views/Shared/401.cshtml`, `~/Views/Shared/403.cshtml`, or `~/Views/Shared/404.cshtml`. JSON/API responses, non-empty responses, and non-GET/HEAD requests keep their original behavior.
+- The new `examples/web-error-pages` proof starts a production-mode AppSurface Web host and verifies the browser/API error-page split with one command, including response-body sentinel checks for the generic `500` page.
 - Static export remains deliberately 404-only. RazorWire CLI probes `/_appsurface/errors/404` and writes `404.html`; it does not emit `401.html` or `403.html`.
 - AppSurface Web can now opt into a conventional production 500 page backed by ASP.NET Core exception handling, rendering only safe generic copy and a request id while leaving Development exception diagnostics and API-oriented responses alone.
 - AppSurface now assigns explicit numeric values to public Web and RazorWire enums, preserving existing ordinals for consumers that persist, serialize, bind, or compare those values.

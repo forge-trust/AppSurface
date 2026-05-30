@@ -2,6 +2,7 @@ packages:
   - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -13,6 +14,7 @@ packages:
   - project: Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -26,6 +28,7 @@ packages:
   - project: Caching/ForgeTrust.AppSurface.Caching/ForgeTrust.AppSurface.Caching.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -39,19 +42,21 @@ packages:
   - project: Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
     order: 35
-    use_when: Add this only when authoring AppSurface modules that need a stable cross-surface auth composition boundary.
-    includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, and Microsoft Options registration for the boundary-preview options root.
-    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policies, middleware, endpoint filters, user/session contracts, challenges, forbids, or UI.
+    use_when: Add this when authoring AppSurface modules or host integrations that need passive cross-surface auth vocabulary without depending on ASP.NET Core.
+    includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, neutral user/session/context contracts, auth outcome and reason results, passive login/logout prompts, passive audit event descriptions, and reserved metadata keys.
+    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policies, middleware, endpoint filters, runtime auth context accessors, challenges, forbids, redirects, audit sinks, or UI.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth/README.md
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
   - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -66,6 +71,7 @@ packages:
   - project: Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -82,6 +88,7 @@ packages:
   - project: Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -96,6 +103,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -110,6 +118,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -126,6 +135,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Web.Scalar/ForgeTrust.AppSurface.Web.Scalar.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -141,6 +151,7 @@ packages:
   - project: Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj
     classification: public
     publish_decision: publish
+    product_family: razorwire
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -157,6 +168,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -178,6 +190,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind.Tasks/ForgeTrust.AppSurface.Web.Tailwind.Tasks.csproj
     classification: excluded
     publish_decision: do_not_publish
+    product_family: internal_support
     publish_reason: The Tailwind MSBuild task is shipped inside the main Tailwind package as a private build asset, not as a standalone NuGet package.
     release_status: excluded
     commercial_status: not_applicable
@@ -187,6 +200,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj
     classification: proof_host
     publish_decision: support_publish
+    product_family: forge_trust
     release_status: proof_host
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
@@ -202,6 +216,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj
     classification: proof_host
     publish_decision: do_not_publish
+    product_family: forge_trust
     publish_reason: Standalone is an AppSurface proof host, not a package intended for external installation.
     release_status: proof_host
     commercial_status: not_applicable
@@ -213,6 +228,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64.csproj
     classification: support
     publish_decision: support_publish
+    product_family: internal_support
     release_status: support_runtime
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
@@ -221,6 +237,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64.csproj
     classification: support
     publish_decision: support_publish
+    product_family: internal_support
     release_status: support_runtime
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
@@ -229,6 +246,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj
     classification: support
     publish_decision: support_publish
+    product_family: internal_support
     release_status: support_runtime
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
@@ -237,6 +255,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64.csproj
     classification: support
     publish_decision: support_publish
+    product_family: internal_support
     release_status: support_runtime
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
@@ -245,6 +264,7 @@ packages:
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64.csproj
     classification: support
     publish_decision: support_publish
+    product_family: internal_support
     release_status: support_runtime
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
@@ -253,6 +273,7 @@ packages:
   - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
     classification: public
     publish_decision: publish
+    product_family: appsurface
     release_status: public_preview
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
@@ -267,6 +288,7 @@ packages:
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish
+    product_family: razorwire
     publish_reason: "Held out of package publishing until issue #171 lands real .NET tool packaging and stable install guidance."
     release_status: excluded
     commercial_status: not_applicable
