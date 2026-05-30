@@ -413,16 +413,16 @@ internal sealed record CommandLineOptions(
         }
 
         var repoRoot = ResolvePath(repositoryRoot, currentDirectory, currentDirectory);
-        var resolvedManifestPath = ResolvePath(manifestPath, repoRoot, Path.Combine(repoRoot, "packages", "package-index.yml"));
-        var resolvedOutputPath = ResolvePath(outputPath, repoRoot, Path.Combine(repoRoot, "packages", "README.md"));
-        var resolvedReadinessOutputPath = ResolvePath(readinessOutputPath, repoRoot, Path.Combine(repoRoot, "packages", "readiness.md"));
-        var resolvedArtifactsOutputPath = ResolvePath(artifactsOutputPath, repoRoot, Path.Combine(repoRoot, "artifacts", "packages"));
+        var resolvedManifestPath = ResolvePath(manifestPath, repoRoot, Path.Join(repoRoot, "packages", "package-index.yml"));
+        var resolvedOutputPath = ResolvePath(outputPath, repoRoot, Path.Join(repoRoot, "packages", "README.md"));
+        var resolvedReadinessOutputPath = ResolvePath(readinessOutputPath, repoRoot, Path.Join(repoRoot, "packages", "readiness.md"));
+        var resolvedArtifactsOutputPath = ResolvePath(artifactsOutputPath, repoRoot, Path.Join(repoRoot, "artifacts", "packages"));
         var resolvedArtifactsInputPath = ResolvePath(artifactsInputPath, repoRoot, resolvedArtifactsOutputPath);
-        var resolvedArtifactManifestPath = ResolvePath(artifactManifestPath, repoRoot, Path.Combine(repoRoot, "artifacts", "package-artifact-manifest.json"));
-        var resolvedReportPath = ResolvePath(reportPath, repoRoot, Path.Combine(repoRoot, "artifacts", "package-validation-report.md"));
-        var resolvedPublishLogPath = ResolvePath(publishLogPath, repoRoot, Path.Combine(repoRoot, "artifacts", "package-publish-log.md"));
-        var resolvedSmokeWorkDirectory = ResolvePath(smokeWorkDirectory, repoRoot, Path.Combine(repoRoot, "artifacts", "package-smoke"));
-        var resolvedSmokeReportPath = ResolvePath(smokeReportPath, repoRoot, Path.Combine(repoRoot, "artifacts", "package-smoke-report.md"));
+        var resolvedArtifactManifestPath = ResolvePath(artifactManifestPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-artifact-manifest.json"));
+        var resolvedReportPath = ResolvePath(reportPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-validation-report.md"));
+        var resolvedPublishLogPath = ResolvePath(publishLogPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-publish-log.md"));
+        var resolvedSmokeWorkDirectory = ResolvePath(smokeWorkDirectory, repoRoot, Path.Join(repoRoot, "artifacts", "package-smoke"));
+        var resolvedSmokeReportPath = ResolvePath(smokeReportPath, repoRoot, Path.Join(repoRoot, "artifacts", "package-smoke-report.md"));
 
         return new CommandLineOptions(
             new PackageIndexRequest(repoRoot, resolvedManifestPath, resolvedOutputPath, resolvedReadinessOutputPath),

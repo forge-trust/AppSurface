@@ -1336,6 +1336,114 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task PackageReadinessEvaluator_BlocksPublishAndProjectEvidenceProblems()
+    {
+        await WriteFileAsync("releases/unreleased.md", "# Unreleased");
+        var entries = new[]
+        {
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
+                    "Packages/PublicHeld/PublicHeld.csproj",
+                    PackageClassification.Public,
+                    PackagePublishDecision.DoNotPublish,
+                    publishReason: "Held for owner review."),
+                CreateMetadata("Packages/PublicHeld/PublicHeld.csproj", "ForgeTrust.AppSurface.PublicHeld")),
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
+                    "Packages/SupportDirect/SupportDirect.csproj",
+                    PackageClassification.Support,
+                    PackagePublishDecision.Publish,
+                    releaseStatus: PackageReleaseStatus.SupportRuntime,
+                    commercialStatus: PackageCommercialStatus.NotApplicable),
+                CreateMetadata("Packages/SupportDirect/SupportDirect.csproj", "ForgeTrust.AppSurface.SupportDirect")),
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
+                    "Packages/ProofDirect/ProofDirect.csproj",
+                    PackageClassification.ProofHost,
+                    PackagePublishDecision.Publish,
+                    releaseStatus: PackageReleaseStatus.ProofHost,
+                    commercialStatus: PackageCommercialStatus.NotApplicable),
+                CreateMetadata("Packages/ProofDirect/ProofDirect.csproj", "ForgeTrust.AppSurface.ProofDirect")),
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
+                    "Packages/ExcludedMaybe/ExcludedMaybe.csproj",
+                    PackageClassification.Excluded,
+                    PackagePublishDecision.SupportPublish,
+                    releaseStatus: PackageReleaseStatus.Excluded,
+                    commercialStatus: PackageCommercialStatus.NotApplicable),
+                CreateMetadata("Packages/ExcludedMaybe/ExcludedMaybe.csproj", "ForgeTrust.AppSurface.ExcludedMaybe")),
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
+                    "Packages/MissingReason/MissingReason.csproj",
+                    PackageClassification.Excluded,
+                    PackagePublishDecision.DoNotPublish,
+                    releaseStatus: PackageReleaseStatus.Excluded,
+                    commercialStatus: PackageCommercialStatus.NotApplicable,
+                    publishReason: string.Empty),
+                CreateMetadata("Packages/MissingReason/MissingReason.csproj", "ForgeTrust.AppSurface.MissingReason")),
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
+                    "Packages/ToolDeps/ToolDeps.csproj",
+                    PackageClassification.Public,
+                    PackagePublishDecision.Publish,
+                    expectedDependencyPackageIds: ["ForgeTrust.AppSurface.Core"]),
+                CreateMetadata(
+                    "Packages/ToolDeps/ToolDeps.csproj",
+                    "ForgeTrust.AppSurface.ToolDeps",
+                    outputType: "Exe",
+                    isTool: true)),
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
+                    "Packages/NotPackable/NotPackable.csproj",
+                    PackageClassification.Public,
+                    PackagePublishDecision.Publish),
+                CreateMetadata(
+                    "Packages/NotPackable/NotPackable.csproj",
+                    "ForgeTrust.AppSurface.NotPackable",
+                    isPackable: false)),
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
+                    "Packages/ToolLibrary/ToolLibrary.csproj",
+                    PackageClassification.Public,
+                    PackagePublishDecision.Publish),
+                CreateMetadata(
+                    "Packages/ToolLibrary/ToolLibrary.csproj",
+                    "ForgeTrust.AppSurface.ToolLibrary",
+                    isTool: true)),
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
+                    "Packages/PublicExe/PublicExe.csproj",
+                    PackageClassification.Public,
+                    PackagePublishDecision.Publish),
+                CreateMetadata(
+                    "Packages/PublicExe/PublicExe.csproj",
+                    "ForgeTrust.AppSurface.PublicExe",
+                    outputType: "Exe")),
+            new ResolvedPackageEntry(
+                CreateReadinessManifestEntry(
+                    "Packages/BrokenNotes/BrokenNotes.csproj",
+                    PackageClassification.Public,
+                    PackagePublishDecision.Publish,
+                    releaseNotesPath: "releases/missing.md"),
+                CreateMetadata("Packages/BrokenNotes/BrokenNotes.csproj", "ForgeTrust.AppSurface.BrokenNotes"))
+        };
+
+        var readinessByPackage = PackageReadinessEvaluator.Evaluate(_repositoryRoot, entries)
+            .ToDictionary(item => item.PackageId, StringComparer.Ordinal);
+
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.PublicHeld", "Public package is not marked publish", "publish_decision: publish");
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.SupportDirect", "Support package uses direct publish", "support_publish or do_not_publish");
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.ProofDirect", "Proof-host package uses direct publish", "support_publish or do_not_publish");
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.ExcludedMaybe", "Excluded package is not marked do_not_publish", "publish_decision: do_not_publish");
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.MissingReason", "publish_reason is missing", "Add publish_reason");
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.ToolDeps", "Tool packages must not define expected package dependencies", "Remove expected_dependency_package_ids");
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.NotPackable", "not packable", "Make Packages/NotPackable/NotPackable.csproj packable");
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.ToolLibrary", "Public tool package output type is Library", "Set OutputType Exe");
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.PublicExe", "Public direct-install package output type is Exe", "Set OutputType Library");
+        AssertBlocked(readinessByPackage, "ForgeTrust.AppSurface.BrokenNotes", "release_notes_path", "existing repository Markdown file");
+    }
+
+    [Fact]
     public async Task VerifyAsync_ThrowsWhenGeneratedReadmeIsStale()
     {
         await WriteCommonChooserFilesAsync(includeUnreleased: true);
@@ -1414,18 +1522,18 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     {
         var defaults = CommandLineOptions.Parse([], _repositoryRoot);
 
-        Assert.Equal(Path.Combine(_repositoryRoot, "packages", "package-index.yml"), defaults.Request.ManifestPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "packages", "README.md"), defaults.Request.ChooserOutputPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "packages", "readiness.md"), defaults.Request.ReadinessOutputPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "packages"), defaults.ArtifactsOutputPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "packages"), defaults.ArtifactsInputPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-artifact-manifest.json"), defaults.ArtifactManifestPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-validation-report.md"), defaults.ReportPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-publish-log.md"), defaults.PublishLogPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "packages", "package-index.yml"), defaults.Request.ManifestPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "packages", "README.md"), defaults.Request.ChooserOutputPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "packages", "readiness.md"), defaults.Request.ReadinessOutputPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "packages"), defaults.ArtifactsOutputPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "packages"), defaults.ArtifactsInputPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-artifact-manifest.json"), defaults.ArtifactManifestPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-validation-report.md"), defaults.ReportPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-publish-log.md"), defaults.PublishLogPath);
         Assert.Equal("https://api.nuget.org/v3/index.json", defaults.Source);
         Assert.Equal("NUGET_API_KEY", defaults.ApiKeyEnvironmentVariable);
-        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-smoke"), defaults.SmokeWorkDirectory);
-        Assert.Equal(Path.Combine(_repositoryRoot, "artifacts", "package-smoke-report.md"), defaults.SmokeReportPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-smoke"), defaults.SmokeWorkDirectory);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-smoke-report.md"), defaults.SmokeReportPath);
         Assert.Null(defaults.PackageVersion);
 
         var parsed = CommandLineOptions.Parse(
@@ -1447,19 +1555,19 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ],
             _repositoryRoot);
 
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src")), parsed.Request.RepositoryRoot);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "manifest.yml")), parsed.Request.ManifestPath);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "chooser.md")), parsed.Request.ChooserOutputPath);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "evidence.md")), parsed.Request.ReadinessOutputPath);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "packages-out")), parsed.ArtifactsOutputPath);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "packages-in")), parsed.ArtifactsInputPath);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "artifact-manifest.json")), parsed.ArtifactManifestPath);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "package-report.md")), parsed.ReportPath);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "publish-log.md")), parsed.PublishLogPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src")), parsed.Request.RepositoryRoot);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "manifest.yml")), parsed.Request.ManifestPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "chooser.md")), parsed.Request.ChooserOutputPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "evidence.md")), parsed.Request.ReadinessOutputPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "packages-out")), parsed.ArtifactsOutputPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "packages-in")), parsed.ArtifactsInputPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "artifact-manifest.json")), parsed.ArtifactManifestPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "package-report.md")), parsed.ReportPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "publish-log.md")), parsed.PublishLogPath);
         Assert.Equal("https://example.test/v3/index.json", parsed.Source);
         Assert.Equal("CUSTOM_NUGET_KEY", parsed.ApiKeyEnvironmentVariable);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "smoke")), parsed.SmokeWorkDirectory);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_repositoryRoot, "src", "smoke-report.md")), parsed.SmokeReportPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "smoke")), parsed.SmokeWorkDirectory);
+        Assert.Equal(Path.GetFullPath(Path.Join(_repositoryRoot, "src", "smoke-report.md")), parsed.SmokeReportPath);
         Assert.Equal("0.0.0-ci.99", parsed.PackageVersion);
 
         var absoluteManifest = Path.Combine(_repositoryRoot, "abs", "manifest.yml");
@@ -1487,7 +1595,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Equal(absoluteManifest, absolute.Request.ManifestPath);
         Assert.Equal(absoluteOutput, absolute.Request.ChooserOutputPath);
-        Assert.Equal(Path.Combine(_repositoryRoot, "packages", "readiness.md"), absolute.Request.ReadinessOutputPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "packages", "readiness.md"), absolute.Request.ReadinessOutputPath);
         Assert.Equal(absoluteArtifacts, absolute.ArtifactsOutputPath);
         Assert.Equal(absoluteArtifactsInput, absolute.ArtifactsInputPath);
         Assert.Equal(absoluteArtifactManifest, absolute.ArtifactManifestPath);
@@ -1613,8 +1721,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.DoesNotContain('\\', stdout.ToString());
         Assert.Contains("Package chooser and readiness dashboard are up to date: packages/README.md, packages/readiness.md.", stdout.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr.ToString());
-        Assert.True(File.Exists(Path.Combine(_repositoryRoot, "packages", "README.md")));
-        Assert.True(File.Exists(Path.Combine(_repositoryRoot, "packages", "readiness.md")));
+        Assert.True(File.Exists(Path.Join(_repositoryRoot, "packages", "README.md")));
+        Assert.True(File.Exists(Path.Join(_repositoryRoot, "packages", "readiness.md")));
     }
 
     [Fact]
@@ -2698,11 +2806,12 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     private static PackageManifestEntry CreateReadinessManifestEntry(
         string projectPath,
         PackageClassification classification,
-        PackagePublishDecision publishDecision,
+        PackagePublishDecision? publishDecision,
         string productFamily = "appsurface",
         PackageReleaseStatus releaseStatus = PackageReleaseStatus.PublicPreview,
         PackageCommercialStatus commercialStatus = PackageCommercialStatus.CommercialReady,
         string? releaseNotesPath = "releases/unreleased.md",
+        string? publishReason = null,
         IReadOnlyList<string>? dependsOn = null,
         IReadOnlyList<string>? expectedDependencyPackageIds = null)
     {
@@ -2715,7 +2824,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             ReleaseStatus = releaseStatus,
             CommercialStatus = commercialStatus,
             ReleaseNotesPath = releaseNotesPath,
-            PublishReason = publishDecision == PackagePublishDecision.DoNotPublish ? "Not part of the public package surface." : null,
+            PublishReason = publishReason ?? (publishDecision == PackagePublishDecision.DoNotPublish ? "Not part of the public package surface." : null),
             UseWhen = classification == PackageClassification.Public ? "Use when testing package readiness." : null,
             Includes = classification == PackageClassification.Public ? "Readiness evidence." : null,
             DoesNotInclude = classification == PackageClassification.Public ? "Live publish proof." : null,
@@ -2723,6 +2832,18 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             DependsOn = dependsOn?.ToList() ?? [],
             ExpectedDependencyPackageIds = expectedDependencyPackageIds?.ToList() ?? []
         };
+    }
+
+    private static void AssertBlocked(
+        IReadOnlyDictionary<string, PackageReadinessEvidence> readinessByPackage,
+        string packageId,
+        string expectedReason,
+        string expectedFixHint)
+    {
+        var readiness = readinessByPackage[packageId];
+        Assert.Equal(PackageReadinessStatus.Blocked, readiness.Status);
+        Assert.Contains(readiness.BlockingReasons, reason => reason.Contains(expectedReason, StringComparison.Ordinal));
+        Assert.Contains(readiness.FixHints, hint => hint.Contains(expectedFixHint, StringComparison.Ordinal));
     }
 
     private static SleepCommand CreateSleepCommand(int durationSeconds)

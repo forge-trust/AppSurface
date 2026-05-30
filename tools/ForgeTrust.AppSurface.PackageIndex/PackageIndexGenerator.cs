@@ -229,7 +229,7 @@ internal sealed class PackageIndexGenerator
                 $"Manifest '{Path.GetRelativePath(request.RepositoryRoot, request.ManifestPath)}' does not exist.");
         }
 
-        var sidecarPath = Path.Combine(Path.GetDirectoryName(request.ChooserOutputPath)!, "README.md.yml");
+        var sidecarPath = Path.Join(Path.GetDirectoryName(request.ChooserOutputPath)!, "README.md.yml");
         if (!File.Exists(sidecarPath))
         {
             throw new PackageIndexException(
@@ -1117,7 +1117,7 @@ internal sealed record PackageIndexRequest(
             repositoryRoot,
             manifestPath,
             outputPath,
-            Path.Combine(GetOutputDirectory(outputPath), "readiness.md"))
+            Path.Join(GetOutputDirectory(outputPath), "readiness.md"))
     {
     }
 
