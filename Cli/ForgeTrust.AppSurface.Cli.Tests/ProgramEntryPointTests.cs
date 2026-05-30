@@ -879,6 +879,9 @@ public sealed class ProgramEntryPointTests
         var args = runner.Args.GetValueOrDefault();
         Assert.Equal(Path.GetFullPath("dist/docs"), args.OutputPath);
         Assert.Equal(ExportMode.Cdn, args.Mode);
+        Assert.NotNull(args.HybridOptions);
+        Assert.Null(args.HybridOptions.LiveOrigin);
+        Assert.Equal(RazorWireHybridCredentialsMode.Auto, args.HybridOptions.CredentialsMode);
         Assert.Equal(ExportRedirectStrategy.Html, args.RedirectStrategy);
         Assert.Null(args.SeedRoutesPath);
         Assert.Equal(["/", "/docs"], args.InitialSeedRoutes);
@@ -947,10 +950,26 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsExportCommand_Should_Reject_Invalid_LiveOrigin()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        var runner = new CapturingAppSurfaceDocsExportRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "export", "--repo", repository.Path, "--live-origin", "https://api.example.com/path"],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("--live-origin", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("no path", result.AllText, StringComparison.Ordinal);
+        Assert.Null(runner.Args);
+    }
+
+    [Fact]
     public async Task AppSurfaceExportCommand_Should_Run_Generic_Hybrid_Export()
     {
         using var output = TempDirectory.Create("appsurface-export-output-");
-        var handler = new AppSurfaceExportHttpMessageHandler();
+        using var handler = new AppSurfaceExportHttpMessageHandler();
 
         var result = await InvokeProgramEntryPointAsync(
             [
@@ -970,6 +989,49 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("data-rw-live-origin=\"https://api.example.com\"", html);
         Assert.Contains("action=\"https://api.example.com/profile/save\"", html);
         Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+    }
+
+    [Fact]
+    public async Task AppSurfaceExportCommand_Should_Reject_Invalid_LiveOrigin()
+    {
+        var result = await InvokeProgramEntryPointAsync(
+            ["export", "--url", "http://localhost:5000", "--live-origin", "https://api.example.com/path"]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("--live-origin", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("no path", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AppSurfaceExportCommand_Should_Reject_Invalid_PublicOrigin()
+    {
+        var result = await InvokeProgramEntryPointAsync(
+            ["export", "--url", "http://localhost:5000", "--public-origin", "ftp://example.com"]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("--public-origin", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("absolute http or https origin", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AppSurfaceExportCommand_Should_Surface_ExportValidationFailures()
+    {
+        using var output = TempDirectory.Create("appsurface-export-output-");
+        using var handler = new AppSurfaceExportHttpMessageHandler();
+
+        var result = await InvokeProgramEntryPointAsync(
+            [
+                "export",
+                "--url", "http://localhost:5000",
+                "--output", output.Path,
+                "--mode", "cdn"
+            ],
+            options => options.CustomRegistrations.Add(
+                services => services.AddSingleton<IHttpClientFactory>(new FixedHttpClientFactory(handler))));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("RWEXPORT", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("CDN mode", result.AllText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2760,33 +2822,65 @@ public sealed class ProgramEntryPointTests
 
     private sealed class AppSurfaceExportHttpMessageHandler : HttpMessageHandler
     {
+        private readonly Queue<HttpResponseMessage> _okResponses;
+        private readonly Queue<HttpResponseMessage> _notFoundResponses;
+        private readonly List<HttpResponseMessage> _responses;
+
+        public AppSurfaceExportHttpMessageHandler()
+        {
+            _responses = Enumerable.Range(0, 8)
+                .Select(_ => CreateOkResponse())
+                .Concat(Enumerable.Range(0, 8).Select(_ => new HttpResponseMessage(HttpStatusCode.NotFound)))
+                .ToList();
+            _okResponses = new Queue<HttpResponseMessage>(_responses.Where(response => response.StatusCode == HttpStatusCode.OK));
+            _notFoundResponses = new Queue<HttpResponseMessage>(_responses.Where(response => response.StatusCode == HttpStatusCode.NotFound));
+        }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri?.AbsolutePath ?? "/";
             if (path == "/" || path == "/index")
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        """
-                        <html>
-                          <head>
-                            <link rel="canonical" href="/profile">
-                          </head>
-                          <body>
-                            <script src="/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"></script>
-                            <form data-rw-form="true" method="post" action="/profile/save">
-                              <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
-                            </form>
-                          </body>
-                        </html>
-                        """,
-                        System.Text.Encoding.UTF8,
-                        "text/html")
-                });
+                return Task.FromResult(_okResponses.Dequeue());
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return Task.FromResult(_notFoundResponses.Dequeue());
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (var response in _responses)
+                {
+                    response.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private static HttpResponseMessage CreateOkResponse()
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    <html>
+                      <head>
+                        <link rel="canonical" href="/profile">
+                      </head>
+                      <body>
+                        <script src="/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"></script>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """,
+                    System.Text.Encoding.UTF8,
+                    "text/html")
+            };
         }
     }
 

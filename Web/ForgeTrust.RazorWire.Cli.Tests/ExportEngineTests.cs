@@ -1861,7 +1861,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new HybridLiveOriginHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new HybridLiveOriginHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -1907,7 +1907,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new HybridUnsafeTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new HybridUnsafeTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -1947,7 +1947,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new HybridLiveOriginHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new HybridLiveOriginHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -1985,7 +1985,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new StaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new StaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -2018,7 +2018,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new FormAssociatedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new FormAssociatedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -2051,7 +2051,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new UnownedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new UnownedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -2084,7 +2084,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new LazyAntiforgeryFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new LazyAntiforgeryFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -2117,7 +2117,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new CustomNamedTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new CustomNamedTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -2150,7 +2150,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new StaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new StaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -2190,7 +2190,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new FormAssociatedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new FormAssociatedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -2228,7 +2228,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new DuplicateStaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new DuplicateStaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -2266,7 +2266,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new CustomEndpointHybridHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new CustomEndpointHybridHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
@@ -2305,7 +2305,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new HybridLiveFragmentHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new HybridLiveFragmentHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(
