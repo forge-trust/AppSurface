@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Web;
 using Microsoft.Extensions.Hosting;
 
@@ -96,7 +97,7 @@ public static class AppSurfaceDocsStandaloneHost
     {
         var context = new StartupContext(
             args,
-            new AppSurfaceDocsWebModule(),
+            new AppSurfaceDocsStandaloneWebModule(),
             EnvironmentProvider: environmentProvider)
         {
             OverrideEntryPointAssembly = typeof(AppSurfaceDocsStandaloneHost).Assembly
@@ -116,7 +117,33 @@ public static class AppSurfaceDocsStandaloneHost
         };
     }
 
-    private sealed class AppSurfaceDocsStandaloneStartup : WebStartup<AppSurfaceDocsWebModule>
+    private sealed class AppSurfaceDocsStandaloneStartup : WebStartup<AppSurfaceDocsStandaloneWebModule>
     {
+    }
+
+    private sealed class AppSurfaceDocsStandaloneWebModule : IAppSurfaceWebModule
+    {
+        public bool IncludeAsApplicationPart => true;
+
+        public void ConfigureWebOptions(StartupContext context, WebOptions options)
+        {
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+            builder.AddModule<AppSurfaceDocsWebModule>();
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
     }
 }

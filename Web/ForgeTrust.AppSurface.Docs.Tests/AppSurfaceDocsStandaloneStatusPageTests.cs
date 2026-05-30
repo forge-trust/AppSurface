@@ -1,5 +1,8 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web;
 using Microsoft.AspNetCore.Builder;
@@ -34,6 +37,53 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     }
 
     [Fact]
+    public async Task MissingDocsRoute_ShouldRenderStandaloneDocsRecoveryPageInDevelopment()
+    {
+        await using var runningHost = await StartStandaloneHostAsync(args: ["--environment", "Development"]);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/docs/missing-page");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
+
+        using var response = await runningHost.Client.SendAsync(request);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Contains("Documentation page not found", html);
+        Assert.Contains("href=\"/docs/search\"", html);
+    }
+
+    [Fact]
+    public async Task ExecutableRunAsync_ShouldRenderStandaloneDocsRecoveryPage()
+    {
+        var repositoryRoot = CreateRepositoryRoot();
+        var port = GetAvailableTcpPort();
+        using var process = StartStandaloneExecutable(port, repositoryRoot);
+
+        try
+        {
+            using var client = new HttpClient
+            {
+                BaseAddress = new Uri($"http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}")
+            };
+
+            var html = await WaitForStandaloneStatusPageAsync(client, process);
+
+            Assert.Contains("Documentation page not found", html);
+            Assert.Contains("href=\"/docs/search\"", html);
+            Assert.DoesNotContain("AppSurface default 404", html);
+        }
+        finally
+        {
+            StopProcess(process);
+
+            if (Directory.Exists(repositoryRoot))
+            {
+                Directory.Delete(repositoryRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task ReservedNotFoundRoute_ShouldRenderStandaloneDocsRecoveryWithoutOriginalPath()
     {
         await using var runningHost = await StartStandaloneHostAsync();
@@ -53,6 +103,7 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         var catalogPath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName(), "catalog.json");
 
         await using var runningHost = await StartStandaloneHostAsync(
+            configurationOverrides:
             new Dictionary<string, string?>
             {
                 ["AppSurfaceDocs:Routing:RouteRootPath"] = "/foo/bar",
@@ -97,6 +148,7 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     }
 
     private static async Task<RunningStandaloneHost> StartStandaloneHostAsync(
+        string[]? args = null,
         IReadOnlyDictionary<string, string?>? configurationOverrides = null,
         string? pathBase = null,
         Action<WebOptions>? configureOptions = null)
@@ -116,7 +168,7 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         }
 
         var builder = AppSurfaceDocsStandaloneHost.CreateBuilder(
-            [],
+            args ?? [],
             environmentProvider: null,
             configureOptions: configureOptions);
         builder.ConfigureAppConfiguration((_, configurationBuilder) => configurationBuilder.AddInMemoryCollection(configuration));
@@ -153,6 +205,109 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
             This source tree exists so the standalone host can harvest a small documentation snapshot.
             """);
         return repositoryRoot;
+    }
+
+    private static Process StartStandaloneExecutable(int port, string repositoryRoot)
+    {
+        var assemblyPath = typeof(AppSurfaceDocsStandaloneHost).Assembly.Location;
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = GetStandaloneProjectDirectory(),
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+
+        startInfo.ArgumentList.Add(assemblyPath);
+        startInfo.ArgumentList.Add("--urls");
+        startInfo.ArgumentList.Add($"http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}");
+        startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
+        startInfo.Environment["DOTNET_ENVIRONMENT"] = "Production";
+        startInfo.Environment["AppSurfaceDocs__Source__RepositoryRoot"] = repositoryRoot;
+
+        return Process.Start(startInfo)
+               ?? throw new InvalidOperationException("Failed to start the standalone docs executable.");
+    }
+
+    private static async Task<string> WaitForStandaloneStatusPageAsync(HttpClient client, Process process)
+    {
+        using var requestTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        while (!requestTimeout.IsCancellationRequested)
+        {
+            if (process.HasExited)
+            {
+                var output = await process.StandardOutput.ReadToEndAsync(requestTimeout.Token);
+                var error = await process.StandardError.ReadToEndAsync(requestTimeout.Token);
+                throw new InvalidOperationException(
+                    $"Standalone docs executable exited with code {process.ExitCode.ToString(CultureInfo.InvariantCulture)} before serving the status page.{Environment.NewLine}{output}{Environment.NewLine}{error}");
+            }
+
+            try
+            {
+                using var response = await client.GetAsync("/_appsurface/errors/404", requestTimeout.Token);
+                if (response.IsSuccessStatusCode)
+                {
+                    return await response.Content.ReadAsStringAsync(requestTimeout.Token);
+                }
+            }
+            catch (HttpRequestException)
+            {
+            }
+            catch (TaskCanceledException) when (!requestTimeout.IsCancellationRequested)
+            {
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), requestTimeout.Token);
+        }
+
+        throw new TimeoutException("Timed out waiting for the standalone docs executable to serve the status page.");
+    }
+
+    private static int GetAvailableTcpPort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            return ((IPEndPoint)listener.LocalEndpoint).Port;
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    private static string GetStandaloneProjectDirectory()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(
+                directory.FullName,
+                "Web",
+                "ForgeTrust.AppSurface.Docs.Standalone",
+                "ForgeTrust.AppSurface.Docs.Standalone.csproj");
+            if (File.Exists(candidate))
+            {
+                return Path.GetDirectoryName(candidate)!;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new InvalidOperationException("Could not locate the standalone docs project directory.");
+    }
+
+    private static void StopProcess(Process process)
+    {
+        if (process.HasExited)
+        {
+            return;
+        }
+
+        process.Kill(entireProcessTree: true);
+        process.WaitForExit(TimeSpan.FromSeconds(5));
     }
 
     private sealed class PathBaseStartupFilter(string pathBase) : IStartupFilter
