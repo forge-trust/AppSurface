@@ -2154,7 +2154,34 @@ public class DocsControllerTests : IDisposable
 
         var result = await pending.Controller.Search();
 
-        AssertHarvestingView(result, "/docs/search");
+        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: true);
+    }
+
+    [Fact]
+    public async Task Search_ShouldRenderHarvestingWithoutLiveProgress_WhenProductionHarvestStreamIsNotAuthorized()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/search",
+            Environments.Production,
+            AppSurfaceDocsHarvestHealthExposure.Always);
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: false);
+    }
+
+    [Fact]
+    public async Task Search_ShouldRenderHarvestingWithLiveProgress_WhenProductionCustomAuthorizerAllows()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/search",
+            Environments.Production,
+            AppSurfaceDocsHarvestHealthExposure.Always,
+            new HarvestProgressAllowAuthorizer());
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: true);
     }
 
     [Fact]
@@ -2164,7 +2191,7 @@ public class DocsControllerTests : IDisposable
 
         var result = await pending.Controller.Search();
 
-        AssertHarvestingView(result, "/docs");
+        AssertHarvestingView(result, "/docs", canUseLiveProgress: true);
     }
 
     [Fact]
@@ -2174,7 +2201,7 @@ public class DocsControllerTests : IDisposable
 
         var result = await pending.Controller.Section("guides");
 
-        AssertHarvestingView(result, "/docs/section/guides");
+        AssertHarvestingView(result, "/docs/section/guides", canUseLiveProgress: true);
     }
 
     [Fact]
@@ -2184,7 +2211,7 @@ public class DocsControllerTests : IDisposable
 
         var result = await pending.Controller.Details("guides/composition");
 
-        AssertHarvestingView(result, "/docs/guides/composition");
+        AssertHarvestingView(result, "/docs/guides/composition", canUseLiveProgress: true);
     }
 
     [Fact]
@@ -2194,7 +2221,7 @@ public class DocsControllerTests : IDisposable
 
         var result = await pending.Controller.Details("guides/composition.md");
 
-        AssertHarvestingView(result, "/docs/guides/composition.md");
+        AssertHarvestingView(result, "/docs/guides/composition.md", canUseLiveProgress: true);
     }
 
     [Fact]
@@ -4403,7 +4430,11 @@ public class DocsControllerTests : IDisposable
         return (controller, cache, memo);
     }
 
-    private PendingHarvestController CreatePendingHarvestController(string requestPath)
+    private PendingHarvestController CreatePendingHarvestController(
+        string requestPath,
+        string environmentName = "Development",
+        AppSurfaceDocsHarvestHealthExposure exposure = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly,
+        IRazorWireChannelAuthorizer? authorizer = null)
     {
         var release = new TaskCompletionSource<IReadOnlyList<DocNode>>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -4414,7 +4445,11 @@ public class DocsControllerTests : IDisposable
         {
             Harvest = new AppSurfaceDocsHarvestOptions
             {
-                InitialRequestWaitBudgetMilliseconds = 0
+                InitialRequestWaitBudgetMilliseconds = 0,
+                Health = new AppSurfaceDocsHarvestHealthOptions
+                {
+                    ExposeRoutes = exposure
+                }
             }
         };
         var cache = new MemoryCache(new MemoryCacheOptions());
@@ -4425,8 +4460,19 @@ public class DocsControllerTests : IDisposable
         var controllerLogger = A.Fake<ILogger<DocsController>>();
         var services = A.Fake<IServiceProvider>();
         A.CallTo(() => environment.ContentRootPath).Returns(Path.GetTempPath());
+        A.CallTo(() => environment.EnvironmentName).Returns(environmentName);
         A.CallTo(() => sanitizer.Sanitize(A<string>._)).ReturnsLazily((string input) => input);
         A.CallTo(() => services.GetService(typeof(IRazorWireStreamHub))).Returns(null);
+        var effectiveAuthorizer = authorizer
+                                  ?? new AppSurfaceDocsHarvestChannelAuthorizer(
+                                      options,
+                                      environment);
+        var requestServices = new ServiceCollection()
+            .AddLogging()
+            .AddControllersWithViews()
+            .Services
+            .AddSingleton<IRazorWireChannelAuthorizer>(effectiveAuthorizer)
+            .BuildServiceProvider();
 
         var aggregator = new DocAggregator(
             [harvester],
@@ -4451,20 +4497,28 @@ public class DocsControllerTests : IDisposable
             controllerLogger,
             coordinator)
         {
-            ControllerContext = CreateControllerContext(new DefaultHttpContext())
+            ControllerContext = CreateControllerContext(
+                new DefaultHttpContext
+                {
+                    RequestServices = requestServices
+                })
         };
         controller.ControllerContext.HttpContext.Request.Path = requestPath;
         controller.Url = new UrlHelper(controller.ControllerContext);
 
-        return new PendingHarvestController(controller, release, initialHarvest, cache, memo);
+        return new PendingHarvestController(controller, release, initialHarvest, cache, memo, requestServices);
     }
 
-    private static void AssertHarvestingView(IActionResult result, string expectedReturnUrl)
+    private static void AssertHarvestingView(
+        IActionResult result,
+        string expectedReturnUrl,
+        bool canUseLiveProgress)
     {
         var viewResult = Assert.IsType<ViewResult>(result);
         Assert.Equal("Harvesting", viewResult.ViewName);
         var model = Assert.IsType<AppSurfaceDocsHarvestingViewModel>(viewResult.Model);
         Assert.Equal(expectedReturnUrl, model.ReturnUrl);
+        Assert.Equal(canUseLiveProgress, model.CanUseLiveProgress);
     }
 
     private static DocFeaturedPageGroupDefinition FeaturedGroup(params DocFeaturedPageDefinition[] pages)
@@ -4561,19 +4615,22 @@ public class DocsControllerTests : IDisposable
         private readonly Task<DocHarvestHealthSnapshot> _initialHarvest;
         private readonly IMemoryCache _cache;
         private readonly Memo _memo;
+        private readonly ServiceProvider _requestServices;
 
         public PendingHarvestController(
             DocsController controller,
             TaskCompletionSource<IReadOnlyList<DocNode>> release,
             Task<DocHarvestHealthSnapshot> initialHarvest,
             IMemoryCache cache,
-            Memo memo)
+            Memo memo,
+            ServiceProvider requestServices)
         {
             Controller = controller;
             _release = release;
             _initialHarvest = initialHarvest;
             _cache = cache;
             _memo = memo;
+            _requestServices = requestServices;
         }
 
         public DocsController Controller { get; }
@@ -4582,9 +4639,18 @@ public class DocsControllerTests : IDisposable
         {
             using var cache = _cache;
             using var memo = _memo;
+            await _requestServices.DisposeAsync();
 
             _release.TrySetResult([]);
             await _initialHarvest.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+    }
+
+    private sealed class HarvestProgressAllowAuthorizer : IRazorWireChannelAuthorizer
+    {
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            return new ValueTask<bool>(AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel));
         }
     }
 }

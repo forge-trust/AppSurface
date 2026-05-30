@@ -310,7 +310,51 @@ The `Testing*Delay*Milliseconds` options are local/manual testing knobs. The def
 
 When the harvest completes successfully, AppSurface Docs first publishes the completed observatory state with replay enabled, then publishes a live-only RazorWire `rw-visit` command for active subscribers. Replay stays state-only, so late subscribers see the completed state and the plain continuation link without being auto-navigated by an old command. The completion view also renders a normal return link so no-JavaScript users can continue manually.
 
-The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints. In development it is exposed by default; non-development hosts must opt in with `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` if users should see the live progress stream.
+The harvest progress stream is authorized with the same route-exposure policy as the operator health endpoints and, outside Development, with a host-owned RazorWire channel authorizer. In Development it is exposed by default. In non-development hosts, `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` exposes the health routes but does not by itself authorize the live progress stream.
+
+### Production live harvest stream authorization
+
+Production or preview hosts that want users to see live harvest progress must register a custom `IRazorWireChannelAuthorizer` before calling `AddAppSurfaceDocs()`. Use `AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel)` instead of hardcoding the channel name:
+
+```csharp
+using ForgeTrust.AppSurface.Docs;
+using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.RazorWire.Streams;
+using Microsoft.AspNetCore.Http;
+
+public sealed class DocsHarvestStreamAuthorizer : IRazorWireChannelAuthorizer
+{
+    public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+    {
+        if (!AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel))
+        {
+            return new ValueTask<bool>(false);
+        }
+
+        var allowed = context.User.Identity?.IsAuthenticated == true
+                      && context.User.IsInRole("DocsOperator");
+
+        return new ValueTask<bool>(allowed);
+    }
+}
+
+services.AddSingleton<IRazorWireChannelAuthorizer, DocsHarvestStreamAuthorizer>();
+services.AddAppSurfaceDocs();
+```
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Health": {
+        "ExposeRoutes": "Always"
+      }
+    }
+  }
+}
+```
+
+The built-in RazorWire `AllowAll` mode is not treated as production authorization for the AppSurface Docs harvest progress stream. Registering `IRazorWireChannelAuthorizer` after `AddAppSurfaceDocs()` is an advanced replacement mode: the later authorizer replaces the AppSurface Docs wrapper and must apply the harvest-progress predicate itself.
 
 Pitfalls:
 
@@ -318,6 +362,7 @@ Pitfalls:
 - Do not rely on file-level progress counts in v1. The current stream reports harvester-level progress and aggregate document counts.
 - Do not retain or replay visit commands. Keep replay enabled only for safe progress state; navigation commands are live-only.
 - Do not use `StartupMode=Disabled` for hosts where first navigation latency matters; that preserves the old lazy-harvest behavior.
+- Do not assume `ExposeRoutes=Always` authorizes the live progress stream in non-development environments. It exposes health routes; live progress also needs a custom stream authorizer.
 
 ### Operator Diagnostics Routes
 

@@ -3,6 +3,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.ViewComponents;
 using ForgeTrust.RazorWire.Bridge;
+using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -835,8 +836,38 @@ public class DocsController : Controller
             {
                 Progress = _harvestCoordinator.CurrentProgress,
                 ReturnUrl = ResolveCurrentRequestReturnUrl(),
-                CompletionNavigationDelayMilliseconds = _harvestCoordinator.CompletionDelay
+                CompletionNavigationDelayMilliseconds = _harvestCoordinator.CompletionDelay,
+                CanUseLiveProgress = await CanUseLiveHarvestProgressAsync()
             });
+    }
+
+    private async ValueTask<bool> CanUseLiveHarvestProgressAsync()
+    {
+        if (!AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
+        {
+            return false;
+        }
+
+        var authorizer = HttpContext.RequestServices.GetService<IRazorWireChannelAuthorizer>();
+        if (authorizer is null)
+        {
+            return _environment.IsDevelopment();
+        }
+
+        try
+        {
+            return await authorizer.CanSubscribeAsync(
+                HttpContext,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "AppSurface Docs could not authorize the live harvest progress stream for the current request.");
+
+            return false;
+        }
     }
 
     private string ResolveCurrentRequestReturnUrl()
