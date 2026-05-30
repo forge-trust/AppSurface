@@ -58,6 +58,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 - RazorWire README snippets are now source-backed by the MVC sample through a MarkdownSnippets generator, with CI verification and README contract tests guarding quickstart drift.
 - RazorWire stream subscriptions are now denied by default through `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.DenyAll`, with an explicit `RazorWireStreamAuthorizationMode.AllowAll` mode for public/demo streams and `IRazorWireChannelAuthorizer` preserved as the request-aware extension point for user, tenant, and workflow-specific channels.
 - RazorWire streams can now emit same-origin Turbo Drive visit commands with `RazorWireStreamBuilder.Visit(...)`, giving live subscribers a narrow one-shot navigation primitive while keeping retained replay channels reserved for state snapshots.
+- RazorWire hybrid export can now keep managed streams, islands, and forms live after static publication. Exported pages may point those RazorWire-owned interactions at a configured live origin, choose credential behavior, or preserve same-origin app-owned routes for backend-passthrough hybrid hosts.
 
 ### AppSurface Docs product example
 
@@ -149,6 +150,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 
 - RazorWire-enhanced forms now get a convention-based failed-submission stack: durable request markers, default form-local fallback UI, handled server validation helpers, and runtime events for custom consumers.
 - Development anti-forgery failures from RazorWire forms now return useful diagnostics with safe production copy, so stale or missing token problems are easier to fix without exposing implementation detail to users.
+- Static and hybrid export now handle RazorWire-owned anti-forgery forms safely: hybrid exports remove crawler-minted tokens and refresh them lazily from `/_rw/antiforgery/token`, while CDN exports fail early with `RWEXPORT006` guidance instead of publishing stale request tokens.
 - The MVC sample now includes `/Reactivity/FormFailures`, covering validation, anti-forgery, authorization, malformed request, server failure, default styling, CSS variable customization, and manual event-driven rendering.
 - The MVC sample now persists its demo username cookie with `Secure`, `HttpOnly`, and `SameSite=Lax`, and its browser-level regression coverage runs through `localhost` so local development keeps the secure-cookie behavior observable.
 - The MVC sample counter keeps its compact icon-only button while exposing an `Increment counter` accessible name for assistive technology and role-based tests.
@@ -156,6 +158,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 ### Console and CLI polish
 
 - RazorWire CLI process execution now follows an explicit reliability contract for one-shot commands and launched target apps. No action is expected: command names, flags, defaults, and export semantics are unchanged. Target-app failures that were previously hidden behind startup or readiness timeouts may now surface earlier with captured output and recovery guidance.
+- AppSurface CLI now exposes a product-facing `appsurface export` command for AppSurface/RazorWire apps, including URL, project, DLL, CDN, hybrid, public-origin, live-origin, and credential options without requiring users to discover the lower-level RazorWire CLI first.
 
 ### RazorWire streams
 
