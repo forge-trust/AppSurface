@@ -86,9 +86,9 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     [Fact]
     public void GetCatalog_ShouldResolveExactTreePathFromTrustedReleaseRoot()
     {
-        var releaseStore = Path.Combine(_tempDirectory, "release-store");
+        var releaseStore = Path.Join(_tempDirectory, "release-store");
         Directory.CreateDirectory(releaseStore);
-        var stableTree = CreateExactTree(Path.Combine("release-store", "1.2.3"));
+        var stableTree = CreateExactTree($"release-store{Path.DirectorySeparatorChar}1.2.3");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -116,7 +116,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     [Fact]
     public void GetCatalog_ShouldAcceptDotSlashTreePathUnderDefaultCatalogDirectoryRoot()
     {
-        var stableTree = CreateExactTree(Path.Combine("releases", "1.2.3"));
+        var stableTree = CreateExactTree($"releases{Path.DirectorySeparatorChar}1.2.3");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -174,9 +174,9 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldMarkEscapingExactTreePathUnavailable()
     {
         var outsideTree = CreateExactTree("outside-tree");
-        var catalogDirectory = Path.Combine(_tempDirectory, "catalog");
+        var catalogDirectory = Path.Join(_tempDirectory, "catalog");
         Directory.CreateDirectory(catalogDirectory);
-        var catalogPath = Path.Combine(catalogDirectory, "catalog.json");
+        var catalogPath = Path.Join(catalogDirectory, "catalog.json");
         File.WriteAllText(
             catalogPath,
             JsonSerializer.Serialize(

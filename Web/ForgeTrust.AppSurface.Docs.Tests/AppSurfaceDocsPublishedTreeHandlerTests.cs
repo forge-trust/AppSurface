@@ -171,6 +171,41 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldRedirectFrozenManifestAliases_WhenMountDoesNotUseExactTreeGuard()
+    {
+        var tree = CreatePublishedTree("release-with-unguarded-frozen-manifest");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "packages/README.md",
+                  "canonicalRoutePath": "packages",
+                  "recoveryAliases": ["packages/README.md"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var provider = new PhysicalFileProvider(tree, ExclusionFilters.None);
+        _disposables.Add(provider);
+        var handler = CreateHandler(
+            [
+                new AppSurfaceDocsPublishedTreeMount(
+                    "/docs/v/1.2.3",
+                    provider,
+                    frozenRouteManifest: new AppSurfaceDocsFrozenRouteManifestCache(provider, tree))
+            ]);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status301MovedPermanently, request.Response.StatusCode);
+        Assert.Equal("/docs/v/1.2.3/packages", request.Response.Headers.Location);
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldRedirectFrozenManifestAliases_ForRootMountedArchives()
     {
         var tree = CreatePublishedTree("root-mounted-frozen-manifest");
@@ -501,7 +536,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
               ]
             }
             """);
-        File.CreateSymbolicLink(Path.Combine(tree, ".appsurface-docs-route-manifest.json"), targetPath);
+        File.CreateSymbolicLink(Path.Join(tree, ".appsurface-docs-route-manifest.json"), targetPath);
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/old-guide");
 
@@ -1124,8 +1159,8 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
     private bool TryCreateSymbolicLinkTestFile(out string targetPath, out string linkPath)
     {
-        targetPath = Path.Combine(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}.txt");
-        linkPath = Path.Combine(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}.txt");
+        targetPath = Path.Join(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}.txt");
+        linkPath = Path.Join(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}.txt");
         try
         {
             File.WriteAllText(targetPath, "target");
@@ -1140,8 +1175,8 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
     private bool TryCreateSymbolicLinkTestDirectory(out string targetPath, out string linkPath)
     {
-        targetPath = Path.Combine(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}");
-        linkPath = Path.Combine(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}");
+        targetPath = Path.Join(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}");
+        linkPath = Path.Join(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}");
         try
         {
             Directory.CreateDirectory(targetPath);

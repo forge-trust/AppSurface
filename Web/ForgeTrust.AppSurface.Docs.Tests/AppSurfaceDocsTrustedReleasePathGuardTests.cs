@@ -87,6 +87,21 @@ public sealed class AppSurfaceDocsTrustedReleasePathGuardTests : IDisposable
         Assert.Contains("does not exist", internalDetail, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void TryValidateDirectory_ShouldReportUnsafeDirectory_WhenPathMetadataCannotBeRead()
+    {
+        var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
+            "bad\0directory",
+            "missing",
+            "unsafe",
+            out var publicIssue,
+            out var internalDetail);
+
+        Assert.False(result);
+        Assert.Equal("unsafe", publicIssue);
+        Assert.Contains("could not be inspected", internalDetail, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -115,6 +130,36 @@ public sealed class AppSurfaceDocsTrustedReleasePathGuardTests : IDisposable
 
         Assert.False(result);
         Assert.Equal(AppSurfaceDocsTrustedReleasePathGuard.NormalizePhysicalPath(Path.Join(_tempDirectory, "missing.html")), physicalFilePath);
+        Assert.Contains("does not exist", denialReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryValidateFileCandidate_ShouldReportInspectionFailure_WhenPathMetadataCannotBeRead()
+    {
+        var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
+            _tempDirectory,
+            "bad\0file.html",
+            out var physicalFilePath,
+            out var denialReason);
+
+        Assert.False(result);
+        Assert.Equal(string.Empty, physicalFilePath);
+        Assert.Contains("could not be inspected", denialReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryValidateNoReparseSegments_ShouldRejectMissingTrustedRoot()
+    {
+        var missingRoot = Path.Join(_tempDirectory, "missing-root");
+        var candidatePath = Path.Join(missingRoot, "index.html");
+
+        var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateNoReparseSegments(
+            missingRoot,
+            candidatePath,
+            expectLeafFile: true,
+            out var denialReason);
+
+        Assert.False(result);
         Assert.Contains("does not exist", denialReason, StringComparison.OrdinalIgnoreCase);
     }
 
