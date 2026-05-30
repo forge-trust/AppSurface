@@ -992,6 +992,29 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public void AppSurfaceExportCommand_Should_Reject_Null_Dependencies()
+    {
+        using var handler = new StaticHttpMessageHandler(HttpStatusCode.OK, "<html></html>");
+        var httpClientFactory = new FixedHttpClientFactory(handler);
+        var logger = NullLogger<AppSurfaceExportCommand>.Instance;
+        var engine = new ExportEngine(NullLogger<ExportEngine>.Instance, httpClientFactory);
+        var requestFactory = new ExportSourceRequestFactory();
+        var sourceResolver = new ExportSourceResolver(
+            NullLoggerFactory.Instance,
+            new TargetAppProcessFactory(),
+            httpClientFactory);
+
+        Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceExportCommand(null!, engine, requestFactory, sourceResolver));
+        Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceExportCommand(logger, null!, requestFactory, sourceResolver));
+        Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceExportCommand(logger, engine, null!, sourceResolver));
+        Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceExportCommand(logger, engine, requestFactory, null!));
+    }
+
+    [Fact]
     public async Task AppSurfaceExportCommand_Should_Reject_Invalid_LiveOrigin()
     {
         var result = await InvokeProgramEntryPointAsync(
