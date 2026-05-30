@@ -90,6 +90,71 @@ public class CSharpDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_WhenCSharpFileIsReparsePointSkipsCandidate()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            var externalFile = Path.Join(externalRoot, "ExternalService.cs");
+            await File.WriteAllTextAsync(
+                externalFile,
+                """
+                namespace External;
+
+                /// <summary>External service docs.</summary>
+                public class ExternalService {}
+                """);
+            var linkPath = CombineUnder(_testRoot, "ExternalService.cs");
+            if (!TryCreateFileSymbolicLink(linkPath, externalFile))
+            {
+                // Skip on hosts where symlink creation is unsupported or unauthorized.
+                return;
+            }
+
+            var results = await _harvester.HarvestAsync(_testRoot);
+
+            Assert.DoesNotContain(results, node => node.Title == "ExternalService");
+            Assert.DoesNotContain(results, node => node.Path == "Namespaces/External");
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WhenCSharpDirectoryIsReparsePointSkipsTraversal()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(externalRoot, "ExternalService.cs"),
+                """
+                namespace External;
+
+                /// <summary>External service docs.</summary>
+                public class ExternalService {}
+                """);
+            var linkPath = CombineUnder(_testRoot, "linked");
+            if (!TryCreateDirectorySymbolicLink(linkPath, externalRoot))
+            {
+                // Skip on hosts where symlink creation is unsupported or unauthorized.
+                return;
+            }
+
+            var results = await _harvester.HarvestAsync(_testRoot);
+
+            Assert.DoesNotContain(results, node => node.Title == "ExternalService");
+            Assert.DoesNotContain(results, node => node.Path == "Namespaces/External");
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
     public async Task HarvestAsync_WithContextShouldUseContextPathPolicyForFileInclusion()
     {
         var harvester = new CSharpDocHarvester(A.Fake<ILogger<CSharpDocHarvester>>());
@@ -1064,6 +1129,80 @@ public class GlobalType {}
         Assert.All(segments, segment => Assert.False(Path.IsPathRooted(segment)));
 
         return segments.Aggregate(root, Path.Combine);
+    }
+
+    private static string CreateExternalTempDirectory()
+    {
+        var path = Path.Join(Path.GetTempPath(), "AppSurfaceDocsTests_CS_External", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static bool TryCreateFileSymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static void DeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, true);
+        }
+        catch (IOException)
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
     }
 
     private sealed class DerivedCSharpDocHarvester(ILogger<CSharpDocHarvester> logger)

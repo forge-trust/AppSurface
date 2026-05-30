@@ -113,6 +113,8 @@ The sample also demonstrates live multi-client updates.
 
 RazorWire stream subscriptions are denied by default. This sample explicitly sets `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll` in `RazorWireExampleModule.ConfigureServices` because the `reactivity` channel is a public demo channel. Production apps should register `IRazorWireChannelAuthorizer` when channels depend on the current user, tenant, or workflow state.
 
+When you intentionally expose public/demo streams, keep channel names validated and namespaced instead of accepting arbitrary request values. Live subscriber tracking is released after disconnect, and replay buffers are bounded to 25 messages per channel while inactive replay channels are pruned after the in-memory hub retains more than 256 replay channels, but public endpoints should still avoid unbounded channel cardinality from user input.
+
 ### Registration and Message Publishing
 
 The reactivity page includes two additional form flows:
