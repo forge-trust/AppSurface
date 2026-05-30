@@ -914,7 +914,7 @@ public class AppSurfaceDocsWebModuleTests
     [Fact]
     public async Task ConfigureWebApplication_ShouldFallbackToConstructedDocsUrlBuilder_WhenServiceIsMissing()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = Path.Join(
             Path.GetTempPath(),
             "appsurfacedocs-web-module-tests",
             Guid.NewGuid().ToString("N"));
@@ -922,19 +922,19 @@ public class AppSurfaceDocsWebModuleTests
 
         try
         {
-            var treePath = Path.Combine(tempDirectory, "1.2.3");
+            var treePath = Path.Join(tempDirectory, "1.2.3");
             Directory.CreateDirectory(treePath);
-            File.WriteAllText(Path.Combine(treePath, "index.html"), "<html>ok</html>");
-            Directory.CreateDirectory(Path.Combine(treePath, "next"));
-            File.WriteAllText(Path.Combine(treePath, "next", "index.html"), "<html>published-collision</html>");
-            File.WriteAllText(Path.Combine(treePath, "search.html"), "<html>search</html>");
-            File.WriteAllText(Path.Combine(treePath, "search-index.json"), "{\"documents\":[]}");
-            File.WriteAllText(Path.Combine(treePath, "search.css"), "body { color: #fff; }");
-            File.WriteAllText(Path.Combine(treePath, "search-client.js"), "window.__searchClientLoaded = true;");
-            File.WriteAllText(Path.Combine(treePath, "outline-client.js"), "window.__outlineClientLoaded = true;");
-            File.WriteAllText(Path.Combine(treePath, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
+            File.WriteAllText(Path.Join(treePath, "index.html"), "<html>ok</html>");
+            Directory.CreateDirectory(Path.Join(treePath, "next"));
+            File.WriteAllText(Path.Join(treePath, "next", "index.html"), "<html>published-collision</html>");
+            File.WriteAllText(Path.Join(treePath, "search.html"), "<html>search</html>");
+            File.WriteAllText(Path.Join(treePath, "search-index.json"), "{\"documents\":[]}");
+            File.WriteAllText(Path.Join(treePath, "search.css"), "body { color: #fff; }");
+            File.WriteAllText(Path.Join(treePath, "search-client.js"), "window.__searchClientLoaded = true;");
+            File.WriteAllText(Path.Join(treePath, "outline-client.js"), "window.__outlineClientLoaded = true;");
+            File.WriteAllText(Path.Join(treePath, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
 
-            var catalogPath = Path.Combine(tempDirectory, "catalog.json");
+            var catalogPath = Path.Join(tempDirectory, "catalog.json");
             File.WriteAllText(
                 catalogPath,
                 """
@@ -1013,7 +1013,7 @@ public class AppSurfaceDocsWebModuleTests
     [Fact]
     public void ConfigureWebApplication_ShouldSkipRecommendedMount_WhenCatalogMarksReleaseUnavailable()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = Path.Join(
             Path.GetTempPath(),
             "appsurfacedocs-web-module-tests",
             Guid.NewGuid().ToString("N"));
@@ -1021,11 +1021,11 @@ public class AppSurfaceDocsWebModuleTests
 
         try
         {
-            var treePath = Path.Combine(tempDirectory, "1.2.3");
+            var treePath = Path.Join(tempDirectory, "1.2.3");
             Directory.CreateDirectory(treePath);
-            File.WriteAllText(Path.Combine(treePath, "index.html"), "<html>broken</html>");
+            File.WriteAllText(Path.Join(treePath, "index.html"), "<html>broken</html>");
 
-            var catalogPath = Path.Combine(tempDirectory, "catalog.json");
+            var catalogPath = Path.Join(tempDirectory, "catalog.json");
             File.WriteAllText(
                 catalogPath,
                 """
@@ -1101,7 +1101,7 @@ public class AppSurfaceDocsWebModuleTests
     [Fact]
     public void BuildPublishedTreeMounts_ShouldReuseProvider_ForRecommendedAliasOfPublicVersion()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = Path.Join(
             Path.GetTempPath(),
             "appsurfacedocs-web-module-tests",
             Guid.NewGuid().ToString("N"));
@@ -1109,7 +1109,7 @@ public class AppSurfaceDocsWebModuleTests
 
         try
         {
-            var exactTreePath = Path.Combine(tempDirectory, "1.2.3");
+            var exactTreePath = Path.Join(tempDirectory, "1.2.3");
             Directory.CreateDirectory(exactTreePath);
             var version = new AppSurfaceDocsResolvedVersion(
                 Version: "1.2.3",
@@ -1124,7 +1124,7 @@ public class AppSurfaceDocsWebModuleTests
                 AvailabilityIssue: null);
             var catalog = new AppSurfaceDocsResolvedVersionCatalog(
                 AppSurfaceDocsResolvedVersionCatalogStatus.Resolved,
-                CatalogPath: Path.Combine(tempDirectory, "catalog.json"),
+                CatalogPath: Path.Join(tempDirectory, "catalog.json"),
                 Versions: [version],
                 RecommendedVersion: version);
 
@@ -1169,7 +1169,7 @@ public class AppSurfaceDocsWebModuleTests
     [Fact]
     public void BuildPublishedTreeMounts_ShouldNotReuseProvider_ForCaseNeighborTreesOnCaseSensitivePlatforms()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = Path.Join(
             Path.GetTempPath(),
             "appsurfacedocs-web-module-tests",
             Guid.NewGuid().ToString("N"));
@@ -1177,8 +1177,8 @@ public class AppSurfaceDocsWebModuleTests
 
         try
         {
-            var firstTreePath = Path.Combine(tempDirectory, "Release");
-            var secondTreePath = Path.Combine(tempDirectory, "release");
+            var firstTreePath = Path.Join(tempDirectory, "Release");
+            var secondTreePath = Path.Join(tempDirectory, "release");
             Directory.CreateDirectory(firstTreePath);
             if (Directory.Exists(secondTreePath))
             {
@@ -1206,7 +1206,7 @@ public class AppSurfaceDocsWebModuleTests
             };
             var catalog = new AppSurfaceDocsResolvedVersionCatalog(
                 AppSurfaceDocsResolvedVersionCatalogStatus.Resolved,
-                CatalogPath: Path.Combine(tempDirectory, "catalog.json"),
+                CatalogPath: Path.Join(tempDirectory, "catalog.json"),
                 Versions: [firstVersion, secondVersion],
                 RecommendedVersion: null);
             var docsUrlBuilder = new DocsUrlBuilder(
@@ -1237,7 +1237,7 @@ public class AppSurfaceDocsWebModuleTests
     [Fact]
     public void BuildPublishedTreeMounts_ShouldUseConfiguredRouteRoot_ForRecommendedAlias()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = Path.Join(
             Path.GetTempPath(),
             "appsurfacedocs-web-module-tests",
             Guid.NewGuid().ToString("N"));
@@ -1245,7 +1245,7 @@ public class AppSurfaceDocsWebModuleTests
 
         try
         {
-            var exactTreePath = Path.Combine(tempDirectory, "1.2.3");
+            var exactTreePath = Path.Join(tempDirectory, "1.2.3");
             Directory.CreateDirectory(exactTreePath);
             var version = new AppSurfaceDocsResolvedVersion(
                 Version: "1.2.3",
@@ -1260,7 +1260,7 @@ public class AppSurfaceDocsWebModuleTests
                 AvailabilityIssue: null);
             var catalog = new AppSurfaceDocsResolvedVersionCatalog(
                 AppSurfaceDocsResolvedVersionCatalogStatus.Resolved,
-                CatalogPath: Path.Combine(tempDirectory, "catalog.json"),
+                CatalogPath: Path.Join(tempDirectory, "catalog.json"),
                 Versions: [version],
                 RecommendedVersion: version);
             var docsUrlBuilder = new DocsUrlBuilder(

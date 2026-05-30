@@ -323,7 +323,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
             return;
         }
 
-        CreateExactTree(Path.Combine(Path.GetRelativePath(_tempDirectory, targetPath), "1.2.3"));
+        CreateExactTree(Path.Join(Path.GetRelativePath(_tempDirectory, targetPath), "1.2.3"));
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -332,7 +332,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "1.2.3",
-                        ExactTreePath = Path.Combine(Path.GetFileName(linkPath), "1.2.3")
+                        ExactTreePath = Path.Join(Path.GetFileName(linkPath), "1.2.3")
                     }
                 ]
             });
@@ -355,10 +355,10 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         }
 
         var stableTree = CreateExactTree("required-file-symlink");
-        var outsideSearchIndex = Path.Combine(_tempDirectory, "outside-search-index.json");
+        var outsideSearchIndex = Path.Join(_tempDirectory, "outside-search-index.json");
         File.WriteAllText(outsideSearchIndex, "{\"documents\":[]}");
-        File.Delete(Path.Combine(stableTree, "search-index.json"));
-        File.CreateSymbolicLink(Path.Combine(stableTree, "search-index.json"), outsideSearchIndex);
+        File.Delete(Path.Join(stableTree, "search-index.json"));
+        File.CreateSymbolicLink(Path.Join(stableTree, "search-index.json"), outsideSearchIndex);
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -413,14 +413,14 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldKeepHealthyVersions_WhenOneExactTreeIsBroken()
     {
         var healthyTree = CreateExactTree("healthy");
-        var brokenTree = Path.Combine(_tempDirectory, "broken");
+        var brokenTree = Path.Join(_tempDirectory, "broken");
         Directory.CreateDirectory(brokenTree);
-        File.WriteAllText(Path.Combine(brokenTree, "index.html"), "<html>broken</html>");
-        File.WriteAllText(Path.Combine(brokenTree, "search.html"), "<html>search</html>");
-        File.WriteAllText(Path.Combine(brokenTree, "search.css"), "body { color: #fff; }");
-        File.WriteAllText(Path.Combine(brokenTree, "search-client.js"), "window.__searchClientLoaded = true;");
-        File.WriteAllText(Path.Combine(brokenTree, "outline-client.js"), "window.__outlineClientLoaded = true;");
-        File.WriteAllText(Path.Combine(brokenTree, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
+        File.WriteAllText(Path.Join(brokenTree, "index.html"), "<html>broken</html>");
+        File.WriteAllText(Path.Join(brokenTree, "search.html"), "<html>search</html>");
+        File.WriteAllText(Path.Join(brokenTree, "search.css"), "body { color: #fff; }");
+        File.WriteAllText(Path.Join(brokenTree, "search-client.js"), "window.__searchClientLoaded = true;");
+        File.WriteAllText(Path.Join(brokenTree, "outline-client.js"), "window.__outlineClientLoaded = true;");
+        File.WriteAllText(Path.Join(brokenTree, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
 
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
@@ -459,7 +459,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldMarkVersionUnavailable_WhenRequiredSearchAssetIsMissing()
     {
         var brokenTree = CreateExactTree("broken");
-        File.Delete(Path.Combine(brokenTree, "search-client.js"));
+        File.Delete(Path.Join(brokenTree, "search-client.js"));
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -489,9 +489,9 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldNotCrawlHistoricalHtml_WhenOutlineAssetIsMissing()
     {
         var exactTree = CreateExactTree("historical-without-outline-asset");
-        File.Delete(Path.Combine(exactTree, "outline-client.js"));
+        File.Delete(Path.Join(exactTree, "outline-client.js"));
         File.WriteAllText(
-            Path.Combine(exactTree, "api.html"),
+            Path.Join(exactTree, "api.html"),
             """<html><head><script src="/docs/outline-client.js"></script></head><body>API</body></html>""");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
@@ -521,7 +521,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldKeepVersionAvailable_WhenMissingOutlineAssetIsNotReferenced()
     {
         var exactTree = CreateExactTree("historical-without-outline");
-        File.Delete(Path.Combine(exactTree, "outline-client.js"));
+        File.Delete(Path.Join(exactTree, "outline-client.js"));
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -550,7 +550,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldMarkVersionUnavailable_WhenSearchIndexPayloadIsMalformed()
     {
         var brokenTree = CreateExactTree("broken-search-index");
-        File.WriteAllText(Path.Combine(brokenTree, "search-index.json"), "{");
+        File.WriteAllText(Path.Join(brokenTree, "search-index.json"), "{");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -582,7 +582,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldMarkVersionUnavailable_WhenSearchIndexPayloadOmitsDocumentsArray()
     {
         var brokenTree = CreateExactTree("broken-search-shape");
-        File.WriteAllText(Path.Combine(brokenTree, "search-index.json"), "{\"items\":[]}");
+        File.WriteAllText(Path.Join(brokenTree, "search-index.json"), "{\"items\":[]}");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -612,7 +612,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldMarkVersionUnavailable_WhenSearchIndexPayloadRootIsNotAnObject()
     {
         var brokenTree = CreateExactTree("broken-search-root");
-        File.WriteAllText(Path.Combine(brokenTree, "search-index.json"), "[]");
+        File.WriteAllText(Path.Join(brokenTree, "search-index.json"), "[]");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -642,7 +642,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldMarkVersionUnavailable_WhenSearchIndexDocumentOmitsRequiredPathOrTitle()
     {
         var brokenTree = CreateExactTree("broken-search-document");
-        File.WriteAllText(Path.Combine(brokenTree, "search-index.json"), "{\"documents\":[{\"title\":\"Guide\"}]}");
+        File.WriteAllText(Path.Join(brokenTree, "search-index.json"), "{\"documents\":[{\"title\":\"Guide\"}]}");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -845,7 +845,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         var catalog = service.GetCatalog();
 
         Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalog.Status);
-        Assert.Equal(Path.GetFullPath(Path.Combine(_tempDirectory, "missing/catalog.json")), catalog.CatalogPath);
+        Assert.Equal(Path.GetFullPath(Path.Join(_tempDirectory, "missing/catalog.json")), catalog.CatalogPath);
         Assert.Empty(catalog.PublicVersions);
         Assert.Null(catalog.RecommendedVersion);
     }
@@ -881,7 +881,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     [Fact]
     public void GetCatalog_ShouldMarkMissingExactTreeDirectoryAsUnavailable()
     {
-        var missingTreePath = Path.Combine(_tempDirectory, "missing-tree");
+        var missingTreePath = Path.Join(_tempDirectory, "missing-tree");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
             {
@@ -1027,7 +1027,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     [Fact]
     public void GetCatalog_ShouldValidateHiddenVersionsWithoutPromotingThemToPublicVersions()
     {
-        var hiddenBrokenTree = Path.Combine(_tempDirectory, "hidden-broken");
+        var hiddenBrokenTree = Path.Join(_tempDirectory, "hidden-broken");
         Directory.CreateDirectory(hiddenBrokenTree);
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
@@ -1106,7 +1106,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
 
         var catalog = service.GetCatalog();
 
-        Assert.Equal(Path.Combine(_tempDirectory, "catalog.json"), catalog.CatalogPath);
+        Assert.Equal(Path.Join(_tempDirectory, "catalog.json"), catalog.CatalogPath);
         var version = Assert.Single(catalog.PublicVersions);
         Assert.True(version.IsAvailable);
         Assert.NotNull(catalog.RecommendedVersion);
@@ -1277,22 +1277,22 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
 
     private string CreateExactTree(string name)
     {
-        var root = Path.Combine(_tempDirectory, name);
+        var root = Path.Join(_tempDirectory, name);
         Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "index.html"), "<html>ok</html>");
-        File.WriteAllText(Path.Combine(root, "search.html"), "<html>search</html>");
-        File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[]}");
-        File.WriteAllText(Path.Combine(root, "search.css"), "body { color: #fff; }");
-        File.WriteAllText(Path.Combine(root, "search-client.js"), "window.__searchClientLoaded = true;");
-        File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
-        File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
+        File.WriteAllText(Path.Join(root, "index.html"), "<html>ok</html>");
+        File.WriteAllText(Path.Join(root, "search.html"), "<html>search</html>");
+        File.WriteAllText(Path.Join(root, "search-index.json"), "{\"documents\":[]}");
+        File.WriteAllText(Path.Join(root, "search.css"), "body { color: #fff; }");
+        File.WriteAllText(Path.Join(root, "search-client.js"), "window.__searchClientLoaded = true;");
+        File.WriteAllText(Path.Join(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
+        File.WriteAllText(Path.Join(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
         return root;
     }
 
     private bool TryCreateSymbolicLinkTestFile(out string linkPath)
     {
-        var targetPath = Path.Combine(_tempDirectory, "symlink-target.txt");
-        linkPath = Path.Combine(_tempDirectory, "symlink-link.txt");
+        var targetPath = Path.Join(_tempDirectory, "symlink-target.txt");
+        linkPath = Path.Join(_tempDirectory, "symlink-link.txt");
         try
         {
             File.WriteAllText(targetPath, "target");
@@ -1307,8 +1307,8 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
 
     private bool TryCreateSymbolicLinkTestDirectory(out string targetPath, out string linkPath)
     {
-        targetPath = Path.Combine(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}");
-        linkPath = Path.Combine(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}");
+        targetPath = Path.Join(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}");
+        linkPath = Path.Join(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}");
         try
         {
             Directory.CreateDirectory(targetPath);
@@ -1344,14 +1344,14 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
 
     private string WriteCatalog(AppSurfaceDocsVersionCatalog catalog)
     {
-        var path = Path.Combine(_tempDirectory, "catalog.json");
+        var path = Path.Join(_tempDirectory, "catalog.json");
         File.WriteAllText(path, JsonSerializer.Serialize(catalog));
         return path;
     }
 
     private string WriteRawCatalogJson(string json)
     {
-        var path = Path.Combine(_tempDirectory, "catalog.json");
+        var path = Path.Join(_tempDirectory, "catalog.json");
         File.WriteAllText(path, json);
         return path;
     }

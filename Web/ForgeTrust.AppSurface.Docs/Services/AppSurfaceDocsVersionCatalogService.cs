@@ -432,28 +432,18 @@ public sealed class AppSurfaceDocsVersionCatalogService
         string? exactTreePath;
         AvailabilityFailure? availabilityFailure;
 
-        try
+        if (!AppSurfaceDocsTrustedReleasePathGuard.TryResolveCatalogTreePath(
+                trustedReleaseRootPath,
+                version.ExactTreePath,
+                out exactTreePath,
+                out var publicIssue,
+                out var internalDetail))
         {
-            if (!AppSurfaceDocsTrustedReleasePathGuard.TryResolveCatalogTreePath(
-                    trustedReleaseRootPath,
-                    version.ExactTreePath,
-                    out exactTreePath,
-                    out var publicIssue,
-                    out var internalDetail))
-            {
-                availabilityFailure = new AvailabilityFailure(publicIssue!, internalDetail!);
-            }
-            else
-            {
-                availabilityFailure = ValidateExactTree(trustedReleaseRootPath, exactTreePath!);
-            }
+            availabilityFailure = new AvailabilityFailure(publicIssue!, internalDetail!);
         }
-        catch (Exception ex) when (AppSurfaceDocsTrustedReleasePathGuard.IsPathMetadataException(ex))
+        else
         {
-            exactTreePath = null;
-            availabilityFailure = new AvailabilityFailure(
-                PublicMessage: "Published release tree path is invalid.",
-                InternalDetail: $"ExactTreePath '{version.ExactTreePath?.Trim()}' is invalid: {ex.Message}");
+            availabilityFailure = ValidateExactTree(trustedReleaseRootPath, exactTreePath!);
         }
 
         if (availabilityFailure is not null && isPublic)
@@ -527,15 +517,8 @@ public sealed class AppSurfaceDocsVersionCatalogService
         return AppSurfaceDocsTrustedReleasePathGuard.ResolveContentRootRelativePath(_environment.ContentRootPath, path);
     }
 
-    private static AvailabilityFailure? ValidateExactTree(string trustedReleaseRootPath, string? exactTreePath)
+    private static AvailabilityFailure? ValidateExactTree(string trustedReleaseRootPath, string exactTreePath)
     {
-        if (string.IsNullOrWhiteSpace(exactTreePath))
-        {
-            return new AvailabilityFailure(
-                PublicMessage: "Published release tree path is missing.",
-                InternalDetail: "ExactTreePath is missing.");
-        }
-
         if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
                 exactTreePath,
                 "Published release tree directory does not exist.",
@@ -559,20 +542,9 @@ public sealed class AppSurfaceDocsVersionCatalogService
                 InternalDetail: $"ExactTreePath '{exactTreePath}' is unavailable: {trustedRootDenialReason}");
         }
 
-        if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateNoReparseSegments(
-                exactTreePath,
-                exactTreePath,
-                expectLeafFile: false,
-                out var rootDenialReason))
-        {
-            return new AvailabilityFailure(
-                PublicMessage: "Published release tree path is not an ordinary directory.",
-                InternalDetail: $"ExactTreePath '{exactTreePath}' is unavailable: {rootDenialReason}");
-        }
-
         foreach (var requiredFile in RequiredExactTreeFiles)
         {
-            var requiredPath = Path.Combine(exactTreePath, requiredFile);
+            var requiredPath = Path.Join(exactTreePath, requiredFile);
             if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
                     exactTreePath,
                     requiredFile,
@@ -586,7 +558,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
             }
         }
 
-        var searchIndexValidationIssue = ValidateSearchIndexPayload(Path.Combine(exactTreePath, "search-index.json"));
+        var searchIndexValidationIssue = ValidateSearchIndexPayload(Path.Join(exactTreePath, "search-index.json"));
         if (searchIndexValidationIssue is not null)
         {
             return searchIndexValidationIssue;
