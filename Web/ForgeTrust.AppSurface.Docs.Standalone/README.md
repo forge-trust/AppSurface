@@ -38,6 +38,19 @@ The optional `configureOptions` callback is for host-shape seams that must stay 
 
 The shared AppSurface Web startup watchdog still applies through `WebOptions.StartupTimeout`, which defaults to 10 seconds and fails fast when the process stalls before Kestrel starts listening. Export also enforces its own startup timeout because callers that build and start the host directly bypass the `RunAsync` watchdog path.
 
+## Browser 404 Recovery
+
+The standalone host explicitly enables AppSurface Web conventional browser status pages and owns the docs-specific `404` override at `Views/Shared/404.cshtml`. This keeps reusable `ForgeTrust.AppSurface.Web` generic while letting the docs-only executable guide stale documentation links back to search.
+
+The standalone `404` view uses `BrowserStatusPageModel` for the original request path and `DocsUrlBuilder.Routes.Search` for the recovery link. It renders those app-relative routes through `Url.PathBaseAware(...)`, so custom route roots, live version roots, and reverse-proxy `PathBase` prefixes all appear in the final browser link. The view does not require `Model.OriginalPath` to be under the docs route because direct preview and static-export probes hit `/_appsurface/errors/404` without an original docs path.
+
+Static export probes `/_appsurface/errors/404` and writes the rendered override as `404.html`. To verify the standalone recovery page locally, run the host and request both a missing docs page and the reserved preview route:
+
+```bash
+curl -i -H "Accept: text/html" http://127.0.0.1:5189/docs/missing-page
+curl -i http://127.0.0.1:5189/_appsurface/errors/404
+```
+
 ## Strict Harvest Failure
 
 Use `AppSurfaceDocs:Harvest:FailOnFailure=true` when the standalone host is acting as an export or CI publish target and an all-failed harvest should stop the run before the app starts listening.

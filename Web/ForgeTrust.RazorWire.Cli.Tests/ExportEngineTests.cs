@@ -602,6 +602,8 @@ public class ExportEngineTests
             var decodedHtml = Uri.UnescapeDataString(html);
             Assert.Contains("Exported 404 page", html);
             Assert.Contains("href=\"/about.html\"", html);
+            Assert.Contains("Search documentation", html);
+            Assert.Contains("href=\"/docs/search.html\"", html);
             Assert.Contains("src=\"/img/error.png\"", html);
             Assert.DoesNotContain("Diagnostics", html, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("_health", decodedHtml, StringComparison.OrdinalIgnoreCase);
@@ -2847,6 +2849,7 @@ public class ExportEngineTests
                               <a href="/docs/%5Froutes">Encoded routes</a>
                             </details>
                             <a href="/about">About</a>
+                            <a href="/docs/search">Search documentation</a>
                             <img src="/img/error.png">
                           </body>
                         </html>
@@ -2861,6 +2864,14 @@ public class ExportEngineTests
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent("<html><body><h1>About</h1></body></html>", Encoding.UTF8, "text/html")
+                });
+            }
+
+            if (path == "/docs/search")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html><body><h1>Search</h1></body></html>", Encoding.UTF8, "text/html")
                 });
             }
 
