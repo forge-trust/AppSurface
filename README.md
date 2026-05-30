@@ -61,7 +61,7 @@ This approach aims to:
 
 ### [Auth](./Auth/ForgeTrust.AppSurface.Auth/README.md)
 
-- [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Boundary-preview composition package with `AppSurfaceAuthModule`, `AppSurfaceAuthOptions`, and no runtime request or identity-provider behavior.
+- [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 
 ### [Console](./Console/README.md)
 

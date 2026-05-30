@@ -10,7 +10,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 
 ### Release and docs surface
 
-- AppSurface now has `ForgeTrust.AppSurface.Auth` as a boundary-preview composition package for future AppSurface auth contracts. It registers only the neutral module/options boundary and does not sign users in, enforce authorization, or integrate with identity providers.
+- AppSurface now has `ForgeTrust.AppSurface.Auth` as a surface-neutral auth vocabulary package for module authors and host integrations. It defines passive user, session, context, result, login/logout prompt, audit-event, and metadata-key contracts while still avoiding runtime authentication, authorization policy evaluation, redirects, audit sinks, and identity-provider integration.
 - AppSurface Docs JavaScript API pages can now resolve public doclets into reader-facing API families. Explicit `@namespace` and `@module` tags remain authoritative, ordered `GroupNameRules` can name known source trees, and untagged fallback groups use path-aware identities so same-stem files in different folders do not merge.
 - AppSurface Docs built-in Markdown and C# harvesters now skip file and directory reparse points during direct and aggregated source traversal, and Markdown root `LICENSE` plus paired sidecar metadata reads use the same non-reparse boundary so symlinks cannot pull documentation content from outside the selected repository root.
 - Older `v0.1` preview routes now redirect to the current RC1 release note, so package consumers land on one canonical release story instead of a stale pre-RC preview.

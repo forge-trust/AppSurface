@@ -43,9 +43,9 @@ packages:
     commercial_status: commercial_ready
     release_notes_path: releases/v0.1.0-rc.1.md
     order: 35
-    use_when: Add this only when authoring AppSurface modules that need a stable cross-surface auth composition boundary.
-    includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, and Microsoft Options registration for the boundary-preview options root.
-    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policies, middleware, endpoint filters, user/session contracts, challenges, forbids, or UI.
+    use_when: Add this when authoring AppSurface modules or host integrations that need passive cross-surface auth vocabulary without depending on ASP.NET Core.
+    includes: AppSurfaceAuthModule, AppSurfaceAuthOptions, neutral user/session/context contracts, auth outcome and reason results, passive login/logout prompts, passive audit event descriptions, and reserved metadata keys.
+    does_not_include: Authentication schemes or handlers, cookies, JWT/OIDC, ASP.NET Identity, authorization policies, middleware, endpoint filters, runtime auth context accessors, challenges, forbids, redirects, audit sinks, or UI.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth/README.md
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Core
