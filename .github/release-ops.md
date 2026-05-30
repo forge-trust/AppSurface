@@ -34,7 +34,10 @@ Tracked follow-up: #161, "Automate coordinated monorepo releases from the public
 The pack-only release slice uses `packages/package-index.yml` as the single package
 contract. Maintain `publish_decision`, `publish_reason`, and
 `expected_dependency_package_ids` there instead of creating a second release package
-list.
+list. Review [`packages/readiness.md`](../packages/readiness.md) before release
+review when deciding whether package-index evidence is complete enough for the
+package artifact workflow. That dashboard is generated maintainer evidence from
+the package index, not live NuGet publish, artifact, or smoke-install status.
 
 Run the package artifact verifier with an exact prerelease version:
 
@@ -105,6 +108,16 @@ protection, or does not prevent self-review. It also fails closed if
 required reviewers configured.
 
 The PackageIndex tool owns the package contract for the workflow:
+
+```bash
+dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
+  verify
+```
+
+`verify` confirms both the adopter-facing package chooser and the maintainer
+readiness dashboard are current. The readiness dashboard checks package-index
+evidence such as release metadata, docs links, packability, tool command shape,
+and expected first-party package dependencies before publish artifacts are built.
 
 ```bash
 dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -- \
