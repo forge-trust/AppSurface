@@ -1149,6 +1149,87 @@ public sealed class PackageIndexGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateDocumentsAsync_RendersNonPublicReadinessStatusesAndExcludedChooserSection()
+    {
+        await WriteProgramRepoAsync();
+        await WriteFileAsync(
+            "packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                release_status: public_preview
+                commercial_status: commercial_ready
+                release_notes_path: releases/unreleased.md
+                order: 10
+                use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
+                includes: Base web startup.
+                does_not_include: OpenAPI.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj
+                product_family: internal_support
+                classification: support
+                publish_decision: support_publish
+                release_status: support_runtime
+                commercial_status: not_applicable
+                release_notes_path: releases/unreleased.md
+                order: 20
+                note: Restored transitively by the Tailwind package.
+              - project: Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj
+                product_family: forge_trust
+                classification: proof_host
+                publish_decision: support_publish
+                release_status: proof_host
+                commercial_status: not_applicable
+                release_notes_path: releases/unreleased.md
+                order: 30
+                note: Internal docs host proof package.
+              - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
+                product_family: razorwire
+                classification: excluded
+                publish_decision: do_not_publish
+                publish_reason: Held until the CLI package shape is stable.
+                release_status: excluded
+                commercial_status: not_applicable
+                release_notes_path: releases/unreleased.md
+                order: 40
+                note: CLI package is excluded from direct install guidance.
+            """);
+        await WriteFileAsync(
+            "Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj",
+            "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj", "<Project />");
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj",
+                "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64"),
+            ["Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj",
+                "ForgeTrust.AppSurface.Docs"),
+            ["Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj",
+                "ForgeTrust.RazorWire.Cli")
+        });
+
+        var documents = await generator.GenerateDocumentsAsync(CreateRequest());
+
+        Assert.Contains("### Not in the direct-install matrix", documents.ChooserMarkdown, StringComparison.Ordinal);
+        Assert.Contains("transitive package evidence complete", documents.ReadinessMarkdown, StringComparison.Ordinal);
+        Assert.Contains("proof-host evidence complete", documents.ReadinessMarkdown, StringComparison.Ordinal);
+        Assert.Contains("excluded by publish decision", documents.ReadinessMarkdown, StringComparison.Ordinal);
+        Assert.Contains("Internal support", documents.ReadinessMarkdown, StringComparison.Ordinal);
+        Assert.Contains("Forge Trust", documents.ReadinessMarkdown, StringComparison.Ordinal);
+        Assert.Contains("RazorWire", documents.ReadinessMarkdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GenerateDocumentsAsync_RendersSameRepositoryBlockerAndPlainTextNote()
     {
         await WriteProgramRepoAsync();
@@ -1333,6 +1414,58 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
         Assert.Equal(PackageReadinessStatus.ManifestReady, readiness.Status);
         Assert.Contains(readiness.Evidence, evidence => evidence.Contains("expected_dependency_package_ids match project references", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PackageReadinessEvaluator_MatchesExpectedDependencyPackageIdsWithFirstPartyReferences()
+    {
+        await WriteFileAsync("releases/unreleased.md", "# Unreleased");
+        var webPath = "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj";
+        var corePath = "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj";
+        var webEntry = new ResolvedPackageEntry(
+            CreateReadinessManifestEntry(
+                webPath,
+                PackageClassification.Public,
+                PackagePublishDecision.Publish,
+                expectedDependencyPackageIds: ["ForgeTrust.AppSurface.Core"]),
+            CreateMetadata(
+                webPath,
+                "ForgeTrust.AppSurface.Web",
+                projectReferences: [corePath]));
+        var coreEntry = new ResolvedPackageEntry(
+            CreateReadinessManifestEntry(
+                corePath,
+                PackageClassification.Excluded,
+                PackagePublishDecision.DoNotPublish,
+                releaseStatus: PackageReleaseStatus.Excluded,
+                commercialStatus: PackageCommercialStatus.NotApplicable),
+            CreateMetadata(corePath, "ForgeTrust.AppSurface.Core"));
+
+        var readiness = PackageReadinessEvaluator.Evaluate(_repositoryRoot, [webEntry, coreEntry]).Single(entry => entry.ProjectPath == webPath);
+
+        Assert.Equal(PackageReadinessStatus.ManifestReady, readiness.Status);
+        Assert.Empty(readiness.BlockingReasons);
+        Assert.Contains(readiness.Evidence, evidence => evidence.Contains("expected_dependency_package_ids match project references", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PackageReadinessEvaluator_IgnoresMissingPublishDecisionUntilManifestValidation()
+    {
+        await WriteFileAsync("releases/unreleased.md", "# Unreleased");
+        var projectPath = "Packages/SupportUndeclared/SupportUndeclared.csproj";
+        var entry = new ResolvedPackageEntry(
+            CreateReadinessManifestEntry(
+                projectPath,
+                PackageClassification.Support,
+                null,
+                releaseStatus: PackageReleaseStatus.SupportRuntime,
+                commercialStatus: PackageCommercialStatus.NotApplicable),
+            CreateMetadata(projectPath, "ForgeTrust.AppSurface.SupportUndeclared"));
+
+        var readiness = PackageReadinessEvaluator.Evaluate(_repositoryRoot, [entry]).Single();
+
+        Assert.Equal(PackageReadinessStatus.ManifestReady, readiness.Status);
+        Assert.DoesNotContain(readiness.Evidence, evidence => evidence.Contains("publish_decision", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1613,6 +1746,18 @@ public sealed class PackageIndexGeneratorTests : IDisposable
             : StringComparison.Ordinal;
 
         Assert.Equal(expected, PackageIndexGenerator.RepositoryPathComparison);
+    }
+
+    [Fact]
+    public void PackageIndexRequest_OutputPath_ReturnsChooserOutputPath()
+    {
+        var request = new PackageIndexRequest(
+            _repositoryRoot,
+            Path.Join(_repositoryRoot, "packages", "package-index.yml"),
+            Path.Join(_repositoryRoot, "packages", "chooser.md"),
+            Path.Join(_repositoryRoot, "packages", "readiness.md"));
+
+        Assert.Equal(request.ChooserOutputPath, request.OutputPath);
     }
 
     [Fact]
