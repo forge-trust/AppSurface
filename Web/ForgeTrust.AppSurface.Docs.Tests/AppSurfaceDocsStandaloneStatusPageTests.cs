@@ -145,24 +145,35 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     [Fact]
     public async Task ReservedNotFoundRoute_ShouldUseLiveDocsRootForVersionedSearchRecovery()
     {
-        var catalogPath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName(), "catalog.json");
+        var catalogDirectory = Directory.CreateDirectory(Path.Join(Path.GetTempPath(), Path.GetRandomFileName()));
+        var catalogPath = Path.Join(catalogDirectory.FullName, "catalog.json");
 
-        await using var runningHost = await StartStandaloneHostAsync(
-            configurationOverrides:
-            new Dictionary<string, string?>
+        try
+        {
+            await using var runningHost = await StartStandaloneHostAsync(
+                configurationOverrides:
+                new Dictionary<string, string?>
+                {
+                    ["AppSurfaceDocs:Routing:RouteRootPath"] = "/foo/bar",
+                    ["AppSurfaceDocs:Routing:DocsRootPath"] = "/foo/bar/next",
+                    ["AppSurfaceDocs:Versioning:Enabled"] = "true",
+                    ["AppSurfaceDocs:Versioning:CatalogPath"] = catalogPath
+                });
+
+            using var response = await runningHost.Client.GetAsync("/_appsurface/errors/404");
+            var html = await response.Content.ReadAsStringAsync();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Contains("href=\"/foo/bar/next/search\"", html);
+            Assert.DoesNotContain("href=\"/foo/bar/search\"", html);
+        }
+        finally
+        {
+            if (Directory.Exists(catalogDirectory.FullName))
             {
-                ["AppSurfaceDocs:Routing:RouteRootPath"] = "/foo/bar",
-                ["AppSurfaceDocs:Routing:DocsRootPath"] = "/foo/bar/next",
-                ["AppSurfaceDocs:Versioning:Enabled"] = "true",
-                ["AppSurfaceDocs:Versioning:CatalogPath"] = catalogPath
-            });
-
-        using var response = await runningHost.Client.GetAsync("/_appsurface/errors/404");
-        var html = await response.Content.ReadAsStringAsync();
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("href=\"/foo/bar/next/search\"", html);
-        Assert.DoesNotContain("href=\"/foo/bar/search\"", html);
+                Directory.Delete(catalogDirectory.FullName, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -240,10 +251,10 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
 
     private static string CreateRepositoryRoot()
     {
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var repositoryRoot = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(repositoryRoot);
         File.WriteAllText(
-            Path.Combine(repositoryRoot, "README.md"),
+            Path.Join(repositoryRoot, "README.md"),
             """
             # Test Docs
 
@@ -278,6 +289,8 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
     private static async Task<string> WaitForStandaloneStatusPageAsync(HttpClient client, Process process)
     {
         using var requestTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        Exception? lastProbeException = null;
+
         while (!requestTimeout.IsCancellationRequested)
         {
             if (process.HasExited)
@@ -296,31 +309,29 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
                     return await response.Content.ReadAsStringAsync(requestTimeout.Token);
                 }
             }
-            catch (HttpRequestException)
+            catch (HttpRequestException ex)
             {
+                lastProbeException = ex;
             }
-            catch (TaskCanceledException) when (!requestTimeout.IsCancellationRequested)
+            catch (TaskCanceledException ex) when (!requestTimeout.IsCancellationRequested)
             {
+                lastProbeException = ex;
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(100), requestTimeout.Token);
         }
 
-        throw new TimeoutException("Timed out waiting for the standalone docs executable to serve the status page.");
+        var timeoutMessage = lastProbeException is null
+            ? "Timed out waiting for the standalone docs executable to serve the status page."
+            : $"Timed out waiting for the standalone docs executable to serve the status page. Last probe failed with {lastProbeException.GetType().Name}: {lastProbeException.Message}";
+        throw new TimeoutException(timeoutMessage, lastProbeException);
     }
 
     private static int GetAvailableTcpPort()
     {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        try
-        {
-            return ((IPEndPoint)listener.LocalEndpoint).Port;
-        }
-        finally
-        {
-            listener.Stop();
-        }
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     private static string GetStandaloneProjectDirectory()
@@ -328,11 +339,12 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = Path.Combine(
-                directory.FullName,
+            var relativeProjectPath = Path.Combine(
                 "Web",
                 "ForgeTrust.AppSurface.Docs.Standalone",
                 "ForgeTrust.AppSurface.Docs.Standalone.csproj");
+            var candidate = Path.Join(directory.FullName, relativeProjectPath);
+
             if (File.Exists(candidate))
             {
                 return Path.GetDirectoryName(candidate)!;
@@ -374,18 +386,22 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
         public async ValueTask DisposeAsync()
         {
             Client.Dispose();
+            await DisposeHostAndRepositoryAsync(host, repositoryRoot);
+        }
+
+        private static async Task DisposeHostAndRepositoryAsync(IHost hostToDispose, string repositoryRootToDelete)
+        {
+            using var _ = hostToDispose;
 
             try
             {
-                await host.StopAsync();
+                await hostToDispose.StopAsync();
             }
             finally
             {
-                host.Dispose();
-
-                if (Directory.Exists(repositoryRoot))
+                if (Directory.Exists(repositoryRootToDelete))
                 {
-                    Directory.Delete(repositoryRoot, recursive: true);
+                    Directory.Delete(repositoryRootToDelete, recursive: true);
                 }
             }
         }

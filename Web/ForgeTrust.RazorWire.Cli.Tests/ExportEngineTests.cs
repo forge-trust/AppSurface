@@ -3100,10 +3100,7 @@ public class ExportEngineTests
 
             if (path == "/docs/search")
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent("<html><body><h1>Search</h1></body></html>", Encoding.UTF8, "text/html")
-                });
+                return Html("<html><body><h1>Search</h1></body></html>");
             }
 
             if (path == "/img/error.png")
