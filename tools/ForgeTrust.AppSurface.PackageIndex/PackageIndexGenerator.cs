@@ -1197,7 +1197,7 @@ internal static class PackageReadinessEvaluator
 
         if (!string.IsNullOrWhiteSpace(entry.Manifest.ReadinessBlocker))
         {
-            blockingReasons.Add($"Maintainer blocker {entry.Manifest.ReadinessBlocker} is open.");
+            blockingReasons.Add($"Maintainer blocker {entry.Manifest.ReadinessBlocker} is set.");
             fixHints.Add("Resolve the linked issue or PR, then remove readiness_blocker from packages/package-index.yml.");
         }
 

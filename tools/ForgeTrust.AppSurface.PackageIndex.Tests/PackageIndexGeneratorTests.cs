@@ -1268,7 +1268,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("blocked", documents.ReadinessMarkdown, StringComparison.Ordinal);
         Assert.Contains("Blocker: #264", documents.ReadinessMarkdown, StringComparison.Ordinal);
         Assert.Contains("Note: Waiting on package owner sign-off", documents.ReadinessMarkdown, StringComparison.Ordinal);
-        Assert.Contains("Maintainer blocker #264 is open", documents.ReadinessMarkdown, StringComparison.Ordinal);
+        Assert.Contains("Maintainer blocker #264 is set", documents.ReadinessMarkdown, StringComparison.Ordinal);
     }
 
     [Fact]

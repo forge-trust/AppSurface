@@ -272,9 +272,9 @@ internal static class Program
 }
 
 /// <summary>
-/// Parsed CLI options for one package chooser command invocation.
+/// Parsed CLI options for a package-index command that may read and write package chooser and readiness dashboard outputs.
 /// </summary>
-/// <param name="Request">Resolved package chooser and readiness dashboard request derived from command-line options.</param>
+/// <param name="Request">Resolved package chooser manifest, chooser output, and readiness dashboard output request derived from command-line options.</param>
 /// <param name="ArtifactsOutputPath">Resolved package artifact output directory.</param>
 /// <param name="ReportPath">Resolved package artifact validation report path.</param>
 /// <param name="PackageVersion">Optional package version supplied for package artifact verification.</param>
