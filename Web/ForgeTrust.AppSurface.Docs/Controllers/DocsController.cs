@@ -860,18 +860,19 @@ public class DocsController : Controller
                 HttpContext,
                 AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
         }
-        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
-        {
-            throw;
-        }
         catch (InvalidOperationException exception)
         {
-            _logger.LogWarning(
-                exception,
-                "AppSurface Docs could not authorize the live harvest progress stream for the current request.");
-
-            return false;
+            return LogLiveHarvestProgressAuthorizationFailure(exception);
         }
+    }
+
+    private bool LogLiveHarvestProgressAuthorizationFailure(Exception exception)
+    {
+        _logger.LogWarning(
+            exception,
+            "AppSurface Docs could not authorize the live harvest progress stream for the current request.");
+
+        return false;
     }
 
     private string ResolveCurrentRequestReturnUrl()
