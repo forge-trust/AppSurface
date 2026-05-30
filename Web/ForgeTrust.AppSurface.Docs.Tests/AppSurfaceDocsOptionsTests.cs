@@ -69,6 +69,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.javascript.unsupported_public_shape", DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
         Assert.Equal("appsurfacedocs.javascript.malformed_public_doclet", DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
         Assert.Equal("appsurfacedocs.javascript.incomplete_public_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
+        Assert.Equal("appsurfacedocs.javascript.incomplete_public_event_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
         Assert.Equal("appsurfacedocs.javascript.duplicate_anchor", DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
         Assert.Equal("appsurfacedocs.routes.reserved_collision", DocHarvestDiagnosticCodes.DocReservedRouteCollision);
         Assert.Equal("appsurfacedocs.routes.doc_collision", DocHarvestDiagnosticCodes.DocRouteCollision);
@@ -93,6 +94,35 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.True(options.Harvest.Paths.VcsIgnore.Enabled);
         Assert.Empty(options.Harvest.Paths.VcsIgnore.AllowGlobs);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsOptions_ShouldDisableStrictJavaScriptEventDocletsByDefault()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.False(options.Harvest.JavaScript.RequireCompleteEventDoclets);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindStrictJavaScriptEventDoclets()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets"] = "true"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.True(options.Harvest.JavaScript.RequireCompleteEventDoclets);
     }
 
     [Fact]
@@ -431,6 +461,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(["**/*.min.js"], options.Harvest.JavaScript.ExcludeGlobs);
         Assert.Empty(options.Harvest.JavaScript.DefaultExclusions.DisabledGroups);
         Assert.Empty(options.Harvest.JavaScript.DefaultExclusions.AllowGlobs);
+        Assert.Empty(options.Harvest.JavaScript.GroupNameRules);
         Assert.True(options.Harvest.JavaScript.RequirePublicTag);
         Assert.False(options.Harvest.JavaScript.StrictHealth);
         Assert.Equal(262_144, options.Harvest.JavaScript.MaxFileSizeBytes);
@@ -548,6 +579,9 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:1"] = "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js",
                         ["AppSurfaceDocs:Harvest:JavaScript:ExcludeGlobs:0"] = " **/*.generated.js ",
                         ["AppSurfaceDocs:Harvest:JavaScript:DefaultExclusions:DisabledGroups:0"] = " buildoutput ",
+                        ["AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:0:Name"] = " RazorWire Browser ",
+                        ["AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:0:IncludeGlobs:0"] = " Web\\ForgeTrust.RazorWire\\assets\\contracts\\**\\*.js ",
+                        ["AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:0:IncludeGlobs:1"] = "Web/ForgeTrust.RazorWire/assets/contracts/**/*.js",
                         ["AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag"] = "false",
                         ["AppSurfaceDocs:Harvest:JavaScript:StrictHealth"] = "true",
                         ["AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes"] = "1024"
@@ -577,10 +611,59 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(["Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"], options.Harvest.JavaScript.IncludeGlobs);
         Assert.Equal(["**/*.min.js", "**/*.generated.js"], options.Harvest.JavaScript.ExcludeGlobs);
         Assert.Equal(["BuildOutput"], options.Harvest.JavaScript.DefaultExclusions.DisabledGroups);
+        var javaScriptGroupRule = Assert.Single(options.Harvest.JavaScript.GroupNameRules);
+        Assert.Equal("RazorWire Browser", javaScriptGroupRule.Name);
+        Assert.Equal(["Web/ForgeTrust.RazorWire/assets/contracts/**/*.js"], javaScriptGroupRule.IncludeGlobs);
         Assert.False(options.Harvest.JavaScript.RequirePublicTag);
         Assert.True(options.Harvest.JavaScript.StrictHealth);
         Assert.Equal(1024, options.Harvest.JavaScript.MaxFileSizeBytes);
         Assert.NotNull(provider.GetRequiredService<ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsHarvestPathPolicy>());
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldSkipNullJavaScriptGroupNameRulesWhileNormalizing()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+        services.Configure<AppSurfaceDocsOptions>(
+            options =>
+            {
+                options.Harvest.JavaScript.GroupNameRules =
+                [
+                    null!,
+                    new AppSurfaceDocsJavaScriptGroupNameRule
+                    {
+                        Name = " Browser Contracts ",
+                        IncludeGlobs = [" src\\browser\\**\\*.js "]
+                    }
+                ];
+            });
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        var rule = Assert.Single(options.Harvest.JavaScript.GroupNameRules);
+        Assert.Equal("Browser Contracts", rule.Name);
+        Assert.Equal(["src/browser/**/*.js"], rule.IncludeGlobs);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldNormalizeNullJavaScriptGroupNameRulesToEmpty()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddLogging();
+
+        services.AddAppSurfaceDocs();
+        services.Configure<AppSurfaceDocsOptions>(options => options.Harvest.JavaScript.GroupNameRules = null!);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Empty(options.Harvest.JavaScript.GroupNameRules);
     }
 
     [Fact]
@@ -736,6 +819,7 @@ public sealed class AppSurfaceDocsOptionsTests
     [Theory]
     [InlineData("search")]
     [InlineData("search-index.json")]
+    [InlineData("_search-index")]
     [InlineData("_health")]
     [InlineData("_health.json")]
     [InlineData("_routes")]
@@ -1252,7 +1336,8 @@ public sealed class AppSurfaceDocsOptionsTests
         var diagnostics = new AppSurfaceDocsDiagnosticsOptions
         {
             ExposeRouteInspector = AppSurfaceDocsHarvestHealthExposure.Always,
-            ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never
+            ShowChrome = AppSurfaceDocsHarvestHealthExposure.Never,
+            SearchIndexRefreshPolicy = " DocsRefresh "
         };
         var bundle = new AppSurfaceDocsBundleOptions { Path = " /tmp/docs.bundle.json " };
         var sidebar = new AppSurfaceDocsSidebarOptions
@@ -1311,6 +1396,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Always, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.Never, options.Diagnostics.ShowChrome);
+        Assert.Equal("DocsRefresh", options.Diagnostics.SearchIndexRefreshPolicy);
         Assert.Equal("/tmp/docs.bundle.json", options.Bundle.Path);
         Assert.Equal(["Contoso.Product."], options.Sidebar.NamespacePrefixes);
         Assert.Equal("main", options.Contributor.DefaultBranch);
@@ -1379,12 +1465,34 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Harvest.Health.ShowChrome);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ExposeRouteInspector);
         Assert.Equal(AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly, options.Diagnostics.ShowChrome);
+        Assert.Null(options.Diagnostics.SearchIndexRefreshPolicy);
         Assert.NotNull(options.Sidebar.NamespacePrefixes);
         Assert.Empty(options.Sidebar.NamespacePrefixes);
         Assert.False(options.Localization.Enabled);
         Assert.Equal("en", options.Localization.DefaultLocale);
         Assert.NotNull(options.Localization.Locales);
         Assert.Empty(options.Localization.Locales);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldNormalizeBlankSearchIndexRefreshPolicyToNull()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Diagnostics:SearchIndexRefreshPolicy"] = "   "
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Null(options.Diagnostics.SearchIndexRefreshPolicy);
     }
 
     [Fact]
@@ -1751,7 +1859,15 @@ public sealed class AppSurfaceDocsOptionsTests
                 JavaScript = new AppSurfaceDocsJavaScriptHarvestOptions
                 {
                     IncludeGlobs = [invalidPattern],
-                    ExcludeGlobs = [invalidPattern]
+                    ExcludeGlobs = [invalidPattern],
+                    GroupNameRules =
+                    [
+                        new AppSurfaceDocsJavaScriptGroupNameRule
+                        {
+                            Name = "Browser",
+                            IncludeGlobs = [invalidPattern]
+                        }
+                    ]
                 }
             }
         };
@@ -1853,7 +1969,8 @@ public sealed class AppSurfaceDocsOptionsTests
                 {
                     IncludeGlobs = null!,
                     ExcludeGlobs = null!,
-                    DefaultExclusions = null!
+                    DefaultExclusions = null!,
+                    GroupNameRules = null!
                 }
             }
         };
@@ -1871,6 +1988,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs must not be null.", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:ExcludeGlobs must not be null.", StringComparison.Ordinal));
         Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:DefaultExclusions must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules must not be null.", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1938,6 +2056,43 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(
             result.Failures,
             failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes must be greater than zero.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectInvalidJavaScriptGroupNameRules()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                JavaScript = new AppSurfaceDocsJavaScriptHarvestOptions
+                {
+                    GroupNameRules =
+                    [
+                        null!,
+                        new AppSurfaceDocsJavaScriptGroupNameRule
+                        {
+                            Name = " ",
+                            IncludeGlobs = []
+                        },
+                        new AppSurfaceDocsJavaScriptGroupNameRule
+                        {
+                            Name = "Browser",
+                            IncludeGlobs = null!
+                        }
+                    ]
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:0 must not be null.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:1:Name must not be blank.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:1:IncludeGlobs must contain at least one repository-relative glob pattern.", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:GroupNameRules:2:IncludeGlobs must not be null.", StringComparison.Ordinal));
     }
 
     [Fact]

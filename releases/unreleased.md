@@ -1,83 +1,28 @@
 # Unreleased
 
-This is the living release note for the next coordinated AppSurface version. It is intentionally written in the same blog-style shape we want future tagged releases to use, but everything here remains provisional until a tag is cut.
+This is the living release note for the next coordinated AppSurface version after `0.1.0-rc.1`. It stays provisional until the next tag is cut.
 
 ## What is taking shape
 
-AppSurface is putting the release contract in place before `v0.1.0`. This slice is about making release notes auditable, public, and reusable:
-
-- a root changelog that acts as the compact ledger
-- a public unreleased proof artifact
-- a pre-1.0 upgrade policy with a clear migration home
-- a top-of-page trust bar for release notes and policy pages
-- pull-request guards that keep PR titles and unreleased entries aligned with future release automation
+Post-RC1 work is now collected here as deltas from the current release candidate. The package-facing story for the first coordinated prerelease lives in [v0.1.0 RC 1](./v0.1.0-rc.1.md); this page records what has changed after that candidate.
 
 ## Included in the next coordinated version
 
 ### Release and docs surface
 
-- The `/docs` landing now promotes a Releases entry point alongside product proof paths.
-- AppSurface now ships a public release hub, a changelog, an unreleased page, and a tagged release template inside the repository.
-- AppSurface now has a consumer-facing [v0.1.0 release preview](./v0.1-preview.md) that package consumers can read before the tag exists. Package-facing docs route release-risk questions into that preview while this unreleased page remains the merged-work proof artifact.
-- Release-note pages can show status, freshness, scope, migration guidance, and provenance in a shared trust bar instead of bespoke page chrome.
-- AppSurface now ships a generated package chooser that tells first-time adopters which package to install first, which optional modules to add next, and which proof paths to follow for release risk and working examples.
-- AppSurface now builds and uploads validated prerelease package artifacts on pull requests and manual workflow runs, using the package chooser manifest as the single source of truth for publish decisions, dependency expectations, tool packages, first-party DLL version identity, and Tailwind runtime payload presence before NuGet publishing is enabled.
-- AppSurface NuGet package metadata now points the package project website to `https://appsurface.dev` while keeping repository metadata on GitHub, and package validation rejects artifacts that drift from that public website URL.
-- AppSurface now has a protected, tag-only NuGet prerelease publish workflow that revalidates package artifact manifests, force-fetches the pushed annotated tag before validation, uses NuGet Trusted Publishing instead of a long-lived API key, requires a reviewed `nuget-prerelease` environment, writes a redacted publish ledger, and smoke-restores published packages from a clean NuGet configuration before a prerelease is considered ready.
-- The public docs Start Here path now leads with an AppSurface evaluator sequence for teams comparing module-based startup against plain ASP.NET Core `Program.cs` configuration.
-- Search fallback verification now proves the server-rendered search shell stays useful for no-JS readers, crawlers, failed `search-index.json` requests, and path-base or published-tree mounts before the browser search runtime takes over.
-- The root README now has a single hello-world quickstart that starts the smallest web example on an explicit port and proves the response with `curl`.
+- AppSurface now has `ForgeTrust.AppSurface.Auth` as a surface-neutral auth vocabulary package for module authors and host integrations. It defines passive user, session, context, result, login/logout prompt, audit-event, and metadata-key contracts while still avoiding runtime authentication, authorization policy evaluation, redirects, audit sinks, and identity-provider integration.
+- AppSurface Docs JavaScript API pages can now resolve public doclets into reader-facing API families. Explicit `@namespace` and `@module` tags remain authoritative, ordered `GroupNameRules` can name known source trees, and untagged fallback groups use path-aware identities so same-stem files in different folders do not merge.
+- AppSurface Docs built-in Markdown and C# harvesters now skip file and directory reparse points during direct and aggregated source traversal, and Markdown root `LICENSE` plus paired sidecar metadata reads use the same non-reparse boundary so symlinks cannot pull documentation content from outside the selected repository root.
+- Older `v0.1` preview routes now redirect to the current RC1 release note, so package consumers land on one canonical release story instead of a stale pre-RC preview.
+- Public package READMEs now link directly to the [v0.1.0 RC 1 release note](./v0.1.0-rc.1.md) for release risk, migration guidance, and package readiness.
+- Package maintainers now have a generated `packages/readiness.md` evidence dashboard that groups packages by product family, reports package-index readiness evidence, and keeps blocker/notes annotations separate from live NuGet publish status.
+- The release authoring checklist now records the preview-rollup rule: when a tagged or release-candidate note supersedes a preview, remove the preview source file and carry its browser routes as `redirect_aliases` on the canonical note.
+- Release preparation now leaves `CHANGELOG.md` as a compact ledger, moves detailed release narrative into tagged release notes, and makes generated release PR reports stop at a manual maintainer review gate before merge, tag, or publish.
 
-### Contribution contract
+### Configuration diagnostics
 
-- Pull request titles are now expected to follow Conventional Commits so the merge history is machine-readable for future automation.
-- Pull requests are expected to update this page unless maintainers explicitly mark the change as outside the public release story.
-- Test and integration process helpers now use CliWrap for child-process execution, keeping stdout and stderr diagnostics available while aligning test infrastructure with the preferred process-launch abstraction.
-- The primary build workflow now declares explicit read-only `GITHUB_TOKEN` contents permissions, keeping CI aligned with least-privilege GitHub Actions defaults.
-- Markdown-only changes on `main` now republish the docs surface, so release-note and policy edits are treated as first-class product updates.
-- AppSurface now exposes focused GitHub issue forms for bug reports, feature requests, and docs/developer-experience feedback, with the root README and contribution guide pointing developers to that feedback path.
-- Public contribution surfaces now steer suspected vulnerabilities away from issue forms and into a private security reporting path.
-- GitHub issue template support links now point first-time adopters to the package chooser and release/upgrade contract when they are evaluating install path or migration risk.
-- The repository now advertises its trust signals from the root README and backs them with Dependabot updates, a formatting-based code-quality workflow, and the repo's existing CodeQL code-scanning setup.
-
-### Console and CLI polish
-
-- AppSurface console apps can now opt into a command-first output contract so public CLI help and validation flows stay quiet instead of printing Generic Host lifecycle chatter.
-- AppSurface now publishes the public `appsurface` .NET tool for repository-level workflows, starting with `appsurface docs` for AppSurface Docs preview and `appsurface docs export` for repo-owned AppSurface Docs static export. RazorWire-specific export workflows remain owned by the separate `razorwire` tool.
-- RazorWire CLI now uses that contract for `--help`, `export --help`, invalid option output, and missing-source validation while still preserving command-owned export progress logs.
-- RazorWire CLI now names export seed-route files with `-r|--seeds`, matching the seed terminology used throughout the exporter and docs.
-- The shared console startup seam now exposes `ConsoleOptions` and `ConsoleOutputMode`, so future public AppSurface CLIs can adopt the same behavior without forking startup logic.
-- RazorWire CLI now has a first-class .NET tool package contract with the `razorwire` command, supports exact-version `dnx` execution from published or explicit local package sources, and verifies the installed tool path through help and sample export smoke tests. Public package publishing remains manual until the coordinated release automation tracked in #161 lands.
-- AppSurface Docs preview now starts the standalone host in-process through `appsurface docs`, keeps routine ASP.NET Core lifecycle output quiet, prints the resolved docs URL plus a concise harvest summary, and attempts to open the page in the system browser once Kestrel is listening.
-- RazorWire CLI export now defaults to CDN-safe static output. Managed internal URLs discovered in HTML and CSS are rewritten to emitted artifacts, `<img>` and `<source>` `srcset` candidates are both covered, AppSurface Docs frame content emits static partials, conventional `404.html` participates in the same validation, and CDN validation fails with `RWEXPORT###` diagnostics when required frame or asset dependencies cannot become files.
-- AppSurface Docs export now has `--redirects html|netlify`. The default `html` strategy keeps GitHub Pages and generic static-host behavior by writing alias HTML fallback files. The `netlify` strategy requires `--mode cdn`, reserves the root `_redirects` file, and writes exact site-local `301!` rules from manifest aliases to canonical live routes without using public origins or emitted `.html` artifact URLs.
-- Project exports now disable persistent MSBuild build servers during CLI-controlled publish and assembly-name probes so captured tool output cannot hang on reused build nodes.
-- RazorWire CLI process cleanup now waits for asynchronous stdout and stderr callbacks to flush before disposing launched target processes, which keeps short-lived command output observable in tests and diagnostics.
-- RazorWire CLI validation errors now include a concrete source-selection example and `razorwire export --help` hint, so a failed export tells developers the next useful command instead of only naming the bad input.
-- RazorWire CLI users who still want extensionless, server-routed export output should pass `--mode hybrid`. The default `cdn` mode is for plain static hosts and CDNs, not S3-specific infrastructure.
-- PackageIndex now has a real `--help`/`-h` surface that exits successfully, describes its commands and options, and reports unknown commands before printing usage.
-- AppSurface docs preview now defaults to the Development host environment when no `--environment` is supplied, so local `appsurface docs` runs with no configured endpoint use the deterministic per-workspace localhost port instead of falling through to Kestrel's port `5000` default.
-- AppSurface-owned OpenAPI and Scalar endpoints now use production exposure gates. OpenAPI and Scalar remain zero-configuration in Development, but non-development hosts must opt in with `AppSurfaceWebOpenApi:ExposeEndpoint=Always` and, for Scalar, `AppSurfaceWebScalar:ExposeEndpoint=Always`. Scalar also requires the AppSurface-owned OpenAPI endpoint to be exposed and never maps OpenAPI on its own.
-
-### Core diagnostics
-
-- Core static utilities now use explicit `ILogger` overloads and source-generated `[LoggerMessage]` definitions for host-owned diagnostics. `PathUtils.FindRepositoryRoot` can warn when discovery falls back from a missing path, and parallel enumerable cleanup paths now log suppressed cleanup failures at `Debug` when a caller supplies a logger.
-- `ProcessUtils` now runs through CliWrap while keeping the existing AppSurface process contract for captured output, streaming logs, cancellation, and non-throwing non-zero exit codes.
-
-### Dependency maintenance
-
-- The dotnet dependency group has been refreshed to the latest compatible package set, with affected NuGet lock files regenerated. CliFx now targets 3.0.0, and AppSurface Console registers source-generated command descriptors while preserving the existing `ConsoleApp<TModule>` and `ConsoleStartup<TModule>` hosting model.
-- The centrally managed `YamlDotNet` dependency now targets `17.0.1`, and the affected PackageIndex, AppSurface Docs, and Aspire lock files have been regenerated.
-- The Autofac dependency package now has dedicated test coverage for AppSurface module integration, host container setup, dependent module loading, and implementation scanning.
-- The GitHub Actions dependency group now refreshes pinned workflow actions for build, release, package, benchmark, and quality jobs while keeping Codecov uploads token-gated so Dependabot validation can still pass when repository secrets are unavailable.
-
-### Configuration validation
-
-- Strongly typed config wrappers now validate resolved object values with DataAnnotations during startup, including defaults, and report operator-friendly `ConfigurationValidationException` failures without echoing attempted values.
-- Configuration audits can now produce a source-aware report for discovered wrappers and explicitly registered keys, showing provider order, file and environment provenance, defaults, validation diagnostics, and redacted display-safe values.
-- AppSurface config now includes a console-agnostic `ConfigDiagnosticsCommandRunner` plus a compiled console sample wrapper for app-owned `config diagnostics` commands. The v1 command path audits the active AppSurface environment only, keeps the Config package free of CliFx and Console dependencies, treats redacted output as internal support data, and documents the startup boundary for apps that fail before commands can run.
-- Configuration audits now omit non-sensitive collection parent display values instead of serializing collection contents, preventing nested fields such as passwords, tokens, secrets, and API keys from leaking through raw collection dumps while preserving redaction for sensitive keys and source metadata.
-- Audit collection traversal now uses immutable per-entry options snapshots with a mutable registration builder, so opt-in traversal settings are stable once an audit key is registered.
+- Config audit entries can now be explicitly classified with `ConfigAuditEntryOptions.Sensitivity`, letting package authors mark domain-specific provider-only or wrapper-discovered keys sensitive without changing key names. `Sensitive` redacts root values, traversed child values, and value-derived dictionary labels before structured/text output; `NonSensitive` documents intent but never downgrades conservative redaction from fragments or sources.
+- Config audit redaction now recognizes additional secret-bearing fragments such as passphrase, DSN, assertion, certificate, cookie, client secret, private key, JWT, bearer, access/refresh tokens, session IDs, and shared access signatures. This can create new false-positive redaction in operator reports by design; full reports remain internal support artifacts because source metadata can still be sensitive.
 - Config wrappers can now opt into audit collection traversal with `ConfigAuditCollectionTraversalAttribute`, carrying safe traversal defaults through wrapper discovery while still letting explicit manual audit registrations override individual options.
 - Nested config validation can now opt into Microsoft Options `[ValidateObjectMembers]` and `[ValidateEnumeratedItems]` markers while AppSurface owns traversal, path formatting, and cycle protection.
 - Scalar config wrappers can now validate resolved primitive values directly with `ConfigValueNotEmpty`, `ConfigValueRange`, and `ConfigValueMinLength` attributes, while wrapper-specific scalar rules can override `ValidateValue`.
@@ -86,7 +31,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - The new `examples/config-validation` sample demonstrates an intentional startup validation failure for a scalar `ConfigStruct<int>` without printing the invalid configured value.
 - Environment variables can now patch individual members of object-valued config loaded from lower-priority providers, so `APP__SETTINGS__DATABASE__PORT` can override one nested value without replacing the rest of the JSON-backed options object.
 
-### Web host development defaults
+### Web host development defaults after RC1
 
 - AppSurface web hosts now choose a deterministic localhost-only development URL when no endpoint is configured, while production, staging, container, and appsettings-based endpoint choices remain untouched.
 - AppSurface startup environment resolution now treats command-line `--environment` as the highest-priority source before `ASPNETCORE_ENVIRONMENT` and `DOTNET_ENVIRONMENT`, keeping module startup context aligned with Generic Host configuration.
@@ -95,10 +40,12 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - OpenAPI's optional web package now has dedicated test coverage for service registration, endpoint mapping, generated document titles, and transformer behavior that removes `ForgeTrust.AppSurface.Web` tags at the document and operation levels while preserving unrelated tags, so the public module contract is guarded independently of Scalar.
 - Scalar's optional web package now has dedicated test coverage for OpenAPI dependency wiring, Scalar endpoint mapping, no-op lifecycle hooks, and minimal AppSurface web host composition.
 - AppSurface Web CORS options can now restrict allowed request headers and HTTP methods, with production defaults that require explicit preflight headers and methods instead of silently allowing any.
-- Tailwind development watch mode now treats a missing standalone CLI as a recoverable local-tooling gap: the app keeps serving existing CSS and logs a warning that points to the runtime package or `TailwindCliPath` override.
+- Tailwind build execution now uses a compiled MSBuild task with stable `ASTW###` diagnostics, structured CLI arguments, bounded output capture, cancellation support, and a packed-package smoke test that proves task/dependency loading from a real nupkg consumer.
+- Tailwind development watch mode now treats a missing standalone CLI as a recoverable local-tooling gap: the app keeps serving existing CSS and logs a warning that points to the runtime package or `TailwindOptions.CliPath` override.
 - AppSurface's conventional browser 404 page now stays app-agnostic, keeps a generic home recovery path, and documents that product-specific recovery links belong in app-owned `~/Views/Shared/{status}.cshtml` overrides.
 - AppSurface Web now ships conventional browser status pages for empty HTML `401`, `403`, and `404` responses. The public surface is now `BrowserStatusPageMode`, `BrowserStatusPageModel`, `UseConventionalBrowserStatusPages()`, and `DisableBrowserStatusPages()`, with preview routes at `/_appsurface/errors/401`, `/_appsurface/errors/403`, and `/_appsurface/errors/404`.
 - Browser status page overrides are status-specific: use `~/Views/Shared/401.cshtml`, `~/Views/Shared/403.cshtml`, or `~/Views/Shared/404.cshtml`. JSON/API responses, non-empty responses, and non-GET/HEAD requests keep their original behavior.
+- The new `examples/web-error-pages` proof starts a production-mode AppSurface Web host and verifies the browser/API error-page split with one command, including response-body sentinel checks for the generic `500` page.
 - Static export remains deliberately 404-only. RazorWire CLI probes `/_appsurface/errors/404` and writes `404.html`; it does not emit `401.html` or `403.html`.
 - AppSurface Web can now opt into a conventional production 500 page backed by ASP.NET Core exception handling, rendering only safe generic copy and a request id while leaving Development exception diagnostics and API-oriented responses alone.
 - AppSurface now assigns explicit numeric values to public Web and RazorWire enums, preserving existing ordinals for consumers that persist, serialize, bind, or compare those values.
@@ -197,6 +144,7 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - AppSurface Docs JavaScript public API harvesting now runs by default for policy-approved `.js` files while still publishing only explicit `@public` browser contracts. Hosts can opt out with `AppSurfaceDocs:Harvest:JavaScript:Enabled=false`, narrow scanning with JavaScript include globs, and keep broad discovery best-effort unless `StrictHealth=true` is enabled.
 - AppSurface Docs now dogfoods RazorWire JavaScript API harvesting through `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js` instead of minified runtime output, keeping generated browser assets small while preserving documented globals, events, DOM hooks, CSS hooks, and island module contracts.
 - AppSurface Config audit reports now support opt-in safe collection element traversal with bounded depth, element, and node limits, source-aware array/list provenance, redacted dictionary key labels, element identity metadata, deterministic numeric rendering, and diagnostics for unsupported or truncated traversal.
+- Opted-in configuration audit collection traversal now reports environment-created collection elements when audit provenance can prove the lower-priority element was absent, and reports a separate base-unknown diagnostic when environment variables supplied the final element but provider evidence cannot prove prior presence. The structured report shape is unchanged, while rendered diagnostics now include severity and stable diagnostic codes for searchability.
 
 ### RazorWire form UX
 
@@ -206,32 +154,28 @@ AppSurface is putting the release contract in place before `v0.1.0`. This slice 
 - The MVC sample now persists its demo username cookie with `Secure`, `HttpOnly`, and `SameSite=Lax`, and its browser-level regression coverage runs through `localhost` so local development keeps the secure-cookie behavior observable.
 - The MVC sample counter keeps its compact icon-only button while exposing an `Increment counter` accessible name for assistive technology and role-based tests.
 
+### Console and CLI polish
+
+- RazorWire CLI process execution now follows an explicit reliability contract for one-shot commands and launched target apps. No action is expected: command names, flags, defaults, and export semantics are unchanged. Target-app failures that were previously hidden behind startup or readiness timeouts may now surface earlier with captured output and recovery guidance.
+
+### RazorWire streams
+
+- RazorWire's in-memory stream hub now releases empty live channel tracking after the last subscriber disconnects or publish-time cleanup prunes stale writers. Replay buffers remain separate from live subscriber state, keep 25 retained messages per channel, prune inactive replay channels after more than 256 replay channels are retained, and are not deleted just because the last live subscriber disconnects.
+
+### Web host development defaults
+
+- Tailwind build execution now uses a compiled MSBuild task with stable `ASTW###` diagnostics, structured CLI arguments, bounded output capture, cancellation support, and a packed-package smoke test that proves task and dependency loading from a real nupkg consumer.
+- AppSurface preview startup now treats `--port` as a loopback-only shortcut that binds `http://localhost:<port>`. Add `--all-hosts` with `--port` only when LAN, container, or other all-interface preview access is intentional; that opt-in preserves the previous `http://localhost:<port>;http://*:<port>` wildcard shape.
+
+### Dependency maintenance
+
+- The central .NET dependency set now carries `Microsoft.Extensions.Caching.Memory`, `Microsoft.Extensions.Hosting`, and `Microsoft.Extensions.Logging.Console` `10.0.8`, while the ABP benchmark host now uses ABP `10.4.0`; solution lock files were regenerated so locked restore sees the same graph in CI and local development.
+
 ## Migration watch
 
-There is no tagged migration guide yet because AppSurface has not cut `v0.1.0`. Until then:
-
-- breaking changes should be called out here as soon as they land
-- the stable policy lives in [Pre-1.0 upgrade policy](./upgrade-policy.md)
-- finalized migration steps move into the tagged release note when the version ships
-- custom AppSurface Docs harvesters that want detail-page outlines and search heading metadata should populate `DocNode.Outline`; pages without outline metadata continue to render without the optional outline section
-- AppSurface Docs hosts that need source-backed harvest status should use `DocAggregator.GetHarvestHealthAsync(...)` and branch on `DocHarvestHealthStatus` plus diagnostic codes. Empty snapshots are not failures, degraded snapshots may still serve partial docs, and hosts that publish release artifacts should enable `AppSurfaceDocs:Harvest:FailOnFailure` when all-failed snapshots must stop startup.
-- AppSurface Docs hosts with expensive or side-effecting harvesters can opt out of startup warmup with `AppSurfaceDocs:Harvest:StartupMode=Disabled`, or tune `InitialRequestWaitBudgetMilliseconds` before cold requests switch to the observatory. The `TestingPreHarvestDelayMilliseconds`, `TestingDelayPerHarvesterMilliseconds`, and `TestingDelayPerDocumentMilliseconds` knobs are for local and automated testing only.
-- `DocAggregator.GetSearchIndexPayloadAsync(...)` is no longer a supported package-consumer API. The live search-index payload is now treated as an internal AppSurface Docs implementation detail so the host can rebase docs paths and serialize once per request. Consumers that previously called that method directly should switch to the public docs search endpoint or build their own search payload contract instead of depending on AppSurface Docs' internal snapshot shape.
-- existing `rw-active` forms opt into failed-form request markers and default fallback UI; applications with custom failure rendering can use `RazorWireOptions.Forms.FailureMode = Manual`, `RazorWireOptions.Forms.EnableFailureUx = false`, or per-form `data-rw-form-failure="off"`
-- RazorWire consumers do not need script-path or app-code changes for the TypeScript runtime pipeline. Maintainers should edit `Web/ForgeTrust.RazorWire/assets/src`, run the focused asset commands, and reserve `VerifyRazorWireGeneratedAssetsBeforePack=false` for emergency pack-only bypasses.
-- existing `rw:stream-source` subscriptions now return `403` until apps either configure `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll` for public/demo streams or register a custom `IRazorWireChannelAuthorizer`
-- AppSurface Docs authors should migrate flat `featured_pages` metadata to `featured_page_groups`. The old field is ignored and logs a warning; each group needs at least `label` or `intent`, plus a `pages` list containing the existing `question`, `path`, `supporting_copy`, and `order` entries.
-- Code that previously read `IHostEnvironment.ApplicationName` to recover a custom AppSurface display label should read `StartupContext.ApplicationName` instead. `IHostEnvironment.ApplicationName` now stays aligned with the host entry-assembly identity used for static web asset discovery unless `StartupContext.OverrideEntryPointAssembly` explicitly selects a different manifest identity. `StartupContext.EntryPointAssembly` still defaults to the root module assembly for command/controller/component discovery, so existing cross-assembly scanning behavior remains stable.
-- Web apps with custom conventional 404 views should change `@model ForgeTrust.AppSurface.Web.NotFoundPageModel` to `@model ForgeTrust.AppSurface.Web.BrowserStatusPageModel`. The old 404-only options API names have moved to `BrowserStatusPage*` names before `v0.1.0`; conventional production `500` exception pages now ship as the opt-in fix for issue #224.
-- Web apps that intentionally exposed AppSurface-owned OpenAPI or Scalar routes outside Development should set `AppSurfaceWebOpenApi:ExposeEndpoint=Always` and, when using Scalar, `AppSurfaceWebScalar:ExposeEndpoint=Always`. The new setting only controls endpoint mapping; apps still need host-owned authorization, private networking, or reverse-proxy protection for public environments.
-
-## Proof artifacts
-
-- [Release hub](./README.md)
-- [Changelog](../CHANGELOG.md)
-- [Pre-1.0 upgrade policy](./upgrade-policy.md)
-- [Release authoring checklist](./release-authoring-checklist.md)
-
-## Before the first tag
-
-The current intent is that everything already in this repository can be part of `v0.1.0` when AppSurface is ready to release. This page is where that pile becomes visible and reviewable before the tag exists.
+- Existing RazorWire CLI users do not need command or flag changes for the process-execution migration. The main behavior difference is that target-app failures may now appear earlier with captured output instead of being hidden behind startup or readiness timeouts.
+- RazorWire stream consumers do not need application code changes for the live-channel cleanup update. Public or demo stream endpoints should still validate or namespace channel names before opting into `AllowAll`; active connection cardinality limits are tracked separately from this cleanup work.
+- Tailwind package consumers do not need source changes for the compiled MSBuild task. Maintainers should keep the packed-package smoke path green when changing task dependencies or diagnostics.
+- AppSurface Docs JavaScript harvest consumers can keep explicit `@namespace` and `@module` tags when they need a stable API family name; otherwise the new fallback grouping may split same-stem files by path instead of merging them.
+- Operators may see more conservative redaction in config audit reports as the secret-fragment list expands. Treat that as the intended default, and use explicit sensitivity options only to document package-owned keys.
+- AppSurface preview users who depended on `--port` listening beyond loopback should add `--all-hosts` or pass explicit `--urls`. The wildcard host can expose the preview process beyond the local machine, so keep the default localhost binding for routine docs and web previews.

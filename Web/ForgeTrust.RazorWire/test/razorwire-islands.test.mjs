@@ -174,6 +174,9 @@ function loadIslands(islands, overrides = {}) {
   if (overrides.requestIdleCallback) {
     window.requestIdleCallback = overrides.requestIdleCallback;
   }
+  if (overrides.IntersectionObserver) {
+    window.IntersectionObserver = overrides.IntersectionObserver;
+  }
 
   const context = {
     document,

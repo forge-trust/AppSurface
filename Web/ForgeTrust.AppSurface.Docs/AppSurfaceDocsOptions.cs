@@ -588,6 +588,17 @@ public sealed class AppSurfaceDocsDiagnosticsOptions
     /// route; route exposure still follows <see cref="ExposeRouteInspector"/>.
     /// </remarks>
     public AppSurfaceDocsHarvestHealthExposure ShowChrome { get; set; } = AppSurfaceDocsHarvestHealthExposure.DevelopmentOnly;
+
+    /// <summary>
+    /// Gets or sets the host-owned authorization policy required to refresh the live docs search-index cache.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see langword="null"/>, which denies the packaged
+    /// <c>{DocsRootPath}/_search-index/refresh</c> endpoint. Set this to the name of a policy registered with
+    /// ASP.NET Core authorization when a host wants browser-form-based operator refresh. AppSurface Docs does not
+    /// register a permissive fallback policy because cache refresh is a mutating operator action.
+    /// </remarks>
+    public string? SearchIndexRefreshPolicy { get; set; }
 }
 
 /// <summary>
@@ -1515,6 +1526,48 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         ValidateGlobPatterns(options.IncludeGlobs, $"{configurationPath}:IncludeGlobs", failures);
         ValidateGlobPatterns(options.ExcludeGlobs, $"{configurationPath}:ExcludeGlobs", failures);
         ValidateDefaultExclusions(options.DefaultExclusions, $"{configurationPath}:DefaultExclusions", failures);
+        ValidateJavaScriptGroupNameRules(options.GroupNameRules, $"{configurationPath}:GroupNameRules", failures);
+    }
+
+    private static void ValidateJavaScriptGroupNameRules(
+        IReadOnlyList<AppSurfaceDocsJavaScriptGroupNameRule>? rules,
+        string configurationPath,
+        List<string> failures)
+    {
+        if (rules is null)
+        {
+            failures.Add($"{configurationPath} must not be null.");
+            return;
+        }
+
+        for (var index = 0; index < rules.Count; index++)
+        {
+            var rulePath = $"{configurationPath}:{index}";
+            var rule = rules[index];
+            if (rule is null)
+            {
+                failures.Add($"{rulePath} must not be null.");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(rule.Name))
+            {
+                failures.Add($"{rulePath}:Name must not be blank.");
+            }
+
+            if (rule.IncludeGlobs is null)
+            {
+                failures.Add($"{rulePath}:IncludeGlobs must not be null.");
+                continue;
+            }
+
+            if (!rule.IncludeGlobs.Any(pattern => !string.IsNullOrWhiteSpace(pattern)))
+            {
+                failures.Add($"{rulePath}:IncludeGlobs must contain at least one repository-relative glob pattern.");
+            }
+
+            ValidateGlobPatterns(rule.IncludeGlobs, $"{rulePath}:IncludeGlobs", failures);
+        }
     }
 
     private static void ValidateGlobPatterns(
@@ -1763,6 +1816,7 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         return value.Trim() is { } trimmed
                && (trimmed.Equals("search", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("search-index.json", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("_search-index", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_health", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_health.json", StringComparison.OrdinalIgnoreCase)
                    || trimmed.Equals("_routes", StringComparison.OrdinalIgnoreCase)

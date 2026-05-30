@@ -32,17 +32,38 @@ public sealed class ConfigAuditTextRenderer
             RenderEntry(builder, entry, indent: "  ");
         }
 
+        if (report.DiscoveredKeys.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine(FormatDiscoveredKeysHeading(report.DiscoveredKeys));
+            foreach (var discoveredKey in report.DiscoveredKeys
+                         .OrderBy(key => key.Classification)
+                         .ThenBy(key => key.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                RenderDiscoveredKey(builder, discoveredKey);
+            }
+        }
+
         if (report.Diagnostics.Count > 0)
         {
             builder.AppendLine();
             builder.AppendLine("Diagnostics:");
             foreach (var diagnostic in report.Diagnostics)
             {
-                builder.AppendLine($"  [{diagnostic.Severity}] {diagnostic.Message}");
+                builder.AppendLine($"  {FormatDiagnostic(diagnostic)}");
             }
         }
 
         return builder.ToString();
+    }
+
+    private static string FormatDiscoveredKeysHeading(IReadOnlyList<ConfigAuditDiscoveredKey> discoveredKeys)
+    {
+        var allSourcesAreFileBacked = discoveredKeys.All(discoveredKey =>
+            discoveredKey.Sources.Count > 0
+            && discoveredKey.Sources.All(source => source.Kind == ConfigAuditSourceKind.File));
+
+        return allSourcesAreFileBacked ? "Discovered file keys:" : "Discovered keys:";
     }
 
     private static void RenderEntry(StringBuilder builder, ConfigAuditEntry entry, string indent)
@@ -55,9 +76,14 @@ public sealed class ConfigAuditTextRenderer
             builder.AppendLine($"{indent}  Source: {FormatSource(source)}");
         }
 
+        if (entry.Element?.KeyCorrelationId != null)
+        {
+            builder.AppendLine($"{indent}  Key correlation: {entry.Element.KeyCorrelationId}");
+        }
+
         foreach (var diagnostic in entry.Diagnostics)
         {
-            builder.AppendLine($"{indent}  Diagnostic: {diagnostic.Message}");
+            builder.AppendLine($"{indent}  Diagnostic: {FormatDiagnostic(diagnostic)}");
         }
 
         if (entry.Children.Count == 0)
@@ -71,6 +97,30 @@ public sealed class ConfigAuditTextRenderer
             RenderEntry(builder, child, indent + "    ");
         }
     }
+
+    private static void RenderDiscoveredKey(StringBuilder builder, ConfigAuditDiscoveredKey discoveredKey)
+    {
+        var value = discoveredKey.DisplayValue == null ? string.Empty : $" = {discoveredKey.DisplayValue}";
+        builder.AppendLine(
+            $"  {discoveredKey.Key} [{FormatDiscoveredClassification(discoveredKey.Classification)}]{value}");
+        if (discoveredKey.IsRedacted)
+        {
+            builder.AppendLine("    Redacted: true");
+        }
+
+        foreach (var source in discoveredKey.Sources)
+        {
+            builder.AppendLine($"    Source: {FormatSource(source)}");
+        }
+
+        foreach (var diagnostic in discoveredKey.Diagnostics)
+        {
+            builder.AppendLine($"    Diagnostic: {FormatDiagnostic(diagnostic)}");
+        }
+    }
+
+    private static string FormatDiagnostic(ConfigAuditDiagnostic diagnostic) =>
+        $"[{diagnostic.Severity}] {diagnostic.Code}: {diagnostic.Message}";
 
     private static IEnumerable<ConfigAuditEntry> OrderChildren(IReadOnlyList<ConfigAuditEntry> children)
     {
@@ -108,10 +158,21 @@ public sealed class ConfigAuditTextRenderer
     private static string FormatSource(ConfigAuditSourceRecord source) =>
         source.Kind switch
         {
+            ConfigAuditSourceKind.File when source.Location != null =>
+                $"{source.ProviderName} {Path.GetFileName(source.FilePath)}:{source.Location.LineNumber}:{source.Location.ByteColumnNumber} :: {source.ConfigPath}",
             ConfigAuditSourceKind.File => $"{source.ProviderName} {Path.GetFileName(source.FilePath)} :: {source.ConfigPath}",
             ConfigAuditSourceKind.EnvironmentVariable => $"Environment variable {source.EnvironmentVariableName}",
             ConfigAuditSourceKind.Default => $"Default value on {source.ProviderName}",
             ConfigAuditSourceKind.Missing => "none",
             _ => source.ProviderName ?? source.Kind.ToString()
+        };
+
+    private static string FormatDiscoveredClassification(ConfigAuditDiscoveredKeyClassification classification) =>
+        classification switch
+        {
+            ConfigAuditDiscoveredKeyClassification.Known => "Known",
+            ConfigAuditDiscoveredKeyClassification.KnownDescendant => "Under known entry",
+            ConfigAuditDiscoveredKeyClassification.Unknown => "Unknown to AppSurface audit registry",
+            _ => classification.ToString()
         };
 }

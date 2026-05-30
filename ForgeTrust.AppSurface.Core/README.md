@@ -11,7 +11,7 @@ The Core library is designed to be lightweight and implementation-agnostic. It p
 
 ## Release Guidance
 
-AppSurface is preparing the first coordinated `v0.1.0` release. Before installing this package from a prerelease feed, read the [v0.1 release preview](../releases/v0.1-preview.md) for current release risk, provisional migration guidance, and the finalization path to the tagged release note.
+AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 1 release note](../releases/v0.1.0-rc.1.md) for current release risk, migration guidance, and package readiness.
 
 ## Key Concepts
 
@@ -50,6 +50,17 @@ Pitfalls:
 Specialized startup types can call the protected `RegisterDependencies(StartupContext context)` seam earlier when they need module-derived options before `IHostBuilder.Build()`. AppSurface Web uses this to resolve `WebOptions.StartupTimeout` before arming its startup watchdog around host creation and startup.
 
 Call `RegisterDependencies` before reading `StartupContext.GetDependencies()` for startup-shaping decisions. Repeated calls with the same context are no-ops, but module registration is still part of startup composition, so avoid calling it from request-time code or from parallel threads.
+
+## Startup port shortcut
+
+`AppSurfaceStartup` treats `--port <port>` as a convenience shortcut for the Generic Host `urls` setting. The shortcut binds `http://localhost:<port>` so local preview commands do not expose the host beyond loopback by default.
+
+Add `--all-hosts` with `--port` only when all-interface access is intentional. That maps the same port to `http://localhost:<port>;http://*:<port>`, preserving a clickable local URL while also adding the ASP.NET Core wildcard host. Use `--urls` instead when you need a custom scheme, host, or multi-binding shape.
+
+Pitfalls:
+
+- Do not use `--all-hosts` for routine local preview. The wildcard host can expose the application beyond the local machine.
+- If both `--urls` and `--port` are supplied, the `--port` shortcut wins so scripted previews can override a broader endpoint setting with one option.
 
 ## Logging in Static Utilities
 

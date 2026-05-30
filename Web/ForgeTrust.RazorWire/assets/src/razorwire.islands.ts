@@ -203,8 +203,9 @@ interface Window {
      */
     function setupIntersectionObserver(island, modulePath, props) {
         // Guard against missing IntersectionObserver in older browsers
-        if (typeof IntersectionObserver !== "undefined") {
-            const observer = new IntersectionObserver((entries) => {
+        const IntersectionObserverConstructor = window.IntersectionObserver;
+        if (typeof IntersectionObserverConstructor !== "undefined") {
+            const observer = new IntersectionObserverConstructor((entries) => {
                 for (const entry of entries) {
                     if (entry.isIntersecting) {
                         observer.unobserve(island);

@@ -21,7 +21,7 @@ When consuming package builds from a configured feed, reference `ForgeTrust.Razo
 
 ## Release Guidance
 
-AppSurface is preparing the first coordinated `v0.1.0` release. Before installing this package from a prerelease feed, read the [v0.1 release preview](../../releases/v0.1-preview.md) for current release risk, provisional migration guidance, and the finalization path to the tagged release note.
+AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 1 release note](../../releases/v0.1.0-rc.1.md) for current release risk, migration guidance, and package readiness.
 
 ## Hero Proof
 
@@ -158,7 +158,8 @@ services.AddRazorWire(options =>
 });
 ```
 
-Stream subscriptions are denied by default. Choose `AllowAll` only for public/demo streams:
+Stream subscriptions are denied by default. Choose `AllowAll` only for public/demo streams. Public channels should use
+validated, intentionally namespaced channel names so arbitrary client input cannot fan out into unlimited channel names:
 
 ```csharp
 services.AddRazorWire(options =>
@@ -204,6 +205,8 @@ RazorWire can push Turbo Stream updates to one or more clients over Server-Sent 
 
 RazorWire can also send a narrow same-origin visit command with `Visit(...)`. Visit streams are one-shot navigation commands, not replayable state. Use them for active subscribers only, and keep normal links or retained state available when late subscribers or no-JavaScript users need to continue.
 
+The in-memory stream hub keeps live subscriber tracking separate from opt-in replay retention. Empty live channel tracking is released after the last subscriber disconnects or publish-time cleanup prunes stale writers. Retained replay buffers are not deleted by live disconnects; they stay bounded by the replay retention policy.
+
 ### Form Enhancement
 
 Standard HTML forms can return targeted stream updates instead of full reloads or redirect-first flows. The counter example above is the smallest version of that story: submit a normal MVC form, return RazorWire updates, and change only the DOM you care about.
@@ -239,7 +242,7 @@ RazorWire is designed for a fast feedback loop during development:
 - `Subscribe(channel)` receives only live messages published after subscription.
 - `Subscribe(channel, new RazorWireStreamSubscribeOptions { Replay = true })` receives retained replay messages first, then continues with live messages.
 
-Replay is opt-in and intentionally small. The in-memory hub keeps a bounded per-channel buffer and drops the oldest retained fragments first. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
+Replay is opt-in and intentionally small. The in-memory hub keeps up to 25 retained fragments per replay channel and prunes inactive replay channels when more than 256 replay channels are retained, dropping the oldest retained fragments and inactive replay channels first. Replay subscriptions to channels with no retained messages do not allocate durable per-channel replay metadata. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
 
 ### `IRazorWireChannelAuthorizer`
 
@@ -313,8 +316,8 @@ Subscribes the page to a RazorWire stream channel.
 
 - `channel`: required channel name.
 - `permanent`: keeps the stream source alive across Turbo visits.
-- Stream endpoints deny subscriptions by default; configure `RazorWireStreamAuthorizationMode.AllowAll` for public/demo channels or provide a custom `IRazorWireChannelAuthorizer`.
-- `replay`: when `true`, appends `?replay=1` to the stream endpoint so the page receives retained channel messages before live updates.
+- Stream endpoints deny subscriptions by default; configure `RazorWireStreamAuthorizationMode.AllowAll` only for public/demo channels or provide a custom `IRazorWireChannelAuthorizer`. Public/demo channels should validate or namespace channel names instead of accepting arbitrary user-supplied channel identifiers.
+- `replay`: when `true`, appends `?replay=1` to the stream endpoint so the page receives retained channel messages before live updates. The in-memory hub retains at most 25 messages per replay channel and prunes inactive replay channels when more than 256 replay channels are retained.
 
 ```html
 <rw:stream-source id="rw-stream-reactivity" channel="reactivity" permanent="true"></rw:stream-source>
@@ -394,24 +397,33 @@ RazorWire can generate CDN-ready static output with the installable `razorwire`
 .NET tool, or with the short-lived `dnx` tool execution path. CDN mode is the
 default: extensionless internal routes such as `/about` are emitted as files such
 as `about.html`, and exporter-managed links, frames, scripts, stylesheets, images,
-`<img>` and `<source>` `srcset` candidates, and CSS `url(...)` references are
-rewritten to the generated artifact URLs. When the conventional
+`<img>` and `<source>` `srcset` candidates, CSS `url(...)` references, and
+string-form CSS `@import "..."` dependencies are rewritten to the generated
+artifact URLs. When the conventional
 `/_appsurface/errors/404` route is available, it emits `404.html` through the same
 validation and rewrite path. Use `--mode hybrid` when the exported directory will
 still be served behind infrastructure that resolves application-style extensionless
 URLs.
 
-CDN export validates the dependencies it can discover while crawling. Missing
-frame routes, unsafe query-bearing frame sources, missing internal assets, and
-managed URLs that cannot be rewritten fail the export with `RWEXPORT###`
-diagnostics instead of producing a broken folder. The validation boundary is
-deliberate: app-authored JavaScript fetches, form posts, Server-Sent Events, import
-maps, and other runtime behavior outside markup/CSS references are not proven static
-by the exporter.
+CDN export validates the static references it can discover while crawling.
+Missing frame routes, unsafe query-bearing frame sources, missing internal assets,
+and managed URLs that cannot be rewritten fail the export with `RWEXPORT###`
+diagnostics instead of producing a broken folder. The diagnostics include the
+HTML element/attribute or CSS token that produced the reference and the normalized
+path the exporter attempted to prove. The validation boundary is deliberate:
+app-authored JavaScript fetches, form posts, Server-Sent Events, import maps, and
+other runtime behavior outside markup/CSS references are not proven static by the
+exporter.
 
-Those package-based commands require a published package or an explicit local package
-source; public package publishing is still manual until the coordinated release
-automation tracked in #161 lands.
+Parser-backed discovery may find valid references that older exporter versions
+missed. Treat new CDN validation failures after upgrading as potentially correct:
+export the missing route or asset, fix path casing, mark authoring-only anchors
+with `data-rw-export-ignore`, or choose `--mode hybrid` when live infrastructure
+owns the dependency.
+
+Those package-based commands require a published package or an explicit local
+package source. The package chooser excludes `ForgeTrust.RazorWire.Cli` until
+issue #171 lands stable public .NET tool packaging.
 
 For installation, `dnx`, local-package, and source-run examples, see the
 [RazorWire CLI](../../Web/ForgeTrust.RazorWire.Cli/README.md).

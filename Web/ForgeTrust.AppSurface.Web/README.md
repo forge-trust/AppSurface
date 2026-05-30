@@ -14,7 +14,7 @@ For more advanced use cases where you need to customize the startup lifecycle be
 
 ## Release Guidance
 
-AppSurface is preparing the first coordinated `v0.1.0` release. Before installing this package from a prerelease feed, read the [v0.1 release preview](../../releases/v0.1-preview.md) for current release risk, provisional migration guidance, and the finalization path to the tagged release note.
+AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 1 release note](../../releases/v0.1.0-rc.1.md) for current release risk, migration guidance, and package readiness.
 
 ## Key Abstractions
 
@@ -159,6 +159,16 @@ The conventional exception page uses ASP.NET Core exception handling, not status
 - API-only apps, JSON problem-details APIs, tenant-specific error pages, or apps with telemetry-first exception middleware should leave this disabled and register their own exception handling.
 - Once ASP.NET Core has started a response, exception handling cannot replace it with the conventional page. Design streaming endpoints so failures are reported through the stream protocol rather than relying on a late 500 page.
 
+### Executable error-page proof
+
+Use the focused [web error-page proof](../../examples/web-error-pages/README.md) when you want executable evidence rather than API reference prose:
+
+```bash
+bash examples/web-error-pages/verify.sh
+```
+
+The proof starts a local production-mode app, verifies browser HTML for empty `401`, `403`, `404`, and thrown `500` paths, verifies API requests do not receive browser HTML, and checks that synthetic request sentinels are absent from the production `500` response body.
+
 ### Configuration and Port Overrides
 
 The web application supports standard ASP.NET Core configuration sources (command-line arguments, environment variables, and `appsettings.json`).
@@ -171,29 +181,37 @@ When an AppSurface web application starts in `Development` without explicit endp
 - AppSurface treats `--environment Development`, `ASPNETCORE_ENVIRONMENT=Development`, and `DOTNET_ENVIRONMENT=Development` as development for both the deterministic port resolver and module-level `StartupContext.IsDevelopment` decisions. Command-line environment parsing is shared with `DefaultEnvironmentProvider`, so duplicate `--environment` keys use the last valid value.
 - Override it any time with `--port`, `--urls`, `ASPNETCORE_URLS`/`URLS`, `ASPNETCORE_HTTP_PORTS`/`DOTNET_HTTP_PORTS`/`HTTP_PORTS`, `ASPNETCORE_HTTPS_PORTS`/`DOTNET_HTTPS_PORTS`/`HTTPS_PORTS`, `urls`/`http_ports`/`https_ports` in appsettings, or `Kestrel:Endpoints` in appsettings/environment variables.
 - Treat the startup log as the source of truth for the selected local URL.
-- The automatic fallback binds only `http://localhost:{port}`. Use `--port` or an explicit wildcard URL when you intentionally need LAN/container access.
+- The automatic fallback and `--port` shortcut bind only `http://localhost:{port}`. Add `--all-hosts` to the `--port` shortcut, or pass an explicit wildcard URL, only when you intentionally need LAN/container access.
 
 #### Port Overrides
 
 You can override the application's listening port using several methods:
 
-1.  **Command-Line**: Use `--port` (shortcut) or `--urls`.
+1.  **Command-Line**: Use `--port` (localhost-only shortcut), `--port` with `--all-hosts`, or `--urls`.
+
     ```bash
     dotnet run -- --port 5001
     # OR
+    dotnet run -- --port 5001 --all-hosts
+    # OR
     dotnet run -- --urls "http://localhost:5001"
     ```
+
 2.  **Environment Variables**: Set `ASPNETCORE_URLS`.
+
     ```bash
     export ASPNETCORE_URLS="http://localhost:5001"
     dotnet run
     ```
+
 3.  **App Settings**: Configure `urls` in `appsettings.json`.
+
     ```json
     {
       "urls": "http://localhost:5001"
     }
     ```
+
 4.  **Kestrel Endpoints**: Configure named endpoints when you need protocol, certificate, or endpoint-specific settings.
 
     ```json
@@ -209,7 +227,7 @@ You can override the application's listening port using several methods:
     ```
 
 > [!NOTE]
-> The `--port` flag is a convenience shortcut that maps to `http://localhost:{port};http://*:{port}`. This ensures the application is accessible on all interfaces while logging a clickable `localhost` URL in the console. If both `--port` and `--urls` are provided, `--port` takes precedence.
+> The `--port` flag is a convenience shortcut that maps to `http://localhost:{port}`. Add `--all-hosts` to map the same port to `http://localhost:{port};http://*:{port}` when all-interface access is intentional. The `*` host is a wildcard binding and can expose the preview host beyond the local machine. If both `--port` and `--urls` are provided, `--port` takes precedence.
 > [!TIP]
 > If you rely on the deterministic development-port fallback, different worktrees on the same machine will get different stable ports. If you need a predictable shared URL for docs, QA, or CI instructions, pass `--port` or `--urls` explicitly instead of depending on the fallback.
 

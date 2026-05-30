@@ -47,6 +47,8 @@ public abstract class AppSurfaceStartup
 public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSurfaceStartup
     where TRootModule : IAppSurfaceHostModule, new()
 {
+    private const string AllHostsArgument = "--all-hosts";
+
     /// <summary>
     /// Runs the startup sequence using the provided startup context.
     /// </summary>
@@ -121,15 +123,16 @@ public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSu
     /// <returns>A host builder configured with the context's host application identity, registered modules, and service registrations.</returns>
     private IHostBuilder CreateHostBuilderCore(StartupContext context)
     {
-        var builder = Host.CreateDefaultBuilder(context.Args);
+        var hostArgs = NormalizeAllHostsArgument(context.Args);
+        var builder = Host.CreateDefaultBuilder(hostArgs);
 
         // Support --port flag as a shortcut for --urls (e.g. --port 5001).
         // We parse once here and reuse in both Host and App configuration stages.
-        var argConfig = new ConfigurationBuilder().AddCommandLine(context.Args).Build();
+        var argConfig = new ConfigurationBuilder().AddCommandLine(hostArgs).Build();
         var portOverlay = !string.IsNullOrEmpty(argConfig["port"])
             ? new Dictionary<string, string?>
             {
-                ["urls"] = $"http://localhost:{argConfig["port"]};http://*:{argConfig["port"]}"
+                ["urls"] = ResolvePortUrls(argConfig["port"]!, IsAllHostsEnabled(argConfig))
             }
             : null;
 
@@ -168,6 +171,40 @@ public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSu
         ConfigureBuilderForAppType(context, builder);
 
         return builder;
+    }
+
+    private static string[] NormalizeAllHostsArgument(string[] args)
+    {
+        var normalizedArgs = new List<string>(args.Length);
+        var changed = false;
+
+        for (var index = 0; index < args.Length; index++)
+        {
+            var arg = args[index];
+            if (string.Equals(arg, AllHostsArgument, StringComparison.OrdinalIgnoreCase)
+                && (index == args.Length - 1 || args[index + 1].StartsWith("-", StringComparison.Ordinal)))
+            {
+                normalizedArgs.Add($"{AllHostsArgument}=true");
+                changed = true;
+                continue;
+            }
+
+            normalizedArgs.Add(arg);
+        }
+
+        return changed ? normalizedArgs.ToArray() : args;
+    }
+
+    private static bool IsAllHostsEnabled(IConfiguration configuration)
+    {
+        return bool.TryParse(configuration["all-hosts"], out var allHosts) && allHosts;
+    }
+
+    private static string ResolvePortUrls(string port, bool allHosts)
+    {
+        return allHosts
+            ? $"http://localhost:{port};http://*:{port}"
+            : $"http://localhost:{port}";
     }
 
     /// <summary>

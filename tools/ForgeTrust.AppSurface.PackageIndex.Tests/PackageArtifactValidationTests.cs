@@ -23,6 +23,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 order: 10
                 use_when: Install this first.
@@ -52,6 +53,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -60,6 +62,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj
+                product_family: forge_trust
                 classification: proof_host
                 publish_decision: do_not_publish
                 order: 20
@@ -91,6 +94,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -99,6 +103,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Web.
                 start_here_path: ForgeTrust.AppSurface.Core/README.md
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -136,6 +141,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -144,6 +150,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
+                product_family: razorwire
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -203,6 +210,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             $$"""
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -211,6 +219,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
+                product_family: appsurface
                 classification: {{classification}}
                 publish_decision: {{publishDecision}}
                 order: 20
@@ -242,6 +251,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: support_publish
                 order: 10
@@ -272,16 +282,19 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: support
                 publish_decision: support_publish
                 order: 10
                 note: Shared dependency package.
               - project: Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj
+                product_family: appsurface
                 classification: support
                 publish_decision: support_publish
                 order: 20
                 note: Optional OpenAPI dependency package.
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 30
@@ -561,6 +574,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -593,6 +607,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -601,6 +616,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
+                product_family: razorwire
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -1646,6 +1662,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -1882,11 +1899,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: support
                 publish_decision: support_publish
                 order: 10
                 note: Core dependency.
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -1980,6 +1999,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -1988,6 +2008,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Web.
                 start_here_path: ForgeTrust.AppSurface.Core/README.md
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2060,6 +2081,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2068,6 +2090,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Web.
                 start_here_path: ForgeTrust.AppSurface.Core/README.md
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2146,11 +2169,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: support
                 publish_decision: support_publish
                 order: 10
                 note: Core dependency.
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2158,23 +2183,37 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 includes: Web.
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 30
+                use_when: Config.
+                includes: Config.
+                does_not_include: Extras.
+                start_here_path: Config/ForgeTrust.AppSurface.Config/README.md
             """);
         await WriteFileAsync("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
         await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
-        var artifactDirectory = Path.Combine(_repositoryRoot, "artifacts");
+        await WriteFileAsync("Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj", "<Project />");
+        await WriteFileAsync("Config/ForgeTrust.AppSurface.Config/README.md", "# Config");
+        var artifactDirectory = Path.Join(_repositoryRoot, "artifacts");
         Directory.CreateDirectory(artifactDirectory);
-        var packagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        var packagePath = Path.Join(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(packagePath, "web", Encoding.UTF8);
-        var supportPackagePath = Path.Combine(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
+        var configPackagePath = Path.Join(artifactDirectory, $"ForgeTrust.AppSurface.Config.{PackageVersion}.nupkg");
+        await File.WriteAllTextAsync(configPackagePath, "config", Encoding.UTF8);
+        var supportPackagePath = Path.Join(artifactDirectory, $"ForgeTrust.AppSurface.Core.{PackageVersion}.nupkg");
         await File.WriteAllTextAsync(supportPackagePath, "core", Encoding.UTF8);
-        var manifestPath = Path.Combine(artifactDirectory, "package-artifact-manifest.json");
+        var manifestPath = Path.Join(artifactDirectory, "package-artifact-manifest.json");
         await new PackageArtifactManifestWriter().WriteAsync(
             new PackageArtifactValidationReport(
                 PackageVersion,
                 [
                     new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", PackagePublishDecision.SupportPublish, [], supportPackagePath),
-                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Web", "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", PackagePublishDecision.Publish, [], packagePath)
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Web", "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", PackagePublishDecision.Publish, [], packagePath),
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Config", "Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj", PackagePublishDecision.Publish, [], configPackagePath)
                 ]),
             artifactDirectory,
             manifestPath,
@@ -2189,7 +2228,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
             CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
             {
                 ["ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"] = CreateMetadata("ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj", "ForgeTrust.AppSurface.Core"),
-                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "ForgeTrust.AppSurface.Web")
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "ForgeTrust.AppSurface.Web"),
+                ["Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj"] = CreateMetadata("Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj", "ForgeTrust.AppSurface.Config")
             }),
             commandRunner,
             new PackageSmokeInstallReportRenderer(),
@@ -2198,7 +2238,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 delays.Add(delay);
                 return Task.CompletedTask;
             });
-        var workDirectory = Path.Combine(_repositoryRoot, "smoke");
+        var workDirectory = Path.Join(_repositoryRoot, "smoke");
 
         var report = await workflow.RunAsync(
             new PackageSmokeInstallRequest(
@@ -2206,18 +2246,207 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 ManifestPath,
                 manifestPath,
                 workDirectory,
-                Path.Combine(workDirectory, "smoke.md"),
+                Path.Join(workDirectory, "smoke.md"),
                 "https://api.nuget.org/v3/index.json"),
             CancellationToken.None);
 
-        var entry = Assert.Single(report.Entries);
-        Assert.Equal("ForgeTrust.AppSurface.Web", entry.PackageId);
-        Assert.Equal(PackageSmokeInstallStatus.Restored, entry.Status);
+        Assert.Equal(["ForgeTrust.AppSurface.Web", "ForgeTrust.AppSurface.Config"], report.Entries.Select(entry => entry.PackageId).ToArray());
+        Assert.All(report.Entries, entry => Assert.Equal(PackageSmokeInstallStatus.Restored, entry.Status));
         Assert.Equal(2, commandRunner.Requests.Count);
         Assert.Single(delays);
-        Assert.True(File.Exists(Path.Combine(workDirectory, "NuGet.config")));
-        Assert.Contains("<clear />", await File.ReadAllTextAsync(Path.Combine(workDirectory, "NuGet.config")), StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Join(workDirectory, "NuGet.config")));
+        Assert.Contains("<clear />", await File.ReadAllTextAsync(Path.Join(workDirectory, "NuGet.config")), StringComparison.Ordinal);
+        var smokeProject = await File.ReadAllTextAsync(Path.Join(workDirectory, "package-restore", "Smoke.csproj"));
+        Assert.Contains("Include=\"ForgeTrust.AppSurface.Web\"", smokeProject, StringComparison.Ordinal);
+        Assert.Contains("Include=\"ForgeTrust.AppSurface.Config\"", smokeProject, StringComparison.Ordinal);
         Assert.Contains("NUGET_PACKAGES", commandRunner.Requests[0].Environment!.Keys);
+    }
+
+    [Fact]
+    public async Task PackageSmokeInstallWorkflow_MarksAllPackagesFailedWhenAggregateRestoreFails()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Web.
+                includes: Web.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 20
+                use_when: Config.
+                includes: Config.
+                does_not_include: Extras.
+                start_here_path: Config/ForgeTrust.AppSurface.Config/README.md
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj", "<Project />");
+        await WriteFileAsync("Config/ForgeTrust.AppSurface.Config/README.md", "# Config");
+        var artifactDirectory = Path.Join(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var webPackagePath = Path.Join(artifactDirectory, $"ForgeTrust.AppSurface.Web.{PackageVersion}.nupkg");
+        await File.WriteAllTextAsync(webPackagePath, "web", Encoding.UTF8);
+        var configPackagePath = Path.Join(artifactDirectory, $"ForgeTrust.AppSurface.Config.{PackageVersion}.nupkg");
+        await File.WriteAllTextAsync(configPackagePath, "config", Encoding.UTF8);
+        var manifestPath = Path.Join(artifactDirectory, "package-artifact-manifest.json");
+        await new PackageArtifactManifestWriter().WriteAsync(
+            new PackageArtifactValidationReport(
+                PackageVersion,
+                [
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Web", "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", PackagePublishDecision.Publish, [], webPackagePath),
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Config", "Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj", PackagePublishDecision.Publish, [], configPackagePath)
+                ]),
+            artifactDirectory,
+            manifestPath,
+            CancellationToken.None);
+        var restoreFailure = new ExternalCommandResult(1, string.Empty, "restore failed");
+        var commandRunner = new RecordingExternalCommandRunner([
+            restoreFailure,
+            restoreFailure,
+            restoreFailure,
+            restoreFailure,
+            restoreFailure
+        ]);
+        var delays = new List<TimeSpan>();
+        var workflow = new PackageSmokeInstallWorkflow(
+            new PackageArtifactManifestReader(),
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "ForgeTrust.AppSurface.Web"),
+                ["Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj"] = CreateMetadata("Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj", "ForgeTrust.AppSurface.Config")
+            }),
+            commandRunner,
+            new PackageSmokeInstallReportRenderer(),
+            (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            });
+
+        var workDirectory = Path.Join(_repositoryRoot, "smoke");
+
+        var report = await workflow.RunAsync(
+            new PackageSmokeInstallRequest(
+                _repositoryRoot,
+                ManifestPath,
+                manifestPath,
+                workDirectory,
+                Path.Join(workDirectory, "report.md"),
+                "https://api.nuget.org/v3/index.json"),
+            CancellationToken.None);
+
+        Assert.Equal(5, commandRunner.Requests.Count);
+        Assert.Equal(4, delays.Count);
+        Assert.All(report.Entries, entry =>
+        {
+            Assert.Equal(PackageSmokeInstallStatus.Failed, entry.Status);
+            Assert.Contains("restore failed", entry.Output, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public async Task PackageSmokeInstallWorkflow_RunsToolSmokeWhenAggregateRestoreFails()
+    {
+        await WriteFileAsync("packages/package-index.yml",
+            """
+            packages:
+              - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 10
+                use_when: Web.
+                includes: Web.
+                does_not_include: Extras.
+                start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
+              - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                product_family: appsurface
+                classification: public
+                publish_decision: publish
+                order: 20
+                use_when: Tool.
+                includes: CLI command.
+                does_not_include: Runtime packages.
+                start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
+                tool_command_name: appsurface
+            """);
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "<Project />");
+        await WriteFileAsync("Web/ForgeTrust.AppSurface.Web/README.md", "# Web");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", "<Project />");
+        await WriteFileAsync("Cli/ForgeTrust.AppSurface.Cli/README.md", "# CLI");
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var webPackagePath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Web"));
+        var cliPackagePath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(webPackagePath, "web", Encoding.UTF8);
+        await File.WriteAllTextAsync(cliPackagePath, "cli", Encoding.UTF8);
+        var manifestPath = CombineSafeChildPath(artifactDirectory, "package-artifact-manifest.json");
+        await new PackageArtifactManifestWriter().WriteAsync(
+            new PackageArtifactValidationReport(
+                PackageVersion,
+                [
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Web", "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", PackagePublishDecision.Publish, [], webPackagePath),
+                    new PackageArtifactValidationReportEntry("ForgeTrust.AppSurface.Cli", "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", PackagePublishDecision.Publish, [], cliPackagePath, IsTool: true, ToolCommandName: "appsurface")
+                ]),
+            artifactDirectory,
+            manifestPath,
+            CancellationToken.None);
+        var restoreFailure = new ExternalCommandResult(1, string.Empty, "restore failed");
+        var commandRunner = new RecordingExternalCommandRunner([
+            restoreFailure,
+            restoreFailure,
+            restoreFailure,
+            restoreFailure,
+            restoreFailure,
+            new ExternalCommandResult(0, "installed", string.Empty),
+            new ExternalCommandResult(0, "USAGE\nappsurface [command]", string.Empty)
+        ]);
+        var delays = new List<TimeSpan>();
+        var workflow = new PackageSmokeInstallWorkflow(
+            new PackageArtifactManifestReader(),
+            CreateResolver(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata("Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj", "ForgeTrust.AppSurface.Web"),
+                ["Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"] = CreateMetadata("Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj", "ForgeTrust.AppSurface.Cli", isTool: true)
+            }),
+            commandRunner,
+            new PackageSmokeInstallReportRenderer(),
+            (delay, _) =>
+            {
+                delays.Add(delay);
+                return Task.CompletedTask;
+            });
+        var workDirectory = CombineSafeChildPath(_repositoryRoot, "smoke");
+
+        var report = await workflow.RunAsync(
+            new PackageSmokeInstallRequest(
+                _repositoryRoot,
+                ManifestPath,
+                manifestPath,
+                workDirectory,
+                CombineSafeChildPath(workDirectory, "smoke.md"),
+                "https://api.nuget.org/v3/index.json"),
+            CancellationToken.None);
+
+        var packageEntry = Assert.Single(report.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Web");
+        Assert.Equal(PackageSmokeInstallStatus.Failed, packageEntry.Status);
+        Assert.Contains("restore failed", packageEntry.Output, StringComparison.Ordinal);
+        var toolEntry = Assert.Single(report.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Cli");
+        Assert.Equal(PackageSmokeInstallStatus.Restored, toolEntry.Status);
+        Assert.Contains("installed", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Equal(4, delays.Count);
+        Assert.Equal(
+            ["dotnet restore", "dotnet restore", "dotnet restore", "dotnet restore", "dotnet restore", "dotnet tool install", "dotnet tool run"],
+            commandRunner.Requests.Select(request => request.OperationName).ToArray());
     }
 
     [Theory]
@@ -2229,6 +2458,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2237,6 +2467,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2283,6 +2514,16 @@ public sealed class PackageArtifactValidationTests : IDisposable
             new PackageSmokeInstallReportRenderer(),
             (_, _) => Task.CompletedTask);
         var workDirectory = CombineSafeChildPath(_repositoryRoot, "smoke");
+        var stalePackageRestoreFile = CombineSafeChildPath(
+            CombineSafeChildPath(workDirectory, "package-restore"),
+            "stale.txt");
+        var staleToolWorkFile = CombineSafeChildPath(
+            CombineSafeChildPath(workDirectory, "ForgeTrust.AppSurface.Cli"),
+            "stale.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(stalePackageRestoreFile)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(staleToolWorkFile)!);
+        await File.WriteAllTextAsync(stalePackageRestoreFile, "stale", Encoding.UTF8);
+        await File.WriteAllTextAsync(staleToolWorkFile, "stale", Encoding.UTF8);
 
         var report = await workflow.RunAsync(
             new PackageSmokeInstallRequest(
@@ -2296,6 +2537,8 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
         var toolEntry = Assert.Single(report.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Cli");
         Assert.Equal(PackageSmokeInstallStatus.Restored, toolEntry.Status);
+        Assert.False(File.Exists(stalePackageRestoreFile));
+        Assert.False(File.Exists(staleToolWorkFile));
         var toolRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "dotnet tool run");
         Assert.Contains("appsurface", Path.GetFileName(toolRunRequest.FileName), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(["--help"], toolRunRequest.Arguments);
@@ -2308,6 +2551,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2316,6 +2560,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2455,6 +2700,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2548,6 +2794,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2556,6 +2803,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20

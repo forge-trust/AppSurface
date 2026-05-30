@@ -491,11 +491,36 @@ internal sealed class PackageSmokeInstallWorkflow
     }
 
     /// <summary>
-    /// Restores each public package and runs each public tool command from the configured package source in an isolated workspace.
+    /// Restores all non-tool <c>publish</c> entries in one aggregate smoke project, then verifies each tool package
+    /// independently from isolated per-tool workspaces.
     /// </summary>
-    /// <param name="request">Smoke install request.</param>
+    /// <param name="request">
+    /// Smoke install request containing the repository root, package index manifest path, artifact manifest path,
+    /// smoke work directory, report output path, and package source URL.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Smoke install report.</returns>
+    /// <returns>
+    /// Smoke install report. Non-tool package entries share the aggregate restore result; tool entries report
+    /// independent install and command-help results.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Use this workflow for post-publish verification against a clean NuGet configuration. Non-tool packages share one
+    /// generated <c>Smoke.csproj</c> restore to reduce total smoke time; tools are installed and run individually to keep
+    /// command-shim verification isolated per package.
+    /// </para>
+    /// <para>
+    /// Restore, tool install, and tool help commands each use 180,000 ms timeouts. Aggregate restores and tool installs
+    /// retry after 15s, 30s, 60s, and 120s delays. The <c>package-restore</c> directory and each per-tool directory under
+    /// <paramref name="request" />.<c>WorkDirectory</c> are deleted and recreated on each run.
+    /// </para>
+    /// <para>
+    /// Pitfall: a failed aggregate package restore marks every non-tool package entry failed, but tool smoke still runs
+    /// and is reported independently. Request validation and manifest or package-plan mismatches throw before a report is
+    /// written; command failures are captured in the returned report unless the supplied <paramref name="cancellationToken" />
+    /// cancels the workflow.
+    /// </para>
+    /// </remarks>
     internal async Task<PackageSmokeInstallReport> RunAsync(
         PackageSmokeInstallRequest request,
         CancellationToken cancellationToken)
@@ -521,43 +546,60 @@ internal sealed class PackageSmokeInstallWorkflow
         await File.WriteAllTextAsync(nugetConfigPath, RenderNuGetConfig(request.Source), cancellationToken);
 
         var reportEntries = new List<PackageSmokeInstallReportEntry>(entries.Length);
-        foreach (var entry in entries)
+        var packageEntries = entries.Where(entry => !entry.ManifestEntry.IsTool).ToArray();
+        if (packageEntries.Length > 0)
         {
-            var packageWorkDirectory = Path.Combine(request.WorkDirectory, SanitizeFileName(entry.ManifestEntry.PackageId));
+            var packageManifestEntries = packageEntries.Select(entry => entry.ManifestEntry).ToArray();
+            var packageWorkDirectory = Path.Join(request.WorkDirectory, "package-restore");
             if (Directory.Exists(packageWorkDirectory))
             {
                 Directory.Delete(packageWorkDirectory, recursive: true);
             }
 
             Directory.CreateDirectory(packageWorkDirectory);
-            ExternalCommandResult result;
-            if (entry.ManifestEntry.IsTool)
+            await WriteSmokeProjectAsync(
+                packageWorkDirectory,
+                packageManifestEntries,
+                manifest.PackageVersion,
+                cancellationToken);
+            var packageRestoreResult = await RunRestoreWithRetryAsync(
+                packageManifestEntries,
+                packageWorkDirectory,
+                nugetConfigPath,
+                dotnetHomePath,
+                sharedPackagesPath,
+                cancellationToken);
+
+            foreach (var entry in packageEntries)
             {
-                result = await RunToolSmokeAsync(
-                    request,
-                    manifest.PackageVersion,
-                    entry.ManifestEntry,
-                    packageWorkDirectory,
-                    nugetConfigPath,
-                    dotnetHomePath,
-                    sharedPackagesPath,
-                    cancellationToken);
-            }
-            else
-            {
-                await WriteSmokeProjectAsync(
-                    packageWorkDirectory,
+                reportEntries.Add(new PackageSmokeInstallReportEntry(
                     entry.ManifestEntry.PackageId,
-                    manifest.PackageVersion,
-                    cancellationToken);
-                result = await RunRestoreWithRetryAsync(
-                    entry.ManifestEntry,
-                    packageWorkDirectory,
-                    nugetConfigPath,
-                    dotnetHomePath,
-                    sharedPackagesPath,
-                    cancellationToken);
+                    entry.ManifestEntry.ProjectPath,
+                    IsTool: false,
+                    packageRestoreResult.ExitCode == 0 ? PackageSmokeInstallStatus.Restored : PackageSmokeInstallStatus.Failed,
+                    packageRestoreResult.ExitCode,
+                    CombineOutput(packageRestoreResult)));
             }
+        }
+
+        foreach (var entry in entries.Where(entry => entry.ManifestEntry.IsTool))
+        {
+            var toolWorkDirectory = Path.Join(request.WorkDirectory, SanitizeFileName(entry.ManifestEntry.PackageId));
+            if (Directory.Exists(toolWorkDirectory))
+            {
+                Directory.Delete(toolWorkDirectory, recursive: true);
+            }
+
+            Directory.CreateDirectory(toolWorkDirectory);
+            var result = await RunToolSmokeAsync(
+                request,
+                manifest.PackageVersion,
+                entry.ManifestEntry,
+                toolWorkDirectory,
+                nugetConfigPath,
+                dotnetHomePath,
+                sharedPackagesPath,
+                cancellationToken);
 
             reportEntries.Add(new PackageSmokeInstallReportEntry(
                 entry.ManifestEntry.PackageId,
@@ -575,7 +617,7 @@ internal sealed class PackageSmokeInstallWorkflow
     }
 
     private async Task<ExternalCommandResult> RunRestoreWithRetryAsync(
-        PackageArtifactManifestEntry entry,
+        IReadOnlyList<PackageArtifactManifestEntry> entries,
         string packageWorkDirectory,
         string nugetConfigPath,
         string dotnetHomePath,
@@ -596,7 +638,7 @@ internal sealed class PackageSmokeInstallWorkflow
                     ],
                     packageWorkDirectory,
                     "dotnet restore",
-                    $"restoring '{entry.PackageId}'",
+                    FormatPackageRestoreDescription(entries),
                     RestoreTimeoutMilliseconds,
                     CreateSmokeEnvironment(dotnetHomePath, sharedPackagesPath)),
                 cancellationToken),
@@ -607,13 +649,13 @@ internal sealed class PackageSmokeInstallWorkflow
         PackageSmokeInstallRequest request,
         string packageVersion,
         PackageArtifactManifestEntry entry,
-        string packageWorkDirectory,
+        string toolWorkDirectory,
         string nugetConfigPath,
         string dotnetHomePath,
         string sharedPackagesPath,
         CancellationToken cancellationToken)
     {
-        var toolPath = Path.Combine(packageWorkDirectory, "tools");
+        var toolPath = Path.Join(toolWorkDirectory, "tools");
         Directory.CreateDirectory(toolPath);
         var installResult = await RunWithRetryAsync(
             () => _commandRunner.RunAsync(
@@ -632,7 +674,7 @@ internal sealed class PackageSmokeInstallWorkflow
                         "--add-source",
                         request.Source
                     ],
-                    packageWorkDirectory,
+                    toolWorkDirectory,
                     "dotnet tool install",
                     $"installing tool '{entry.PackageId}'",
                     ToolInstallTimeoutMilliseconds,
@@ -649,7 +691,7 @@ internal sealed class PackageSmokeInstallWorkflow
             new ExternalCommandRequest(
                 ResolveToolShimPath(toolPath, entry.ToolCommandName),
                 ["--help"],
-                packageWorkDirectory,
+                toolWorkDirectory,
                 "dotnet tool run",
                 $"running '{entry.ToolCommandName} --help'",
                 ToolRunTimeoutMilliseconds,
@@ -712,10 +754,12 @@ internal sealed class PackageSmokeInstallWorkflow
 
     private static async Task WriteSmokeProjectAsync(
         string packageWorkDirectory,
-        string packageId,
+        IReadOnlyList<PackageArtifactManifestEntry> entries,
         string packageVersion,
         CancellationToken cancellationToken)
     {
+        ArgumentOutOfRangeException.ThrowIfZero(entries.Count);
+
         var project = new XDocument(
             new XElement("Project",
                 new XAttribute("Sdk", "Microsoft.NET.Sdk"),
@@ -725,11 +769,19 @@ internal sealed class PackageSmokeInstallWorkflow
                     new XElement("ImplicitUsings", "enable"),
                     new XElement("Nullable", "enable")),
                 new XElement("ItemGroup",
-                    new XElement("PackageReference",
-                        new XAttribute("Include", packageId),
-                        new XAttribute("Version", packageVersion)))));
+                    entries.Select(entry =>
+                        new XElement("PackageReference",
+                            new XAttribute("Include", entry.PackageId),
+                            new XAttribute("Version", packageVersion))))));
         await File.WriteAllTextAsync(Path.Combine(packageWorkDirectory, "Smoke.csproj"), project.ToString(), cancellationToken);
         await File.WriteAllTextAsync(Path.Combine(packageWorkDirectory, "Program.cs"), "Console.WriteLine(\"smoke\");" + Environment.NewLine, cancellationToken);
+    }
+
+    private static string FormatPackageRestoreDescription(IReadOnlyList<PackageArtifactManifestEntry> entries)
+    {
+        return entries.Count == 1
+            ? $"restoring '{entries[0].PackageId}'"
+            : $"restoring {entries.Count} published packages in one smoke project";
     }
 
     private static string RenderNuGetConfig(string source)

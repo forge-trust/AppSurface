@@ -2647,6 +2647,10 @@ public class DocAggregatorTests : IDisposable
         var harvestedDocs = new List<DocNode>
         {
             new("Search", "search.md", "<p>Search body</p>"),
+            new(
+                "Refresh",
+                "_search-index/refresh.md",
+                "<p>Refresh body</p>"),
             new("Guide", "guides/guide.md", "<p>Guide body</p>")
         };
         A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(harvestedDocs);
@@ -2654,6 +2658,7 @@ public class DocAggregatorTests : IDisposable
         var payload = await _aggregator.GetSearchIndexPayloadAsync();
 
         Assert.DoesNotContain(payload.Documents, document => document.SourcePath == "search.md");
+        Assert.DoesNotContain(payload.Documents, document => document.SourcePath == "_search-index/refresh.md");
         var indexedDocument = Assert.Single(payload.Documents);
         Assert.Equal("guides/guide.md", indexedDocument.SourcePath);
         Assert.Equal("/docs/guides/guide", indexedDocument.Path);
@@ -5083,14 +5088,17 @@ public class DocAggregatorTests : IDisposable
             string rootPath,
             CancellationToken cancellationToken = default)
         {
-            var deadline = DateTimeOffset.UtcNow.AddSeconds(1);
-            while (!cancellationToken.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+            using var cancellationObserved = new ManualResetEventSlim();
+            using var registration = cancellationToken.Register(
+                static state => ((ManualResetEventSlim)state!).Set(),
+                cancellationObserved);
+
+            if (cancellationObserved.Wait(TimeSpan.FromSeconds(1)))
             {
-                System.Threading.Thread.Sleep(1);
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<IReadOnlyList<DocNode>>([]);
+            throw new TimeoutException("The test harvester did not observe the timeout cancellation token.");
         }
     }
 

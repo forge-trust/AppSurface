@@ -20,6 +20,8 @@ appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 
 `appsurface docs` and `appsurface docs preview` run the standalone host for local inspection. `appsurface docs export` starts that same host in-process, binds an internal `http://127.0.0.1:0` listener, resolves the actual Kestrel address, and exports through RazorWire's static export engine.
 
+Preview `--port` values bind localhost only. Add `--all-hosts` to a `--port` preview only when LAN, container, or other non-loopback access is intentional; the all-hosts wildcard can expose the preview host beyond the local machine.
+
 Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands.
 
 Redirect aliases default to HTML fallback materialization. Omit `--redirects`, or pass `--redirects html`, for GitHub Pages and generic static hosts. Pass `--mode cdn --redirects netlify` for Netlify-compatible CDN publishing; export writes one root `_redirects` file with exact site-local `301!` rules and does not write alias HTML files. Netlify export validates the encoded provider rule paths, so self-redirects and same-source aliases that point at different canonical routes fail before files are written. Do not hand-author `_redirects` in the export output because the exporter reserves that file for validated redirect rules.
@@ -655,7 +657,7 @@ dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Test
 
 The dedicated `vcs-ignore-parity.yml` workflow runs that parity suite on Linux, macOS, and Windows so case-sensitive ignore behavior and Git oracle traces stay pinned across supported runner families.
 
-Traversal uses the same policy for Markdown and C#. AppSurface Docs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file. The root `LICENSE` file is a Markdown candidate, but when global includes are configured it still needs to match an include such as `LICENSE`.
+Traversal uses the same policy for Markdown and C#. AppSurface Docs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file. File and directory reparse points, including symlinks and junctions, are skipped before the built-in Markdown and C# harvesters read or descend into them. This keeps the selected repository root as the source boundary even for untrusted repositories that contain links to files outside the root. The root `LICENSE` file is a Markdown candidate only when it is not a reparse point, and Markdown sidecar metadata files such as `README.md.yml` are ignored when the sidecar itself is a reparse point. When global includes are configured, the root license still needs to match an include such as `LICENSE`.
 
 To host the same live source surface somewhere else, set the route-family root. With versioning disabled, the live docs root defaults to the route root:
 
@@ -750,13 +752,14 @@ var routes = app.Services.GetRequiredService<DocsUrlBuilder>().Routes;
 var home = routes.Home;
 var search = routes.Search;
 var searchIndexRefresh = routes.SearchIndexRefresh;
+var searchIndexRefreshMethod = routes.SearchIndexRefreshMethod; // POST
 var healthJson = routes.HealthJson;
 var routeInspectorJson = routes.RouteInspectorJson;
 ```
 
-`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
+`AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `SearchIndexRefreshMethod`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
-The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; keep `Routes.SearchIndexRefresh` for authenticated operator refresh flows.
+The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; operator UI should submit a browser form to `Routes.SearchIndexRefresh` with `Routes.SearchIndexRefreshMethod`.
 
 Embedded hosts decide their own app-wide browser error UX. The reusable `ForgeTrust.AppSurface.Docs` package registers docs routes and route references, but it does not install a docs-aware application `404` page. Hosts that want stale-docs recovery should opt into AppSurface Web conventional browser status pages, add their own `~/Views/Shared/404.cshtml`, use `BrowserStatusPageModel` for status/original-path context, inject `DocsUrlBuilder`, and link to `DocsUrlBuilder.Routes.Search` through the host's path-base-aware rendering helper.
 
@@ -1039,6 +1042,12 @@ static web assets.
   - Include globs default to an empty list; exclude globs default to `**/*.min.js`; default-exclusion controls mirror the global path option shape.
   - Use include globs as an optional narrowing or performance boundary, such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js`.
   - Global path rules apply first, then JavaScript-specific includes, default exclusions, and excludes refine the candidate set.
+- `AppSurfaceDocs:Harvest:JavaScript:GroupNameRules`
+  - Defaults to an empty list.
+  - Names already-eligible JavaScript source trees when public doclets do not declare a nonblank `@namespace` or `@module`.
+  - Rules are evaluated in order; the first matching rule wins.
+  - Each rule requires a nonblank `Name` and at least one valid repository-relative `IncludeGlobs` pattern.
+  - Group name rules do not include files in the harvest. Use `IncludeGlobs`, `ExcludeGlobs`, and shared path policy for harvest boundaries.
 - `AppSurfaceDocs:Harvest:JavaScript:RequirePublicTag`
   - Defaults to `true`.
   - Requires harvested doclets to carry `@public`. `@internal`, `@private`, and `@ignore` always exclude a doclet.
@@ -1047,6 +1056,11 @@ static web assets.
   - Defaults to `false`.
   - Keeps broad default JavaScript discovery best-effort for aggregate health: empty results, parse/read diagnostics, and timeouts remain visible but do not mask or cause Markdown/C# strict failures.
   - JavaScript participates in strict aggregate health when this is `true` or JavaScript `IncludeGlobs` is nonempty.
+- `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets`
+  - Defaults to `false`.
+  - When `true`, incomplete public JavaScript event doclets emit `appsurfacedocs.javascript.incomplete_public_event_doclet` with error severity and fail harvest health.
+  - `DocAggregator` treats `appsurfacedocs.javascript.incomplete_public_event_doclet` as a strict blocking diagnostic: when `RequireCompleteEventDoclets` emits it, the JavaScript harvester is treated as though `ParticipatesInStrictHealth=true` and that diagnostic becomes the harvester health result, regardless of whether JavaScript would otherwise participate in `StrictHealth`.
+  - This applies only to public `@event` doclets. Parse failures, oversized files, unsupported shapes, and malformed doclets stay governed by `StrictHealth` or explicit JavaScript include globs.
 - `AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes`
   - Defaults to `262144`.
   - Files above this limit are skipped with a structured harvest diagnostic so generated bundles do not dominate docs snapshot time.
@@ -1125,7 +1139,40 @@ JavaScript harvesting is for intentional browser runtime contracts: custom event
 }
 ```
 
-The v1 harvester parses policy-approved `.js` files with Acornima and reads JSDoc-shaped block comments. It parses modules first and falls back to script parsing for classic browser runtimes. It renders group pages such as `api/javascript/razorwire`, adds fragment-addressable search stubs for each item, and uses `@namespace` or `@module` as the group name. Without an explicit group, `window.RazorWire` groups under `RazorWire`; otherwise the source file name is used.
+The v1 harvester parses policy-approved `.js` files with Acornima and reads JSDoc-shaped block comments. It parses modules first and falls back to script parsing for classic browser runtimes. It renders group pages such as `api/javascript/razorwire`, adds fragment-addressable search stubs for each item, and uses `@namespace` or `@module` as the group name. Without an explicit group, configured group rules run next; if no rule matches, classic browser globals such as `window.RazorWire` infer `RazorWire`, and other doclets use source-path fallback.
+
+JavaScript API family names resolve in this order:
+
+1. the first nonblank `@namespace`
+2. the first nonblank `@module`
+3. the first configured `GroupNameRules` match
+4. classic browser global inference from `window.*`
+5. fallback identity from the source path
+
+Configured group rules are useful when a docs-only contract manifest or package-owned source tree should publish under a reader-facing family name without repeating the same tag on every doclet:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "JavaScript": {
+        "GroupNameRules": [
+          {
+            "Name": "RazorWire",
+            "IncludeGlobs": [
+              "Web/ForgeTrust.RazorWire/assets/contracts/**/*.js"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Rules are ordered and first match wins. Put narrow package paths before broad fallback paths. A rule only names files that normal harvest policy already accepted; it does not widen `IncludeGlobs`, bypass excludes, or publish unannotated JavaScript. If a doclet has `@namespace` or `@module`, that tag wins over any matching rule so source-owned API names remain stable.
+
+Path fallback is deterministic and path-aware. A single untagged file such as `src/public-api.js` uses `public-api` as its reader-facing family label and publishes at `api/javascript/src-public-api`, so its route stays stable if another `public-api.js` appears later. If multiple fallback files share the same stem, AppSurface Docs also disambiguates the visible family labels with path context, such as `forms/public-api` and `widgets/public-api`, so unrelated contracts do not silently merge onto one page. Add `@namespace`, `@module`, or a configured group rule when fallback labels are not the names readers should see.
 
 Supported public shapes:
 
@@ -1142,6 +1189,8 @@ Supported public shapes:
 - standalone `@cssHook selector` doclets for stable styling hooks paired with `@hookKind`
 
 Event doclets should include `@target`, `@firesWhen`, `@bubbles`, `@cancelable`, and detail payload fields through `@property detail.name`. Use `@detail none` only when the event deliberately carries no payload. Add `@example` when the event needs consumption guidance beyond the contract fields.
+
+Set `AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets=true` when public browser events must be release-blocking. In that mode, each public `@event` must include `@target`, `@firesWhen`, and either at least one valid `detail.*` property or `@detail none`. `@bubbles`, `@cancelable`, and `@example` remain recommended authoring fields, but they are intentionally excluded from the blocking strict-event contract. Valid detail property names are exactly `detail.` plus dot-separated segments. Segments may contain letters, digits, `_`, `$`, `-`, and a trailing `[]`. Optional JSDoc brackets and defaults are accepted, so `detail.message`, `[detail.message]`, `[detail.message="fallback"]`, `detail.items[]`, and `detail.items[].id` are valid. Values such as `detail`, `[detail]`, `detail.`, `detail..message`, `detail. message`, `detail.[x]`, `Detail.message`, `form`, and `message` are invalid. `@detail none` is contradictory when any `detail.*` property is present.
 
 ```js
 /**
@@ -1176,15 +1225,32 @@ Browser-contract doclets should carry enough fields for readers to use them with
  */
 ```
 
-Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially.
+Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`).
+
+Use the CLI health verifier in CI when degraded docs health should block release output:
+
+```bash
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release -- \
+  docs verify-health \
+  --repo . \
+  --require-complete-event-doclets \
+  --environment Production \
+  --startup-timeout-seconds 30
+```
+
+The verifier starts the standalone docs host on loopback, reads the same redacted response shape as `{DocsRootPath}/_health.json`, and exits nonzero when `verification.ok=false`. The reported status code matches the health endpoint contract: `200` for `Healthy` or `Empty`, `503` for `Degraded` or `Failed`; `docs verify-health` also fails when the HTTP response status and `verification.httpStatusCode` disagree. `docs verify-health --startup-timeout-seconds` defaults to 10 seconds when omitted; pass `0` to disable the startup watchdog instead of waiting indefinitely. `AppSurfaceDocs:Harvest:FailOnFailure` still fails startup only for aggregate `Failed` snapshots; use `docs verify-health` when a `Degraded` snapshot, such as incomplete strict event docs with Markdown still available, should block publication.
 
 Pitfalls:
 
 - Do not add broad `**/*.js` include globs just to turn JavaScript harvesting on. It is already on; include globs are for narrowing default discovery.
+- Do not expect `GroupNameRules` to harvest files. They only name JavaScript API families after the normal path policy accepts a file.
+- Do not put a broad `GroupNameRules` entry before a narrower package rule unless you want the broad name to win.
+- Do not rely on fallback file names as stable product names for packages. Prefer `@namespace`, `@module`, or a configured group rule for public API families.
 - Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
 - When documenting package browser contracts, prefer a small docs-only contract manifest such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js` over generated runtime outputs.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
+- Do not pair `@detail none` with `@property detail.*`; either the event has no payload or its payload shape is documented.
 - Do not put `@public` on classes, default exports, or CommonJS exports until a later harvester slice supports those shapes.
 - Do not treat Acornima as a runtime JavaScript execution engine. AppSurface Docs uses it only to parse configured source for documentation, and `ForgeTrust.AppSurface.Docs` carries `THIRD-PARTY-NOTICES.md` for the redistributed package.
 
@@ -1287,6 +1353,54 @@ When the hidden frozen route manifest is present, mounted archives also use it b
 
 `AppSurfaceDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
 
+### Search index refresh
+
+`GET {DocsRootPath}/search-index.json` is a read-only reader endpoint. Legacy query strings such as `?refresh=1` and `?refresh=true` are ignored so crawlers, browser reloads, and copied reader links cannot mutate the server snapshot cache.
+
+Packaged operator refresh lives at `POST {DocsRootPath}/_search-index/refresh`. The endpoint always requires MVC anti-forgery validation and a host-owned authorization policy named by `AppSurfaceDocs:Diagnostics:SearchIndexRefreshPolicy`. Blank or whitespace policy names are normalized to `null`; when the policy is missing, the packaged endpoint denies refresh.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Diagnostics": {
+      "SearchIndexRefreshPolicy": "DocsSearchIndexRefresh"
+    }
+  }
+}
+```
+
+```csharp
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(
+        "DocsSearchIndexRefresh",
+        policy => policy.RequireAuthenticatedUser()
+            .RequireClaim("scope", "docs.search-index.refresh"));
+});
+```
+
+A Razor/MVC operator surface can post to the packaged endpoint with the normal anti-forgery token:
+
+```cshtml
+@inject ForgeTrust.AppSurface.Docs.Services.DocsUrlBuilder DocsUrls
+
+<form method="@DocsUrls.Routes.SearchIndexRefreshMethod" action="@DocsUrls.Routes.SearchIndexRefresh">
+    @Html.AntiForgeryToken()
+    <button type="submit">Refresh search index</button>
+</form>
+```
+
+Host automation should usually use a host-owned admin or job endpoint instead of the browser-form-shaped packaged route. After applying host-specific authentication, authorization, audit logging, and replay controls, call `DocAggregator.InvalidateCache()` directly.
+
+| Request state | Response |
+| --- | --- |
+| Missing or invalid anti-forgery token | Framework anti-forgery failure, normally `400` |
+| No configured refresh policy, blank policy, missing policy provider/service, or policy not found | `403` |
+| Unauthenticated user after anti-forgery succeeds | `403` |
+| Authenticated user who fails the configured policy | `403` |
+| Authenticated user who satisfies the configured policy | `204`, cache invalidated |
+| Non-POST request to `{DocsRootPath}/_search-index/refresh` | `405` |
+
 Pitfalls:
 
 - Do not set `CacheExpirationMinutes` to `0` to disable caching. AppSurface Docs rejects zero and negative values because every request would rebuild the docs snapshot and search index.
@@ -1294,7 +1408,7 @@ Pitfalls:
 - Do not set fractional-second values such as `0.333` minutes. AppSurface Docs rejects values that cannot round-trip to a whole-second `max-age`.
 - Do not set huge finite values such as `double.MaxValue`. AppSurface Docs caps the value so the derived search-index `Cache-Control` `max-age` remains representable.
 - The search-index response uses the same duration for its private `Cache-Control` `max-age`, so client refresh behavior stays aligned with server-side snapshot reuse.
-- Manual refresh through `{DocsRootPath}/search-index.json?refresh=1` still invalidates the server snapshot generation immediately for authenticated users; it does not change the configured TTL for later entries. For example, when `AppSurfaceDocs:Routing:DocsRootPath` is `/docs/next`, use `/docs/next/search-index.json?refresh=1`.
+- Do not use `{DocsRootPath}/search-index.json?refresh=1` for operations. It is intentionally read-only compatibility noise; use the POST operator route or a host-owned automation path.
 
 ## Contributor Provenance
 

@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Net;
+using System.Text.Json;
 
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Caching;
@@ -24,6 +26,8 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection(ProgramEntryPointCollection.Name)]
 public sealed class ProgramEntryPointTests
 {
+    private static readonly TimeSpan DefaultHealthVerifyStartupTimeout = TimeSpan.FromSeconds(10);
+
     [Fact]
     public async Task EntryPoint_Should_Print_Root_Help_Without_Lifecycle_Noise()
     {
@@ -50,6 +54,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("--repo", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--public-origin", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--all-hosts", result.AllText, StringComparison.Ordinal);
         Assert.Contains("--startup-timeout-seconds", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--redirects", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
@@ -111,6 +116,23 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("--port", runner.Args);
         Assert.Contains("5189", runner.Args);
         Assert.Equal(TimeSpan.FromSeconds(10), runner.StartupTimeout);
+    }
+
+    [Fact]
+    public async Task DocsPreviewAlias_Should_Forward_AllHosts_When_Port_Is_Configured()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingAppSurfaceDocsHostRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "preview", "--repo", repository.Path, "--port", "5189", "--all-hosts"],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(runner.Args);
+        Assert.Contains("--port", runner.Args);
+        Assert.Contains("5189", runner.Args);
+        Assert.Contains("--all-hosts", runner.Args);
     }
 
     [Fact]
@@ -283,6 +305,21 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task DocsCommand_Should_Reject_AllHosts_Without_Port()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-repo-");
+        var runner = new CapturingAppSurfaceDocsHostRunner();
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "--repo", repository.Path, "--all-hosts"],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("The --all-hosts option requires --port.", result.AllText, StringComparison.Ordinal);
+        Assert.Null(runner.Args);
+    }
+
+    [Fact]
     public async Task DocsCommand_Should_Reject_Missing_RepositoryRoot()
     {
         var missingRepository = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -315,8 +352,515 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("--strict", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--port", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("--urls", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--all-hosts", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
         Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EntryPoint_Should_Print_Docs_Verify_Health_Help_Without_Preview_Listener_Options()
+    {
+        var result = await InvokeEntryPointAsync(["docs", "verify-health", "--help"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Verify AppSurface Docs harvest health for CI and release gates.", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--require-complete-event-doclets", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--repo", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("--startup-timeout-seconds", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--strict", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--port", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--urls", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("--all-hosts", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application started", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Run Exited - Shutting down", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Forward_StrictEventDoclets_And_HealthExposure()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Result = CreateHealthVerifyResult(ok: true)
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            [
+                "docs", "verify-health",
+                "--repo", repository.Path,
+                "--require-complete-event-doclets",
+                "--route-root", "/reference",
+                "--docs-root", "/reference/next",
+                "--environment", "Production",
+                "--startup-timeout-seconds", "30"
+            ],
+            options => RegisterRunner(options, runner));
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(runner.Args);
+        var args = runner.Args.GetValueOrDefault();
+        Assert.Equal("http://127.0.0.1:0", args.RequestedBaseUrl);
+        Assert.Equal("/reference/next/_health.json", args.HealthJsonPath);
+        Assert.Equal("Production", args.HostArgs.EnvironmentName);
+        Assert.Equal(TimeSpan.FromSeconds(30), args.HostArgs.StartupTimeout);
+        Assert.Contains("--AppSurfaceDocs:Harvest:StartupMode", args.HostArgs.Args);
+        Assert.Contains(nameof(AppSurfaceDocsHarvestStartupMode.Disabled), args.HostArgs.Args);
+        Assert.Contains("--AppSurfaceDocs:Harvest:FailOnFailure", args.HostArgs.Args);
+        Assert.Contains("false", args.HostArgs.Args);
+        Assert.Contains("--AppSurfaceDocs:Harvest:Health:ExposeRoutes", args.HostArgs.Args);
+        Assert.Contains(nameof(AppSurfaceDocsHarvestHealthExposure.Always), args.HostArgs.Args);
+        Assert.Contains("--AppSurfaceDocs:Harvest:JavaScript:RequireCompleteEventDoclets", args.HostArgs.Args);
+        Assert.Contains("true", args.HostArgs.Args);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Fail_WithReadableDiagnostics_WhenHealthIsNotOk()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Result = CreateHealthVerifyResult(ok: false)
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("AppSurface Docs harvest health verification failed", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("appsurfacedocs.javascript.incomplete_public_event_doclet", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("Add @target", result.AllText, StringComparison.Ordinal);
+        Assert.NotNull(runner.Args);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Fail_WithReadableMessage_WhenHealthEndpointCannotBeRead()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Exception = new HttpRequestException("loopback refused")
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("could not read the health endpoint: loopback refused", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Fail_WithReadableMessage_WhenHealthEndpointTimesOut()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Exception = new OperationCanceledException(
+                "The request was canceled.",
+                new TimeoutException("The health endpoint did not respond before the timeout elapsed."))
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(
+            "could not read the health endpoint: The health endpoint did not respond before the timeout elapsed.",
+            result.AllText,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Reject_Unsupported_StrictOption()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Result = CreateHealthVerifyResult(ok: true)
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path, "--strict"],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Null(runner.Args);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Fail_WithReadableMessage_WhenHealthJsonIsInvalid()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Exception = new JsonException("missing verification")
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("returned invalid JSON: missing verification", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Fail_WithReadableMessage_WhenStartupTimesOut()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Exception = new TimeoutException("verification host did not start")
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("verification host did not start", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Fail_WhenHttpStatusDiffersFromHealthJson()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Result = new AppSurfaceDocsHealthVerificationResult(
+                new AppSurfaceDocsHarvestHealthResponse
+                {
+                    Status = nameof(DocHarvestHealthStatus.Healthy),
+                    Verification = new AppSurfaceDocsHarvestHealthVerification
+                    {
+                        Ok = true,
+                        HttpStatusCode = 200
+                    }
+                },
+                HttpStatusCode.ServiceUnavailable)
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("inconsistent HTTP status", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("response HTTP 503", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("verification.httpStatusCode 200", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsVerifyHealthCommand_Should_Fail_WithReadableDiagnostics_WhenOptionalDiagnosticFieldsAreBlank()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new CapturingAppSurfaceDocsHealthVerifyRunner
+        {
+            Result = new AppSurfaceDocsHealthVerificationResult(
+                new AppSurfaceDocsHarvestHealthResponse
+                {
+                    Status = nameof(DocHarvestHealthStatus.Failed),
+                    Verification = new AppSurfaceDocsHarvestHealthVerification
+                    {
+                        Ok = false,
+                        HttpStatusCode = 503
+                    },
+                    Diagnostics =
+                    [
+                        new AppSurfaceDocsHarvestDiagnosticResponse
+                        {
+                            Code = "appsurfacedocs.test",
+                            Problem = "Harvest failed."
+                        }
+                    ]
+                },
+                HttpStatusCode.ServiceUnavailable)
+        };
+
+        var result = await InvokeProgramEntryPointAsync(
+            ["docs", "verify-health", "--repo", repository.Path],
+            options => RegisterRunner(options, runner));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("status Failed, HTTP 503", result.AllText, StringComparison.Ordinal);
+        Assert.Contains("- appsurfacedocs.test: Harvest failed.", result.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fix:", result.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsHealthHttpClient_ShouldReturnBody_WhenHttpStatusIsUnavailable()
+    {
+        var client = new AppSurfaceDocsHealthHttpClient(
+            new HttpClient(new StaticHttpMessageHandler(HttpStatusCode.ServiceUnavailable, """{"status":"Degraded"}""")));
+
+        var response = await client.GetAsync("http://127.0.0.1/docs/_health.json", CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("""{"status":"Degraded"}""", response.Body);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_Parse_HealthJson_WhenHttpStatusIsUnavailable()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61234");
+        var starter = new ImmediateHealthHostStarter(host);
+        var client = new CapturingHealthHttpClient(
+            new AppSurfaceDocsHealthHttpResponse(
+                HttpStatusCode.ServiceUnavailable,
+                """
+                {
+                  "status": "Degraded",
+                  "generatedUtc": "2026-05-25T12:00:00Z",
+                  "verification": {
+                    "ok": false,
+                    "httpStatusCode": 503
+                  },
+                  "diagnostics": [
+                    {
+                      "code": "appsurfacedocs.javascript.incomplete_public_event_doclet",
+                      "problem": "Missing @target."
+                    }
+                  ]
+                }
+                """));
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            client,
+            starter);
+
+        var result = await runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, result.HttpStatusCode);
+        Assert.False(result.Health.Verification.Ok);
+        Assert.Equal("Degraded", result.Health.Status);
+        Assert.Equal("http://127.0.0.1:61234/docs/_health.json", client.Url);
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
+        Assert.Equal(
+            NormalizeDirectoryForComparison(repository.Path),
+            NormalizeDirectoryForComparison(starter.WorkingDirectoryDuringStart));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("null")]
+    [InlineData("{}")]
+    [InlineData("""{"status":"Healthy","verification":{"httpStatusCode":200}}""")]
+    [InlineData("""{"status":"Healthy","verification":{"ok":true}}""")]
+    [InlineData("""{"status":"Healthy","verification":{"ok":"true","httpStatusCode":200}}""")]
+    [InlineData("""{"status":"Healthy","verification":{"ok":true,"httpStatusCode":"200"}}""")]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_Reject_Missing_HealthJson(string body)
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61235");
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, body)),
+            new ImmediateHealthHostStarter(host));
+
+        await Assert.ThrowsAsync<JsonException>(
+            () => runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), CancellationToken.None));
+
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_Fail_WhenHostStartupTimesOut()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var client = new CapturingHealthHttpClient(
+            new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}"""));
+        var starter = new CancelingHealthHostStarter();
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            client,
+            starter);
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(
+            () => runner.VerifyAsync(
+                CreateHealthVerifyArgs(repository.Path, TimeSpan.FromMilliseconds(10)),
+                CancellationToken.None));
+
+        Assert.Contains("did not start", exception.Message, StringComparison.Ordinal);
+        Assert.Null(client.Url);
+        Assert.True(starter.StartupToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_Verify_WhenStartupTimeoutIsDisabled()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61237");
+        var starter = new ImmediateHealthHostStarter(host);
+        var client = new CapturingHealthHttpClient(
+            new AppSurfaceDocsHealthHttpResponse(
+                HttpStatusCode.OK,
+                """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}"""));
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            client,
+            starter);
+
+        var result = await runner.VerifyAsync(
+            CreateHealthVerifyArgs(repository.Path, startupTimeout: null),
+            CancellationToken.None);
+
+        Assert.True(result.Health.Verification.Ok);
+        Assert.Equal(HttpStatusCode.OK, result.HttpStatusCode);
+        Assert.False(starter.StartupToken.IsCancellationRequested);
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_DefaultEnvironment_WhenHostArgsOmitEnvironment()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61238");
+        var starter = new ImmediateHealthHostStarter(host);
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            starter);
+
+        var result = await runner.VerifyAsync(
+            CreateHealthVerifyArgs(repository.Path, DefaultHealthVerifyStartupTimeout, environmentName: null),
+            CancellationToken.None);
+
+        Assert.True(result.Health.Verification.Ok);
+        Assert.Equal(Environments.Production, starter.EnvironmentName);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_NotCancelStartupToken_WhenHostStartsBeforeTimeout()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61241");
+        var starter = new ImmediateHealthHostStarter(host);
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            starter);
+
+        var result = await runner.VerifyAsync(
+            CreateHealthVerifyArgs(repository.Path, TimeSpan.FromSeconds(30)),
+            CancellationToken.None);
+
+        Assert.True(result.Health.Verification.Ok);
+        Assert.False(starter.StartupToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_UseTrailingSlashBaseUrl()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61239/");
+        var client = new CapturingHealthHttpClient(
+            new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}"""));
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            client,
+            new ImmediateHealthHostStarter(host));
+
+        await runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), CancellationToken.None);
+
+        Assert.Equal("http://127.0.0.1:61239/docs/_health.json", client.Url);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_ConvertImmediateStartupCancellationToTimeout()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            new ImmediatelyCanceledHealthHostStarter());
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(
+            () => runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), CancellationToken.None));
+
+        Assert.IsType<OperationCanceledException>(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_DisposeHost_WhenStopFails()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        var host = new TrackingHost("http://127.0.0.1:61240", throwOnStop: true);
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            new ImmediateHealthHostStarter(host));
+
+        var result = await runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), CancellationToken.None);
+
+        Assert.True(result.Health.Verification.Ok);
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_StopLateStartedHost_WhenCallerCancelsStartup()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        using var cancellation = new CancellationTokenSource();
+        var host = new TrackingHost("http://127.0.0.1:61236");
+        var starter = new ControllableHealthHostStarter();
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            NullLogger<AppSurfaceDocsInProcessHealthVerifyRunner>.Instance,
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            starter);
+
+        var verificationTask = runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), cancellation.Token);
+        await starter.Started;
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => verificationTask);
+        starter.Complete(host);
+        await host.Disposed.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.True(starter.StartupToken.IsCancellationRequested);
+        Assert.True(host.StopCalled);
+        Assert.True(host.DisposeCalled);
+    }
+
+    [Fact]
+    public async Task AppSurfaceDocsInProcessHealthVerifyRunner_Should_IgnoreLateStartupFailure_WhenCallerCancelsStartup()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-health-repo-");
+        using var cancellation = new CancellationTokenSource();
+        var loggerProvider = new InMemoryLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Debug);
+            builder.AddProvider(loggerProvider);
+        });
+        var starter = new ControllableHealthHostStarter();
+        var runner = new AppSurfaceDocsInProcessHealthVerifyRunner(
+            loggerFactory.CreateLogger<AppSurfaceDocsInProcessHealthVerifyRunner>(),
+            new CapturingHealthHttpClient(
+                new AppSurfaceDocsHealthHttpResponse(HttpStatusCode.OK, """{"status":"Healthy","verification":{"ok":true,"httpStatusCode":200}}""")),
+            starter);
+
+        var verificationTask = runner.VerifyAsync(CreateHealthVerifyArgs(repository.Path), cancellation.Token);
+        await starter.Started;
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => verificationTask);
+        starter.Fail(new InvalidOperationException("Late startup failure."));
+        await starter.Finished.WaitAsync(TimeSpan.FromSeconds(1));
+        await WaitForLogMessageAsync(
+            loggerProvider,
+            "Late AppSurface Docs health verification startup task failed after verification stopped.");
     }
 
     [Fact]
@@ -343,6 +887,7 @@ public sealed class ProgramEntryPointTests
         Assert.Contains("Production", args.HostArgs.Args);
         Assert.DoesNotContain("--urls", args.HostArgs.Args);
         Assert.DoesNotContain("--port", args.HostArgs.Args);
+        Assert.DoesNotContain("--all-hosts", args.HostArgs.Args);
         Assert.Equal(TimeSpan.FromSeconds(10), args.HostArgs.StartupTimeout);
     }
 
@@ -1861,6 +2406,67 @@ public sealed class ProgramEntryPointTests
         options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsExportRunner>(runner));
     }
 
+    private static void RegisterRunner(ConsoleOptions options, CapturingAppSurfaceDocsHealthVerifyRunner runner)
+    {
+        options.CustomRegistrations.Add(services => services.AddSingleton<IAppSurfaceDocsHealthVerifyRunner>(runner));
+    }
+
+    private static AppSurfaceDocsHealthVerificationResult CreateHealthVerifyResult(bool ok)
+    {
+        return new AppSurfaceDocsHealthVerificationResult(
+            new AppSurfaceDocsHarvestHealthResponse
+            {
+                Status = ok ? nameof(DocHarvestHealthStatus.Healthy) : nameof(DocHarvestHealthStatus.Degraded),
+                Verification = new AppSurfaceDocsHarvestHealthVerification
+                {
+                    Ok = ok,
+                    HttpStatusCode = ok ? 200 : 503
+                },
+                Diagnostics = ok
+                    ? []
+                    :
+                    [
+                        new AppSurfaceDocsHarvestDiagnosticResponse
+                        {
+                            Code = DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet,
+                            Severity = nameof(DocHarvestDiagnosticSeverity.Error),
+                            HarvesterType = nameof(JavaScriptDocHarvester),
+                            Problem = "JavaScript Event 'razorwire:missing' is missing public contract fields.",
+                            Fix = "Add @target, @firesWhen, @property detail.* or @detail none to the public JavaScript doclet."
+                        }
+                    ]
+            },
+            ok ? HttpStatusCode.OK : HttpStatusCode.ServiceUnavailable);
+    }
+
+    private static AppSurfaceDocsHealthVerifyArgs CreateHealthVerifyArgs(string repositoryPath)
+    {
+        return CreateHealthVerifyArgs(repositoryPath, DefaultHealthVerifyStartupTimeout);
+    }
+
+    private static AppSurfaceDocsHealthVerifyArgs CreateHealthVerifyArgs(
+        string repositoryPath,
+        TimeSpan? startupTimeout)
+    {
+        return CreateHealthVerifyArgs(repositoryPath, startupTimeout, Environments.Production);
+    }
+
+    private static AppSurfaceDocsHealthVerifyArgs CreateHealthVerifyArgs(
+        string repositoryPath,
+        TimeSpan? startupTimeout,
+        string? environmentName)
+    {
+        var hostArgs = new AppSurfaceDocsHostArgs(
+            repositoryPath,
+            ["--AppSurfaceDocs:Source:RepositoryRoot", repositoryPath],
+            startupTimeout,
+            environmentName);
+        return new AppSurfaceDocsHealthVerifyArgs(
+            hostArgs,
+            "/docs/_health.json",
+            "http://127.0.0.1:0");
+    }
+
     private static AppSurfaceDocsExportArgs CreateExportArgs(
         string repositoryPath,
         string outputPath,
@@ -2004,6 +2610,145 @@ public sealed class ProgramEntryPointTests
             }
 
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CapturingAppSurfaceDocsHealthVerifyRunner : IAppSurfaceDocsHealthVerifyRunner
+    {
+        public AppSurfaceDocsHealthVerifyArgs? Args { get; private set; }
+
+        public AppSurfaceDocsHealthVerificationResult Result { get; init; } = CreateHealthVerifyResult(ok: true);
+
+        public Exception? Exception { get; init; }
+
+        public Task<AppSurfaceDocsHealthVerificationResult> VerifyAsync(
+            AppSurfaceDocsHealthVerifyArgs args,
+            CancellationToken cancellationToken)
+        {
+            Args = args;
+            if (Exception is not null)
+            {
+                throw Exception;
+            }
+
+            return Task.FromResult(Result);
+        }
+    }
+
+    private sealed class ImmediateHealthHostStarter(IHost host) : IAppSurfaceDocsHealthHostStarter
+    {
+        public string? EnvironmentName { get; private set; }
+
+        public CancellationToken StartupToken { get; private set; }
+
+        public string? WorkingDirectoryDuringStart { get; private set; }
+
+        public Task<IHost> BuildAndStartAsync(
+            AppSurfaceDocsHealthVerifyArgs args,
+            string environmentName,
+            CancellationToken cancellationToken)
+        {
+            EnvironmentName = environmentName;
+            StartupToken = cancellationToken;
+            WorkingDirectoryDuringStart = Directory.GetCurrentDirectory();
+            return Task.FromResult(host);
+        }
+    }
+
+    private sealed class CancelingHealthHostStarter : IAppSurfaceDocsHealthHostStarter
+    {
+        private readonly TaskCompletionSource<IHost> _hostCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public CancellationToken StartupToken { get; private set; }
+
+        public Task<IHost> BuildAndStartAsync(
+            AppSurfaceDocsHealthVerifyArgs args,
+            string environmentName,
+            CancellationToken cancellationToken)
+        {
+            StartupToken = cancellationToken;
+            cancellationToken.Register(() => _hostCompletion.TrySetCanceled(cancellationToken));
+            return _hostCompletion.Task;
+        }
+    }
+
+    private sealed class ImmediatelyCanceledHealthHostStarter : IAppSurfaceDocsHealthHostStarter
+    {
+        public Task<IHost> BuildAndStartAsync(
+            AppSurfaceDocsHealthVerifyArgs args,
+            string environmentName,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromException<IHost>(new OperationCanceledException(cancellationToken));
+        }
+    }
+
+    private sealed class ControllableHealthHostStarter : IAppSurfaceDocsHealthHostStarter
+    {
+        private readonly TaskCompletionSource<IHost> _hostCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<object?> _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<object?> _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public Task Finished => _finished.Task;
+
+        public CancellationToken StartupToken { get; private set; }
+
+        public Task<IHost> BuildAndStartAsync(
+            AppSurfaceDocsHealthVerifyArgs args,
+            string environmentName,
+            CancellationToken cancellationToken)
+        {
+            StartupToken = cancellationToken;
+            _started.TrySetResult(null);
+            return _hostCompletion.Task;
+        }
+
+        public void Complete(IHost host)
+        {
+            _hostCompletion.TrySetResult(host);
+            _finished.TrySetResult(null);
+        }
+
+        public void Fail(Exception exception)
+        {
+            _hostCompletion.TrySetException(exception);
+            _finished.TrySetResult(null);
+        }
+    }
+
+    private sealed class CapturingHealthHttpClient(AppSurfaceDocsHealthHttpResponse response) : IAppSurfaceDocsHealthHttpClient
+    {
+        public string? Url { get; private set; }
+
+        public Task<AppSurfaceDocsHealthHttpResponse> GetAsync(string url, CancellationToken cancellationToken)
+        {
+            Url = url;
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class StaticHttpMessageHandler(HttpStatusCode statusCode, string body) : HttpMessageHandler
+    {
+        private readonly HttpResponseMessage _response = new(statusCode)
+        {
+            Content = new StringContent(body)
+        };
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(_response);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _response.Dispose();
+            }
+
+            base.Dispose(disposing);
         }
     }
 

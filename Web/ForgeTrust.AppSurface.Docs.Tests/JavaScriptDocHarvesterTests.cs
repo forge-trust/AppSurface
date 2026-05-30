@@ -93,6 +93,253 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldEmitStrictEventDiagnostic_WhenRequiredPublicEventFieldsAreMissing()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:missing
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("@target", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("@firesWhen", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("@property detail.* or @detail none", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("detail.message")]
+    [InlineData("[detail.message]")]
+    [InlineData("[detail.message=\"fallback\"]")]
+    [InlineData("detail.items[]")]
+    [InlineData("detail.items[].id")]
+    [InlineData("detail.$payload-id")]
+    [InlineData("detail.message_2")]
+    public async Task HarvestAsync_ShouldAcceptStrictEventDetailPropertyNames(string detailPropertyName)
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            $$"""
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:valid-detail
+             * @target document
+             * @firesWhen a valid detail shape is documented.
+             * @property {string} {{detailPropertyName}} - Detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("detail.[]")]
+    [InlineData("detail.message!")]
+    [InlineData("detail.0:")]
+    public void IsValidEventDetailPropertyName_ShouldRejectMalformedNames(string detailPropertyName)
+    {
+        Assert.False(JavaScriptDocHarvester.IsValidEventDetailPropertyName(detailPropertyName));
+    }
+
+    [Theory]
+    [InlineData("detail")]
+    [InlineData("[detail]")]
+    [InlineData("detail.")]
+    [InlineData("detail..message")]
+    [InlineData("detail. message")]
+    [InlineData("detail.[x]")]
+    [InlineData("Detail.message")]
+    [InlineData("form")]
+    [InlineData("message")]
+    public async Task HarvestAsync_ShouldRejectStrictEventDetailPropertyNames(string detailPropertyName)
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            $$"""
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:invalid-detail
+             * @target document
+             * @firesWhen an invalid detail shape is documented.
+             * @property {string} {{detailPropertyName}} - Detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Contains("has invalid or contradictory public contract fields", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Fix @property names to use valid detail.* paths", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add @property detail.*", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldRejectStrictEventDetailNoneConflict()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:conflict
+             * @target document
+             * @firesWhen a contradictory detail shape is documented.
+             * @detail none
+             * @property {string} detail.message - Detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Contains("has invalid or contradictory public contract fields", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Remove @detail none or remove the event detail @property tags", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add remove", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldAvoidContradictoryFix_WhenDetailNoneHasInvalidProperty()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:conflict-invalid
+             * @target document
+             * @firesWhen a contradictory and invalid detail shape is documented.
+             * @detail none
+             * @property {string} message - Invalid detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Contains("Fix @property names to use valid detail.* paths", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("Remove @detail none or remove the event detail @property tags", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add @property detail.*", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldDescribeMissingAndInvalidStrictEventFields()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:missing-invalid
+             * @property {string} message - Invalid detail field.
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.Contains("is missing or has invalid public contract fields", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Add @target, @firesWhen", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.Contains("Fix @property names to use valid detail.* paths", diagnostic.Fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add @property detail.*", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldNotEmitStrictEventDiagnostic_ForNonPublicEventIncludedByGlob()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Included event without an explicit public contract signal.
+             * @event razorwire:internal-include
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequirePublicTag = false;
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
+        Assert.DoesNotContain(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet);
+        Assert.DoesNotContain(
+            GetDiagnostics(harvester),
+            diagnostic => diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepNonEventCompletenessDiagnosticsAsWarnings_WhenStrictEventDocletsAreEnabled()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public attribute.
+             * @public
+             * @attribute data-rw-mode
+             */
+            """);
+        var options = CreateEnabledOptions("src/public-api.js");
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        var harvester = CreateHarvester(options);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldRejectFixturePathsOutsideTestRoot()
     {
         var exception = await Assert.ThrowsAsync<ArgumentException>(
@@ -383,6 +630,274 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldUseConfiguredGroupRules_WhenDocletHasNoExplicitGroup()
+    {
+        await WriteAsync(
+            "src/browser/public-api.js",
+            """
+            /**
+             * Browser lifecycle event.
+             * @public
+             * @event browser:ready
+             * @target document
+             * @firesWhen the browser contracts are ready.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/**/*.js");
+        options.Harvest.JavaScript.GroupNameRules =
+        [
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = "Browser Contracts",
+                IncludeGlobs = ["src/browser/**/*.js"]
+            },
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = "Fallback Contracts",
+                IncludeGlobs = ["src/**/*.js"]
+            }
+        ];
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Path, "api/javascript/browser-contracts", StringComparison.Ordinal));
+        Assert.Equal("Browser Contracts JavaScript API", page.Title);
+        Assert.Equal(["API Reference", "JavaScript", "Browser Contracts"], page.Metadata?.Breadcrumbs);
+        var eventStub = Assert.Single(docs, doc => string.Equals(
+            doc.Path,
+            "api/javascript/browser-contracts#event-browser-ready",
+            StringComparison.Ordinal));
+        Assert.Equal("Browser Contracts", eventStub.Metadata?.Component);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipInvalidConfiguredGroupRules_AndUseFallbackWhenNoRuleMatches()
+    {
+        await WriteAsync(
+            "src/browser/public-api.js",
+            """
+            /**
+             * Browser lifecycle event.
+             * @public
+             * @event browser:ready
+             * @target document
+             * @firesWhen the browser contracts are ready.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/**/*.js");
+        options.Harvest.JavaScript.GroupNameRules =
+        [
+            null!,
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = " ",
+                IncludeGlobs = ["src/browser/**/*.js"]
+            },
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = "Null Glob Rule",
+                IncludeGlobs = null!
+            },
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = "Other Contracts",
+                IncludeGlobs = ["src/other/**/*.js"]
+            }
+        ];
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal));
+        Assert.Equal("api/javascript/browser-public-api", page.Path);
+        Assert.Equal("public-api JavaScript API", page.Title);
+        Assert.Equal(["API Reference", "JavaScript", "public-api"], page.Metadata?.Breadcrumbs);
+        Assert.DoesNotContain(docs, doc => string.Equals(doc.Path, "api/javascript/other-contracts", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldUseFallbackWhenConfiguredGroupRulesAreNull()
+    {
+        await WriteAsync(
+            "src/browser/public-api.js",
+            """
+            /**
+             * Browser lifecycle event.
+             * @public
+             * @event browser:ready
+             * @target document
+             * @firesWhen the browser contracts are ready.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/**/*.js");
+        options.Harvest.JavaScript.GroupNameRules = null!;
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal));
+        Assert.Equal("api/javascript/browser-public-api", page.Path);
+        Assert.Equal(["API Reference", "JavaScript", "public-api"], page.Metadata?.Breadcrumbs);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldPreferExplicitTagsOverConfiguredGroupRules_AndUseFirstNonblankTag()
+    {
+        await WriteAsync(
+            "src/browser/razorwire.js",
+            """
+            /**
+             * RazorWire lifecycle event.
+             * @public
+             * @namespace RazorWire
+             * @event razorwire:ready
+             * @target document
+             * @firesWhen RazorWire starts.
+             * @detail none
+             */
+            """);
+        await WriteAsync(
+            "src/browser/module.js",
+            """
+            /**
+             * Module lifecycle event.
+             * @public
+             * @namespace
+             * @module Module Contracts
+             * @event module:ready
+             * @target document
+             * @firesWhen the module starts.
+             * @detail none
+             */
+            """);
+        var options = CreateEnabledOptions("src/browser/**/*.js");
+        options.Harvest.JavaScript.GroupNameRules =
+        [
+            new AppSurfaceDocsJavaScriptGroupNameRule
+            {
+                Name = "Configured Browser",
+                IncludeGlobs = ["src/browser/**/*.js"]
+            }
+        ];
+        var harvester = CreateHarvester(options);
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => string.Equals(doc.Path, "api/javascript/razorwire", StringComparison.Ordinal));
+        Assert.Contains(docs, doc => string.Equals(doc.Path, "api/javascript/module-contracts", StringComparison.Ordinal));
+        Assert.DoesNotContain(docs, doc => string.Equals(doc.Path, "api/javascript/configured-browser", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldUsePathAwareFallbackRoute_WhenFileStemIsCurrentlyUnique()
+    {
+        await WriteAsync(
+            "src/widgets/public-api.js",
+            """
+            /**
+             * Widget lifecycle event.
+             * @public
+             * @event widget:ready
+             * @target document
+             * @firesWhen widgets are ready.
+             * @detail none
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/**/*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal));
+        Assert.Equal("api/javascript/widgets-public-api", page.Path);
+        Assert.Equal("public-api JavaScript API", page.Title);
+        Assert.Equal(["API Reference", "JavaScript", "public-api"], page.Metadata?.Breadcrumbs);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldUseGenericFallbackDisplay_WhenFallbackPathHasNoSegments()
+    {
+        await WriteAsync(
+            ".js",
+            """
+            /**
+             * Root fallback lifecycle event.
+             * @public
+             * @event root:ready
+             * @target document
+             * @firesWhen the root fallback contract is ready.
+             * @detail none
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var page = Assert.Single(docs, doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal));
+        Assert.Equal("api/javascript/javascript", page.Path);
+        Assert.Equal("JavaScript JavaScript API", page.Title);
+        Assert.Equal(["API Reference", "JavaScript", "JavaScript"], page.Metadata?.Breadcrumbs);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldKeepPathFallbackGroupsDistinct_WhenFileStemsMatch()
+    {
+        await WriteAsync(
+            "src/widgets/public-api.js",
+            """
+            /**
+             * Widget lifecycle event.
+             * @public
+             * @event widget:ready
+             * @target document
+             * @firesWhen widgets are ready.
+             * @detail none
+             */
+            """);
+        await WriteAsync(
+            "src/forms/public-api.js",
+            """
+            /**
+             * Form lifecycle event.
+             * @public
+             * @event form:ready
+             * @target document
+             * @firesWhen forms are ready.
+             * @detail none
+             */
+            """);
+        await WriteAsync(
+            "src/admin/admin-api.js",
+            """
+            /**
+             * Admin lifecycle event.
+             * @public
+             * @event admin:ready
+             * @target document
+             * @firesWhen admin contracts are ready.
+             * @detail none
+             */
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/**/*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        var groupPages = docs
+            .Where(doc => string.Equals(doc.Metadata?.PageType, "javascript-api", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(3, groupPages.Length);
+        Assert.Contains(groupPages, doc => string.Equals(doc.Path, "api/javascript/admin-admin-api", StringComparison.Ordinal));
+        Assert.Contains(groupPages, doc => string.Equals(doc.Path, "api/javascript/forms-public-api", StringComparison.Ordinal));
+        Assert.Contains(groupPages, doc => string.Equals(doc.Path, "api/javascript/widgets-public-api", StringComparison.Ordinal));
+        Assert.Contains(groupPages, doc => doc.Metadata?.Breadcrumbs?.SequenceEqual(["API Reference", "JavaScript", "admin-api"]) == true);
+        Assert.Contains(groupPages, doc => doc.Metadata?.Breadcrumbs?.SequenceEqual(["API Reference", "JavaScript", "forms/public-api"]) == true);
+        Assert.Contains(groupPages, doc => doc.Metadata?.Breadcrumbs?.SequenceEqual(["API Reference", "JavaScript", "widgets/public-api"]) == true);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldKeepDistinctGroupPages_WhenNamespaceSlugsCollide()
     {
         await WriteAsync(
@@ -662,7 +1177,11 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptParseFailed);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
+        var duplicateAnchorDiagnostic = Assert.Single(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor);
+        Assert.Contains("RazorWire", duplicateAnchorDiagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("name:RazorWire", duplicateAnchorDiagnostic.Problem, StringComparison.Ordinal);
         Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-duplicate", StringComparison.Ordinal));
         Assert.Contains(docs, doc => doc.Path.EndsWith("#event-razorwire-duplicate-2", StringComparison.Ordinal));
     }
@@ -1170,6 +1689,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Equal("JavaScript Event", document.PageTypeLabel);
         Assert.Equal("javascript", document.Language);
         Assert.Equal("JavaScript", document.LanguageLabel);
+        Assert.Equal(["API Reference", "JavaScript", "RazorWire"], document.Breadcrumbs);
         Assert.Contains("detail.statusCode", document.BodyText, StringComparison.Ordinal);
         Assert.Contains("razorwire:form:failure", document.BodyText, StringComparison.OrdinalIgnoreCase);
     }
@@ -1277,6 +1797,48 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
             && item.Status == DocHarvesterHealthStatus.Failed);
         Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldFailStrictJavaScriptEventDocletsWithoutStrictHealth()
+    {
+        await WriteAsync(
+            "src/public-api.js",
+            """
+            /**
+             * Public event.
+             * @public
+             * @event razorwire:missing
+             */
+            """);
+        var options = new AppSurfaceDocsOptions();
+        options.Source.RepositoryRoot = _testRoot;
+        options.Harvest.JavaScript.RequireCompleteEventDoclets = true;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        var aggregator = new DocAggregator(
+            [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+        var response = AppSurfaceDocsHarvestHealthResponse.FromSnapshot(health);
+
+        Assert.Equal(DocHarvestHealthStatus.Degraded, health.Status);
+        Assert.Equal(2, health.TotalHarvesters);
+        Assert.Equal(1, health.SuccessfulHarvesters);
+        Assert.Equal(1, health.FailedHarvesters);
+        Assert.False(response.Verification.Ok);
+        Assert.Equal(503, response.Verification.HttpStatusCode);
+        Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+            && item.Status == DocHarvesterHealthStatus.Failed);
+        Assert.Contains(
+            health.Diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet
+                          && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
     }
 
     [Fact]

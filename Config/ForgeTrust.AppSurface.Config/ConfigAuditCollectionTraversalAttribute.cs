@@ -10,7 +10,8 @@ namespace ForgeTrust.AppSurface.Config;
 /// Invalid limits emit a <c>config-audit-options-invalid</c> diagnostic and fall back to safe bounded defaults.
 /// Non-sensitive dictionary keys may be displayed by default, but sensitive-looking keys are always redacted before
 /// structured reports or text output are returned. The attribute is inherited by derived wrappers; place a new
-/// attribute on the derived wrapper when it needs different traversal limits.
+/// attribute on the derived wrapper when it needs different traversal limits. Dictionary key correlation stays disabled
+/// unless <see cref="DictionaryKeyCorrelationMode"/> is set and global correlation key material is configured.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]
 public sealed class ConfigAuditCollectionTraversalAttribute : Attribute
@@ -55,13 +56,22 @@ public sealed class ConfigAuditCollectionTraversalAttribute : Attribute
     public bool DisplayDictionaryKeys { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets the opt-in dictionary key correlation mode for the attributed wrapper.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see cref="ConfigAuditDictionaryKeyCorrelationMode.None"/>, which keeps redacted dictionary key
+    /// labels report-local. <see cref="ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac"/> adds opaque correlation
+    /// ids when <see cref="ConfigAuditDictionaryKeyCorrelationOptions"/> supplies valid key material.
+    /// </remarks>
+    public ConfigAuditDictionaryKeyCorrelationMode DictionaryKeyCorrelationMode { get; set; } = ConfigAuditDictionaryKeyCorrelationMode.None;
+
+    /// <summary>
     /// Converts the attribute values into immutable audit entry options.
     /// </summary>
     /// <remarks>
-    /// The returned options enable collection traversal, copy attribute values as-is, and mark every option as
-    /// assigned with <see cref="ConfigAuditEntryOptionAssignments.All"/>. Marking every option assigned lets the
-    /// wrapper attribute provide a complete wrapper-level policy while still allowing explicitly assigned manual
-    /// registration options, including default-valued assignments, to override individual properties later.
+    /// The returned options enable collection traversal, copy attribute values as-is, and mark every traversal option
+    /// plus dictionary key correlation as assigned. The traversal attribute never assigns entry sensitivity; use
+    /// manual audit-key options when a discovered wrapper should be classified as sensitive.
     /// </remarks>
     internal ConfigAuditEntryOptions ToOptions() =>
         new(
@@ -70,5 +80,7 @@ public sealed class ConfigAuditCollectionTraversalAttribute : Attribute
             MaxCollectionElements,
             MaxReportNodes,
             DisplayDictionaryKeys,
-            ConfigAuditEntryOptionAssignments.All);
+            ConfigAuditSensitivity.Unknown,
+            DictionaryKeyCorrelationMode,
+            ConfigAuditEntryOptionAssignments.CollectionTraversal | ConfigAuditEntryOptionAssignments.DictionaryKeyCorrelationMode);
 }

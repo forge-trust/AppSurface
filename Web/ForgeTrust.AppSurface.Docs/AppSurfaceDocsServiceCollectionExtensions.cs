@@ -136,6 +136,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Harvest.Paths.DefaultExclusions =
                         NormalizeDefaultExclusions(options.Harvest.Paths.DefaultExclusions);
                     options.Harvest.Paths.VcsIgnore.AllowGlobs = NormalizeGlobArray(options.Harvest.Paths.VcsIgnore.AllowGlobs);
+                    options.Diagnostics.SearchIndexRefreshPolicy = NormalizeOrNull(options.Diagnostics.SearchIndexRefreshPolicy);
                     options.Harvest.Markdown.IncludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.IncludeGlobs);
                     options.Harvest.Markdown.ExcludeGlobs = NormalizeGlobArray(options.Harvest.Markdown.ExcludeGlobs);
                     options.Harvest.Markdown.DefaultExclusions =
@@ -148,6 +149,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                     options.Harvest.JavaScript.ExcludeGlobs = NormalizeGlobArray(options.Harvest.JavaScript.ExcludeGlobs);
                     options.Harvest.JavaScript.DefaultExclusions =
                         NormalizeDefaultExclusions(options.Harvest.JavaScript.DefaultExclusions);
+                    options.Harvest.JavaScript.GroupNameRules =
+                        NormalizeJavaScriptGroupNameRules(options.Harvest.JavaScript.GroupNameRules);
 
                     options.Source.RepositoryRoot = options.Source.RepositoryRoot?.Trim();
                     options.Bundle.Path = NormalizeOrNull(options.Bundle.Path);
@@ -382,6 +385,20 @@ public static class AppSurfaceDocsServiceCollectionExtensions
 
         options.AllowGlobs = allowGlobs;
         return options;
+    }
+
+    private static AppSurfaceDocsJavaScriptGroupNameRule[] NormalizeJavaScriptGroupNameRules(
+        IEnumerable<AppSurfaceDocsJavaScriptGroupNameRule>? rules)
+    {
+        return (rules ?? [])
+            .Where(rule => rule is not null)
+            .Select(
+                rule => new AppSurfaceDocsJavaScriptGroupNameRule
+                {
+                    Name = NormalizeOrNull(rule.Name),
+                    IncludeGlobs = NormalizeGlobArray(rule.IncludeGlobs)
+                })
+            .ToArray();
     }
 
     private sealed class MarkdownHarvesterRegistrationMarker;

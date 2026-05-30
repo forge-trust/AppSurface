@@ -91,6 +91,8 @@ public sealed class ConfigAuditEntryOptions
     private int _maxCollectionElements = DefaultMaxCollectionElements;
     private int _maxReportNodes = DefaultMaxReportNodes;
     private bool _displayDictionaryKeys = true;
+    private ConfigAuditSensitivity _sensitivity = ConfigAuditSensitivity.Unknown;
+    private ConfigAuditDictionaryKeyCorrelationMode _dictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.None;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigAuditEntryOptions"/> class with safe defaults.
@@ -119,6 +121,8 @@ public sealed class ConfigAuditEntryOptions
         _maxCollectionElements = source.MaxCollectionElements;
         _maxReportNodes = source.MaxReportNodes;
         _displayDictionaryKeys = source.DisplayDictionaryKeys;
+        _sensitivity = source.Sensitivity;
+        _dictionaryKeyCorrelationMode = source.DictionaryKeyCorrelationMode;
         AssignedOptions = source.AssignedOptions;
     }
 
@@ -135,6 +139,8 @@ public sealed class ConfigAuditEntryOptions
     /// <param name="maxCollectionElements">The maximum number of elements per collection.</param>
     /// <param name="maxReportNodes">The maximum number of child nodes reported for the entry.</param>
     /// <param name="displayDictionaryKeys">Whether non-sensitive dictionary keys may be displayed.</param>
+    /// <param name="sensitivity">The entry-level sensitivity classification.</param>
+    /// <param name="dictionaryKeyCorrelationMode">The dictionary key correlation mode.</param>
     /// <param name="assignedOptions">The properties intentionally assigned by the source.</param>
     internal ConfigAuditEntryOptions(
         bool traverseCollectionElements,
@@ -142,6 +148,8 @@ public sealed class ConfigAuditEntryOptions
         int maxCollectionElements,
         int maxReportNodes,
         bool displayDictionaryKeys,
+        ConfigAuditSensitivity sensitivity,
+        ConfigAuditDictionaryKeyCorrelationMode dictionaryKeyCorrelationMode,
         ConfigAuditEntryOptionAssignments assignedOptions)
     {
         _traverseCollectionElements = traverseCollectionElements;
@@ -149,6 +157,8 @@ public sealed class ConfigAuditEntryOptions
         _maxCollectionElements = maxCollectionElements;
         _maxReportNodes = maxReportNodes;
         _displayDictionaryKeys = displayDictionaryKeys;
+        _sensitivity = sensitivity;
+        _dictionaryKeyCorrelationMode = dictionaryKeyCorrelationMode;
         AssignedOptions = assignedOptions;
     }
 
@@ -218,6 +228,46 @@ public sealed class ConfigAuditEntryOptions
     }
 
     /// <summary>
+    /// Gets the entry-level sensitivity classification used by audit redaction.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see cref="ConfigAuditSensitivity.Unknown"/>. <see cref="ConfigAuditSensitivity.Sensitive"/>
+    /// redacts the root value, traversed child values, and value-derived dictionary labels before report models are
+    /// returned. <see cref="ConfigAuditSensitivity.NonSensitive"/> is a classification hint only: it never disables
+    /// redaction from sensitive key fragments, source metadata, provider metadata, or another registration that marks
+    /// the same entry sensitive. Invalid enum values emit a <c>config-audit-options-invalid</c> diagnostic and fail
+    /// closed as sensitive during report generation.
+    /// </remarks>
+    public ConfigAuditSensitivity Sensitivity
+    {
+        get => _sensitivity;
+        init
+        {
+            _sensitivity = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.Sensitivity;
+        }
+    }
+
+    /// <summary>
+    /// Gets the opt-in persistent dictionary key correlation mode for this entry.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see cref="ConfigAuditDictionaryKeyCorrelationMode.None"/>, which keeps redacted dictionary key
+    /// labels report-local. <see cref="ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac"/> adds a separate
+    /// <see cref="ConfigAuditElementIdentity.KeyCorrelationId"/> to dictionary element entries when global
+    /// correlation key material is configured.
+    /// </remarks>
+    public ConfigAuditDictionaryKeyCorrelationMode DictionaryKeyCorrelationMode
+    {
+        get => _dictionaryKeyCorrelationMode;
+        init
+        {
+            _dictionaryKeyCorrelationMode = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.DictionaryKeyCorrelationMode;
+        }
+    }
+
+    /// <summary>
     /// Gets the option properties that were intentionally assigned by the source registration.
     /// </summary>
     /// <remarks>
@@ -245,6 +295,31 @@ public sealed class ConfigAuditEntryOptions
             diagnostics.Add(CreateInvalidOptionDiagnostic(key, nameof(MaxReportNodes), "must be greater than or equal to 1"));
         }
 
+        if (!IsValidSensitivity(Sensitivity))
+        {
+            diagnostics.Add(
+                CreateInvalidOptionDiagnostic(
+                    key,
+                    nameof(Sensitivity),
+                    $"value '{Convert.ToInt32(Sensitivity, System.Globalization.CultureInfo.InvariantCulture)}' is not valid; use {ConfigAuditSensitivity.Unknown}, {ConfigAuditSensitivity.NonSensitive}, or {ConfigAuditSensitivity.Sensitive}. Report generation falls back to {ConfigAuditSensitivity.Sensitive} so the entry does not fail open"));
+        }
+
+        if (!Enum.IsDefined(DictionaryKeyCorrelationMode))
+        {
+            diagnostics.Add(CreateInvalidOptionDiagnostic(
+                key,
+                nameof(DictionaryKeyCorrelationMode),
+                "must be a defined ConfigAuditDictionaryKeyCorrelationMode value"));
+        }
+        else if (DictionaryKeyCorrelationMode != ConfigAuditDictionaryKeyCorrelationMode.None
+                 && !TraverseCollectionElements)
+        {
+            diagnostics.Add(CreateInvalidOptionDiagnostic(
+                key,
+                nameof(DictionaryKeyCorrelationMode),
+                "ScopedHmac requires TraverseCollectionElements to be true or set mode to None"));
+        }
+
         return diagnostics;
     }
 
@@ -253,19 +328,23 @@ public sealed class ConfigAuditEntryOptions
     /// </summary>
     /// <remarks>
     /// Normalization preserves <see cref="TraverseCollectionElements"/>, <see cref="DisplayDictionaryKeys"/>, and
-    /// <see cref="AssignedOptions"/>. It is intended for report generation after diagnostics have captured invalid
-    /// inputs; it should not be used as a signal that an option was unassigned.
+    /// <see cref="AssignedOptions"/>. Invalid <see cref="Sensitivity"/> values fail closed as
+    /// <see cref="ConfigAuditSensitivity.Sensitive"/> after diagnostics have captured the bad value. It is intended
+    /// for report generation after diagnostics have captured invalid inputs; it should not be used as a signal that an
+    /// option was unassigned.
     /// </remarks>
     internal ConfigAuditEntryOptions Normalize() =>
-        Validate("unused").Count == 0
-            ? new ConfigAuditEntryOptions(this)
-            : new ConfigAuditEntryOptions(
-                TraverseCollectionElements,
-                DefaultMaxCollectionDepth,
-                DefaultMaxCollectionElements,
-                DefaultMaxReportNodes,
-                DisplayDictionaryKeys,
-                AssignedOptions);
+        new(
+            TraverseCollectionElements,
+            MaxCollectionDepth >= 0 ? MaxCollectionDepth : DefaultMaxCollectionDepth,
+            MaxCollectionElements >= 0 ? MaxCollectionElements : DefaultMaxCollectionElements,
+            MaxReportNodes >= 1 ? MaxReportNodes : DefaultMaxReportNodes,
+            DisplayDictionaryKeys,
+            NormalizeSensitivity(Sensitivity),
+            Enum.IsDefined(DictionaryKeyCorrelationMode) && TraverseCollectionElements
+                ? DictionaryKeyCorrelationMode
+                : ConfigAuditDictionaryKeyCorrelationMode.None,
+            AssignedOptions);
 
     /// <summary>
     /// Applies explicitly assigned option values from a later registration over this options snapshot.
@@ -298,8 +377,74 @@ public sealed class ConfigAuditEntryOptions
             overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.DisplayDictionaryKeys)
                 ? overrides.DisplayDictionaryKeys
                 : DisplayDictionaryKeys,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.Sensitivity)
+                ? MergeSensitivity(Sensitivity, overrides.Sensitivity)
+                : Sensitivity,
+            overrides.AssignedOptions.HasFlag(ConfigAuditEntryOptionAssignments.DictionaryKeyCorrelationMode)
+                ? overrides.DictionaryKeyCorrelationMode
+                : DictionaryKeyCorrelationMode,
             AssignedOptions | overrides.AssignedOptions);
     }
+
+    /// <summary>
+    /// Merges two assigned entry sensitivity values using the most restrictive valid classification.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ConfigAuditSensitivity.Sensitive"/> wins over <see cref="ConfigAuditSensitivity.NonSensitive"/>,
+    /// and <see cref="ConfigAuditSensitivity.NonSensitive"/> wins over <see cref="ConfigAuditSensitivity.Unknown"/>.
+    /// If either value is outside the known enum members, that invalid value is preserved so validation can emit an
+    /// actionable diagnostic before normalization fails closed. This helper is pure and does not throw for invalid enum
+    /// values.
+    /// </remarks>
+    /// <param name="current">The current sensitivity value.</param>
+    /// <param name="candidate">The candidate sensitivity value being merged in.</param>
+    /// <returns>The merged sensitivity value.</returns>
+    internal static ConfigAuditSensitivity MergeSensitivity(
+        ConfigAuditSensitivity current,
+        ConfigAuditSensitivity candidate)
+    {
+        if (!IsValidSensitivity(current))
+        {
+            return current;
+        }
+
+        if (!IsValidSensitivity(candidate))
+        {
+            return candidate;
+        }
+
+        return current > candidate ? current : candidate;
+    }
+
+    /// <summary>
+    /// Returns a report-generation-safe sensitivity value.
+    /// </summary>
+    /// <remarks>
+    /// Valid values are returned unchanged. Invalid enum values normalize to
+    /// <see cref="ConfigAuditSensitivity.Sensitive"/> so redaction fails closed after validation has captured the
+    /// original value. This helper is pure and does not throw.
+    /// </remarks>
+    /// <param name="sensitivity">The sensitivity value to normalize.</param>
+    /// <returns>
+    /// <paramref name="sensitivity"/> when it is valid; otherwise <see cref="ConfigAuditSensitivity.Sensitive"/>.
+    /// </returns>
+    internal static ConfigAuditSensitivity NormalizeSensitivity(ConfigAuditSensitivity sensitivity) =>
+        IsValidSensitivity(sensitivity) ? sensitivity : ConfigAuditSensitivity.Sensitive;
+
+    /// <summary>
+    /// Determines whether a sensitivity value is one of the supported enum members.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ConfigAuditSensitivity.Unknown"/>, <see cref="ConfigAuditSensitivity.NonSensitive"/>, and
+    /// <see cref="ConfigAuditSensitivity.Sensitive"/> are valid. All other numeric values are invalid and should be
+    /// reported before being normalized. This helper is pure and does not throw.
+    /// </remarks>
+    /// <param name="sensitivity">The sensitivity value to inspect.</param>
+    /// <returns><see langword="true"/> when <paramref name="sensitivity"/> is a supported enum member.</returns>
+    internal static bool IsValidSensitivity(ConfigAuditSensitivity sensitivity) =>
+        sensitivity is ConfigAuditSensitivity.Unknown
+            or ConfigAuditSensitivity.NonSensitive
+            or ConfigAuditSensitivity.Sensitive;
 
     private static ConfigAuditDiagnostic CreateInvalidOptionDiagnostic(string key, string optionName, string rule) =>
         new()
@@ -328,6 +473,8 @@ public sealed class ConfigAuditEntryOptionsBuilder
     private int _maxCollectionElements = ConfigAuditEntryOptions.DefaultMaxCollectionElements;
     private int _maxReportNodes = ConfigAuditEntryOptions.DefaultMaxReportNodes;
     private bool _displayDictionaryKeys = true;
+    private ConfigAuditSensitivity _sensitivity = ConfigAuditSensitivity.Unknown;
+    private ConfigAuditDictionaryKeyCorrelationMode _dictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.None;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigAuditEntryOptionsBuilder"/> class with safe defaults.
@@ -402,6 +549,43 @@ public sealed class ConfigAuditEntryOptionsBuilder
     }
 
     /// <summary>
+    /// Gets or sets the entry-level sensitivity classification used by audit redaction.
+    /// </summary>
+    /// <remarks>
+    /// Use <see cref="ConfigAuditSensitivity.Sensitive"/> when the key's domain-specific value should redact even if
+    /// the key name does not contain a built-in sensitive fragment. <see cref="ConfigAuditSensitivity.NonSensitive"/>
+    /// documents intent but is not an opt-out from conservative redaction and never downgrades another sensitive
+    /// signal.
+    /// </remarks>
+    public ConfigAuditSensitivity Sensitivity
+    {
+        get => _sensitivity;
+        set
+        {
+            _sensitivity = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.Sensitivity;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the opt-in persistent dictionary key correlation mode for this entry.
+    /// </summary>
+    /// <remarks>
+    /// The default keeps redacted dictionary key labels report-local. Use
+    /// <see cref="ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac"/> only when operators need stable opaque
+    /// dictionary key identifiers and global <see cref="ConfigAuditDictionaryKeyCorrelationOptions"/> are configured.
+    /// </remarks>
+    public ConfigAuditDictionaryKeyCorrelationMode DictionaryKeyCorrelationMode
+    {
+        get => _dictionaryKeyCorrelationMode;
+        set
+        {
+            _dictionaryKeyCorrelationMode = value;
+            AssignedOptions |= ConfigAuditEntryOptionAssignments.DictionaryKeyCorrelationMode;
+        }
+    }
+
+    /// <summary>
     /// Gets the option properties that were assigned through this builder.
     /// </summary>
     /// <remarks>
@@ -425,6 +609,8 @@ public sealed class ConfigAuditEntryOptionsBuilder
             MaxCollectionElements,
             MaxReportNodes,
             DisplayDictionaryKeys,
+            Sensitivity,
+            DictionaryKeyCorrelationMode,
             AssignedOptions);
 }
 
@@ -469,9 +655,24 @@ internal enum ConfigAuditEntryOptionAssignments
     DisplayDictionaryKeys = 1 << 4,
 
     /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.Sensitivity"/> was explicitly assigned.
+    /// </summary>
+    Sensitivity = 1 << 5,
+
+    /// <summary>
+    /// <see cref="ConfigAuditEntryOptions.DictionaryKeyCorrelationMode"/> was explicitly assigned.
+    /// </summary>
+    DictionaryKeyCorrelationMode = 1 << 6,
+
+    /// <summary>
+    /// All collection traversal options were explicitly assigned.
+    /// </summary>
+    CollectionTraversal = TraverseCollectionElements | MaxCollectionDepth | MaxCollectionElements | MaxReportNodes | DisplayDictionaryKeys,
+
+    /// <summary>
     /// Every audit entry option was explicitly assigned.
     /// </summary>
-    All = TraverseCollectionElements | MaxCollectionDepth | MaxCollectionElements | MaxReportNodes | DisplayDictionaryKeys
+    All = CollectionTraversal | Sensitivity | DictionaryKeyCorrelationMode
 }
 
 /// <summary>
@@ -503,11 +704,13 @@ public static class ConfigAuditServiceCollectionExtensions
     /// Registers an additional configuration key for audit reports with entry-specific options.
     /// </summary>
     /// <remarks>
-    /// Use <paramref name="configure"/> to opt into collection element traversal for this key only. Options are
-    /// snapshotted when the registration is created; collection traversal remains disabled by default so existing
-    /// reports keep their previous shape unless callers explicitly enable it. If this key is also discovered from a
-    /// config wrapper, the wrapper supplies metadata and validation while explicitly assigned manual options override
-    /// wrapper audit options per property.
+    /// Use <paramref name="configure"/> to opt into collection element traversal for this key only or to classify a
+    /// domain-specific value with <see cref="ConfigAuditEntryOptionsBuilder.Sensitivity"/>. Options are snapshotted
+    /// when the registration is created; collection traversal remains disabled by default so existing reports keep
+    /// their previous shape unless callers explicitly enable it. If this key is also discovered from a config wrapper,
+    /// the wrapper supplies metadata and validation while explicitly assigned manual options override wrapper audit
+    /// options per property. Sensitivity merges monotonically, so <see cref="ConfigAuditSensitivity.NonSensitive"/>
+    /// never downgrades an effective sensitive entry.
     /// </remarks>
     /// <typeparam name="T">The expected value type.</typeparam>
     /// <param name="services">The service collection.</param>

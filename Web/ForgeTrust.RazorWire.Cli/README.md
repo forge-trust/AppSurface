@@ -4,14 +4,26 @@ The **RazorWire CLI** is a command-line tool for managing RazorWire projects. It
 
 The CLI uses AppSurface's command-first console mode. That means help and validation output are intentionally quiet, without Generic Host lifecycle banners, while real export runs still emit useful progress logs.
 
+## Start here: export the sample
+
+During repository development, the fastest confidence check is to export the RazorWire MVC sample from source:
+
+```bash
+dotnet run --project Web/ForgeTrust.RazorWire.Cli -- export -o ./dist -p ./examples/razorwire-mvc/RazorWireWebExample.csproj
+test -f ./dist/index.html
+```
+
+A successful run publishes the sample, starts it on an ephemeral loopback URL, crawls the discovered pages, writes static files under `./dist`, and shuts the target app down automatically. Inspect `./dist/index.html` first; it proves the exporter emitted the root artifact.
+
 ## Installation
 
-The RazorWire CLI is packaged as a .NET tool with the command name `razorwire`.
-Use an exact package version when running release builds so exports are reproducible.
-The commands in this section require `ForgeTrust.RazorWire.Cli` to
-exist on one of your configured NuGet sources, or for you to pass an explicit
-local package source. Public package publishing is still manual until the
-coordinated release automation tracked in #161 lands.
+The RazorWire CLI project is configured as a .NET tool with the command name
+`razorwire`. Use an exact package version when running release builds so exports
+are reproducible. The package chooser still excludes `ForgeTrust.RazorWire.Cli`
+from the direct-install matrix until issue #171 lands stable public tool
+packaging, so the commands in this section require the package to exist on one
+of your configured NuGet sources or for you to pass an explicit local package
+source. During normal repository development, prefer the source-run command below.
 
 Run a published package without permanently installing it:
 
@@ -91,19 +103,21 @@ Exactly one source option is required: `--url`, `--project`, or `--dll`.
 - Assets that already have extensions, such as `/css/site.css`, `/img/logo.png`, or `/_content/.../razorwire.js`, keep their path. Cache-busting query strings on assets are allowed only when the query-free path maps to an exported file.
 - The conventional `/_appsurface/errors/404` page, when available, is emitted as `404.html` and participates in the same CDN validation and URL rewriting.
 
-CDN validation fails the export when exporter-managed dependencies cannot be represented as static artifacts. Diagnostics use stable codes:
+CDN validation fails the export when exporter-managed dependencies cannot be represented as static artifacts. Diagnostics use stable codes and include the discovered surface, such as `<img src>`, `<a href>`, `stylesheet url()`, or `stylesheet @import string`, plus the normalized path the exporter tried to prove:
 
-- `RWEXPORT001`: a server-fetched frame route did not materialize.
-- `RWEXPORT002`: a query-bearing frame route cannot be represented as one static artifact.
-- `RWEXPORT003`: a required internal asset did not materialize.
-- `RWEXPORT004`: a managed internal URL could not be rewritten to an emitted artifact URL.
-- `RWEXPORT005`: a registered redirect alias cannot safely point at its canonical route, collides with another route or provider redirect output, or was already crawled as a normal HTML page.
+- `RWEXPORT001`: a server-fetched frame route did not materialize. Add or seed the frame route, or switch to `--mode hybrid` when a live server owns it.
+- `RWEXPORT002`: a query-bearing frame route cannot be represented as one static artifact. Export a query-free route, split the frame into static pages, or keep server routing with `--mode hybrid`.
+- `RWEXPORT003`: a required internal asset did not materialize. Add the asset route, correct path casing, make the reference external/data/hash-only, or use `--mode hybrid`.
+- `RWEXPORT004`: a managed internal URL could not be rewritten to an emitted artifact URL. Seed or expose the target route so it emits an artifact, or mark authoring-only anchors with `data-rw-export-ignore`.
+- `RWEXPORT005`: a registered redirect alias cannot safely point at its canonical route, collides with another route or provider redirect output, or was already crawled as a normal HTML page. Fix the host redirect registration so aliases map to exported canonical routes without artifact collisions.
 
 `hybrid` mode preserves the older application-style URL behavior. Use it when the exported directory will still be served by infrastructure that resolves extensionless URLs, dynamic frame endpoints, or other live-server behavior. Hybrid mode logs missing discovered dependencies but does not enforce CDN static-safety validation.
 
 Redirect strategy is a host-integration setting, not a generic `razorwire export` CLI option. `ExportContext.AddRedirectAlias(...)` is the preferred API for registering alias-to-canonical relationships; `AddRedirectArtifact(...)` remains as a compatibility wrapper for older integrations. `ExportRedirectStrategy.Html` works on generic static hosts such as GitHub Pages. `ExportRedirectStrategy.Netlify` is for CDN exports published to Netlify-compatible providers: it writes one publish-root `_redirects` file, serializes exact site-local paths with per-segment percent encoding, uses `301!`, de-duplicates exact serialized source/target pairs, rejects self-redirects after serialization, rejects same-source/different-target rules, rejects aliases that conflict with exported `_redirects`, and never uses `PublicOrigin` or emitted `.html` artifact URLs as rule targets.
 
-CDN mode validates the URLs the exporter owns and can see while crawling HTML and CSS: discovered page links, Turbo Frame sources, supported HTML asset references, `<link rel="canonical">` values that point at managed app routes, `<img>` and `<source>` `srcset` candidates, and CSS `url(...)` references. It does not prove arbitrary app-authored JavaScript `fetch` calls, form posts, Server-Sent Events, import maps, or other runtime behavior that is not represented as exporter-managed markup or CSS URLs.
+CDN mode validates the static references the exporter owns and can see while crawling HTML and CSS: parser-discovered page links, Turbo Frame sources, supported HTML asset references, `<link rel="canonical">` values that point at managed app routes, `<img>` and `<source>` `srcset` candidates, CSS `url(...)` references, and both `@import url(...)` and string-form `@import "..."` stylesheet dependencies. It does not prove arbitrary app-authored JavaScript `fetch` calls, form posts, Server-Sent Events, import maps, or other runtime behavior that is not represented as exporter-managed markup or CSS references.
+
+Parser-backed discovery can surface valid HTML or CSS references that older exporter versions missed. After upgrading, a new `RWEXPORT###` failure may be correct rather than a regression: export the route or asset, fix path casing, mark authoring-only anchors with `data-rw-export-ignore`, or choose `--mode hybrid` when the dependency is intentionally served by live infrastructure.
 
 CDN export skips relative anchors that point at common source or project file extensions, such as `./Program.cs` or `../Project.csproj`, because those links are usually for GitHub and editor navigation rather than static-site dependencies. For other authoring-only anchors in app-rendered HTML, use `data-rw-export-ignore`; the anchor remains rendered and clickable, but CDN export will not crawl, validate, or rewrite its `href`.
 
@@ -123,6 +137,18 @@ For both `--project` and `--dll`:
 - If you do not pass `--urls` via `--app-args`, the CLI appends `--urls http://127.0.0.1:0`.
 - The launched app inherits the parent process environment, while the CLI forces `ASPNETCORE_ENVIRONMENT=Production` and `DOTNET_ENVIRONMENT=Production` for deployed-runtime semantics.
 - The CLI waits for startup, crawls the app, then shuts the process down automatically.
+- Pass multiple target-app arguments by repeating `--app-args` once per token. For example, `--app-args --urls --app-args http://127.0.0.1:5009` launches the app with `--urls http://127.0.0.1:5009`.
+
+#### If export fails
+
+Process failures are reported with the command stage, exit code or startup exception when available, captured target-app stdout/stderr, and the next recovery step. Target-app output is fully captured for the current export attempt; the CLI does not apply a line-count or byte-count truncation limit. Common branches:
+
+- **Missing source option or multiple sources**: choose exactly one of `--url`, `--project`, or `--dll`; run `razorwire export --help` for the current command shape.
+- **Multi-targeted project without `--framework`**: pass `-f|--framework <TFM>`, such as `--framework net10.0`, so publish and DLL resolution use the same target.
+- **Project publish fails**: read the captured `dotnet publish` stdout/stderr, fix the build error, and rerun the same export command.
+- **Target app exits before listening**: inspect the captured target-app output in the error. The app failed during startup before the exporter could discover a base URL.
+- **Readiness timeout after a listening URL**: verify the app can serve requests at the emitted loopback URL and that startup work is not blocking the first response.
+- **Cancellation or interrupted export**: the CLI performs best-effort shutdown of the launched target app before returning.
 
 ### AppSurface Docs versioned export notes
 
@@ -152,3 +178,14 @@ dotnet run --project Web/ForgeTrust.RazorWire.Cli -- export -o ./dist -p ./examp
 ```bash
 dotnet run --project Web/ForgeTrust.RazorWire.Cli -- export -o ./dist -d ./bin/Release/net10.0/MyApp.dll --app-args --urls --app-args http://127.0.0.1:5009
 ```
+
+## Contributor process execution policy
+
+RazorWire CLI owns two process boundaries:
+
+| Boundary | Use for | Contract |
+|---|---|---|
+| Command executor | Finite commands such as publish probes and MSBuild property reads. | Return exit code, stdout, and stderr as data; do not throw for non-zero exits or ordinary startup failures; propagate cancellation. |
+| Target app process | Long-running app launched for crawling. | Raise stdout/stderr as non-empty lines, surface startup failure before readiness timeout, raise exit after output drain when possible, and perform best-effort process-tree cleanup on disposal. |
+
+Keep command arguments tokenized as ordered argument lists. Do not build shell command strings. User-facing docs should describe observable behavior and recovery steps; implementation dependencies belong in contributor docs and tests.

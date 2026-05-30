@@ -8,7 +8,7 @@ This package provides the configuration layer for AppSurface modules. It combine
 
 ## Release Guidance
 
-AppSurface is preparing the first coordinated `v0.1.0` release. Before installing this package from a prerelease feed, read the [v0.1 release preview](../../releases/v0.1-preview.md) for current release risk, provisional migration guidance, and the finalization path to the tagged release note.
+AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 1 release note](../../releases/v0.1.0-rc.1.md) for current release risk, migration guidance, and package readiness.
 
 ## Key Types
 
@@ -19,6 +19,7 @@ AppSurface is preparing the first coordinated `v0.1.0` release. Before installin
 - **`IConfigAuditReporter`**: Builds source-aware configuration audit reports for known config entries.
 - **`ConfigAuditTextRenderer`**: Renders a safe, human-readable audit report from the structured model.
 - **`ConfigAuditCollectionTraversalAttribute`**: Enables bounded collection element traversal for a discovered config wrapper.
+- **`ConfigAuditDictionaryKeyCorrelationOptions`**: Supplies opt-in scoped HMAC key material for dictionary key correlation ids.
 - **`ConfigDiagnosticsCommandRunner`**: Runs the app-owned text diagnostics workflow for the active AppSurface environment.
 - **`Config<T>` / `ConfigStruct<T>`**: Base types for strongly typed configuration values.
 - **`ConfigKeyAttribute`**: Associates a configuration type or property with a specific key.
@@ -66,6 +67,9 @@ What does this app believe its configuration is, and why?
 The reporter returns a structured `ConfigAuditReport` for an environment. The report includes provider order, known
 configuration entries, source records, entry states, diagnostics, and display-safe values. A known entry is either a
 discovered `Config<T>` / `ConfigStruct<T>` wrapper or a key registered explicitly with `AddConfigAuditKey<T>()`.
+Audit values are redacted before they enter `ConfigAuditReport`, JSON serialization, text rendering, or diagnostics
+command output. The report is still an internal support artifact: key names, provider names, file paths, environment
+variable names, diagnostics, and the existence of redacted values can still be operationally sensitive.
 
 ```csharp
 var report = auditReporter.GetReport("Staging");
@@ -76,6 +80,111 @@ Explicit registrations are useful for keys that are read directly through `IConf
 
 ```csharp
 services.AddConfigAuditKey<string>("Billing.Endpoint");
+```
+
+Mark domain-specific secrets explicitly when the key name does not contain a built-in sensitive fragment:
+
+```csharp
+services.AddConfigAuditKey<string>(
+    "Partner.Payload",
+    options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+```
+
+### Config audit source locations in 5 minutes
+
+File-backed source records can include an optional `Location` when AppSurface can confidently map the merged JSON value
+back to a property token in the same file content used to initialize the file provider snapshot:
+
+```csharp
+var report = auditReporter.GetReport("Staging");
+var source = report.Entries
+    .Single(entry => entry.Key == "MyApp.Settings")
+    .Sources
+    .Single(source => source.Kind == ConfigAuditSourceKind.File);
+
+var coordinate = source.Location is { } location
+    ? $"{source.FilePath}:{location.LineNumber}:{location.ByteColumnNumber}"
+    : source.FilePath;
+
+Console.WriteLine(coordinate);
+```
+
+The structured model keeps the coordinate separate from the path:
+
+```json
+{
+  "Kind": "File",
+  "FilePath": "/app/appsettings.Staging.json",
+  "ConfigPath": "MyApp.Settings.Database.Host",
+  "Location": {
+    "LineNumber": 9,
+    "ByteColumnNumber": 9
+  }
+}
+```
+
+Default `System.Text.Json` options serialize enum values such as `Kind` numerically. Enable a string-enum converter if
+you want the enum names shown above in exported support data.
+
+The text renderer includes the coordinate when it is present and preserves the previous shape when it is absent:
+
+```text
+Source: FileBasedConfigProvider appsettings.Staging.json:9:9 :: MyApp.Settings.Database.Host
+Source: FileBasedConfigProvider appsettings.Staging.json :: Legacy.Unlocated
+```
+
+`ByteColumnNumber` is one-based and counts UTF-8 bytes from the start of the physical line, not Unicode characters or
+editor display cells. A property after `é`, emoji, or other non-ASCII text can have a byte column larger than the
+column shown by an editor.
+
+`Location` can be `null` even for a file source. AppSurface omits coordinates when it cannot prove that the coordinate
+would point at the same value the existing JSON parse and merge produced. Common causes include ambiguous
+case-insensitive path collisions, unsupported dotted property paths, parser mismatch, collection element descendants,
+or source metadata from a provider that is not file-backed. No location is better than a misleading location.
+
+File paths and line/byte coordinates are operational metadata. Treat rendered audit reports as support-bundle material:
+review them before sharing outside the operational trust boundary, especially when deployment paths reveal tenant names,
+repository layout, or host filesystem conventions.
+
+### Discovered file keys in 5 minutes
+
+The report also includes `DiscoveredKeys` for effective merged configuration visible to enumerable providers. The
+built-in v1 surface discovers file-backed keys from `FileBasedConfigProvider`, so the text renderer labels that section
+`Discovered file keys:` when all discovered sources are files. It does not enumerate environment variables, secret
+providers, shadowed lower-priority file values, or every raw key a custom provider may know about. Classifications are
+relative to the AppSurface audit registry: `Unknown` means unknown to `Config<T>` wrappers and
+`AddConfigAuditKey<T>()`, not globally unused.
+
+For example, this file-backed configuration:
+
+```json
+{
+  "Billing": {
+    "Endpoint": "https://billing.example",
+    "Password": "super-secret"
+  },
+  "BillingEndpiont": "https://typo.example"
+}
+```
+
+with this registration:
+
+```csharp
+services.AddConfigAuditKey<BillingOptions>("Billing");
+services.AddConfigAuditKey<string>("Billing.Endpoint");
+```
+
+renders discovered file keys like this:
+
+```text
+Discovered file keys:
+  Billing.Endpoint [Known] = https://billing.example
+    Source: FileBasedConfigProvider appsettings.Staging.json :: Billing.Endpoint
+  Billing.Password [Under known entry] = [redacted]
+    Redacted: true
+    Source: FileBasedConfigProvider appsettings.Staging.json :: Billing.Password
+  BillingEndpiont [Unknown to AppSurface audit registry] = https://typo.example
+    Source: FileBasedConfigProvider appsettings.Staging.json :: BillingEndpiont
 ```
 
 ### Audit Hello World
@@ -197,9 +306,10 @@ Entries:
     Diagnostic: The configuration value must be between 1 and 5.
 ```
 
-Known AppSurface audit entries only: the report includes discovered `Config<T>` / `ConfigStruct<T>` wrappers and
-entries registered with `AddConfigAuditKey<T>()`. It does not enumerate every raw environment variable, unused JSON key,
-or typo in a provider.
+Known AppSurface audit entries include discovered `Config<T>` / `ConfigStruct<T>` wrappers and entries registered with
+`AddConfigAuditKey<T>()`. `DiscoveredKeys` separately exposes effective merged file-backed keys visible to enumerable
+providers. The report still does not enumerate every raw environment variable or every raw key a custom provider may
+know about.
 
 Place the wrapper where AppSurface Console command discovery can see it. By default, `ConsoleStartup<TModule>` scans
 `StartupContext.EntryPointAssembly`, which is normally the root module assembly. If your command lives elsewhere, set
@@ -244,6 +354,25 @@ display. Dotted, quoted, bracketed, hidden, or sensitive dictionary keys use inh
 exposing a raw key path; for example, keys such as `user.name`, `items[0]`, or `"first name"` inherit the parent source
 because they cannot form an unambiguous raw config path.
 
+When environment variables create or replace indexed collection elements, traversed child entries keep the exact
+environment source and add proof-limited diagnostics. `config-audit-environment-created-element` means the audit could
+prove there was no lower-priority element for that index. `config-audit-environment-element-base-unknown` means the
+environment supplied the final element, but lower-priority provider evidence was pathless, invalid, generic, or otherwise
+unable to prove whether that index already existed.
+
+For example, with traversal enabled for `MyApp.Settings`, `MYAPP__SETTINGS__ENDPOINTS__0=https://one.example` can
+render like this when no lower-priority provider supplied `Endpoints[0]`:
+
+```text
+MyApp.Settings.Endpoints[0] = https://one.example
+  Source: Environment variable MYAPP__SETTINGS__ENDPOINTS__0
+  Diagnostic: [Info] config-audit-environment-created-element: Environment variable created this collection element; audit provenance found no prior element.
+```
+
+The report still follows runtime probing. If indexed environment variables skip `ENDPOINTS__0` and only define
+`ENDPOINTS__1`, the later variable is not reported as created because AppSurface does not bind it as part of the
+runtime collection.
+
 ### Collection Traversal API
 
 `ConfigAuditEntryOptions` is an immutable snapshot that controls collection expansion for one known entry:
@@ -255,12 +384,17 @@ because they cannot form an unambiguous raw config path.
 | `MaxCollectionElements` | `128` | Stops after this many elements from any one collection. |
 | `MaxReportNodes` | `4096` | Bounds total child nodes created for the entry. |
 | `DisplayDictionaryKeys` | `true` | Allows non-sensitive dictionary keys to appear as labels. Sensitive keys are still redacted. |
+| `Sensitivity` | `Unknown` | Classifies the entry for redaction. `Sensitive` redacts root values, traversed child values, and value-derived dictionary labels. `NonSensitive` documents intent but never disables conservative redaction from fragments or sources. |
+| `DictionaryKeyCorrelationMode` | `None` | Adds no durable dictionary key metadata unless explicitly set to `ScopedHmac`. |
 
 For discovered wrappers, use `ConfigAuditCollectionTraversalAttribute`. Attribute presence enables traversal and its
 named properties mirror the bounded options:
 
 ```csharp
-[ConfigAuditCollectionTraversal(MaxCollectionElements = 32, DisplayDictionaryKeys = false)]
+[ConfigAuditCollectionTraversal(
+    MaxCollectionElements = 32,
+    DisplayDictionaryKeys = false,
+    DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac)]
 public sealed class ServicesByNameConfig : Config<Dictionary<string, ServiceEndpoint>>
 {
 }
@@ -276,6 +410,8 @@ services.AddConfigAuditKey<Dictionary<string, ServiceEndpoint>>(
     {
         options.TraverseCollectionElements = true;
         options.MaxCollectionElements = 32;
+        options.Sensitivity = ConfigAuditSensitivity.Sensitive;
+        options.DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac;
     });
 ```
 
@@ -294,12 +430,61 @@ services.AddSingleton(
 Each collection child can include `ConfigAuditEntry.Element`. Array and list entries set `Element.Kind` to
 `ArrayItem` or `ListItem` and set `Element.Index`. Dictionary entries set `Element.Kind` to `DictionaryItem` and set
 `Element.KeyLabel` to a display-safe label. Redacted dictionary labels are report-local, for example
-`[redacted-key-1]`; they are not stable identifiers across reports.
+`[redacted-key-1]`; they are not stable identifiers across reports. When dictionary key correlation is explicitly
+enabled and configured, dictionary entries also set `Element.KeyCorrelationId` to a separate opaque identifier. The
+correlation id is metadata; it is never part of `ConfigAuditEntry.Key` or `Element.KeyLabel`.
 
 When wrapper discovery and manual registration use the same key, the wrapper remains the source of wrapper metadata
 and validation behavior. Explicit manual option assignments override wrapper attribute options per property, including
 assignments back to the default value. For example, a wrapper can hide dictionary keys by default while one manual
 registration sets `DisplayDictionaryKeys = true` for a provider-only report composition.
+
+The same duplicate-registration rule is the preferred way to classify a wrapper-discovered key as sensitive without
+losing wrapper validation or traversal metadata:
+
+```csharp
+[ConfigKey("Audit.Services", root: true)]
+[ConfigAuditCollectionTraversal]
+public sealed class AuditServicesConfig : Config<List<ServiceEndpoint>>
+{
+}
+
+services.AddConfigAuditKey<List<ServiceEndpoint>>(
+    "Audit.Services",
+    options => options.Sensitivity = ConfigAuditSensitivity.Sensitive);
+```
+
+### Dictionary Key Correlation
+
+Dictionary key correlation is an opt-in support workflow for comparing hidden dictionary keys across reports. It does
+not reveal raw keys and does not make `[redacted-key-1]` durable. Enable it per audit entry with
+`DictionaryKeyCorrelationMode = ConfigAuditDictionaryKeyCorrelationMode.ScopedHmac`, then configure global key material
+with `ConfigAuditDictionaryKeyCorrelationOptions`:
+
+```csharp
+services.Configure<ConfigAuditDictionaryKeyCorrelationOptions>(options =>
+{
+    options.SecretKey = configuration["ConfigAudit:CorrelationSecret"];
+    options.KeyId = "config-audit-2026-05";
+    options.ApplicationScope = "billing-service";
+});
+```
+
+The secret key is interpreted as UTF-8 and must contain at least 32 bytes when UTF-8 encoded. AppSurface derives ids with
+HMAC-SHA256 over the algorithm version, application scope, report environment, root audit key, and raw dictionary key,
+then truncates the result to 96 bits. Rendered ids look like `v1:{keyId}:{24-hex-chars}`. The key id is trimmed and can
+contain only ASCII
+letters, digits, `.`, `_`, and `-` so rendered reports remain line-safe. Changing the secret key, key id, application
+scope, environment, or root audit key intentionally changes the id.
+
+If correlation is enabled for an entry but global key material is missing or invalid, the report keeps current
+report-local labels, omits `KeyCorrelationId`, and emits `config-audit-key-correlation-unavailable`. Support bundles may
+include correlation ids, key id, and application scope, but must never include the secret key or a raw-key mapping.
+
+Treat correlation ids as sensitive support metadata. They reveal equality, absence, recurrence, and churn across
+reports. If an attacker can choose dictionary keys and obtain reports, they can still test chosen inputs against
+correlation output even though HMAC prevents offline guessing without the secret. Keep correlation disabled unless a
+support or operator workflow needs it.
 
 ### Collection Examples
 
@@ -307,9 +492,10 @@ registration sets `DisplayDictionaryKeys = true` for a provider-only report comp
 | --- | --- |
 | `string[]` or `List<T>` | Children render as `Key[0]`, `Key[1]`, preserving numeric order in text output. |
 | `Dictionary<string,T>` | Non-sensitive keys render as `Key["name"]`; sensitive keys render as `Key[[redacted-key-1]]`. |
+| dictionary correlation enabled | Dictionary elements include `Element.KeyCorrelationId`; text output renders it as entry metadata. |
 | null element | Emits an element child with a `null` display value and no grandchildren. |
 | object element | Emits the element and then ordinary public property/field children below it. |
-| non-string dictionary key | Uses the invariant string label when it is non-sensitive and display is enabled. |
+| non-string dictionary key | Uses the invariant string label for convertible keys when non-sensitive and display is enabled; arbitrary object keys are hidden. |
 | dotted or bracketed dictionary key | Uses a display label but inherits parent provenance because no safe exact source path is available. |
 | unsupported enumerable | Emits a traversal diagnostic instead of enumerating. |
 | multidimensional array | Emits a traversal diagnostic; only one-dimensional arrays are expanded. |
@@ -318,19 +504,38 @@ registration sets `DisplayDictionaryKeys = true` for a provider-only report comp
 
 Audit reports are redacted by default before renderers see values. Sensitive-looking paths, keys, and environment
 variable names render as `[redacted]`. The built-in fragments include `password`, `secret`, `token`, `apikey`, `key`,
-`connectionstring`, `credential`, and `private`.
+`connectionstring`, `credential`, `private`, `passphrase`, `clientsecret`, `client_secret`, `sharedsecret`,
+`shared_secret`, `privatekey`, `private_key`, `certificate`, `cert`, `dsn`, `sas`, `sharedaccesssignature`,
+`assertion`, `cookie`, `sessionid`, `session_id`, `sessioncookie`, `session_cookie`, `bearer`, `jwt`,
+`refresh_token`, `access_token`, `clientassertion`, and `client_assertion`.
 
-Redaction is deliberately conservative. It does not expose string lengths, sensitive collection counts, or sensitive
-nested values. Source metadata remains visible unless a provider marks the source metadata itself as sensitive. This
-keeps values redacted while still showing where a value came from. Treat rendered reports as internal support data:
-provider names, file names, environment variable names, key names, and the existence of redacted values can still be
-operationally sensitive.
+Redaction is deliberately conservative and can produce false positives. Short fragments such as `key`, `cert`, `dsn`,
+and `sas` are accepted because audit reports are operator diagnostics, not a public display surface. Use
+`ConfigAuditSensitivity.NonSensitive` only as documentation for readers and future tooling; it is not an opt-out and
+never downgrades redaction from `Sensitive`, built-in fragments, provider source sensitivity, or sensitive-looking
+source paths.
+
+Redaction does not expose string lengths, sensitive collection counts, or sensitive nested values. Display values are
+redacted before entering `ConfigAuditReport`. Source metadata remains visible unless a provider marks the source
+metadata itself as sensitive, which keeps values redacted while still showing where a value came from. Treat rendered
+reports as internal support data: provider names, file names, environment variable names, key names, config paths, and
+the existence of redacted values can still be operationally sensitive.
 
 Collection parent values are omitted instead of serialized when the collection key and source metadata are not
 sensitive. This avoids leaking nested element fields such as `Password`, `Token`, `Secret`, or `ApiKey` through a raw
-JSON dump. When element traversal is enabled, dictionary key labels and source selection are redacted before public
-report objects are created. Raw sensitive dictionary keys do not appear in `Key`, `Element`, `Sources`, diagnostics, or
-the text renderer.
+JSON dump. When element traversal is enabled, dictionary key labels are redacted or hidden before public report objects
+are created. Sensitive dictionary labels do not appear in `Key`, `Element.KeyLabel`, diagnostics, or the text renderer.
+Source metadata remains governed by the source-metadata safety contract above.
+
+When an entry is effectively sensitive, dictionary labels become report-local placeholders:
+
+```text
+Partner.Payloads[[redacted-key-1]] = [redacted]
+```
+
+When `DisplayDictionaryKeys = false`, labels are intentionally hidden as `[[key]]`. Hidden labels inherit parent
+provenance for display, but redaction still evaluates parent and child source candidates so a source-sensitive child
+value does not leak.
 
 ### Audit Diagnostics
 
@@ -342,7 +547,10 @@ the text renderer.
 | `config-audit-report-node-limit` | Warning | Traversal stopped at `MaxReportNodes` for the entry. |
 | `config-audit-source-inherited` | Info | An element inherited parent provenance because an exact safe source path was unavailable. |
 | `config-audit-source-unavailable` | Info | No provider source record was available for an element. |
-| `config-audit-options-invalid` | Error | Entry options were invalid; safe defaults were used for bounded traversal values. |
+| `config-audit-environment-created-element` | Info | An environment variable supplied a collection element and audit provenance proved no lower-priority element existed for that index. |
+| `config-audit-environment-element-base-unknown` | Info | An environment variable supplied a collection element, but lower-priority provider evidence could not prove whether that index existed. |
+| `config-audit-options-invalid` | Error | Entry options were invalid. Traversal limits use safe bounded defaults; invalid `Sensitivity` values fail closed as `Sensitive`, and invalid or unavailable correlation mode falls back to `None`. |
+| `config-audit-key-correlation-unavailable` | Warning | Dictionary key correlation was requested, but global key material was missing or invalid. |
 
 ### Migration Note
 
@@ -350,11 +558,24 @@ Existing reports keep the same collection shape unless an entry opts into collec
 `ConfigAuditCollectionTraversalAttribute` or manual `TraverseCollectionElements`. Object child entries, redacted scalar
 display values, provider precedence, and wrapper diagnostics continue to work as before. If a wrapper-discovered key
 and a manual key registration use the same config key, wrapper metadata still wins for type and validation, while
-explicit manual audit option assignments are merged into the selected entry.
+explicit manual audit option assignments are merged into the selected entry. Opted-in traversed collection entries may
+now include additional info diagnostics for environment-created or base-unknown elements. The public report object shape
+is unchanged, but text output now includes diagnostic severity and code so operators can search rendered reports.
+
+Adding `Sensitivity = ConfigAuditSensitivity.Sensitive` is additive API surface, but redaction behavior is intentionally
+broader. New built-in fragments can redact values that previously rendered, and `NonSensitive` is not an opt-out. Review
+release notes for fragment changes when audit output shape matters to operators.
 
 ### Audit Pitfalls
 
-- Audit reports cover AppSurface-known entries, not every raw process environment variable or every unused file key.
+- Known audit entries cover AppSurface-registered keys. `DiscoveredKeys` adds the effective merged file-backed keys
+  visible to enumerable providers, but it is not a complete raw file inventory and does not include shadowed
+  lower-priority file keys in v1.
+- `Unknown to AppSurface audit registry` means the key is outside known `Config<T>` wrappers and
+  `AddConfigAuditKey<T>()` registrations. It can be a typo, stale setting, or a value consumed outside AppSurface; it
+  is not proof that the key is globally unused.
+- Environment variables, secret providers, source-metadata redaction modes, shadowed raw file inventory, and strict
+  drift gates are outside the first discovered-key surface.
 - Collection display values are intentionally omitted rather than summarized or serialized; opt into element traversal
   for keys where element-level visibility is safe and useful.
 - `ConfigAuditCollectionTraversalAttribute` is inherited. Put a new attribute on a derived wrapper when inherited
@@ -362,10 +583,20 @@ explicit manual audit option assignments are merged into the selected entry.
 - Attribute values are compile-time metadata. Use manual `AddConfigAuditKey<T>()` options when traversal settings must
   be chosen dynamically at registration time.
 - Sensitive dictionary key labels are report-local. Do not use `[redacted-key-1]` as a durable correlation identifier.
-- Element traversal reports existing provider values. Environment-created missing collection elements, global debug
-  expansion, diffing, raw-key drift analysis, and support-bundle export are separate product surfaces.
+- `ConfigAuditSensitivity.NonSensitive` is not a redaction bypass; it cannot override sensitive fragments, source
+  sensitivity, provider sensitivity, or another registration that marks the entry sensitive.
+- Invalid `ConfigAuditSensitivity` enum values emit `config-audit-options-invalid` and redact as sensitive.
+- Dictionary key correlation ids are separate from labels and still sensitive. They are useful for support comparison,
+  not public logging, analytics, or user-facing output.
+- Key rotation is explicit: changing the correlation secret or key id breaks historical correlation. V1 does not
+  dual-read old keys during a migration window.
+- Element traversal can report environment-created collection elements only when runtime-bound environment variables and
+  audit provenance prove the element exists because of the environment override. It does not enumerate orphaned
+  environment variables, sparse indices skipped by runtime probing, global debug expansion, raw-key drift analysis, or
+  support-bundle export.
 - Provider-discovered raw key enumeration is intentionally separate from the first audit surface.
-- File origins include file path and config path. Line and column origins are not part of the first report.
+- File origins include file path and config path. File source locations are optional and only appear when AppSurface can
+  map a source record to an exact property token without ambiguity.
 - Validation diagnostics name keys and rules; they do not include attempted secret values.
 - A direct environment object value replaces the whole object, while child environment variables produce member-level
   patch provenance.
