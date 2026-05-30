@@ -229,6 +229,33 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     }
 
     [Fact]
+    public void GetCatalog_ShouldReturnCatalogAvailabilityIssue_WhenTrustedReleaseRootPathIsInvalid()
+    {
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = "1.2.3"
+                    }
+                ]
+            });
+        var logger = A.Fake<ILogger<AppSurfaceDocsVersionCatalogService>>();
+        var service = CreateCatalogService(catalogPath, trustedReleaseRootPath: "bad\0root", logger: logger);
+
+        var catalog = service.GetCatalog();
+
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalog.Status);
+        Assert.Empty(catalog.PublicVersions);
+        Assert.Contains("invalid", catalog.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("bad", catalog.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        AssertWarningLogged(logger, "trusted release root configuration is invalid");
+    }
+
+    [Fact]
     public void GetCatalog_ShouldRejectTrustedReleaseRootSymlink()
     {
         if (!TryCreateSymbolicLinkTestDirectory(out _, out var linkPath))
@@ -1146,6 +1173,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     [Theory]
     [InlineData("label", "false")]
     [InlineData("summary", "[]")]
+    [InlineData("visibility", "\"\"")]
     [InlineData("visibility", "\"NotAVisibility\"")]
     [InlineData("advisoryState", "\"NotAnAdvisory\"")]
     public void GetCatalog_ShouldSkipEntriesWithInvalidOptionalProperties(string propertyName, string invalidJsonValue)

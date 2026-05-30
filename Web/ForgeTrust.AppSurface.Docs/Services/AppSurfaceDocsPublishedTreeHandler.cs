@@ -277,16 +277,14 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 mount.ExactTreeRootPath,
                 AppSurfaceDocsFrozenRouteManifest.FileName,
                 out var manifestPath,
-                out var denialReason)
+                out _)
             && IsPhysicalFileInsideMountRoot(mount, manifestInfo, manifestPath))
         {
             return true;
         }
 
         _logger.LogWarning(
-            "Ignoring AppSurface Docs frozen route manifest for mount {MountRootPath} because the manifest path is not safe: {Reason}",
-            mount.MountRootPath,
-            denialReason ?? "physical file path is outside the published tree root.");
+            "Ignoring AppSurface Docs frozen route manifest because the manifest path is not safe.");
         return false;
     }
 

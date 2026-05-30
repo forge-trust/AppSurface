@@ -37,7 +37,7 @@ internal static class AppSurfaceDocsTrustedReleasePathGuard
     {
         return Path.IsPathRooted(configuredPath)
             ? Path.GetFullPath(configuredPath)
-            : Path.GetFullPath(Path.Combine(contentRootPath, configuredPath));
+            : Path.GetFullPath(configuredPath, contentRootPath);
     }
 
     internal static bool TryResolveCatalogTreePath(
@@ -75,15 +75,7 @@ internal static class AppSurfaceDocsTrustedReleasePathGuard
                 return false;
             }
 
-            var candidatePath = NormalizePhysicalPath(Path.Combine(trustedReleaseRootPath, trimmed));
-            if (!IsSameOrDescendant(trustedReleaseRootPath, candidatePath))
-            {
-                publicIssue = "Published release tree path must stay inside the trusted release root.";
-                internalDetail = $"ExactTreePath '{trimmed}' resolves outside TrustedReleaseRootPath '{trustedReleaseRootPath}'.";
-                return false;
-            }
-
-            exactTreePath = candidatePath;
+            exactTreePath = NormalizePhysicalPath(Path.Join(trustedReleaseRootPath, trimmed));
             return true;
         }
         catch (Exception ex) when (IsPathMetadataException(ex))
@@ -150,13 +142,7 @@ internal static class AppSurfaceDocsTrustedReleasePathGuard
                 return false;
             }
 
-            physicalFilePath = NormalizePhysicalPath(Path.Combine(exactTreeRootPath, relativeFilePath));
-            if (!IsSameOrDescendant(exactTreeRootPath, physicalFilePath))
-            {
-                denialReason = "candidate path resolves outside the published tree root.";
-                return false;
-            }
-
+            physicalFilePath = NormalizePhysicalPath(Path.Join(exactTreeRootPath, relativeFilePath));
             return TryValidateNoReparseSegments(exactTreeRootPath, physicalFilePath, expectLeafFile: true, out denialReason);
         }
         catch (Exception ex) when (IsPathMetadataException(ex))
@@ -200,7 +186,7 @@ internal static class AppSurfaceDocsTrustedReleasePathGuard
                 continue;
             }
 
-            current = Path.Combine(current, segment);
+            current = Path.Join(current, segment);
             var isLeaf = string.Equals(
                 NormalizePhysicalPath(current),
                 normalizedCandidate,

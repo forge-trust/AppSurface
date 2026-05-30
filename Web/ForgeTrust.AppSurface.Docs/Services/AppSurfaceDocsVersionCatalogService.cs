@@ -145,11 +145,9 @@ public sealed class AppSurfaceDocsVersionCatalogService
         }
         catch (Exception ex) when (AppSurfaceDocsTrustedReleasePathGuard.IsPathMetadataException(ex))
         {
-            var trimmedRootPath = _options.Versioning.TrustedReleaseRootPath?.Trim();
             _logger.LogWarning(
                 ex,
-                "AppSurface Docs trusted release root {TrustedReleaseRootPath} is invalid. Published release trees will stay unavailable.",
-                trimmedRootPath);
+                "AppSurface Docs trusted release root configuration is invalid. Published release trees will stay unavailable.");
             return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(
                 catalogPath,
                 "Trusted release root path is invalid.");
@@ -160,13 +158,10 @@ public sealed class AppSurfaceDocsVersionCatalogService
                 "Trusted release root directory does not exist.",
                 "Trusted release root must be an ordinary directory.",
                 out var trustedRootPublicIssue,
-                out var trustedRootInternalDetail))
+                out _))
         {
             _logger.LogWarning(
-                "AppSurface Docs trusted release root {TrustedReleaseRootPath} is unavailable: {AvailabilityIssue} Detail: {AvailabilityDetail}",
-                trustedReleaseRootPath,
-                trustedRootPublicIssue,
-                trustedRootInternalDetail);
+                "AppSurface Docs trusted release root is unavailable. Published release trees will stay unavailable.");
             return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath, trustedRootPublicIssue);
         }
 

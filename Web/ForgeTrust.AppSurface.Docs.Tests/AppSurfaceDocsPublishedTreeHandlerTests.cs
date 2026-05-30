@@ -436,9 +436,10 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         }
 
         var tree = CreatePublishedTree("symlinked-asset");
-        Directory.CreateDirectory(Path.Combine(tree, "img"));
+        var imageDirectory = Path.Join(tree, "img");
+        Directory.CreateDirectory(imageDirectory);
         File.WriteAllBytes(targetPath, [0x89, 0x50, 0x4E, 0x47]);
-        File.CreateSymbolicLink(Path.Combine(tree, "img", "hero.png"), targetPath);
+        File.CreateSymbolicLink(Path.Join(imageDirectory, "hero.png"), targetPath);
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/img/hero.png");
 
@@ -454,9 +455,10 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         }
 
         var tree = CreatePublishedTree("symlinked-asset-directory");
-        Directory.CreateDirectory(Path.Combine(targetPath, "nested"));
-        File.WriteAllBytes(Path.Combine(targetPath, "nested", "hero.png"), [0x89, 0x50, 0x4E, 0x47]);
-        Directory.Move(linkPath, Path.Combine(tree, "linked-img"));
+        var nestedDirectory = Path.Join(targetPath, "nested");
+        Directory.CreateDirectory(nestedDirectory);
+        File.WriteAllBytes(Path.Join(nestedDirectory, "hero.png"), [0x89, 0x50, 0x4E, 0x47]);
+        Directory.Move(linkPath, Path.Join(tree, "linked-img"));
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/linked-img/nested/hero.png");
 
@@ -474,7 +476,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
         var tree = CreatePublishedTree("symlinked-fallback");
         File.WriteAllText(targetPath, "<!DOCTYPE html><html><body>external</body></html>");
-        File.CreateSymbolicLink(Path.Combine(tree, "external.html"), targetPath);
+        File.CreateSymbolicLink(Path.Join(tree, "external.html"), targetPath);
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/external");
 
