@@ -124,6 +124,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
                 use_when: Install this first for a normal ASP.NET Core app with AppSurface modules.
                 includes: Base web startup.
                 does_not_include: OpenAPI.
+                depends_on:
+                  - ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
                 product_family: appsurface
@@ -1227,6 +1229,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("Internal support", documents.ReadinessMarkdown, StringComparison.Ordinal);
         Assert.Contains("Forge Trust", documents.ReadinessMarkdown, StringComparison.Ordinal);
         Assert.Contains("RazorWire", documents.ReadinessMarkdown, StringComparison.Ordinal);
+        Assert.Contains("`ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64`", documents.ReadinessMarkdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2214,6 +2217,15 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => generator.RunPackageGateAsync(CreateRequest()));
 
         Assert.Contains("outside the repository root", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResolveRepositoryFilePath_ThrowsWhenRepositoryPathIsBlank()
+    {
+        var error = Assert.Throws<PackageIndexException>(
+            () => PackageIndexGenerator.ResolveRepositoryFilePath(_repositoryRoot, " ", "Release note"));
+
+        Assert.Contains("Release note must define a repository-relative file path.", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

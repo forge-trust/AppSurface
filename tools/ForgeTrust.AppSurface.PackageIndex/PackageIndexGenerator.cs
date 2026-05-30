@@ -34,6 +34,23 @@ internal sealed class PackageIndexGenerator
         "forge_trust",
         "internal_support"
     ];
+    private static readonly IReadOnlyDictionary<string, string> ProductFamilyDisplayNames =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["appsurface"] = "AppSurface",
+            ["razorwire"] = "RazorWire",
+            ["forge_trust"] = "Forge Trust",
+            ["internal_support"] = "Internal support"
+        };
+    private static readonly IReadOnlyDictionary<PackageReadinessStatus, string> ReadinessStatusLabels =
+        new Dictionary<PackageReadinessStatus, string>
+        {
+            [PackageReadinessStatus.ManifestReady] = "manifest evidence complete",
+            [PackageReadinessStatus.TransitiveReady] = "transitive package evidence complete",
+            [PackageReadinessStatus.ProofReady] = "proof-host evidence complete",
+            [PackageReadinessStatus.Excluded] = "excluded by publish decision",
+            [PackageReadinessStatus.Blocked] = "blocked"
+        };
 
     private static readonly HashSet<string> ReservedWindowsDeviceNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -337,13 +354,11 @@ internal sealed class PackageIndexGenerator
                 $"Manifest entry '{entry.Project}' documentation target");
         }
 
-        foreach (var dependency in entry.DependsOn)
+        var unknownDependency = entry.DependsOn.FirstOrDefault(dependency => !knownPackageIds.Contains(dependency));
+        if (unknownDependency is not null)
         {
-            if (!knownPackageIds.Contains(dependency))
-            {
-                throw new PackageIndexException(
-                    $"Manifest entry '{entry.Project}' depends on unknown package id '{dependency}'.");
-            }
+            throw new PackageIndexException(
+                $"Manifest entry '{entry.Project}' depends on unknown package id '{unknownDependency}'.");
         }
 
         ValidateToolCommandName(entry, metadata);
@@ -871,27 +886,12 @@ internal sealed class PackageIndexGenerator
 
     private static string FormatReadinessStatus(PackageReadinessStatus status)
     {
-        return status switch
-        {
-            PackageReadinessStatus.ManifestReady => "manifest evidence complete",
-            PackageReadinessStatus.TransitiveReady => "transitive package evidence complete",
-            PackageReadinessStatus.ProofReady => "proof-host evidence complete",
-            PackageReadinessStatus.Excluded => "excluded by publish decision",
-            PackageReadinessStatus.Blocked => "blocked",
-            _ => status.ToString()
-        };
+        return ReadinessStatusLabels[status];
     }
 
     private static string FormatProductFamily(string productFamily)
     {
-        return productFamily switch
-        {
-            "appsurface" => "AppSurface",
-            "razorwire" => "RazorWire",
-            "forge_trust" => "Forge Trust",
-            "internal_support" => "Internal support",
-            _ => productFamily.Replace('_', ' ')
-        };
+        return ProductFamilyDisplayNames[productFamily];
     }
 
     /// <summary>
@@ -1153,6 +1153,15 @@ internal sealed record ResolvedPackageEntry(PackageManifestEntry Manifest, Packa
 /// </summary>
 internal static class PackageReadinessEvaluator
 {
+    private static readonly IReadOnlyDictionary<PackageClassification, PackageReleaseStatus> ExpectedReleaseStatuses =
+        new Dictionary<PackageClassification, PackageReleaseStatus>
+        {
+            [PackageClassification.Public] = PackageReleaseStatus.PublicPreview,
+            [PackageClassification.Support] = PackageReleaseStatus.SupportRuntime,
+            [PackageClassification.ProofHost] = PackageReleaseStatus.ProofHost,
+            [PackageClassification.Excluded] = PackageReleaseStatus.Excluded
+        };
+
     /// <summary>
     /// Evaluates package-index evidence for resolved package rows.
     /// </summary>
@@ -1209,16 +1218,8 @@ internal static class PackageReadinessEvaluator
         List<string> blockingReasons,
         List<string> fixHints)
     {
-        var expectedReleaseStatus = entry.Manifest.Classification switch
-        {
-            PackageClassification.Public => PackageReleaseStatus.PublicPreview,
-            PackageClassification.Support => PackageReleaseStatus.SupportRuntime,
-            PackageClassification.ProofHost => PackageReleaseStatus.ProofHost,
-            PackageClassification.Excluded => PackageReleaseStatus.Excluded,
-            _ => PackageReleaseStatus.Unknown
-        };
-        if (entry.Manifest.ReleaseStatus == expectedReleaseStatus
-            && expectedReleaseStatus != PackageReleaseStatus.Unknown)
+        var expectedReleaseStatus = ExpectedReleaseStatuses[entry.Manifest.Classification];
+        if (entry.Manifest.ReleaseStatus == expectedReleaseStatus)
         {
             evidence.Add($"release_status is {FormatReadinessEnum(entry.Manifest.ReleaseStatus)}");
         }
@@ -1378,11 +1379,11 @@ internal static class PackageReadinessEvaluator
             .Select(reference => NormalizeProjectReferencePath(repositoryRoot, reference))
             .Where(metadataByProjectPath.ContainsKey)
             .Select(referencePath => metadataByProjectPath[referencePath].PackageId)
-            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        Array.Sort(actualPackageIds, StringComparer.OrdinalIgnoreCase);
         var expectedPackageIds = entry.Manifest.ExpectedDependencyPackageIds
-            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        Array.Sort(expectedPackageIds, StringComparer.OrdinalIgnoreCase);
 
         if (actualPackageIds.SequenceEqual(expectedPackageIds, StringComparer.OrdinalIgnoreCase))
         {
