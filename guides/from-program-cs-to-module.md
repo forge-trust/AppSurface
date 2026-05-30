@@ -54,6 +54,14 @@ The source-of-truth test classes are:
 - `Web/ForgeTrust.AppSurface.Web.Tests/BrowserStatusPageTests.cs`
 - `Web/ForgeTrust.AppSurface.Web.Tests/ConventionalExceptionPageTests.cs`
 
+For a runnable local proof that exercises the same browser/API split through a real AppSurface host, run:
+
+```bash
+bash examples/web-error-pages/verify.sh
+```
+
+The proof is documented in [examples/web-error-pages](../examples/web-error-pages/README.md).
+
 Those tests cover the HTTP contract this page relies on:
 
 - Browser requests to empty supported status responses render recovery-oriented HTML and preserve the original status.

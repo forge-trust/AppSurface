@@ -158,6 +158,16 @@ The conventional exception page uses ASP.NET Core exception handling, not status
 - API-only apps, JSON problem-details APIs, tenant-specific error pages, or apps with telemetry-first exception middleware should leave this disabled and register their own exception handling.
 - Once ASP.NET Core has started a response, exception handling cannot replace it with the conventional page. Design streaming endpoints so failures are reported through the stream protocol rather than relying on a late 500 page.
 
+### Runnable error-page proof
+
+Use the focused [web error-page proof](../../examples/web-error-pages/README.md) when you want executable evidence rather than API reference prose:
+
+```bash
+bash examples/web-error-pages/verify.sh
+```
+
+The proof starts a local production-mode app, verifies browser HTML for empty `401`, `403`, `404`, and thrown `500` paths, verifies API requests do not receive browser HTML, and checks that synthetic request sentinels are absent from the production `500` response body.
+
 ### Configuration and Port Overrides
 
 The web application supports standard ASP.NET Core configuration sources (command-line arguments, environment variables, and `appsettings.json`).
