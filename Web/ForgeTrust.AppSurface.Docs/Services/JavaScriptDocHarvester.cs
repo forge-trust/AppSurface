@@ -1475,14 +1475,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         HashSet<string> yielded,
         CancellationToken cancellationToken)
     {
-        var traversalRootCandidate = ClassifyHarvestCandidate(repositoryRoot, traversalRoot);
-        if (traversalRootCandidate.Status != JavaScriptHarvestCandidateStatus.Directory)
-        {
-            yield break;
-        }
-
         var pending = new Stack<string>();
-        pending.Push(traversalRootCandidate.FullPath);
+        pending.Push(traversalRoot);
 
         while (pending.Count > 0)
         {
@@ -1651,7 +1645,28 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                || value.Contains('[', StringComparison.Ordinal);
     }
 
-    private static JavaScriptHarvestCandidate ClassifyHarvestCandidate(string rootPath, string candidatePath)
+    /// <summary>
+    /// Classifies a JavaScript harvest candidate before the harvester reads a source file or descends into a directory.
+    /// </summary>
+    /// <param name="rootPath">The repository root that bounds built-in JavaScript harvesting.</param>
+    /// <param name="candidatePath">The candidate file or directory path to inspect.</param>
+    /// <returns>The candidate's normalized path metadata and safety state.</returns>
+    internal static JavaScriptHarvestCandidate ClassifyHarvestCandidate(string rootPath, string candidatePath)
+    {
+        return ClassifyHarvestCandidate(rootPath, candidatePath, File.GetAttributes);
+    }
+
+    /// <summary>
+    /// Classifies a JavaScript harvest candidate with a caller-supplied attribute reader for deterministic boundary tests.
+    /// </summary>
+    /// <param name="rootPath">The repository root that bounds built-in JavaScript harvesting.</param>
+    /// <param name="candidatePath">The candidate file or directory path to inspect.</param>
+    /// <param name="getAttributes">Reads file-system attributes for an already-normalized in-root candidate.</param>
+    /// <returns>The candidate's normalized path metadata and safety state.</returns>
+    internal static JavaScriptHarvestCandidate ClassifyHarvestCandidate(
+        string rootPath,
+        string candidatePath,
+        Func<string, FileAttributes> getAttributes)
     {
         var fullRoot = Path.GetFullPath(rootPath);
         var fullCandidate = Path.GetFullPath(candidatePath);
@@ -1664,7 +1679,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         FileAttributes attributes;
         try
         {
-            attributes = File.GetAttributes(fullCandidate);
+            attributes = getAttributes(fullCandidate);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -2133,18 +2148,38 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string RelativePath,
         bool HasGlobTokens);
 
-    private readonly record struct JavaScriptHarvestCandidate(
+    /// <summary>
+    /// Captures the normalized path and boundary decision for a JavaScript harvest file-system candidate.
+    /// </summary>
+    /// <param name="Status">The pre-read safety state for the candidate.</param>
+    /// <param name="FullPath">The normalized absolute candidate path.</param>
+    /// <param name="RelativePath">The repository-root-relative candidate path used in glob matching and diagnostics.</param>
+    internal readonly record struct JavaScriptHarvestCandidate(
         JavaScriptHarvestCandidateStatus Status,
         string FullPath,
         string RelativePath);
 
-    private enum JavaScriptHarvestCandidateStatus
+    /// <summary>
+    /// Describes how the built-in JavaScript harvester may treat a file-system candidate before reading or traversal.
+    /// </summary>
+    internal enum JavaScriptHarvestCandidateStatus
     {
+        /// <summary>The candidate is a regular file that may be read if it also matches harvest policy.</summary>
         File,
+
+        /// <summary>The candidate is a real directory that may be enumerated if it also matches harvest policy.</summary>
         Directory,
+
+        /// <summary>The candidate path does not exist.</summary>
         Missing,
+
+        /// <summary>The candidate path is outside the configured repository root.</summary>
         OutsideRoot,
+
+        /// <summary>The candidate is a symlink, junction, or other reparse point and must not be followed.</summary>
         ReparsePoint,
+
+        /// <summary>The candidate metadata could not be inspected before a read or traversal decision.</summary>
         Inaccessible
     }
 

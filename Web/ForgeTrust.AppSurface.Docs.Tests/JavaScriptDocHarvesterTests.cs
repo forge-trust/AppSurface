@@ -1260,6 +1260,41 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public void ClassifyHarvestCandidate_ShouldReturnOutsideRootWithoutReadingAttributes()
+    {
+        var outsidePath = Path.GetFullPath(Path.Join(_testRoot, "..", "outside.js"));
+        var readAttributes = false;
+
+        var candidate = JavaScriptDocHarvester.ClassifyHarvestCandidate(
+            _testRoot,
+            outsidePath,
+            _ =>
+            {
+                readAttributes = true;
+                return FileAttributes.Normal;
+            });
+
+        Assert.Equal(JavaScriptDocHarvester.JavaScriptHarvestCandidateStatus.OutsideRoot, candidate.Status);
+        Assert.Equal(outsidePath, candidate.FullPath);
+        Assert.False(readAttributes);
+    }
+
+    [Fact]
+    public void ClassifyHarvestCandidate_ShouldReturnInaccessible_WhenAttributesCannotBeInspected()
+    {
+        var candidatePath = Path.Join(_testRoot, "src", "blocked.js");
+
+        var candidate = JavaScriptDocHarvester.ClassifyHarvestCandidate(
+            _testRoot,
+            candidatePath,
+            _ => throw new IOException("metadata denied"));
+
+        Assert.Equal(JavaScriptDocHarvester.JavaScriptHarvestCandidateStatus.Inaccessible, candidate.Status);
+        Assert.Equal(Path.GetFullPath(candidatePath), candidate.FullPath);
+        Assert.Equal("src/blocked.js", candidate.RelativePath);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldReportReadDiagnostic_WhenIncludedDirectoryRootCannotBeEnumerated()
     {
         if (OperatingSystem.IsWindows())
