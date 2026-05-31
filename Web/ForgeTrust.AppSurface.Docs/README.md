@@ -1197,6 +1197,26 @@ static web assets.
   - Defines the only filesystem tree that catalog `exactTreePath` values may publish.
   - Relative configured values resolve from the app content root.
   - The root and exact release trees must be ordinary directories. Symlinks, junctions, reparse points, and metadata-inspection failures are denied.
+- `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`
+  - Defaults to `2097152` bytes (2 MiB).
+  - Must be between `1` and `33554432` bytes (32 MiB). There is no disable sentinel.
+  - Defines the published-tree HTML/search-index rewrite limit. AppSurface Docs checks exported `.html` files and the root `search-index.json` before request-time rewrites, and checks `search-index.json` during catalog validation before parsing.
+  - Does not limit streamed static assets such as images, fonts, CSS, JavaScript, or the source-backed docs harvesters.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Versioning": {
+      "Enabled": true,
+      "CatalogPath": "config/appsurfacedocs/versions.json",
+      "TrustedReleaseRootPath": "/srv/appsurface-docs/releases",
+      "MaxRewrittenFileSizeBytes": 2097152
+    }
+  }
+}
+```
+
+Production hosts can set the same value with `AppSurfaceDocs__Versioning__MaxRewrittenFileSizeBytes`.
 
 ### JavaScript public API harvesting
 
@@ -1397,13 +1417,20 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
   - The payload must remain valid JSON with a top-level `documents` array so version-local search can load safely.
   - Every `documents[]` entry must include non-empty string `path` and `title` properties.
   - Missing or blank `path`/`title` values cause AppSurface Docs to reject the published release tree during startup validation.
+  - The payload must stay under `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`; oversized payloads are rejected during catalog validation before JSON parsing, so the release is marked unavailable before readers hit broken search.
 - `search.css` at the tree root. The bundled search stylesheet carries search-local fallbacks for the shared style tokens so exact release search controls remain styled even when a historical/static export does not include `site.gen.css`.
 - `search-client.js` at the tree root
 - `outline-client.js` at the tree root for outline-aware exports whose HTML references the page-local outline runtime
 - `minisearch.min.js` at the tree root
 - any section, detail, partial, and asset routes that belong to the exported docs surface for that release
 
-AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. The mount contract has two roots: `MountRootPath` controls normal serving, links, assets, search config, search-index payloads, and redirects; `CanonicalRootPath` controls only `<link rel="canonical">` metadata. Exact mounts self-canonicalize. Recommended alias mounts use the route-family root as `MountRootPath` and the matching exact-version root as `CanonicalRootPath`, so `/docs` remains friendly while crawlers see `/docs/v/{version}` as the durable duplicate URL.
+AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. Exported `.html` files and the root `search-index.json` must stay under the published tree rewrite limit in `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`. Oversized rewritten artifacts fail closed instead of streaming unrewritten content; other static assets continue to stream normally. The mount contract has two roots: `MountRootPath` controls normal serving, links, assets, search config, search-index payloads, and redirects; `CanonicalRootPath` controls only `<link rel="canonical">` metadata. Exact mounts self-canonicalize. Recommended alias mounts use the route-family root as `MountRootPath` and the matching exact-version root as `CanonicalRootPath`, so `/docs` remains friendly while crawlers see `/docs/v/{version}` as the durable duplicate URL.
+
+### Published tree rewrite limit
+
+`AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` is a public resource guard for published release trees. The default is `2097152` bytes (2 MiB), chosen conservatively because this repository does not check in a representative exported docs corpus outside build outputs. Hosts with larger generated docs can raise the value up to `33554432` bytes (32 MiB), but raising it increases per-request memory exposure for public rewritten HTML and search-index requests.
+
+Use the limit for exported `.html` pages and the root `search-index.json` only. It is not a general docs file-size policy, it does not cap source harvesting, and it does not block images, fonts, CSS, JavaScript, or other streamed assets. When AppSurface Docs rejects an oversized rewritten artifact, diagnostics include the artifact type, observed size, configured limit, `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`, the failure outcome, and this section name. Remediate by shrinking or re-exporting the artifact, or by setting a larger explicit limit within the supported range.
 
 When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
 
@@ -1483,6 +1510,8 @@ After:
 - Do not expect the recommended alias to rewrite ordinary links to the exact-version route. Only canonical metadata moves from the alias root to the exact root.
 - Do not assume `AppSurfaceDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
+- Do not treat `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` as a cache or total CPU limit. It bounds rewritten input size for published `.html` and root `search-index.json`; under-limit rewritten files can still require request-time parsing and rewriting.
+- Do not raise `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` casually. Larger limits allow larger public request-time reads; prefer shrinking or re-exporting unusually large HTML or search-index artifacts when practical.
 - Do not hand-edit `.appsurface-docs-route-manifest.json` to add aliases. New exports validate duplicate aliases, aliases that collide with canonical routes, and aliases that equal their own canonical route. Runtime ignores ambiguous aliases from hand-edited or legacy manifests and keeps serving normal files.
 
 `AppSurfaceDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.

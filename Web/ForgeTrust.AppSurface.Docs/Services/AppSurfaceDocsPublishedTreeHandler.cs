@@ -22,12 +22,17 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </remarks>
 internal sealed class AppSurfaceDocsPublishedTreeHandler
 {
+    private const string MaxRewrittenFileSizeKey = "AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes";
+    private const string RewriteLimitDocsAnchor = "AppSurface Docs README section 'Published tree rewrite limit'";
+
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
     private readonly IReadOnlyList<AppSurfaceDocsPublishedTreeMount> _mounts;
     private readonly string _previewRootPath;
     private readonly string _routeRootPath;
     private readonly string? _publicOrigin;
+    private readonly long _maxRewrittenFileSizeBytes;
     private readonly ILogger<AppSurfaceDocsPublishedTreeHandler> _logger;
+    private int _oversizedRewriteWarningLogged;
 
     /// <summary>
     /// Initializes a new instance of <see cref="AppSurfaceDocsPublishedTreeHandler"/>.
@@ -36,17 +41,24 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     /// <param name="previewRootPath">The live preview docs root that should bypass published-tree handling.</param>
     /// <param name="routeRootPath">The route-family root that owns archive and exact-version routes.</param>
     /// <param name="publicOrigin">The runtime public origin used for absolute canonical metadata, or <see langword="null" /> to preserve exported origins.</param>
+    /// <param name="maxRewrittenFileSizeBytes">Maximum input size, in bytes, for published-tree HTML and search-index rewrites.</param>
     /// <param name="logger">Logger used for frozen manifest diagnostics.</param>
     internal AppSurfaceDocsPublishedTreeHandler(
         IEnumerable<AppSurfaceDocsPublishedTreeMount> mounts,
         string previewRootPath,
         string routeRootPath = DocsUrlBuilder.DocsEntryPath,
         string? publicOrigin = null,
+        long maxRewrittenFileSizeBytes = AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes,
         ILogger<AppSurfaceDocsPublishedTreeHandler>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(mounts);
         ArgumentException.ThrowIfNullOrWhiteSpace(previewRootPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(routeRootPath);
+        if (maxRewrittenFileSizeBytes < AppSurfaceDocsVersioningOptions.MinMaxRewrittenFileSizeBytes
+            || maxRewrittenFileSizeBytes > AppSurfaceDocsVersioningOptions.MaxMaxRewrittenFileSizeBytes)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxRewrittenFileSizeBytes));
+        }
 
         _mounts = mounts
             .OrderByDescending(mount => mount.MountRootPath.Length)
@@ -54,6 +66,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         _previewRootPath = previewRootPath;
         _routeRootPath = routeRootPath;
         _publicOrigin = DocsUrlBuilder.NormalizePublicOriginOrNull(publicOrigin);
+        _maxRewrittenFileSizeBytes = maxRewrittenFileSizeBytes;
         _logger = logger ?? NullLogger<AppSurfaceDocsPublishedTreeHandler>.Instance;
     }
 
@@ -404,7 +417,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                    .Any(segment => segment.StartsWith(".", StringComparison.Ordinal));
     }
 
-    private static async Task WriteResponseAsync(
+    private async Task WriteResponseAsync(
         HttpContext httpContext,
         AppSurfaceDocsPublishedTreeMount mount,
         string previewRootPath,
@@ -413,42 +426,58 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         string relativeFilePath,
         IFileInfo fileInfo)
     {
-        var contentType = ResolveContentType(relativeFilePath);
-        httpContext.Response.StatusCode = StatusCodes.Status200OK;
-        httpContext.Response.ContentType = contentType;
-        httpContext.Response.ContentLength = null;
-        httpContext.Response.Headers.LastModified = fileInfo.LastModified.ToUniversalTime().ToString(
-            "R",
-            CultureInfo.InvariantCulture);
-
         if (ShouldRewriteHtml(relativeFilePath))
         {
-            var html = await ReadUtf8TextAsync(fileInfo, httpContext.RequestAborted);
+            var contentType = ResolveContentType(relativeFilePath);
+            var readResult = await ReadRewrittenFileAsync(
+                httpContext,
+                fileInfo,
+                relativeFilePath,
+                "HTML");
+            if (!readResult.Allowed)
+            {
+                WriteRejectedRewrittenFile(httpContext, readResult, relativeFilePath, "HTML");
+                return;
+            }
+
             var rewrittenHtml = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(
-                html,
+                readResult.Text!,
                 mount.MountRootPath,
                 previewRootPath,
                 routeRootPath,
                 httpContext.Request.PathBase.Value,
                 mount.CanonicalRootPath,
                 publicOrigin);
+            SetSuccessHeaders(httpContext, contentType, fileInfo);
             await WriteUtf8TextAsync(httpContext, rewrittenHtml, contentType);
             return;
         }
 
         if (ShouldRewriteSearchIndex(relativeFilePath))
         {
-            var json = await ReadUtf8TextAsync(fileInfo, httpContext.RequestAborted);
+            var readResult = await ReadRewrittenFileAsync(
+                httpContext,
+                fileInfo,
+                relativeFilePath,
+                "search-index.json");
+            if (!readResult.Allowed)
+            {
+                WriteRejectedRewrittenFile(httpContext, readResult, relativeFilePath, "search-index.json");
+                return;
+            }
+
             var rewrittenJson = AppSurfaceDocsPublishedTreeContentRewriter.RewriteSearchIndexJson(
-                json,
+                readResult.Text!,
                 mount.MountRootPath,
                 previewRootPath,
                 routeRootPath,
                 httpContext.Request.PathBase.Value);
+            SetSuccessHeaders(httpContext, "application/json; charset=utf-8", fileInfo);
             await WriteUtf8TextAsync(httpContext, rewrittenJson, "application/json; charset=utf-8");
             return;
         }
 
+        SetSuccessHeaders(httpContext, ResolveContentType(relativeFilePath), fileInfo);
         httpContext.Response.ContentLength = fileInfo.Length;
         if (HttpMethods.IsHead(httpContext.Request.Method))
         {
@@ -475,11 +504,77 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             : "application/octet-stream";
     }
 
-    private static async Task<string> ReadUtf8TextAsync(IFileInfo fileInfo, CancellationToken cancellationToken)
+    private static void SetSuccessHeaders(HttpContext httpContext, string contentType, IFileInfo fileInfo)
     {
+        httpContext.Response.StatusCode = StatusCodes.Status200OK;
+        httpContext.Response.ContentType = contentType;
+        httpContext.Response.ContentLength = null;
+        httpContext.Response.Headers.LastModified = fileInfo.LastModified.ToUniversalTime().ToString(
+            "R",
+            CultureInfo.InvariantCulture);
+    }
+
+    private async Task<RewrittenFileReadResult> ReadRewrittenFileAsync(
+        HttpContext httpContext,
+        IFileInfo fileInfo,
+        string relativeFilePath,
+        string artifactType)
+    {
+        if (fileInfo.Length < 0)
+        {
+            return RewrittenFileReadResult.Rejected(
+                ObservedBytes: fileInfo.Length,
+                Reason: "reported an unknown length");
+        }
+
+        if (fileInfo.Length > _maxRewrittenFileSizeBytes)
+        {
+            return RewrittenFileReadResult.Rejected(
+                ObservedBytes: fileInfo.Length,
+                Reason: "exceeded metadata length before read");
+        }
+
         await using var stream = fileInfo.CreateReadStream();
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        return await reader.ReadToEndAsync(cancellationToken);
+        await using var cappedStream = new RewrittenFileSizeLimitStream(
+            stream,
+            _maxRewrittenFileSizeBytes,
+            relativeFilePath,
+            artifactType);
+        using var reader = new StreamReader(cappedStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        try
+        {
+            return RewrittenFileReadResult.Success(await reader.ReadToEndAsync(httpContext.RequestAborted));
+        }
+        catch (RewrittenFileSizeLimitExceededException ex)
+        {
+            return RewrittenFileReadResult.Rejected(
+                ObservedBytes: ex.ObservedBytes,
+                Reason: "exceeded the configured limit while reading");
+        }
+    }
+
+    private void WriteRejectedRewrittenFile(
+        HttpContext httpContext,
+        RewrittenFileReadResult readResult,
+        string relativeFilePath,
+        string artifactType)
+    {
+        httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+        httpContext.Response.ContentLength = 0;
+
+        if (Interlocked.Exchange(ref _oversizedRewriteWarningLogged, 1) == 0)
+        {
+            _logger.LogWarning(
+                "AppSurface Docs rejected published-tree {ArtifactType} rewrite for {RelativeFilePath}: observed {ObservedBytes} bytes, configured limit {ConfiguredLimitBytes} bytes via {ConfigKey}; {Reason}; request rejected with 404. Shrink or re-export the artifact, or raise {RemediationConfigKey} within the supported range. See {DocsAnchor}.",
+                artifactType,
+                relativeFilePath,
+                readResult.ObservedBytes,
+                _maxRewrittenFileSizeBytes,
+                MaxRewrittenFileSizeKey,
+                readResult.Reason,
+                MaxRewrittenFileSizeKey,
+                RewriteLimitDocsAnchor);
+        }
     }
 
     private static async Task WriteUtf8TextAsync(HttpContext httpContext, string content, string contentType)
@@ -493,6 +588,124 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         }
 
         await httpContext.Response.Body.WriteAsync(payload, httpContext.RequestAborted);
+    }
+
+    private readonly record struct RewrittenFileReadResult(bool Allowed, string? Text, long ObservedBytes, string? Reason)
+    {
+        public static RewrittenFileReadResult Success(string text)
+        {
+            return new RewrittenFileReadResult(true, text, 0, null);
+        }
+
+        public static RewrittenFileReadResult Rejected(long ObservedBytes, string Reason)
+        {
+            return new RewrittenFileReadResult(false, null, ObservedBytes, Reason);
+        }
+    }
+
+    private sealed class RewrittenFileSizeLimitExceededException(
+        string relativeFilePath,
+        string artifactType,
+        long observedBytes,
+        long configuredLimitBytes)
+        : IOException(
+            $"Published-tree {artifactType} '{relativeFilePath}' exceeded the configured rewrite limit of {configuredLimitBytes} bytes.")
+    {
+        public long ObservedBytes { get; } = observedBytes;
+    }
+
+    private sealed class RewrittenFileSizeLimitStream(Stream inner, long limitBytes, string relativeFilePath, string artifactType)
+        : Stream
+    {
+        private long _observedBytes;
+
+        public override bool CanRead => inner.CanRead;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => inner.Length;
+
+        public override long Position
+        {
+            get => inner.Position;
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+            inner.Flush();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var bytesRead = inner.Read(buffer, offset, count);
+            RecordBytes(bytesRead);
+            return bytesRead;
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            var bytesRead = inner.Read(buffer);
+            RecordBytes(bytesRead);
+            return bytesRead;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var bytesRead = await inner.ReadAsync(buffer, cancellationToken);
+            RecordBytes(bytesRead);
+            return bytesRead;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override void SetLength(long value)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            throw new NotSupportedException();
+        }
+
+        private void RecordBytes(int bytesRead)
+        {
+            if (bytesRead <= 0)
+            {
+                return;
+            }
+
+            _observedBytes += bytesRead;
+            if (_observedBytes > limitBytes)
+            {
+                throw new RewrittenFileSizeLimitExceededException(
+                    relativeFilePath,
+                    artifactType,
+                    _observedBytes,
+                    limitBytes);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
     }
 }
 
