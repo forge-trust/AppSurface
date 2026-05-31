@@ -196,6 +196,8 @@ services.AddSingleton<IRazorWireChannelAuthorizer, TenantStreamAuthorizer>();
 services.AddRazorWire();
 ```
 
+Package-owned sensitive streams may impose stricter rules than the global RazorWire `AllowAll` shortcut. For example, AppSurface Docs harvest progress requires a custom host authorizer outside Development even when the host exposes docs harvest health routes.
+
 ## Also Possible
 
 - Keep sidebars and other regions independent with `rw:island`, including lazy loading and `permanent="true"` persistence across page transitions.

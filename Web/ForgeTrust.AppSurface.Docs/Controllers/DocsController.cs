@@ -3,6 +3,7 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.ViewComponents;
 using ForgeTrust.RazorWire.Bridge;
+using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -835,8 +836,45 @@ public class DocsController : Controller
             {
                 Progress = _harvestCoordinator.CurrentProgress,
                 ReturnUrl = ResolveCurrentRequestReturnUrl(),
-                CompletionNavigationDelayMilliseconds = _harvestCoordinator.CompletionDelay
+                CompletionNavigationDelayMilliseconds = _harvestCoordinator.CompletionDelay,
+                CanUseLiveProgress = await CanUseLiveHarvestProgressAsync()
             });
+    }
+
+    private async ValueTask<bool> CanUseLiveHarvestProgressAsync()
+    {
+        // CanUseLiveHarvestProgressAsync delegates to the effective IRazorWireChannelAuthorizer because the
+        // AddAppSurfaceDocs-installed AppSurfaceDocsHarvestChannelAuthorizer wrapper owns the same harvest-progress
+        // decision as the RazorWire endpoint. In non-development environments that wrapper denies HarvestProgress
+        // when the inner authorizer is AllowAllRazorWireChannelAuthorizer or DenyAllRazorWireChannelAuthorizer, so
+        // the built-in allow-all cannot enable live progress in production unless a host intentionally replaces the
+        // AppSurfaceDocsHarvestChannelAuthorizer wrapper after AddAppSurfaceDocs as an advanced replacement mode.
+        var authorizer = HttpContext.RequestServices.GetService<IRazorWireChannelAuthorizer>();
+        if (authorizer is null)
+        {
+            return AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment)
+                   && _environment.IsDevelopment();
+        }
+
+        try
+        {
+            return await authorizer.CanSubscribeAsync(
+                HttpContext,
+                AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            return LogLiveHarvestProgressAuthorizationFailure(exception);
+        }
+    }
+
+    private bool LogLiveHarvestProgressAuthorizationFailure(Exception exception)
+    {
+        _logger.LogWarning(
+            exception,
+            "AppSurface Docs could not authorize the live harvest progress stream for the current request.");
+
+        return false;
     }
 
     private string ResolveCurrentRequestReturnUrl()
