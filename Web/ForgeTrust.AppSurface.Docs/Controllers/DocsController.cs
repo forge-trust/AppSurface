@@ -843,9 +843,12 @@ public class DocsController : Controller
 
     private async ValueTask<bool> CanUseLiveHarvestProgressAsync()
     {
-        // CanUseLiveHarvestProgressAsync delegates to the effective IRazorWireChannelAuthorizer so the
-        // AddAppSurfaceDocs-installed AppSurfaceDocsHarvestChannelAuthorizer can reject built-in allow-all/deny-all
-        // harvest progress access in production. Only advanced host replacement after AddAppSurfaceDocs bypasses that wrapper.
+        // CanUseLiveHarvestProgressAsync delegates to the effective IRazorWireChannelAuthorizer because the
+        // AddAppSurfaceDocs-installed AppSurfaceDocsHarvestChannelAuthorizer wrapper owns the same harvest-progress
+        // decision as the RazorWire endpoint. In non-development environments that wrapper denies HarvestProgress
+        // when the inner authorizer is AllowAllRazorWireChannelAuthorizer or DenyAllRazorWireChannelAuthorizer, so
+        // the built-in allow-all cannot enable live progress in production unless a host intentionally replaces the
+        // AppSurfaceDocsHarvestChannelAuthorizer wrapper after AddAppSurfaceDocs as an advanced replacement mode.
         var authorizer = HttpContext.RequestServices.GetService<IRazorWireChannelAuthorizer>();
         if (authorizer is null)
         {

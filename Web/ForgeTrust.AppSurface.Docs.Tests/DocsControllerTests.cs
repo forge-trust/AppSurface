@@ -2227,6 +2227,20 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_ShouldRenderHarvestingWithoutLiveProgress_WhenDevelopmentRoutesHiddenAndNoRuntimeAuthorizer()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/search",
+            Environments.Development,
+            AppSurfaceDocsHarvestHealthExposure.Never,
+            registerAuthorizer: false);
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: false);
+    }
+
+    [Fact]
     public async Task Search_ShouldRenderHarvestingWithoutLiveProgress_WhenProductionCustomAuthorizerCannotRun()
     {
         await using var pending = CreatePendingHarvestController(
