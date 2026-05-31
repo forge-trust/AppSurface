@@ -80,6 +80,61 @@ public class RazorWireFormTagHelperTests
     }
 
     [Fact]
+    public void Process_WhenAntiforgeryIsLazy_EmitsLazyRuntimeMarker()
+    {
+        var helper = new RazorWireFormTagHelper(new RazorWireOptions()) { Antiforgery = "lazy" };
+        var output = CreateOutput("rw-antiforgery", "lazy");
+
+        helper.Process(CreateContext(), output);
+
+        Assert.Equal("lazy", output.Attributes["data-rw-antiforgery"].Value);
+        Assert.Equal("true", output.Attributes["data-rw-form"].Value);
+        Assert.False(output.Attributes.ContainsName("rw-antiforgery"));
+    }
+
+    [Fact]
+    public void Process_WhenAntiforgeryIsLazyAndFailureIsOff_EmitsTransportMarkerWithoutFailureMarker()
+    {
+        var helper = new RazorWireFormTagHelper(new RazorWireOptions()) { Antiforgery = "lazy" };
+        var output = CreateOutput("rw-antiforgery", "lazy", "data-rw-form-failure", "off");
+
+        helper.Process(CreateContext(), output);
+
+        Assert.Equal("lazy", output.Attributes["data-rw-antiforgery"].Value);
+        Assert.Equal("true", output.Attributes["data-rw-form"].Value);
+        Assert.Equal("off", output.Attributes["data-rw-form-failure"].Value);
+        Assert.DoesNotContain("__RazorWireForm", output.PostContent.GetContent());
+    }
+
+    [Fact]
+    public void Process_WhenAntiforgeryIsLazyAndGlobalFailureUxDisabled_EmitsTransportMarkerWithoutFailureMarker()
+    {
+        var options = new RazorWireOptions();
+        options.Forms.EnableFailureUx = false;
+        var helper = new RazorWireFormTagHelper(options) { Antiforgery = "lazy" };
+        var output = CreateOutput("rw-antiforgery", "lazy");
+
+        helper.Process(CreateContext(), output);
+
+        Assert.Equal("lazy", output.Attributes["data-rw-antiforgery"].Value);
+        Assert.Equal("true", output.Attributes["data-rw-form"].Value);
+        Assert.False(output.Attributes.ContainsName("data-rw-form-failure"));
+        Assert.DoesNotContain("__RazorWireForm", output.PostContent.GetContent());
+    }
+
+    [Fact]
+    public void Process_WhenAntiforgeryIsOff_EmitsOffRuntimeMarker()
+    {
+        var helper = new RazorWireFormTagHelper(new RazorWireOptions()) { Antiforgery = "off" };
+        var output = CreateOutput("rw-antiforgery", "off");
+
+        helper.Process(CreateContext(), output);
+
+        Assert.Equal("off", output.Attributes["data-rw-antiforgery"].Value);
+        Assert.False(output.Attributes.ContainsName("rw-antiforgery"));
+    }
+
+    [Fact]
     public void Process_WhenPerFormOff_SkipsRazorWireFailureMarkers()
     {
         var helper = new RazorWireFormTagHelper(new RazorWireOptions());
