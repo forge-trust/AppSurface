@@ -60,6 +60,11 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
 
     private string CreateExactTree(string name)
     {
+        if (Path.IsPathRooted(name))
+        {
+            throw new ArgumentException("Exact tree names must be relative to the test directory.", nameof(name));
+        }
+
         var root = Path.Combine(_tempDirectory, name);
         Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, "index.html"), "<html>ok</html>");

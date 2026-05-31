@@ -237,9 +237,8 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             return false;
         }
 
-        foreach (var filePath in archiveFilePaths)
+        foreach (var relativePath in archiveFilePaths.Select(filePath => NormalizeRelativePath(exactTreePath, filePath)))
         {
-            var relativePath = NormalizeRelativePath(exactTreePath, filePath);
             if (string.Equals(relativePath, FileName, StringComparison.Ordinal))
             {
                 continue;

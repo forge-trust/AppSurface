@@ -542,8 +542,8 @@ public class ExportEngineTests
 
         try
         {
-            var handler = new TestHttpMessageHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, baseUrl);
@@ -590,8 +590,8 @@ public class ExportEngineTests
 
         try
         {
-            var handler = new TestHttpMessageHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
+            using var handler = new TestHttpMessageHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, baseUrl);
