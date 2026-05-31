@@ -32,9 +32,34 @@ public class RazorWireOptions
 public class RazorWireStreamOptions
 {
     /// <summary>
+    /// The default maximum channel name length, measured after route decoding.
+    /// </summary>
+    public const int DefaultMaxChannelNameLength = 128;
+
+    /// <summary>
+    /// The default maximum number of live stream channels admitted by one application process.
+    /// </summary>
+    public const int DefaultMaxLiveChannels = 64;
+
+    /// <summary>
+    /// The default maximum number of live stream subscriptions admitted by one application process.
+    /// </summary>
+    public const int DefaultMaxLiveSubscriptions = 256;
+
+    /// <summary>
+    /// The default maximum number of live stream subscriptions admitted for one channel by one application process.
+    /// </summary>
+    public const int DefaultMaxLiveSubscriptionsPerChannel = 32;
+
+    /// <summary>
     /// Gets or sets the base path used for establishing stream connections.
     /// Defaults to <c>"/_rw/streams"</c>.
     /// </summary>
+    /// <remarks>
+    /// The path must start with <c>/</c>, must not end with <c>/</c>, and must not contain route tokens, query strings,
+    /// fragments, whitespace, or ASCII control characters. RazorWire appends a single validated channel segment to this
+    /// path when mapping the stream endpoint.
+    /// </remarks>
     public string BasePath { get; set; } = "/_rw/streams";
 
     /// <summary>
@@ -48,6 +73,47 @@ public class RazorWireStreamOptions
     /// the current <c>HttpContext</c>, user, claims, route data, or tenant state.
     /// </remarks>
     public RazorWireStreamAuthorizationMode AuthorizationMode { get; set; } = RazorWireStreamAuthorizationMode.DenyAll;
+
+    /// <summary>
+    /// Gets or sets the maximum channel name length accepted by the stream endpoint.
+    /// Defaults to <see cref="DefaultMaxChannelNameLength"/>.
+    /// </summary>
+    /// <remarks>
+    /// The limit is measured on the decoded route value using .NET string length. Channel names are validated before
+    /// authorization and admission, and v1 channel names may contain only ASCII letters, ASCII digits, <c>.</c>,
+    /// <c>_</c>, <c>-</c>, and <c>:</c>. Raise this value only for intentionally finite, namespaced channel schemes.
+    /// </remarks>
+    public int MaxChannelNameLength { get; set; } = DefaultMaxChannelNameLength;
+
+    /// <summary>
+    /// Gets or sets the maximum number of live channel names admitted by one application process.
+    /// Defaults to <see cref="DefaultMaxLiveChannels"/>.
+    /// </summary>
+    /// <remarks>
+    /// This is a per-process guardrail, not a cluster-wide, tenant-wide, user-wide, or load-balancer-wide limit. A live
+    /// channel is counted only while it has at least one admitted subscription in the current process.
+    /// </remarks>
+    public int MaxLiveChannels { get; set; } = DefaultMaxLiveChannels;
+
+    /// <summary>
+    /// Gets or sets the maximum number of live stream subscriptions admitted by one application process.
+    /// Defaults to <see cref="DefaultMaxLiveSubscriptions"/>.
+    /// </summary>
+    /// <remarks>
+    /// A subscription is one admitted SSE request/browser connection. One person can consume multiple subscriptions by
+    /// opening multiple tabs or pages. This is not a distributed or user-aware quota.
+    /// </remarks>
+    public int MaxLiveSubscriptions { get; set; } = DefaultMaxLiveSubscriptions;
+
+    /// <summary>
+    /// Gets or sets the maximum number of live stream subscriptions admitted for one channel by one application process.
+    /// Defaults to <see cref="DefaultMaxLiveSubscriptionsPerChannel"/>.
+    /// </summary>
+    /// <remarks>
+    /// A subscription is one admitted SSE request/browser connection. Use this per-process limit to keep one public
+    /// channel from consuming all live subscription capacity in the current process.
+    /// </remarks>
+    public int MaxLiveSubscriptionsPerChannel { get; set; } = DefaultMaxLiveSubscriptionsPerChannel;
 }
 
 /// <summary>
