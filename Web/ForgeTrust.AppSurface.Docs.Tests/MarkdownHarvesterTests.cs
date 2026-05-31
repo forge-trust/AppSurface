@@ -1,3 +1,4 @@
+using System.Text;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
@@ -86,7 +87,7 @@ public class MarkdownHarvesterTests : IDisposable
     [Fact]
     public async Task HarvestAsync_ShouldSkipOversizedMarkdownBeforeReadingOrParsing()
     {
-        var markdownPath = Path.Combine(_testRoot, "Large.md");
+        var markdownPath = CombineUnder(_testRoot, "Large.md");
         await File.WriteAllTextAsync(markdownPath, "# Large\nThis body is intentionally larger than the test limit.");
         var readPaths = new List<string>();
         var harvester = new MarkdownHarvester(
@@ -121,6 +122,59 @@ public class MarkdownHarvesterTests : IDisposable
         Assert.Contains("AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes", diagnostic.Problem, StringComparison.Ordinal);
         Assert.Contains("Markdig did not receive", diagnostic.Cause, StringComparison.Ordinal);
         Assert.Contains("AppSurfaceDocs:Harvest:Markdown:ExcludeGlobs", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldReadMarkdownAtConfiguredMaximumSize()
+    {
+        var content = "# Exact\n";
+        var markdownPath = CombineUnder(_testRoot, "Exact.md");
+        await File.WriteAllTextAsync(markdownPath, content);
+        var readPaths = new List<string>();
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            (path, cancellationToken) =>
+            {
+                readPaths.Add(path);
+                return File.ReadAllTextAsync(path, cancellationToken);
+            },
+            new AppSurfaceDocsOptions
+            {
+                Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    Markdown = new AppSurfaceDocsMarkdownHarvestOptions
+                    {
+                        MaxFileSizeBytes = Encoding.UTF8.GetByteCount(content)
+                    }
+                }
+            });
+
+        var doc = Assert.Single(await harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester).GetHarvestDiagnostics();
+
+        Assert.Equal("Exact", doc.Title);
+        Assert.Contains(markdownPath, readPaths);
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldUseDefaultMarkdownLimitsWhenHarvestOptionsAreNull()
+    {
+        var markdownPath = CombineUnder(_testRoot, "Guide.md");
+        await File.WriteAllTextAsync(markdownPath, "# Guide");
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            File.ReadAllTextAsync,
+            new AppSurfaceDocsOptions
+            {
+                Harvest = null!
+            });
+
+        var doc = Assert.Single(await harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester).GetHarvestDiagnostics();
+
+        Assert.Equal("Guide", doc.Title);
+        Assert.Empty(diagnostics);
     }
 
     [Fact]
@@ -1009,7 +1063,7 @@ public class MarkdownHarvesterTests : IDisposable
     [Fact]
     public async Task HarvestAsync_ShouldIgnoreOversizedMetadataSidecarBeforeReadingOrParsing()
     {
-        var markdownPath = Path.Combine(_testRoot, "Guide.md");
+        var markdownPath = CombineUnder(_testRoot, "Guide.md");
         var sidecarPath = markdownPath + ".yml";
         await File.WriteAllTextAsync(markdownPath, "# Guide\n\nBody.");
         await File.WriteAllTextAsync(sidecarPath, "title: Oversized Sidecar\nsummary: This sidecar should not be read.");
@@ -1047,6 +1101,74 @@ public class MarkdownHarvesterTests : IDisposable
         Assert.Contains("AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes", diagnostic.Problem, StringComparison.Ordinal);
         Assert.Contains("Markdown body can still publish", diagnostic.Cause, StringComparison.Ordinal);
         Assert.Contains("Move large prose into the Markdown body", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldReadMetadataSidecarAtConfiguredMaximumSize()
+    {
+        var metadata = "title: Exact Sidecar\n";
+        var markdownPath = CombineUnder(_testRoot, "Guide.md");
+        var sidecarPath = markdownPath + ".yaml";
+        await File.WriteAllTextAsync(markdownPath, "# Guide\n\nBody.");
+        await File.WriteAllTextAsync(sidecarPath, metadata);
+        var readPaths = new List<string>();
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            (path, cancellationToken) =>
+            {
+                readPaths.Add(path);
+                return File.ReadAllTextAsync(path, cancellationToken);
+            },
+            new AppSurfaceDocsOptions
+            {
+                Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    Markdown = new AppSurfaceDocsMarkdownHarvestOptions
+                    {
+                        MaxMetadataFileSizeBytes = Encoding.UTF8.GetByteCount(metadata)
+                    }
+                }
+            });
+
+        var doc = Assert.Single(await harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester).GetHarvestDiagnostics();
+
+        Assert.Equal("Exact Sidecar", doc.Title);
+        Assert.Contains(markdownPath, readPaths);
+        Assert.Contains(sidecarPath, readPaths);
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task ReadMetadataSidecarAsync_ShouldIgnoreOversizedSidecarWithoutDiagnosticCollection()
+    {
+        var markdownPath = CombineUnder(_testRoot, "Guide.md");
+        var sidecarPath = markdownPath + ".yml";
+        await File.WriteAllTextAsync(markdownPath, "# Guide\n\nBody.");
+        await File.WriteAllTextAsync(sidecarPath, "title: Oversized Sidecar");
+        var readPaths = new List<string>();
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            (path, cancellationToken) =>
+            {
+                readPaths.Add(path);
+                return File.ReadAllTextAsync(path, cancellationToken);
+            },
+            new AppSurfaceDocsOptions
+            {
+                Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    Markdown = new AppSurfaceDocsMarkdownHarvestOptions
+                    {
+                        MaxMetadataFileSizeBytes = 8
+                    }
+                }
+            });
+
+        var metadata = await harvester.ReadMetadataSidecarAsync(markdownPath, "Guide.md", CancellationToken.None);
+
+        Assert.Null(metadata);
+        Assert.DoesNotContain(sidecarPath, readPaths);
     }
 
     [Fact]
