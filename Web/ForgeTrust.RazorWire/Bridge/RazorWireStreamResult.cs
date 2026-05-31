@@ -43,7 +43,13 @@ public class RazorWireStreamResult : IActionResult
     /// <summary>
     /// Creates a <see cref="RazorWireStreamResult"/> that will stream the provided raw HTML as a single render action.
     /// </summary>
-    /// <param name="rawContent">Raw HTML to stream; if null, an empty string is used.</param>
+    /// <remarks>
+    /// This constructor is a trusted whole-stream escape hatch. RazorWire writes <paramref name="rawContent"/> exactly as
+    /// provided; it does not encode, sanitize, wrap, or validate the payload. Prefer
+    /// <see cref="RazorWireStreamBuilder"/> when composing targeted stream actions, and encode user-supplied values before
+    /// they are included in raw stream markup.
+    /// </remarks>
+    /// <param name="rawContent">Trusted raw Turbo Stream HTML to stream; if null, an empty string is used.</param>
     public RazorWireStreamResult(string? rawContent)
     {
         _actions = [new RawHtmlStreamAction(rawContent ?? string.Empty)];

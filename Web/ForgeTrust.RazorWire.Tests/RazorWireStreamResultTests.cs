@@ -32,6 +32,21 @@ public class RazorWireStreamResultTests
     }
 
     [Fact]
+    public async Task ExecuteResultAsync_WithNullRawHtml_WritesEmptyBodyAndSetsTurboContentType()
+    {
+        // Arrange
+        using var actionContext = CreateActionContext();
+        var result = new RazorWireStreamResult(rawContent: null);
+
+        // Act
+        await result.ExecuteResultAsync(actionContext.ActionContext);
+
+        // Assert
+        Assert.Equal("text/vnd.turbo-stream.html", actionContext.ActionContext.HttpContext.Response.ContentType);
+        Assert.Equal(string.Empty, await RazorWireTestContext.ReadBodyAsync(actionContext.ActionContext.HttpContext.Response));
+    }
+
+    [Fact]
     public async Task ExecuteResultAsync_WithController_ReusesControllerViewDataAndTempData()
     {
         // Arrange
