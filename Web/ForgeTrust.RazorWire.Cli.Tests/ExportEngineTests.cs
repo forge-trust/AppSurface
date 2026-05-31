@@ -281,7 +281,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "frame", "content.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "frame", "content.html")));
         }
         finally
         {
@@ -301,7 +301,7 @@ public class ExportEngineTests
         {
             var context = new ExportContext(
                 tempDir,
-                Path.Combine(tempDir, "missing-seeds.txt"),
+                Path.Join(tempDir, "missing-seeds.txt"),
                 "http://localhost:5000");
 
             await Assert.ThrowsAsync<FileNotFoundException>(() => _sut.RunAsync(context));
@@ -319,7 +319,7 @@ public class ExportEngineTests
     public async Task RunAsync_Should_Fallback_To_Root_When_Seed_File_Has_No_Valid_Routes()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["mailto:test@example.com", "javascript:void(0)", ""]);
 
@@ -332,7 +332,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
         }
         finally
         {
@@ -440,8 +440,8 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Normalize_Absolute_Seed_Urls_Against_BaseUrl_PathBase()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["http://localhost:5000/app/docs"]);
 
@@ -454,7 +454,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000/app");
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs.html")));
             Assert.DoesNotContain("/app/docs", context.RouteOutcomes.Keys);
             Assert.Contains("/docs", context.RouteOutcomes.Keys);
             Assert.Contains("/app/docs", handler.RequestPaths);
@@ -472,7 +472,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Respect_CancellationToken()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
         var client = new HttpClient(new SlowHandler());
         A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
@@ -496,7 +496,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Continue_When_Route_Throws_During_Export()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
         try
         {
@@ -509,7 +509,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
         }
         finally
         {
@@ -537,7 +537,7 @@ public class ExportEngineTests
     public async Task RunAsync_Should_Export_Different_Content_Types_Correctly()
     {
         // Arrange
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
         var baseUrl = "http://localhost:5000";
 
@@ -555,19 +555,19 @@ public class ExportEngineTests
 
             // Assert
             // 1. Check HTML index
-            var indexHtmlPath = Path.Combine(tempDir, "index.html");
+            var indexHtmlPath = Path.Join(tempDir, "index.html");
             Assert.True(File.Exists(indexHtmlPath), "index.html should exist");
             var indexContent = await File.ReadAllTextAsync(indexHtmlPath);
             Assert.Contains("<h1>Home</h1>", indexContent);
 
             // 2. Check CSS file
-            var cssPath = Path.Combine(tempDir, "style.css");
+            var cssPath = Path.Join(tempDir, "style.css");
             Assert.True(File.Exists(cssPath), "style.css should exist");
             var cssContent = await File.ReadAllTextAsync(cssPath);
             Assert.Contains("body { background: white; }", cssContent);
 
             // 3. Check Binary Image
-            var imgPath = Path.Combine(tempDir, "image.png");
+            var imgPath = Path.Join(tempDir, "image.png");
             Assert.True(File.Exists(imgPath), "image.png should exist");
             var imgBytes = await File.ReadAllBytesAsync(imgPath);
             Assert.Equal(new byte[] { 0x01, 0x02, 0x03, 0x04 }, imgBytes);
@@ -585,7 +585,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Write_404Html_When_ReservedRoute_ReturnsHtml()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -597,7 +597,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var notFoundFile = Path.Combine(tempDir, "404.html");
+            var notFoundFile = Path.Join(tempDir, "404.html");
             Assert.True(File.Exists(notFoundFile));
             var html = await File.ReadAllTextAsync(notFoundFile);
             var decodedHtml = Uri.UnescapeDataString(html);
@@ -609,10 +609,10 @@ public class ExportEngineTests
             Assert.DoesNotContain("_routes", decodedHtml, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_health", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_routes", StringComparison.OrdinalIgnoreCase));
-            Assert.False(File.Exists(Path.Combine(tempDir, "_appsurface", "errors", "404.html")));
-            Assert.False(File.Exists(Path.Combine(tempDir, "401.html")));
-            Assert.False(File.Exists(Path.Combine(tempDir, "403.html")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "about.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "_appsurface", "errors", "404.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "401.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "403.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "about.html")));
         }
         finally
         {
@@ -626,8 +626,8 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Preserve_Reserved_404Html_When_SeedFile_Includes_404Html()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["/404.html"]);
 
@@ -639,7 +639,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var notFoundFile = Path.Combine(tempDir, "404.html");
+            var notFoundFile = Path.Join(tempDir, "404.html");
             Assert.True(File.Exists(notFoundFile));
             var html = await File.ReadAllTextAsync(notFoundFile);
             Assert.Contains("Exported 404 page", html);
@@ -712,7 +712,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Skip_404Html_When_ReservedRoute_IsUnavailable()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -723,7 +723,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            Assert.False(File.Exists(Path.Combine(tempDir, "404.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "404.html")));
         }
         finally
         {
@@ -737,7 +737,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Skip_404Html_When_ReservedRoute_IsNotHtml()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -748,7 +748,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            Assert.False(File.Exists(Path.Combine(tempDir, "404.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "404.html")));
         }
         finally
         {
@@ -762,7 +762,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Export_Content_JavaScript_From_Html_Script_Sources()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -773,7 +773,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var scriptPath = Path.Combine(
+            var scriptPath = Path.Join(
                 tempDir,
                 "_content",
                 "ForgeTrust.RazorWire",
@@ -793,7 +793,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Export_Redirected_Stylesheet_To_Original_Route_Path()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -808,7 +808,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var rootStylesheetPath = Path.Combine(tempDir, "css", "site.gen.css");
+            var rootStylesheetPath = Path.Join(tempDir, "css", "site.gen.css");
             Assert.True(File.Exists(rootStylesheetPath), "Expected redirected root stylesheet to be exported.");
 
             var stylesheet = await File.ReadAllTextAsync(rootStylesheetPath);
@@ -826,7 +826,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Rewrite_Managed_Urls_To_Static_Artifacts()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -854,17 +854,17 @@ public class ExportEngineTests
             Assert.Contains("data-copy=\".hero { background: url('img/inline.png'); }\">.hero { background: url('/img/inline.png'); }</style>", indexHtml);
             Assert.Contains("data-copy=\"background: url('img/attr.png')\" style=\"background: url('/img/attr.png')\"", indexHtml);
 
-            var aboutHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "about.html"));
+            var aboutHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "about.html"));
             Assert.Contains("<h1>About</h1>", aboutHtml);
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs", "start.html")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs", "start.partial.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs", "start.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs", "start.partial.html")));
 
-            var css = await File.ReadAllTextAsync(Path.Combine(tempDir, "css", "site.css"));
+            var css = await File.ReadAllTextAsync(Path.Join(tempDir, "css", "site.css"));
             Assert.Contains("url('/img/bg.png?v=1')", css);
-            Assert.True(File.Exists(Path.Combine(tempDir, "_content", "pkg", "app.js")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "img", "bg.png")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "img", "hero.avif")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "img", "hero.webp")));
+            Assert.True(File.Exists(Path.Join(tempDir, "_content", "pkg", "app.js")));
+            Assert.True(File.Exists(Path.Join(tempDir, "img", "bg.png")));
+            Assert.True(File.Exists(Path.Join(tempDir, "img", "hero.avif")));
+            Assert.True(File.Exists(Path.Join(tempDir, "img", "hero.webp")));
             Assert.All(
                 context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && (outcome.IsHtml || outcome.IsCss)),
                 outcome => Assert.Null(outcome.TextBody));
@@ -955,7 +955,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Append_Html_For_Dotted_Extensionless_Page_Routes()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -966,9 +966,9 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
-            var packageHtmlPath = Path.Combine(tempDir, "docs", "web", "forgetrust.razorwire.html");
-            var childHtmlPath = Path.Combine(tempDir, "docs", "web", "forgetrust.razorwire", "docs.html");
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            var packageHtmlPath = Path.Join(tempDir, "docs", "web", "forgetrust.razorwire.html");
+            var childHtmlPath = Path.Join(tempDir, "docs", "web", "forgetrust.razorwire", "docs.html");
 
             Assert.Contains("href=\"/docs/web/forgetrust.razorwire.html\"", indexHtml);
             Assert.True(File.Exists(packageHtmlPath), "Expected dotted page route to export as an HTML artifact.");
@@ -1610,7 +1610,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_Should_Preserve_Extensionless_Managed_Urls()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1621,7 +1621,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("href=\"/about\"", indexHtml);
             Assert.Contains("href=\"/docs/start#intro\"", indexHtml);
             Assert.Contains("src=\"/docs/start\"", indexHtml);
@@ -1639,12 +1639,12 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Frame_Route_Is_Missing()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new MissingFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new MissingFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1664,7 +1664,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Frame_Source_Has_Query()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1689,7 +1689,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Required_Asset_Is_Missing()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1714,7 +1714,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Anchor_Cannot_Rewrite()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1739,7 +1739,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Leave_Source_Navigation_Anchors_Unvalidated_And_Unrewritten()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1750,7 +1750,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("""<a href="./Program.cs">Program</a>""", indexHtml, StringComparison.Ordinal);
             Assert.DoesNotContain("./Program.cs.html", indexHtml, StringComparison.Ordinal);
             Assert.DoesNotContain(context.RouteOutcomes.Keys, route => route == "/Program.cs");
@@ -1767,7 +1767,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Not_Rewrite_Anchors_With_DataRwExportIgnore()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1778,7 +1778,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("""<a href="./source.txt" data-rw-export-ignore="true">Source</a>""", indexHtml, StringComparison.Ordinal);
             Assert.Contains("""<a href="/about.html">About</a>""", indexHtml, StringComparison.Ordinal);
             Assert.DoesNotContain("./source.txt.html", indexHtml, StringComparison.Ordinal);
@@ -1796,8 +1796,8 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Export_RootSeed_And_Allow_404HomeRecoveryLink_To_Be_ExportIgnored()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["/", "/docs"]);
 
@@ -1812,10 +1812,10 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var notFoundHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "404.html"));
+            var notFoundHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "404.html"));
             Assert.Contains("href=\"/\" data-rw-export-ignore=\"true\"", notFoundHtml, StringComparison.Ordinal);
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs.html")));
             Assert.True(context.RouteOutcomes.TryGetValue("/", out var rootOutcome));
             Assert.True(rootOutcome.Succeeded);
         }
@@ -1836,7 +1836,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new MissingFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new MissingFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
@@ -2013,7 +2013,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_FailFormAssociatedStaticAntiforgeryTokens()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2046,7 +2046,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_FailUnownedStaticAntiforgeryTokens()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2079,7 +2079,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_FailLazyAntiforgeryWithoutStaticToken()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2112,7 +2112,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_FailCustomNamedStaticAntiforgeryTokens()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2145,7 +2145,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_ConvertLazyFormsForSameOriginPassthrough()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2167,7 +2167,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("action=\"/profile/save\"", html);
             Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
             Assert.DoesNotContain("crawler-token", html);
@@ -2185,7 +2185,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_ConvertFormAssociatedAntiforgeryTokens()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2204,7 +2204,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("action=\"/profile/save\"", html);
             Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
             Assert.Contains("id=\"profile\"", html);
@@ -2223,7 +2223,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_RemoveAllOwnedStaticAntiforgeryTokens()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2242,7 +2242,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("action=\"/profile/save\"", html);
             Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
             Assert.DoesNotContain("__RequestVerificationToken", html);
@@ -2261,7 +2261,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_WithLiveOrigin_Should_PreserveCustomAntiforgeryEndpoint()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2284,7 +2284,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("data-rw-antiforgery-endpoint=\"/tokens/antiforgery\"", html);
             Assert.DoesNotContain("data-rw-antiforgery-endpoint=\"/_rw/antiforgery/token\"", html);
         }
@@ -2300,7 +2300,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_WithLiveOrigin_Should_PreserveFragmentShapeWhenRewritingFrameForms()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2323,7 +2323,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            var fragmentHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "frame", "content.html"));
+            var fragmentHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "frame", "content.html"));
             Assert.StartsWith("<turbo-frame", fragmentHtml.TrimStart(), StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("<html", fragmentHtml, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("<body", fragmentHtml, StringComparison.OrdinalIgnoreCase);
@@ -2343,7 +2343,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_Should_Write_Text_Artifacts_Without_Buffering_Bodies()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2354,8 +2354,8 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "css", "site.css")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "css", "site.css")));
             Assert.All(
                 context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && (outcome.IsHtml || outcome.IsCss)),
                 outcome => Assert.Null(outcome.TextBody));
@@ -2552,7 +2552,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Preserve_Hash_Only_References()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2563,7 +2563,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("href=\"#intro\"", html, StringComparison.Ordinal);
             Assert.Contains("url(#svg-filter)", html, StringComparison.Ordinal);
             Assert.Contains("style=\"clip-path:url('#clip-path')\"", html, StringComparison.Ordinal);
@@ -2583,7 +2583,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Record_Duplicate_Reference_Provenance_Without_Duplicate_Fetches()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2610,7 +2610,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Stream_Binary_Assets_Without_Text_Body()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -2624,7 +2624,7 @@ public class ExportEngineTests
             Assert.True(context.RouteOutcomes.TryGetValue("/image.png", out var imageOutcome));
             Assert.True(imageOutcome.Succeeded);
             Assert.Null(imageOutcome.TextBody);
-            Assert.True(File.Exists(Path.Combine(tempDir, "image.png")));
+            Assert.True(File.Exists(Path.Join(tempDir, "image.png")));
         }
         finally
         {
@@ -2654,11 +2654,11 @@ public class ExportEngineTests
     [Fact]
     public void MapHtmlFilePathToPartialPath_Should_Append_Partial_Suffix()
     {
-        var htmlPath = Path.Combine("dist", "docs", "topic.html");
+        var htmlPath = Path.Join("dist", "docs", "topic.html");
 
         var partialPath = ExportEngine.MapHtmlFilePathToPartialPath(htmlPath);
 
-        Assert.EndsWith(Path.Combine("docs", "topic.partial.html"), partialPath);
+        Assert.EndsWith(Path.Join("docs", "topic.partial.html"), partialPath);
     }
 
     [Fact]
@@ -2776,8 +2776,8 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Export_Docs_Partial_Fragments()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["/docs/start", "/docs"]);
 
@@ -2790,10 +2790,10 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var fullPagePath = Path.Combine(tempDir, "docs", "start.html");
-            var partialPath = Path.Combine(tempDir, "docs", "start.partial.html");
-            var docsLandingPath = Path.Combine(tempDir, "docs.html");
-            var docsLandingPartialPath = Path.Combine(tempDir, "docs.partial.html");
+            var fullPagePath = Path.Join(tempDir, "docs", "start.html");
+            var partialPath = Path.Join(tempDir, "docs", "start.partial.html");
+            var docsLandingPath = Path.Join(tempDir, "docs.html");
+            var docsLandingPartialPath = Path.Join(tempDir, "docs.partial.html");
 
             Assert.True(File.Exists(fullPagePath), "Expected docs full page export.");
             Assert.True(File.Exists(partialPath), "Expected docs partial export.");
@@ -2810,7 +2810,7 @@ public class ExportEngineTests
             var fullHtml = await File.ReadAllTextAsync(fullPagePath);
             Assert.Contains("<meta name=\"rw-docs-static-partials\" content=\"1\" />", fullHtml);
 
-            var nextPartialPath = Path.Combine(tempDir, "docs", "next.partial.html");
+            var nextPartialPath = Path.Join(tempDir, "docs", "next.partial.html");
             Assert.True(
                 File.Exists(nextPartialPath),
                 "Expected docs partial export for crawl-discovered /docs/next.");
@@ -2844,8 +2844,8 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Export_CustomRoot_Docs_Partial_Fragments()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["/foo/bar/next"]);
 
@@ -2857,8 +2857,8 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var fullPagePath = Path.Combine(tempDir, "foo", "bar", "next.html");
-            var partialPath = Path.Combine(tempDir, "foo", "bar", "next.partial.html");
+            var fullPagePath = Path.Join(tempDir, "foo", "bar", "next.html");
+            var partialPath = Path.Join(tempDir, "foo", "bar", "next.partial.html");
 
             Assert.True(File.Exists(fullPagePath), "Expected custom-root docs full page export.");
             Assert.True(File.Exists(partialPath), "Expected custom-root docs partial export.");
