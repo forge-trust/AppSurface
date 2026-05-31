@@ -16,6 +16,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - Behavior change: AppSurface Docs `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` continues to expose harvest health routes outside Development, but live harvest progress streaming now also requires a custom host-owned `IRazorWireChannelAuthorizer`.
 - AppSurface Docs version catalogs now require trusted-root-relative `exactTreePath` values under `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; migrate old absolute tree paths by moving the parent into the trusted root setting and keeping catalog entries relative.
+- AppSurface Docs Markdown harvesting now skips oversized Markdown bodies before read/Markdig parse and ignores oversized `.md.yml` / `.md.yaml` sidecars before YAML parse, emitting visible warning diagnostics while otherwise healthy snapshots remain healthy by default.
 
 ## 0.1.0-rc.1 - 2026-05-29
 
