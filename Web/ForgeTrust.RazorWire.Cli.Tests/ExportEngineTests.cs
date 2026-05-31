@@ -536,8 +536,7 @@ public class ExportEngineTests
     public async Task RunAsync_Should_Export_Different_Content_Types_Correctly()
     {
         // Arrange
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
         var baseUrl = "http://localhost:5000";
 
         try
@@ -554,19 +553,19 @@ public class ExportEngineTests
 
             // Assert
             // 1. Check HTML index
-            var indexHtmlPath = Path.Combine(tempDir, "index.html");
+            var indexHtmlPath = TestPathUtils.PathUnder(tempDir, "index.html");
             Assert.True(File.Exists(indexHtmlPath), "index.html should exist");
             var indexContent = await File.ReadAllTextAsync(indexHtmlPath);
             Assert.Contains("<h1>Home</h1>", indexContent);
 
             // 2. Check CSS file
-            var cssPath = Path.Combine(tempDir, "style.css");
+            var cssPath = TestPathUtils.PathUnder(tempDir, "style.css");
             Assert.True(File.Exists(cssPath), "style.css should exist");
             var cssContent = await File.ReadAllTextAsync(cssPath);
             Assert.Contains("body { background: white; }", cssContent);
 
             // 3. Check Binary Image
-            var imgPath = Path.Combine(tempDir, "image.png");
+            var imgPath = TestPathUtils.PathUnder(tempDir, "image.png");
             Assert.True(File.Exists(imgPath), "image.png should exist");
             var imgBytes = await File.ReadAllBytesAsync(imgPath);
             Assert.Equal(new byte[] { 0x01, 0x02, 0x03, 0x04 }, imgBytes);
@@ -584,8 +583,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_ShouldWriteReleaseArchiveManifest_WhenExplicitlyEnabled()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-engine-").FullName;
         var baseUrl = "http://localhost:5000";
 
         try
@@ -599,7 +597,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            var manifestPath = Path.Combine(tempDir, ".appsurface-docs-release-manifest.json");
+            var manifestPath = TestPathUtils.PathUnder(tempDir, ".appsurface-docs-release-manifest.json");
             Assert.True(File.Exists(manifestPath));
             Assert.NotNull(context.ReleaseArchiveManifest);
             Assert.Equal(manifestPath, context.ReleaseArchiveManifest.ManifestPath);
