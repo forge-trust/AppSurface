@@ -98,6 +98,7 @@ test('idle strategy uses requestIdleCallback when available', async () => {
     }
   });
 
+  await waitForCondition(() => idleCallbacks.length === 1);
   assert.equal(idleCallbacks.length, 1);
   idleCallbacks[0]();
   await flushHydration();
@@ -204,11 +205,16 @@ async function flushHydration() {
 }
 
 async function waitForAttributeValue(element, name, value) {
+  await waitForCondition(() => element.getAttribute(name) === value);
+}
+
+async function waitForCondition(predicate) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    await flushHydration();
-    if (element.getAttribute(name) === value) {
+    if (predicate()) {
       return;
     }
+
+    await flushHydration();
   }
 }
 
