@@ -219,7 +219,7 @@ public class RazorWireScriptsTagHelperTests
         var content = _output.Content.GetContent();
         Assert.Contains("data-rw-live-origin=\"https://api.example.com\"", content);
         Assert.Contains("data-rw-hybrid-credentials=\"include\"", content);
-        Assert.Contains("data-rw-antiforgery-endpoint=\"/tokens/antiforgery\"", content);
+        Assert.Contains("data-rw-antiforgery-endpoint=\"/my-app/tokens/antiforgery\"", content);
     }
 
     [Fact]

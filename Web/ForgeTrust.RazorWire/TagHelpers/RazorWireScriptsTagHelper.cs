@@ -1,5 +1,6 @@
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.Razor.TagHelpers;
@@ -49,7 +50,9 @@ public class RazorWireScriptsTagHelper : TagHelper
     /// The generated runtime script includes data attributes for form failure UX, development diagnostics, split-origin
     /// live origin, hybrid credential behavior, and the lazy anti-forgery token endpoint. The helper normalizes
     /// <see cref="RazorWireOptions.Hybrid"/>.<see cref="RazorWireHybridOptions.LiveOrigin"/> before emitting it so the
-    /// browser receives only an origin, never a path-bearing URL. Use
+    /// browser receives only an origin, never a path-bearing URL. The anti-forgery endpoint is emitted relative to the
+    /// current request path base so applications mounted under a virtual directory refresh tokens from the live app path.
+    /// Use
     /// <see cref="RazorWireHybridCredentialsMode.Auto"/> to include credentials automatically when a live origin is
     /// configured; use explicit include or omit only when the live endpoint contract requires it.
     /// </remarks>
@@ -83,7 +86,8 @@ public class RazorWireScriptsTagHelper : TagHelper
             "RazorWireOptions.Hybrid.LiveOrigin");
         var liveOrigin = HtmlEncoder.Default.Encode(normalizedLiveOrigin ?? string.Empty);
         var credentialsMode = ResolveHybridCredentialsAttribute(_options, normalizedLiveOrigin);
-        var antiforgeryEndpoint = HtmlEncoder.Default.Encode(_options.Forms.Antiforgery.TokenEndpointPath);
+        var antiforgeryEndpoint = HtmlEncoder.Default.Encode(
+            pathBase.Add(new PathString(_options.Forms.Antiforgery.TokenEndpointPath)).Value!);
 
         // This includes Turbo.js and the custom RazorWire island loader.
         output.Content.SetHtmlContent(
