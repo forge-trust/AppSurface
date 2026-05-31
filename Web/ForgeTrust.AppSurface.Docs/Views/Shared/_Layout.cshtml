@@ -11,6 +11,7 @@
     var docsHomeUrl = Url.PathBaseAware(docsIdentity.HomeHref);
     var docsSearchUrl = Url.PathBaseAware(docsRoutes.Search);
     var docsSearchIndexUrl = Url.PathBaseAware(docsRoutes.SearchIndex);
+    var docsArchiveRootUrl = Url.PathBaseAware(docsRoutes.Versions);
     var docsSearchStylesheetUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "search.css"));
     var docsMiniSearchUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "minisearch.min.js"));
     var docsSearchClientUrl = Url.PathBaseAware(AssetVersioner.BuildVersionedDocsAssetUrl(DocsUrlBuilder, "search-client.js"));
@@ -23,6 +24,7 @@
         new
         {
             docsRootPath = docsRootUrl,
+            docsArchiveRootPath = docsArchiveRootUrl,
             docsSearchUrl,
             docsSearchIndexUrl,
             miniSearchUrl = docsMiniSearchUrl

@@ -405,7 +405,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
         try
         {
             exactTreePath = ResolveCatalogRelativePath(catalogDirectory, version.ExactTreePath);
-            availabilityFailure = ValidateExactTree(exactTreePath);
+            availabilityFailure = ValidateExactTree(exactTreePath, normalizedVersion);
         }
         catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
         {
@@ -501,7 +501,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
             : Path.GetFullPath(Path.Combine(catalogDirectory, configuredPath));
     }
 
-    private static AvailabilityFailure? ValidateExactTree(string? exactTreePath)
+    private static AvailabilityFailure? ValidateExactTree(string? exactTreePath, string version)
     {
         if (string.IsNullOrWhiteSpace(exactTreePath))
         {
@@ -528,7 +528,9 @@ public sealed class AppSurfaceDocsVersionCatalogService
             }
         }
 
-        var searchIndexValidationIssue = ValidateSearchIndexPayload(Path.Combine(exactTreePath, "search-index.json"));
+        var searchIndexValidationIssue = ValidateSearchIndexPayload(
+            Path.Combine(exactTreePath, "search-index.json"),
+            new PublishedSearchIndexArchivePathContext(version));
         if (searchIndexValidationIssue is not null)
         {
             return searchIndexValidationIssue;
@@ -537,7 +539,9 @@ public sealed class AppSurfaceDocsVersionCatalogService
         return null;
     }
 
-    private static AvailabilityFailure? ValidateSearchIndexPayload(string searchIndexPath)
+    private static AvailabilityFailure? ValidateSearchIndexPayload(
+        string searchIndexPath,
+        PublishedSearchIndexArchivePathContext pathContext)
     {
         try
         {
@@ -558,12 +562,12 @@ public sealed class AppSurfaceDocsVersionCatalogService
                     InternalDetail: $"ExactTreePath '{Path.GetDirectoryName(searchIndexPath)}' has a search-index.json payload without a documents array.");
             }
 
+            var index = 0;
             foreach (var item in documents.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.Object
                     || !item.TryGetProperty("path", out var path)
                     || path.ValueKind != JsonValueKind.String
-                    || string.IsNullOrWhiteSpace(path.GetString())
                     || !item.TryGetProperty("title", out var title)
                     || title.ValueKind != JsonValueKind.String
                     || string.IsNullOrWhiteSpace(title.GetString()))
@@ -572,6 +576,17 @@ public sealed class AppSurfaceDocsVersionCatalogService
                         PublicMessage: "Published release tree has a search-index.json document entry without the required path/title fields.",
                         InternalDetail: $"ExactTreePath '{Path.GetDirectoryName(searchIndexPath)}' has a search-index.json document entry without the required path/title fields.");
                 }
+
+                var validation = PublishedSearchIndexDocumentPathPolicy.ValidateArchivePath(path.GetString(), pathContext);
+                if (!validation.IsValid)
+                {
+                    var reason = PublishedSearchIndexDocumentPathPolicy.ToDiagnosticCode(validation.Reason);
+                    return new AvailabilityFailure(
+                        PublicMessage: "Published release tree has an unsafe search-index document path.",
+                        InternalDetail: $"Version '{pathContext.Version}' search-index.json documents[{index}].path was rejected: category '{reason}', title '{SanitizeSearchIndexDiagnosticValue(title.GetString())}', value '{validation.RedactedValue}', expected root '/docs'.");
+                }
+
+                index++;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -582,6 +597,17 @@ public sealed class AppSurfaceDocsVersionCatalogService
         }
 
         return null;
+    }
+
+    private static string SanitizeSearchIndexDiagnosticValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "<blank>";
+        }
+
+        var sanitized = new string(value.Trim().Select(ch => char.IsControl(ch) ? ' ' : ch).ToArray());
+        return sanitized.Length <= 80 ? sanitized : sanitized[..80] + "...";
     }
 }
 

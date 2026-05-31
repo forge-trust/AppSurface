@@ -3,6 +3,7 @@ using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
@@ -366,6 +367,80 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         var brokenVersion = Assert.Single(catalog.PublicVersions);
         Assert.False(brokenVersion.IsAvailable);
         Assert.Contains("required path/title fields", brokenVersion.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldMarkOnlyAffectedVersionUnavailable_WhenSearchIndexDocumentPathIsUnsafe()
+    {
+        var brokenTree = CreateExactTree("broken-search-document-path");
+        var healthyTree = CreateExactTree("healthy-search-document-path");
+        File.WriteAllText(
+            Path.Combine(brokenTree, "search-index.json"),
+            "{\"documents\":[{\"path\":\"javascript:alert(1)\",\"title\":\"Guide\"}]}");
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                RecommendedVersion = "1.9.0",
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "2.0.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, brokenTree),
+                        SupportState = AppSurfaceDocsVersionSupportState.Current
+                    },
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.9.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, healthyTree),
+                        SupportState = AppSurfaceDocsVersionSupportState.Maintained
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var brokenVersion = Assert.Single(catalog.PublicVersions, version => version.Version == "2.0.0");
+        var healthyVersion = Assert.Single(catalog.PublicVersions, version => version.Version == "1.9.0");
+        Assert.False(brokenVersion.IsAvailable);
+        Assert.Contains("unsafe search-index document path", brokenVersion.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("javascript", brokenVersion.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        Assert.True(healthyVersion.IsAvailable);
+        Assert.Same(healthyVersion, catalog.RecommendedVersion);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldLogRowLevelSearchIndexPathDiagnostics_WhenDocumentPathIsUnsafe()
+    {
+        var brokenTree = CreateExactTree("broken-search-document-path-diagnostics");
+        File.WriteAllText(
+            Path.Combine(brokenTree, "search-index.json"),
+            "{\"documents\":[{\"path\":\"/docs/%2e%2e/admin\",\"title\":\"Guide\"}]}");
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, brokenTree),
+                        SupportState = AppSurfaceDocsVersionSupportState.Current
+                    }
+                ]
+            });
+        var logger = new CapturingLogger<AppSurfaceDocsVersionCatalogService>();
+        var service = CreateCatalogService(catalogPath, logger: logger);
+
+        _ = service.GetCatalog();
+
+        var warning = Assert.Single(logger.Messages);
+        Assert.Contains("documents[0].path", warning, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("category 'encoded-traversal'", warning, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Version '1.2.3'", warning, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("%2e%2e", warning, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -949,7 +1024,8 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         string? catalogPath,
         bool versioningEnabled = true,
         string routeRootPath = "/docs",
-        string docsRootPath = "/docs/next")
+        string docsRootPath = "/docs/next",
+        ILogger<AppSurfaceDocsVersionCatalogService>? logger = null)
     {
         var options = new AppSurfaceDocsOptions
         {
@@ -968,7 +1044,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         return new AppSurfaceDocsVersionCatalogService(
             options,
             new TestWebHostEnvironment { ContentRootPath = _tempDirectory, WebRootPath = _tempDirectory },
-            NullLogger<AppSurfaceDocsVersionCatalogService>.Instance);
+            logger ?? NullLogger<AppSurfaceDocsVersionCatalogService>.Instance);
     }
 
     private string CreateExactTree(string name)
@@ -1017,5 +1093,43 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         public string ContentRootPath { get; set; } = string.Empty;
 
         public IFileProvider ContentRootFileProvider { get; set; } = null!;
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return NullScope.Instance;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return logLevel >= LogLevel.Warning;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (IsEnabled(logLevel))
+            {
+                Messages.Add(formatter(state, exception));
+            }
+        }
+    }
+
+    private sealed class NullScope : IDisposable
+    {
+        public static readonly NullScope Instance = new();
+
+        public void Dispose()
+        {
+        }
     }
 }
