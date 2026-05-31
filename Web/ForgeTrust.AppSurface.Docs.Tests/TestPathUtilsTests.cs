@@ -14,6 +14,14 @@ public sealed class TestPathUtilsTests
     }
 
     [Fact]
+    public void PathUnder_ShouldRejectTraversalOutsideBasePath()
+    {
+        var basePath = Path.Join(Path.GetTempPath(), "appsurface");
+
+        Assert.Throws<ArgumentException>(() => TestPathUtils.PathUnder(basePath, "..", "outside.txt"));
+    }
+
+    [Fact]
     public void RelativePath_ShouldTrimSeparatorNoise()
     {
         var relativePath = TestPathUtils.RelativePath(

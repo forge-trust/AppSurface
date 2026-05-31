@@ -142,7 +142,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldDenySvg_ForLegacyUnverifiedArchives()
     {
         var tree = CreatePublishedTree("legacy-svg");
-        File.WriteAllText(Path.Combine(tree, "logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+        File.WriteAllText(TestPathUtils.PathUnder(tree, "logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/logo.svg");
 
@@ -155,7 +155,9 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldServeSvg_ForVerifiedArchives()
     {
         var tree = CreatePublishedTree("verified-svg");
-        File.WriteAllText(Path.Combine(tree, "logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Logo</title></svg>");
+        File.WriteAllText(
+            TestPathUtils.PathUnder(tree, "logo.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Logo</title></svg>");
         var handler = CreateVerifiedHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/logo.svg");
 
@@ -168,7 +170,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldDenySvg_WhenVerifiedArchiveChangesAfterStartup()
     {
         var tree = CreatePublishedTree("tampered-svg");
-        var svgPath = Path.Combine(tree, "logo.svg");
+        var svgPath = TestPathUtils.PathUnder(tree, "logo.svg");
         File.WriteAllText(svgPath, "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Original</title></svg>");
         var handler = CreateVerifiedHandler(tree, "/docs/v/1.2.3");
         File.WriteAllText(svgPath, "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Tampered</title></svg>");
@@ -1360,7 +1362,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
                 })
             .OrderBy(entry => entry.path, StringComparer.Ordinal)
             .ToArray();
-        var manifestPath = Path.Combine(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        var manifestPath = TestPathUtils.PathUnder(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
         File.WriteAllText(
             manifestPath,
             JsonSerializer.Serialize(

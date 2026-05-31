@@ -379,7 +379,7 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
 
     private AppSurfaceDocsReleaseArchiveFile WriteFile(string relativePath, string content, string? contentType = null)
     {
-        var path = Path.Combine(new[] { _tempDirectory }.Concat(relativePath.Split('/')).ToArray());
+        var path = TestPathUtils.PathUnder(_tempDirectory, relativePath.Split('/'));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
         return new AppSurfaceDocsReleaseArchiveFile(

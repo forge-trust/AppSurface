@@ -6,7 +6,14 @@ internal static class TestPathUtils
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(basePath);
 
-        return Path.Join(basePath, RelativePath(relativeSegments));
+        var fullBasePath = Path.GetFullPath(basePath);
+        var candidatePath = Path.GetFullPath(Path.Join(fullBasePath, RelativePath(relativeSegments)));
+        if (!IsSameOrDescendant(fullBasePath, candidatePath))
+        {
+            throw new ArgumentException("Relative path segments must stay under the base path.", nameof(relativeSegments));
+        }
+
+        return candidatePath;
     }
 
     public static string RelativePath(params string[] segments)
@@ -32,10 +39,35 @@ internal static class TestPathUtils
                 throw new ArgumentException("Relative path segments cannot be rooted.", nameof(segments));
             }
 
-            normalizedSegments[index] = segment.Trim(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var normalizedSegment = segment.Trim(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.IsNullOrWhiteSpace(normalizedSegment))
+            {
+                throw new ArgumentException("Relative path segments cannot be empty.", nameof(segments));
+            }
+
+            normalizedSegments[index] = normalizedSegment;
         }
 
         return string.Join(Path.DirectorySeparatorChar, normalizedSegments);
+    }
+
+    private static bool IsSameOrDescendant(string basePath, string candidatePath)
+    {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (string.Equals(
+            Path.TrimEndingDirectorySeparator(candidatePath),
+            Path.TrimEndingDirectorySeparator(basePath),
+            comparison))
+        {
+            return true;
+        }
+
+        var basePrefix = Path.EndsInDirectorySeparator(basePath)
+            ? basePath
+            : basePath + Path.DirectorySeparatorChar;
+        return candidatePath.StartsWith(basePrefix, comparison);
     }
 
     public static string FindRepoRoot(string startPath)

@@ -1459,7 +1459,7 @@ public class AppSurfaceDocsWebModuleTests
     [Fact]
     public void BuildPublishedTreeMounts_ShouldUseVerifiedFrozenManifestSnapshot_ForVerifiedArchives()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-web-module-tests",
             Guid.NewGuid().ToString("N"));
@@ -1467,7 +1467,7 @@ public class AppSurfaceDocsWebModuleTests
 
         try
         {
-            var exactTreePath = Path.Combine(tempDirectory, "1.2.3");
+            var exactTreePath = TestPathUtils.PathUnder(tempDirectory, "1.2.3");
             Directory.CreateDirectory(exactTreePath);
             var verifiedArchive = new AppSurfaceDocsVerifiedReleaseArchive(
                 new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.OrdinalIgnoreCase),
@@ -1487,7 +1487,7 @@ public class AppSurfaceDocsWebModuleTests
                 VerifiedReleaseArchive: verifiedArchive);
             var catalog = new AppSurfaceDocsResolvedVersionCatalog(
                 AppSurfaceDocsResolvedVersionCatalogStatus.Resolved,
-                CatalogPath: Path.Combine(tempDirectory, "catalog.json"),
+                CatalogPath: TestPathUtils.PathUnder(tempDirectory, "catalog.json"),
                 Versions: [version],
                 RecommendedVersion: version);
             var docsUrlBuilder = new DocsUrlBuilder(
@@ -1522,7 +1522,7 @@ public class AppSurfaceDocsWebModuleTests
     [Fact]
     public void BuildPublishedTreeMounts_ShouldReplaceSharedManifestCache_WhenLaterMountUsesVerifiedArchive()
     {
-        var tempDirectory = Path.Combine(
+        var tempDirectory = TestPathUtils.PathUnder(
             Path.GetTempPath(),
             "appsurfacedocs-web-module-tests",
             Guid.NewGuid().ToString("N"));
@@ -1530,7 +1530,7 @@ public class AppSurfaceDocsWebModuleTests
 
         try
         {
-            var exactTreePath = Path.Combine(tempDirectory, "shared");
+            var exactTreePath = TestPathUtils.PathUnder(tempDirectory, "shared");
             Directory.CreateDirectory(exactTreePath);
             var verifiedArchive = new AppSurfaceDocsVerifiedReleaseArchive(
                 new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.OrdinalIgnoreCase),
@@ -1561,7 +1561,7 @@ public class AppSurfaceDocsWebModuleTests
                 VerifiedReleaseArchive: verifiedArchive);
             var catalog = new AppSurfaceDocsResolvedVersionCatalog(
                 AppSurfaceDocsResolvedVersionCatalogStatus.Resolved,
-                CatalogPath: Path.Combine(tempDirectory, "catalog.json"),
+                CatalogPath: TestPathUtils.PathUnder(tempDirectory, "catalog.json"),
                 Versions: [legacyVersion, verifiedVersion],
                 RecommendedVersion: null);
             var docsUrlBuilder = new DocsUrlBuilder(
