@@ -207,6 +207,50 @@ RazorWire can also send a narrow same-origin visit command with `Visit(...)`. Vi
 
 The in-memory stream hub keeps live subscriber tracking separate from opt-in replay retention. Empty live channel tracking is released after the last subscriber disconnects or publish-time cleanup prunes stale writers. Retained replay buffers are not deleted by live disconnects; they stay bounded by the replay retention policy.
 
+### Text vs Trusted HTML in Stream Templates
+
+RazorWire stream templates have a deliberate trust boundary:
+
+| API | Template content handling | Use when |
+|---|---|---|
+| `Append`, `Prepend`, `Replace`, `Update` | Treats `content` as plain text and HTML-encodes it. `null` renders as empty text. | Updating counters, status labels, validation targets, and any caller-supplied text. |
+| `AppendHtml`, `PrependHtml`, `ReplaceHtml`, `UpdateHtml` | Writes `trustedHtml` directly. RazorWire does not encode or sanitize it. | Inserting small server-authored fragments where every user value has already been encoded. |
+| `AppendPartial`, `PrependPartial`, `ReplacePartial`, `UpdatePartial` | Renders a Razor partial through MVC. | Returning app markup that belongs in a `.cshtml` partial. |
+| `AppendComponent`, `PrependComponent`, `ReplaceComponent`, `UpdateComponent` | Renders a view component through MVC. | Returning reusable app markup with component logic. |
+| `new RazorWireStreamResult(rawContent)` and `IRazorWireStreamHub.PublishAsync(channel, content)` | Raw whole-stream boundaries. Content is transported as-is. | Advanced integrations that already built trusted Turbo Stream markup. |
+
+Prefer the text APIs by default:
+
+```csharp
+return this.RazorWireStream()
+    .Update("status", displayName)
+    .BuildResult();
+```
+
+If `displayName` is `<b>Ada</b>`, the browser receives text, not markup:
+
+```html
+<template>&lt;b&gt;Ada&lt;/b&gt;</template>
+```
+
+For app-authored markup, prefer Razor-rendered helpers:
+
+```csharp
+return this.RazorWireStream()
+    .ReplacePartial("profile-card", "_ProfileCard", model)
+    .BuildResult();
+```
+
+Use `*Html` only when the string is already trusted and caller-owned. Encode user values before composing the fragment:
+
+```csharp
+var encodedName = System.Net.WebUtility.HtmlEncode(displayName);
+
+return this.RazorWireStream()
+    .UpdateHtml("status", $"<p>Saved {encodedName}.</p>")
+    .BuildResult();
+```
+
 ### Form Enhancement
 
 Standard HTML forms can return targeted stream updates instead of full reloads or redirect-first flows. The counter example above is the smallest version of that story: submit a normal MVC form, return RazorWire updates, and change only the DOM you care about.
@@ -218,6 +262,8 @@ When `EnableFailureUx` is enabled, `form[rw-active]` also marks enhanced form po
 Handling anti-forgery tokens correctly is critical when updating forms via Turbo Streams. See [Security & Anti-Forgery](Docs/antiforgery.md) for the detailed patterns and recommendations.
 
 RazorWire stream subscriptions are also safe by default: `RazorWireOptions.Streams.AuthorizationMode` starts at `RazorWireStreamAuthorizationMode.DenyAll`, so `rw:stream-source` receives `403` until the app either opts into `RazorWireStreamAuthorizationMode.AllowAll` for public/demo channels or registers `IRazorWireChannelAuthorizer`. Development responses include a safe plain-text diagnostic; production denials stay generic and logs avoid raw channel names, user identifiers, and claim values.
+
+Stream builder text APIs encode template content by default. The `*Html` builder methods, `RazorWireStreamResult(string?)`, and `IRazorWireStreamHub.PublishAsync(channel, content)` are trusted boundaries: they do not encode or sanitize raw markup. Keep user-controlled values in text APIs, Razor partials, or view components unless you explicitly encode them before composing trusted HTML.
 
 Development anti-forgery failures from RazorWire forms are rewritten into helpful form-local diagnostics when possible. Production responses stay safe and generic. See [Failed Form UX](Docs/form-failures.md#development-diagnostics).
 
@@ -237,8 +283,8 @@ RazorWire is designed for a fast feedback loop during development:
 
 ### `IRazorWireStreamHub`
 
-- `PublishAsync(channel, content)` broadcasts a Turbo Stream fragment to every subscriber on a channel.
-- `PublishAsync(channel, content, new RazorWireStreamPublishOptions { Replay = true })` broadcasts the fragment and retains it in the channel's bounded replay buffer.
+- `PublishAsync(channel, content)` broadcasts a trusted Turbo Stream fragment to every subscriber on a channel. The hub transports `content` as-is; it does not encode or sanitize template content.
+- `PublishAsync(channel, content, new RazorWireStreamPublishOptions { Replay = true })` broadcasts the trusted fragment and retains it in the channel's bounded replay buffer.
 - `Subscribe(channel)` receives only live messages published after subscription.
 - `Subscribe(channel, new RazorWireStreamSubscribeOptions { Replay = true })` receives retained replay messages first, then continues with live messages.
 
@@ -259,10 +305,11 @@ Replay is opt-in and intentionally small. The in-memory hub keeps up to 25 retai
 
 ### `this.RazorWireStream()` (controller extension)
 
-- `Append(target, content)` adds content to the end of the target element.
-- `Prepend(target, content)` adds content to the beginning.
-- `Replace(target, content)` replaces the target element entirely.
-- `Update(target, content)` replaces the inner content of the target.
+- `Append(target, content)` adds HTML-encoded text to the end of the target element.
+- `Prepend(target, content)` adds HTML-encoded text to the beginning.
+- `Replace(target, content)` replaces the target element entirely with HTML-encoded text.
+- `Update(target, content)` replaces the inner content of the target with HTML-encoded text.
+- `AppendHtml(target, trustedHtml)`, `PrependHtml(target, trustedHtml)`, `ReplaceHtml(target, trustedHtml)`, and `UpdateHtml(target, trustedHtml)` insert trusted HTML without encoding or sanitizing. Use partials/components for app markup when practical, and encode user values before composing trusted fragments.
 - `Remove(target)` removes the target element.
 - `FormError(target, title, message)` updates the target with an encoded generated error block and marks the response handled.
 - `FormValidationErrors(target, ModelState, title, maxErrors, message)` updates the target with a stable MVC validation summary and marks the response handled.

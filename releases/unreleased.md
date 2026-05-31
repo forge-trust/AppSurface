@@ -161,6 +161,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 
 ### RazorWire streams
 
+- RazorWire stream builder text APIs now HTML-encode template content by default. `Append`, `Prepend`, `Replace`, and `Update` are safe text helpers, while new `AppendHtml`, `PrependHtml`, `ReplaceHtml`, and `UpdateHtml` methods preserve trusted server-authored markup without encoding or sanitizing. Raw whole-stream paths such as `RazorWireStreamResult(string?)` and `IRazorWireStreamHub.PublishAsync(channel, content)` remain trusted boundaries.
 - RazorWire's in-memory stream hub now releases empty live channel tracking after the last subscriber disconnects or publish-time cleanup prunes stale writers. Replay buffers remain separate from live subscriber state, keep 25 retained messages per channel, prune inactive replay channels after more than 256 replay channels are retained, and are not deleted just because the last live subscriber disconnects.
 
 ### Web host development defaults
@@ -174,6 +175,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 
 ## Migration watch
 
+- RazorWire stream markup callers should audit `.Append(`, `.Prepend(`, `.Replace(`, `.Update(`, `new RazorWireStreamResult(`, and `PublishAsync(..., string)`. Keep text/status/counter updates on the existing methods, move Razor markup to partial or component helpers when practical, and use `AppendHtml`/`PrependHtml`/`ReplaceHtml`/`UpdateHtml` only for trusted fragments with user values encoded before composition.
 - Existing RazorWire CLI users do not need command or flag changes for the process-execution migration. The main behavior difference is that target-app failures may now appear earlier with captured output instead of being hidden behind startup or readiness timeouts.
 - RazorWire stream consumers do not need application code changes for the live-channel cleanup update. Public or demo stream endpoints should still validate or namespace channel names before opting into `AllowAll`; active connection cardinality limits are tracked separately from this cleanup work.
 - Tailwind package consumers do not need source changes for the compiled MSBuild task. Maintainers should keep the packed-package smoke path green when changing task dependencies or diagnostics.

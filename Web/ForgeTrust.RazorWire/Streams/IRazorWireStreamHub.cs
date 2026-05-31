@@ -13,18 +13,28 @@ namespace ForgeTrust.RazorWire.Streams;
 public interface IRazorWireStreamHub
 {
     /// <summary>
-    /// Publishes a string message to the specified channel.
+    /// Publishes a trusted stream message to the specified channel.
     /// </summary>
     /// <param name="channel">The name of the channel to publish the message to.</param>
-    /// <param name="message">The message payload to publish.</param>
+    /// <param name="message">
+    /// The trusted Turbo Stream payload to publish. The hub transports this string as-is; it does not encode or sanitize
+    /// template content.
+    /// </param>
     /// <returns>A <see cref="ValueTask"/> that completes when the publish operation has finished.</returns>
+    /// <remarks>
+    /// Prefer publishing output from <see cref="Bridge.RazorWireStreamBuilder"/> so plain-text values are encoded before
+    /// the message reaches the hub. If composing a raw message, encode user-supplied values before publishing.
+    /// </remarks>
     ValueTask PublishAsync(string channel, string message);
 
     /// <summary>
-    /// Publishes a string message to the specified channel with explicit delivery options.
+    /// Publishes a trusted stream message to the specified channel with explicit delivery options.
     /// </summary>
     /// <param name="channel">The name of the channel to publish the message to.</param>
-    /// <param name="message">The message payload to publish.</param>
+    /// <param name="message">
+    /// The trusted Turbo Stream payload to publish. The hub transports this string as-is; it does not encode or sanitize
+    /// template content.
+    /// </param>
     /// <param name="options">
     /// Optional publish behavior. The default interface implementation is a compatibility fallback and ignores this value
     /// by delegating to <see cref="PublishAsync(string, string)"/>. Implementations that support replay retention or other
@@ -33,7 +43,9 @@ public interface IRazorWireStreamHub
     /// <returns>A <see cref="ValueTask"/> that completes when the publish operation has finished.</returns>
     /// <remarks>
     /// Pitfall: callers should not expect <see cref="RazorWireStreamPublishOptions"/> to be honored unless the concrete
-    /// <see cref="IRazorWireStreamHub"/> implementation overrides this member.
+    /// <see cref="IRazorWireStreamHub"/> implementation overrides this member. The hub is also a raw transport boundary:
+    /// use <see cref="Bridge.RazorWireStreamBuilder"/> or encode user-supplied values before publishing raw stream
+    /// strings.
     /// </remarks>
     ValueTask PublishAsync(string channel, string message, RazorWireStreamPublishOptions? options)
     {
