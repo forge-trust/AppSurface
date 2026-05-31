@@ -46,22 +46,36 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
             options,
             new TestHostEnvironment { EnvironmentName = Environments.Production });
 
-        Assert.True(await developmentAuthorizer.CanSubscribeAsync(new DefaultHttpContext(), AppSurfaceDocsHarvestProgressReporter.ChannelName));
-        Assert.False(await productionAuthorizer.CanSubscribeAsync(new DefaultHttpContext(), AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.True(await developmentAuthorizer.CanSubscribeAsync(
+            new DefaultHttpContext(),
+            AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.False(await productionAuthorizer.CanSubscribeAsync(
+            new DefaultHttpContext(),
+            AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
     }
 
     [Fact]
-    public async Task CanSubscribeAsync_WhenHarvestProgressExposureIsAlwaysOrNever_UsesConfiguredExposure()
+    public async Task CanSubscribeAsync_WhenProductionHarvestProgressExposureIsAlwaysWithoutCustomAuthorizer_Denies()
     {
         var always = new AppSurfaceDocsHarvestChannelAuthorizer(
             Options(AppSurfaceDocsHarvestHealthExposure.Always),
             new TestHostEnvironment { EnvironmentName = Environments.Production });
+
+        Assert.False(await always.CanSubscribeAsync(
+            new DefaultHttpContext(),
+            AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+    }
+
+    [Fact]
+    public async Task CanSubscribeAsync_WhenHarvestProgressExposureIsNever_DeniesEvenInDevelopment()
+    {
         var never = new AppSurfaceDocsHarvestChannelAuthorizer(
             Options(AppSurfaceDocsHarvestHealthExposure.Never),
             new TestHostEnvironment { EnvironmentName = Environments.Development });
 
-        Assert.True(await always.CanSubscribeAsync(new DefaultHttpContext(), AppSurfaceDocsHarvestProgressReporter.ChannelName));
-        Assert.False(await never.CanSubscribeAsync(new DefaultHttpContext(), AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.False(await never.CanSubscribeAsync(
+            new DefaultHttpContext(),
+            AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
     }
 
     [Fact]
@@ -81,9 +95,40 @@ public sealed class AppSurfaceDocsHarvestChannelAuthorizerTests
             new TestHostEnvironment { EnvironmentName = Environments.Production },
             new TestChannelAuthorizer(allow: true));
 
-        Assert.True(await allowed.CanSubscribeAsync(context, AppSurfaceDocsHarvestProgressReporter.ChannelName));
-        Assert.False(await deniedByInner.CanSubscribeAsync(context, AppSurfaceDocsHarvestProgressReporter.ChannelName));
-        Assert.False(await deniedByHarvestVisibility.CanSubscribeAsync(context, AppSurfaceDocsHarvestProgressReporter.ChannelName));
+        Assert.True(await allowed.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.False(await deniedByInner.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.False(await deniedByHarvestVisibility.CanSubscribeAsync(
+            context,
+            AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+    }
+
+    [Fact]
+    public async Task CanSubscribeAsync_WhenHarvestProgressHasBuiltInAuthorizerOutsideDevelopment_Denies()
+    {
+        var context = new DefaultHttpContext();
+        var denyAll = new AppSurfaceDocsHarvestChannelAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            new DenyAllRazorWireChannelAuthorizer());
+        var allowAll = new AppSurfaceDocsHarvestChannelAuthorizer(
+            Options(AppSurfaceDocsHarvestHealthExposure.Always),
+            new TestHostEnvironment { EnvironmentName = Environments.Production },
+            new AllowAllRazorWireChannelAuthorizer());
+
+        Assert.False(await denyAll.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.False(await allowAll.CanSubscribeAsync(context, AppSurfaceDocsStreamAuthorization.HarvestProgressChannel));
+        Assert.True(await allowAll.CanSubscribeAsync(context, "public-host-channel"));
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("appsurfacedocs-harvest", true)]
+    [InlineData("AppSurfaceDocs-Harvest", false)]
+    [InlineData("host-channel", false)]
+    public void IsHarvestProgressChannel_ShouldMatchOnlyExactHarvestChannel(string? channel, bool expected)
+    {
+        Assert.Equal(expected, AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(channel));
     }
 
     private static AppSurfaceDocsOptions Options(AppSurfaceDocsHarvestHealthExposure exposure)

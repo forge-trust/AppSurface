@@ -26,6 +26,17 @@ public sealed record AppSurfaceDocsHarvestingViewModel
     /// Gets the delay, in milliseconds, before JavaScript users are returned to <see cref="ReturnUrl"/>.
     /// </summary>
     public int CompletionNavigationDelayMilliseconds { get; init; } = 900;
+
+    /// <summary>
+    /// Gets a value indicating whether the current request may subscribe to the live harvest progress stream.
+    /// </summary>
+    /// <remarks>
+    /// When this value is <see langword="false"/>, the harvesting view renders the current redacted progress snapshot
+    /// and a manual continuation path without emitting a RazorWire stream source. Controllers should compute this from
+    /// the effective runtime <c>IRazorWireChannelAuthorizer</c> so the view matches the stream endpoint's authorization
+    /// decision.
+    /// </remarks>
+    public bool CanUseLiveProgress { get; init; } = true;
 }
 
 /// <summary>
