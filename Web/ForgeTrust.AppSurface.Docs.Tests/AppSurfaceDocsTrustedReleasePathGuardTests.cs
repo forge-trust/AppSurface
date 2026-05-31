@@ -145,6 +145,24 @@ public sealed class AppSurfaceDocsTrustedReleasePathGuardTests : IDisposable
     }
 
     [Fact]
+    public void TryValidateDirectory_ShouldReportUnsafeDirectory_WhenPathIsFile()
+    {
+        var filePath = Path.Join(_tempDirectory, "release-root-file");
+        File.WriteAllText(filePath, "not a directory");
+
+        var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
+            filePath,
+            "missing",
+            "unsafe",
+            out var publicIssue,
+            out var internalDetail);
+
+        Assert.False(result);
+        Assert.Equal("unsafe", publicIssue);
+        Assert.Contains("file, not a directory", internalDetail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void TryValidateDirectory_ShouldReportUnsafeDirectory_WhenPathMetadataCannotBeRead()
     {
         var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(

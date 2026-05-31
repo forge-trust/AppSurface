@@ -150,6 +150,13 @@ internal static class AppSurfaceDocsTrustedReleasePathGuard
             var info = new DirectoryInfo(directoryPath);
             if (!info.Exists)
             {
+                if (File.Exists(directoryPath))
+                {
+                    publicIssue = publicUnsafeIssue;
+                    internalDetail = $"Directory '{directoryPath}' is a file, not a directory.";
+                    return false;
+                }
+
                 publicIssue = publicMissingIssue;
                 internalDetail = $"Directory '{directoryPath}' does not exist.";
                 return false;
