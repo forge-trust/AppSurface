@@ -138,7 +138,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             return false;
         }
 
-        var files = new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.OrdinalIgnoreCase);
+        var files = new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.Ordinal);
         var verifiedFrozenRouteManifest = AppSurfaceDocsFrozenRouteManifest.Empty;
         foreach (var entry in document.Files ?? [])
         {
@@ -543,7 +543,9 @@ public sealed class AppSurfaceDocsVerifiedReleaseArchive
         IReadOnlyDictionary<string, AppSurfaceDocsReleaseArchiveFile> filesByPath,
         AppSurfaceDocsFrozenRouteManifest frozenRouteManifest)
     {
-        _filesByPath = filesByPath ?? throw new ArgumentNullException(nameof(filesByPath));
+        _filesByPath = new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(
+            filesByPath ?? throw new ArgumentNullException(nameof(filesByPath)),
+            StringComparer.Ordinal);
         FrozenRouteManifest = frozenRouteManifest ?? throw new ArgumentNullException(nameof(frozenRouteManifest));
     }
 

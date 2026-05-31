@@ -208,6 +208,41 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldDenyVerifiedArchiveCaseMismatchedFiles()
+    {
+        var tree = CreatePublishedTree("verified-case-mismatched-file");
+        var caseVariantPath = TestPathUtils.PathUnder(tree, "INDEX.HTML");
+        File.WriteAllText(caseVariantPath, "<!DOCTYPE html><html><body>case variant</body></html>");
+        var provider = new PhysicalFileProvider(tree, ExclusionFilters.None);
+        _disposables.Add(provider);
+        var archive = new AppSurfaceDocsVerifiedReleaseArchive(
+            new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["index.html"] = new AppSurfaceDocsReleaseArchiveFile(
+                    "index.html",
+                    new FileInfo(caseVariantPath).Length,
+                    "text/html",
+                    ComputeFileSha256(caseVariantPath))
+            },
+            AppSurfaceDocsFrozenRouteManifest.Empty);
+        var handler = CreateHandler(
+            [
+                new AppSurfaceDocsPublishedTreeMount(
+                    "/docs/v/1.2.3",
+                    provider,
+                    tree,
+                    new AppSurfaceDocsFrozenRouteManifestCache(AppSurfaceDocsFrozenRouteManifest.Empty, tree),
+                    AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+                    archive)
+            ]);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/INDEX.HTML");
+
+        var handled = await handler.TryHandleAsync(request);
+
+        Assert.False(handled);
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldRedirectFrozenManifestAliases_ToMountedCanonicalRoutes()
     {
         var tree = CreatePublishedTree("release-with-frozen-manifest");

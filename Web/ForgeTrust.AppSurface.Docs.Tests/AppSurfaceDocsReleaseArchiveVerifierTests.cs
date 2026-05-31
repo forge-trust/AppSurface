@@ -260,6 +260,20 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     }
 
     [Fact]
+    public void TryVerify_ShouldFail_WhenCaseVariantServeableArchiveFileIsNotListed()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>");
+        var digest = WriteManifest(index);
+        var fileSystem = new ExtraEnumeratedFileSystem(TestPathUtils.PathUnder(_tempDirectory, "INDEX.HTML"));
+
+        var failure = VerifyFailure(digest, fileSystem);
+
+        Assert.Equal("ASDOCSARCHIVE009", failure.Code);
+        Assert.Equal("INDEX.HTML", failure.Path);
+        Assert.Contains("serveable file", failure.PublicMessage);
+    }
+
+    [Fact]
     public void TryVerify_ShouldFail_WhenArchiveFilesCannotBeEnumerated()
     {
         var digest = WriteManifest();
@@ -514,6 +528,34 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
             }
 
             return Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories);
+        }
+    }
+
+    private sealed class ExtraEnumeratedFileSystem(string extraPath) : AppSurfaceDocsReleaseArchiveFileSystem
+    {
+        internal override bool FileExists(string path)
+        {
+            return File.Exists(path);
+        }
+
+        internal override byte[] ReadAllBytes(string path)
+        {
+            return File.ReadAllBytes(path);
+        }
+
+        internal override long GetLength(string path)
+        {
+            return new FileInfo(path).Length;
+        }
+
+        internal override string ComputeSha256(string path)
+        {
+            return ComputeFileSha256(path);
+        }
+
+        internal override IEnumerable<string> EnumerateFiles(string rootPath)
+        {
+            return Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories).Append(extraPath);
         }
     }
 
