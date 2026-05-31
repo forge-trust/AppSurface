@@ -50,6 +50,505 @@ test('before fetch supports Headers-like request headers', () => {
   assert.equal(headers.get('X-RazorWire-Form'), 'true');
 });
 
+test('stream connections include credentials for configured live origin', () => {
+  const { context, document } = loadRuntime({
+    liveOrigin: 'https://api.example.test',
+    hybridCredentials: 'include'
+  });
+  const stream = new FakeElement('rw-stream-source');
+  stream.setAttribute('src', 'https://api.example.test/rw/stream');
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+
+  const source = context.window.RazorWire.connectionManager.sources.get('https://api.example.test/rw/stream');
+  assert.equal(source.es.options.withCredentials, true);
+});
+
+test('stream connections include credentials for auto mode with configured live origin', () => {
+  const { context, document } = loadRuntime({
+    liveOrigin: 'https://api.example.test',
+    hybridCredentials: 'auto'
+  });
+  const stream = new FakeElement('rw-stream-source');
+  stream.setAttribute('src', 'https://api.example.test/rw/stream');
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+
+  const source = context.window.RazorWire.connectionManager.sources.get('https://api.example.test/rw/stream');
+  assert.equal(source.es.options.withCredentials, true);
+});
+
+test('runtime normalizes live origin before matching hybrid credentials', () => {
+  const { context, document } = loadRuntime({
+    liveOrigin: ' https://api.example.test/ ',
+    hybridCredentials: 'auto'
+  });
+  const stream = new FakeElement('rw-stream-source');
+  stream.setAttribute('src', 'https://api.example.test/rw/stream');
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+
+  assert.equal(context.window.RazorWire.config.liveOrigin, 'https://api.example.test');
+  const source = context.window.RazorWire.connectionManager.sources.get('https://api.example.test/rw/stream');
+  assert.equal(source.es.options.withCredentials, true);
+});
+
+test('runtime ignores invalid live origin for hybrid credentials', () => {
+  const { context, document } = loadRuntime({
+    liveOrigin: 'https://api.example.test/forms',
+    hybridCredentials: 'include'
+  });
+  const stream = new FakeElement('rw-stream-source');
+  stream.setAttribute('src', 'https://api.example.test/rw/stream');
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+
+  assert.equal(context.window.RazorWire.config.liveOrigin, '');
+  const source = context.window.RazorWire.connectionManager.sources.get('https://api.example.test/rw/stream');
+  assert.equal(source.es.options.withCredentials, undefined);
+});
+
+test('before fetch lazily refreshes antiforgery token before submit resumes', async () => {
+  const fetches = [];
+  const { document } = loadRuntime({
+    liveOrigin: 'https://api.example.test',
+    hybridCredentials: 'include',
+    antiforgeryEndpoint: '/tokens/antiforgery',
+    fetch: async (url, options) => {
+      fetches.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          formFieldName: '__RequestVerificationToken',
+          requestToken: 'runtime-token',
+          headerName: 'RequestVerificationToken'
+        })
+      };
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', 'https://api.example.test/profile/save');
+  document.body.appendChild(form);
+
+  let resumed = false;
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers: {} },
+      resume: () => {
+        resumed = true;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.detail.fetchOptions.credentials, 'include');
+  assert.equal(fetches.length, 1);
+  assert.equal(fetches[0].url, 'https://api.example.test/tokens/antiforgery');
+  assert.equal(fetches[0].options.credentials, 'include');
+  assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'ready');
+  assert.equal(form.children.find(child => child.name === '__RequestVerificationToken')?.value, 'runtime-token');
+  assert.equal(resumed, true);
+});
+
+test('lazy antiforgery token fetch includes credentials for auto mode with live origin', async () => {
+  const fetches = [];
+  const { document } = loadRuntime({
+    liveOrigin: 'https://api.example.test',
+    hybridCredentials: 'auto',
+    fetch: async (url, options) => {
+      fetches.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          formFieldName: '__RequestVerificationToken',
+          requestToken: 'runtime-token'
+        })
+      };
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', 'https://api.example.test/profile/save');
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'focusin',
+    target: form
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(fetches.length, 1);
+  assert.equal(fetches[0].options.credentials, 'include');
+  assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'ready');
+});
+
+test('lazy antiforgery token refresh runs when form failure ux is disabled', async () => {
+  const fetches = [];
+  const { document } = loadRuntime({
+    formFailureEnabled: 'false',
+    failureMode: 'off',
+    fetch: async (url, options) => {
+      fetches.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          formFieldName: '__RequestVerificationToken',
+          requestToken: 'runtime-token'
+        })
+      };
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'off');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  document.body.appendChild(form);
+
+  let resumed = false;
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers: {} },
+      resume: () => {
+        resumed = true;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.detail.fetchOptions.headers['X-RazorWire-Form'], 'true');
+  assert.equal(fetches.length, 1);
+  assert.equal(fetches[0].options.credentials, 'same-origin');
+  assert.equal(form.children.find(child => child.name === '__RequestVerificationToken')?.value, 'runtime-token');
+  assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'ready');
+  assert.equal(resumed, true);
+  assert.equal(document.head.querySelectorAll('#rw-form-failure-default-styles').length, 0);
+});
+
+test('intent lazy antiforgery failure dispatches when form failure ux is enabled', async () => {
+  const { document } = loadRuntime({
+    fetch: async () => {
+      throw new Error('token endpoint offline');
+    }
+  });
+  const events = [];
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.dispatchEvent = event => {
+    events.push(event);
+    return !event.defaultPrevented;
+  };
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'focusin',
+    target: form
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'failed');
+  assert.equal(events.some(event => event.type === 'razorwire:form:failure'), true);
+});
+
+test('intent lazy antiforgery failure is quiet when form failure ux is disabled', async () => {
+  const { document } = loadRuntime({
+    fetch: async () => {
+      throw new Error('token endpoint offline');
+    }
+  });
+  const events = [];
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'off');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.dispatchEvent = event => {
+    events.push(event);
+    return !event.defaultPrevented;
+  };
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'focusin',
+    target: form
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'failed');
+  assert.equal(events.some(event => event.type === 'razorwire:form:failure'), false);
+  assert.equal(form.querySelectorAll('[data-rw-form-error-generated="true"]').length, 0);
+});
+
+test('before fetch patches paused request body and header with refreshed antiforgery token', async () => {
+  const fetches = [];
+  const { document } = loadRuntime({
+    fetch: async (url, options) => {
+      fetches.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          formFieldName: 'csrf-token',
+          requestToken: 'runtime-token',
+          headerName: 'X-CSRF-TOKEN'
+        })
+      };
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', '/profile/save');
+  document.body.appendChild(form);
+
+  const body = new URLSearchParams('name=Andrew');
+  const headers = new FakeHeaders();
+  let resumed = false;
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers, body },
+      resume: () => {
+        resumed = true;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(fetches.length, 1);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(headers.get('X-CSRF-TOKEN'), 'runtime-token');
+  assert.equal(body.get('csrf-token'), 'runtime-token');
+  assert.equal(form.children.find(child => child.name === 'csrf-token')?.value, 'runtime-token');
+  assert.equal(resumed, true);
+});
+
+test('before fetch leaves non-form string bodies unchanged while setting antiforgery header', async () => {
+  const { document } = loadRuntime({
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        formFieldName: 'csrf-token',
+        requestToken: 'runtime-token',
+        headerName: 'X-CSRF-TOKEN'
+      })
+    })
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', '/profile/save');
+  document.body.appendChild(form);
+
+  const body = JSON.stringify({ name: 'Andrew' });
+  const headers = new FakeHeaders();
+  headers.set('content-type', 'application/json');
+  let resumed = false;
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers, body },
+      resume: () => {
+        resumed = true;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(event.detail.fetchOptions.body, body);
+  assert.equal(headers.get('X-CSRF-TOKEN'), 'runtime-token');
+  assert.equal(form.children.find(child => child.name === 'csrf-token')?.value, 'runtime-token');
+  assert.equal(resumed, true);
+});
+
+test('before fetch patches form-url-encoded string bodies with refreshed antiforgery token', async () => {
+  const { document } = loadRuntime({
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        formFieldName: 'csrf-token',
+        requestToken: 'runtime-token',
+        headerName: 'X-CSRF-TOKEN'
+      })
+    })
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', '/profile/save');
+  document.body.appendChild(form);
+
+  const headers = new FakeHeaders();
+  headers.set('content-type', 'application/x-www-form-urlencoded; charset=UTF-8');
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers, body: 'name=Andrew' },
+      resume: () => {
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(event.detail.fetchOptions.body, 'name=Andrew&csrf-token=runtime-token');
+  assert.equal(headers.get('X-CSRF-TOKEN'), 'runtime-token');
+});
+
+test('lazy antiforgery token refresh is shared between intent and submit', async () => {
+  const fetches = [];
+  let resolveFetch;
+  const { document } = loadRuntime({
+    fetch: async (url, options) => {
+      fetches.push({ url, options });
+      return new Promise(resolve => {
+        resolveFetch = () => resolve({
+          ok: true,
+          json: async () => ({
+            formFieldName: '__RequestVerificationToken',
+            requestToken: 'shared-token'
+          })
+        });
+      });
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.setAttribute('action', '/profile/save');
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'focusin',
+    target: form
+  });
+
+  let resumed = false;
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers: {} },
+      resume: () => {
+        resumed = true;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+
+  assert.equal(fetches.length, 1);
+  assert.equal(event.defaultPrevented, true);
+
+  resolveFetch();
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(fetches.length, 1);
+  assert.equal(form.children.find(child => child.name === '__RequestVerificationToken')?.value, 'shared-token');
+  assert.equal(resumed, true);
+});
+
+test('lazy antiforgery refresh failure clears active submit state', async () => {
+  const { document } = loadRuntime({
+    fetch: async () => {
+      throw new Error('token endpoint offline');
+    }
+  });
+  const events = [];
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.dispatchEvent = event => {
+    events.push(event);
+    return !event.defaultPrevented;
+  };
+  const button = new FakeElement('button');
+  form.appendChild(button);
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'turbo:submit-start',
+    target: form,
+    detail: { formSubmission: { submitter: button } }
+  });
+
+  assert.equal(form.getAttribute('data-rw-submitting'), 'true');
+  assert.equal(button.disabled, true);
+
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers: {} },
+      resume: () => {}
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const submitEnd = events.find(item => item.type === 'razorwire:form:submit-end');
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(form.hasAttribute('data-rw-submitting'), false);
+  assert.equal(form.hasAttribute('aria-busy'), false);
+  assert.equal(form.getAttribute('data-rw-submit-status'), 'failed');
+  assert.equal(button.disabled, false);
+  assert.equal(submitEnd.detail.success, false);
+  assert.equal(submitEnd.detail.submitter, button);
+});
+
 test('submit lifecycle disables only RazorWire-owned submitter state and restores it', () => {
   const { document } = loadRuntime();
   const form = new FakeForm();
@@ -231,7 +730,7 @@ test('global disabled failure UX ignores stale form-level auto markup', () => {
     detail: { formSubmission: { submitter: button } }
   });
 
-  assert.equal(beforeFetch.detail.fetchOptions.headers['X-RazorWire-Form'], undefined);
+  assert.equal(beforeFetch.detail.fetchOptions.headers['X-RazorWire-Form'], 'true');
   assert.equal(form.hasAttribute('data-rw-submitting'), false);
   assert.equal(button.disabled, false);
   assert.equal(document.head.querySelectorAll('#rw-form-failure-default-styles').length, 0);
@@ -248,7 +747,7 @@ test('legacy runtime mode off also disables stale form-level auto markup', () =>
 });
 
 test('rw-visit stream action visits same-origin urls with configured action', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current' });
 
   const stream = new FakeElement('turbo-stream');
   stream.setAttribute('url', '../next?tab=done#summary');
@@ -262,7 +761,7 @@ test('rw-visit stream action visits same-origin urls with configured action', ()
 });
 
 test('rw-visit stream action revisits the current page for completion sentinel urls', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current?q=old#top' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current?q=old#top' });
 
   const stream = new FakeElement('turbo-stream');
   stream.setAttribute('url', '#');
@@ -276,7 +775,7 @@ test('rw-visit stream action revisits the current page for completion sentinel u
 });
 
 test('rw-visit stream action accepts the supported same-origin url forms', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current?q=old#top' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current?q=old#top' });
   const allowed = [
     ['/docs/next', 'https://example.test/docs/next'],
     ['?tab=done', 'https://example.test/docs/current?tab=done'],
@@ -298,7 +797,7 @@ test('rw-visit stream action accepts the supported same-origin url forms', () =>
 });
 
 test('rw-visit stream action defaults to advance', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current' });
 
   const stream = new FakeElement('turbo-stream');
   stream.setAttribute('url', '#summary');
@@ -311,7 +810,7 @@ test('rw-visit stream action defaults to advance', () => {
 });
 
 test('rw-visit stream action rejects unsafe urls without throwing', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current' });
   const rejectedUrls = [
     '',
     ' /docs/next',
@@ -336,7 +835,7 @@ test('rw-visit stream action rejects unsafe urls without throwing', () => {
 });
 
 test('rw-visit stream action rejects unsupported visit action without throwing', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current' });
 
   const stream = new FakeElement('turbo-stream');
   stream.setAttribute('url', '/docs/next');
@@ -356,18 +855,63 @@ test('stream registration tolerates missing Turbo global', () => {
   assert.equal(stream.getAttribute('data-rw-registered'), 'true');
 });
 
-test('stream state body attributes use safe channel tokens', () => {
+test('stream state body attributes use decoded channel identity without url modifiers', () => {
   const { context, document } = loadRuntime();
   const stream = new FakeElement('rw-stream-source');
-  stream.setAttribute('src', '/streams/orders?tenant=a#live');
+  stream.setAttribute('src', '/streams/tenant%3Aorders?replay=1#live');
   document.body.appendChild(stream);
 
   context.window.RazorWire.connectionManager.scan();
-  const source = context.window.RazorWire.connectionManager.sources.get('/streams/orders?tenant=a#live');
+  const source = context.window.RazorWire.connectionManager.sources.get('/streams/tenant%3Aorders?replay=1#live');
   source.es.onopen();
 
-  assert.equal(document.body.getAttribute('data-rw-stream-orders-tenant-a-live'), 'connected');
-  assert.equal(document.body.hasAttribute('data-rw-stream-orders?tenant=a#live'), false);
+  assert.equal(source.channel, 'tenant:orders');
+  assert.equal(document.body.getAttribute('data-rw-stream-tenant-orders'), 'connected');
+  assert.equal(document.body.hasAttribute('data-rw-stream-tenant-3Aorders-replay-1-live'), false);
+});
+
+test('stream state ignores decoded direct-request channels outside the public grammar', () => {
+  const { context, document } = loadRuntime();
+  const stream = new FakeElement('rw-stream-source');
+  const selectors = [];
+  const querySelectorAll = document.querySelectorAll.bind(document);
+  stream.setAttribute('src', '/streams/%22');
+  document.body.appendChild(stream);
+  document.querySelectorAll = selector => {
+    selectors.push(selector);
+    return querySelectorAll(selector);
+  };
+
+  context.window.RazorWire.connectionManager.scan();
+  const source = context.window.RazorWire.connectionManager.sources.get('/streams/%22');
+
+  assert.equal(source.channel, null);
+  assert.doesNotThrow(() => source.es.onerror());
+  assert.equal(selectors.some(selector => selector.startsWith('[data-rw-requires-stream="')), false);
+});
+
+test('stream errors dispatch observable detail to registered stream source elements', () => {
+  const { context, document } = loadRuntime();
+  const stream = new FakeElement('rw-stream-source');
+  const events = [];
+  stream.setAttribute('src', '/streams/orders');
+  stream.dispatchEvent = event => {
+    events.push(event);
+    return !event.defaultPrevented;
+  };
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+  const source = context.window.RazorWire.connectionManager.sources.get('/streams/orders');
+  source.es.readyState = 0;
+  source.es.onerror();
+
+  const error = events.find(event => event.type === 'razorwire:stream:error');
+  assert.equal(error.detail.channel, 'orders');
+  assert.equal(error.detail.source, stream);
+  assert.equal(error.detail.state, 'connecting');
+  assert.equal(error.detail.readyState, 0);
+  assert.equal(error.detail.src, '/streams/orders');
 });
 
 function loadRuntime(runtimeOptions = {}) {
@@ -383,17 +927,20 @@ function loadRuntime(runtimeOptions = {}) {
   const window = {
     RazorWireInitialized: false,
     RazorWire: { config: { existing: true } },
-    Turbo: turbo,
     location: {
       href: runtimeOptions.windowHref ?? 'https://example.test/',
       origin: 'https://example.test'
     },
     addEventListener: () => {}
   };
+  if (turbo !== null) {
+    window.Turbo = turbo;
+  }
   const context = {
     console: { log: () => {} },
     document,
     window,
+    Turbo: turbo ?? undefined,
     Element: FakeElement,
     HTMLFormElement: FakeForm,
     CustomEvent: FakeCustomEvent,
@@ -408,16 +955,26 @@ function loadRuntime(runtimeOptions = {}) {
     clearInterval: () => {},
     Date,
     Intl,
-    URL
+    URL,
+    URLSearchParams,
+    fetch: runtimeOptions.fetch
   };
-  if (turbo !== null) {
-    context.Turbo = turbo;
-  }
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(readFileSync(runtimePath, 'utf8'), context);
 
   return { context, document, window, turbo };
+}
+
+function loadRuntimeWithVisitAction(runtimeOptions = {}) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const runtime = loadRuntime(runtimeOptions);
+    if (typeof runtime.turbo?.StreamActions?.['rw-visit'] === 'function') {
+      return runtime;
+    }
+  }
+
+  assert.fail('RazorWire runtime did not register the rw-visit Turbo stream action.');
 }
 
 function response(status, headers) {
@@ -467,8 +1024,9 @@ class FakeHeaders {
 }
 
 class FakeEventSource {
-  constructor(url) {
+  constructor(url, options = {}) {
     this.url = url;
+    this.options = options;
     this.readyState = 0;
     this.closed = false;
     this.onopen = null;
@@ -491,6 +1049,9 @@ class FakeElement {
     this.disabled = false;
     this.id = '';
     this.dataset = {};
+    this.name = '';
+    this.type = '';
+    this.value = '';
   }
 
   setAttribute(name, value) {
@@ -614,6 +1175,9 @@ class FakeDocument {
     }
     this.currentScript.setAttribute('data-rw-form-failure-mode', runtimeOptions.failureMode ?? 'auto');
     this.currentScript.setAttribute('data-rw-default-failure-message', runtimeOptions.defaultFailureMessage ?? 'Default failure');
+    this.currentScript.setAttribute('data-rw-live-origin', runtimeOptions.liveOrigin ?? '');
+    this.currentScript.setAttribute('data-rw-hybrid-credentials', runtimeOptions.hybridCredentials ?? 'auto');
+    this.currentScript.setAttribute('data-rw-antiforgery-endpoint', runtimeOptions.antiforgeryEndpoint ?? '/_rw/antiforgery/token');
   }
 
   addEventListener(type, listener) {
@@ -674,6 +1238,13 @@ function matches(element, selector) {
   }
   if (selector === 'form[data-rw-form="true"]') {
     return element.tagName === 'FORM' && element.getAttribute('data-rw-form') === 'true';
+  }
+  if (selector.startsWith('input[name="')) {
+    const name = selector.match(/input\[name="([^"]+)"\]/)?.[1];
+    return element.tagName === 'INPUT' && (element.getAttribute('name') === name || element.name === name);
+  }
+  if (selector === 'input[data-rw-antiforgery-token="true"]') {
+    return element.tagName === 'INPUT' && element.getAttribute('data-rw-antiforgery-token') === 'true';
   }
   if (selector === '[data-rw-form-errors]') return element.hasAttribute('data-rw-form-errors');
   if (selector === '[data-rw-form-error-generated="true"]') {

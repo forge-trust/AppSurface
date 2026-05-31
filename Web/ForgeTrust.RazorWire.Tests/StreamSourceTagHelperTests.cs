@@ -31,6 +31,40 @@ public sealed class StreamSourceTagHelperTests
         Assert.Equal("/_rw/streams/harvest", liveOnlyOutput.Attributes["src"].Value);
     }
 
+    [Fact]
+    public void Process_ShouldEncodeChannelPathSegment()
+    {
+        var tagHelper = new StreamSourceTagHelper(new RazorWireOptions())
+        {
+            Channel = "tenant:orders",
+            Replay = false
+        };
+        var output = CreateOutput();
+
+        tagHelper.Process(CreateContext(), output);
+
+        Assert.Equal("/_rw/streams/tenant%3Aorders", output.Attributes["src"].Value);
+    }
+
+    [Theory]
+    [InlineData("tenant/orders")]
+    [InlineData("tenant orders")]
+    [InlineData("tenant?orders")]
+    [InlineData("tenant#orders")]
+    [InlineData("tenant%2Forders")]
+    [InlineData("téñant")]
+    public void Process_ShouldRejectInvalidChannelNames(string channel)
+    {
+        var tagHelper = new StreamSourceTagHelper(new RazorWireOptions())
+        {
+            Channel = channel
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => tagHelper.Process(CreateContext(), CreateOutput()));
+
+        Assert.Contains("ASCII letters", exception.Message, StringComparison.Ordinal);
+    }
+
     private static TagHelperContext CreateContext()
     {
         return new TagHelperContext(

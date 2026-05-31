@@ -57,7 +57,9 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 - RazorWire browser runtime assets now have an authored TypeScript pipeline under `Web/ForgeTrust.RazorWire/assets/src`, generated committed outputs under `wwwroot/razorwire`, focused pnpm typecheck/test/build/verify commands, a pack-only freshness guard, and a docs-only JavaScript contract manifest so public API harvesting survives minification.
 - RazorWire README snippets are now source-backed by the MVC sample through a MarkdownSnippets generator, with CI verification and README contract tests guarding quickstart drift.
 - RazorWire stream subscriptions are now denied by default through `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.DenyAll`, with an explicit `RazorWireStreamAuthorizationMode.AllowAll` mode for public/demo streams and `IRazorWireChannelAuthorizer` preserved as the request-aware extension point for user, tenant, and workflow-specific channels.
+- RazorWire stream endpoints now enforce single-process public SSE admission guardrails before allocating hub subscriber state. Channel names are validated before authorization, malformed channels return `400`, authorization denials still return `403`, and live capacity exhaustion returns `429` before SSE headers are written.
 - RazorWire streams can now emit same-origin Turbo Drive visit commands with `RazorWireStreamBuilder.Visit(...)`, giving live subscribers a narrow one-shot navigation primitive while keeping retained replay channels reserved for state snapshots.
+- RazorWire hybrid export can now keep managed streams, islands, and forms live after static publication. Exported pages may point those RazorWire-owned interactions at a configured live origin, choose credential behavior, or preserve same-origin app-owned routes for backend-passthrough hybrid hosts.
 
 ### AppSurface Docs product example
 
@@ -153,6 +155,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 
 - RazorWire-enhanced forms now get a convention-based failed-submission stack: durable request markers, default form-local fallback UI, handled server validation helpers, and runtime events for custom consumers.
 - Development anti-forgery failures from RazorWire forms now return useful diagnostics with safe production copy, so stale or missing token problems are easier to fix without exposing implementation detail to users.
+- Static and hybrid export now handle RazorWire-owned anti-forgery forms safely: hybrid exports remove crawler-minted tokens and refresh them lazily from `/_rw/antiforgery/token`, while CDN exports fail early with `RWEXPORT006` guidance instead of publishing stale request tokens.
 - The MVC sample now includes `/Reactivity/FormFailures`, covering validation, anti-forgery, authorization, malformed request, server failure, default styling, CSS variable customization, and manual event-driven rendering.
 - The MVC sample now persists its demo username cookie with `Secure`, `HttpOnly`, and `SameSite=Lax`, and its browser-level regression coverage runs through `localhost` so local development keeps the secure-cookie behavior observable.
 - The MVC sample counter keeps its compact icon-only button while exposing an `Increment counter` accessible name for assistive technology and role-based tests.
@@ -160,10 +163,13 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 ### Console and CLI polish
 
 - RazorWire CLI process execution now follows an explicit reliability contract for one-shot commands and launched target apps. No action is expected: command names, flags, defaults, and export semantics are unchanged. Target-app failures that were previously hidden behind startup or readiness timeouts may now surface earlier with captured output and recovery guidance.
+- AppSurface CLI now exposes a product-facing `appsurface export` command for AppSurface/RazorWire apps, including URL, project, DLL, CDN, hybrid, public-origin, live-origin, and credential options without requiring users to discover the lower-level RazorWire CLI first.
 
 ### RazorWire streams
 
+- RazorWire stream builder text APIs now HTML-encode template content by default. `Append`, `Prepend`, `Replace`, and `Update` are safe text helpers, while new `AppendHtml`, `PrependHtml`, `ReplaceHtml`, and `UpdateHtml` methods preserve trusted server-authored markup without encoding or sanitizing. Raw whole-stream paths such as `RazorWireStreamResult(string?)` and `IRazorWireStreamHub.PublishAsync(channel, content)` remain trusted boundaries.
 - RazorWire's in-memory stream hub now releases empty live channel tracking after the last subscriber disconnects or publish-time cleanup prunes stale writers. Replay buffers remain separate from live subscriber state, keep 25 retained messages per channel, prune inactive replay channels after more than 256 replay channels are retained, and are not deleted just because the last live subscriber disconnects.
+- RazorWire stream admission limits are configurable through `RazorWireOptions.Streams.MaxChannelNameLength`, `MaxLiveChannels`, `MaxLiveSubscriptions`, and `MaxLiveSubscriptionsPerChannel`. These are per-process limits for live SSE requests, not distributed user, tenant, IP, or cluster quotas. The browser runtime now dispatches `razorwire:stream:error` when native `EventSource` reports a stream failure so development tooling can distinguish rejected streams from ordinary reconnecting state.
 
 ### Web host development defaults
 
@@ -176,8 +182,9 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 
 ## Migration watch
 
+- RazorWire stream markup callers should audit `.Append(`, `.Prepend(`, `.Replace(`, `.Update(`, `new RazorWireStreamResult(`, and `PublishAsync(..., string)`. Keep text/status/counter updates on the existing methods, move Razor markup to partial or component helpers when practical, and use `AppendHtml`/`PrependHtml`/`ReplaceHtml`/`UpdateHtml` only for trusted fragments with user values encoded before composition.
 - Existing RazorWire CLI users do not need command or flag changes for the process-execution migration. The main behavior difference is that target-app failures may now appear earlier with captured output instead of being hidden behind startup or readiness timeouts.
-- RazorWire stream consumers do not need application code changes for the live-channel cleanup update. Public or demo stream endpoints should still validate or namespace channel names before opting into `AllowAll`; active connection cardinality limits are tracked separately from this cleanup work.
+- RazorWire stream consumers do not need application code changes for the live-channel cleanup update. Public or demo stream endpoints may now see `429 Too Many Requests` under high live-connection fanout because RazorWire admits only a bounded number of live channels and live SSE requests per process. Raise `MaxLiveSubscriptions`, `MaxLiveSubscriptionsPerChannel`, or `MaxLiveChannels` intentionally when a demo or dashboard expects more fanout, and use external rate limiting or realtime infrastructure for distributed fairness.
 - Tailwind package consumers do not need source changes for the compiled MSBuild task. Maintainers should keep the packed-package smoke path green when changing task dependencies or diagnostics.
 - AppSurface Docs JavaScript harvest consumers can keep explicit `@namespace` and `@module` tags when they need a stable API family name; otherwise the new fallback grouping may split same-stem files by path instead of merging them.
 - AppSurface Docs version-catalog maintainers should copy the `releaseManifestSha256` value printed by export into each new exact release entry. Existing unpinned archives remain readable, but archive SVG is denied until the release manifest is pinned and verified.

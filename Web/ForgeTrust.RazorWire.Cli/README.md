@@ -84,6 +84,8 @@ Exports a RazorWire application to a static directory.
 - **`-d|--dll <path.dll>`**: Path to a .NET DLL to run automatically and export.
 - **`-f|--framework <TFM>`**: Target framework for project exports. Required when `--project` points at a multi-targeted project.
 - **`-m|--mode <cdn|hybrid>`**: Export mode. `cdn` is the default and rewrites managed internal URLs to emitted static artifacts. `hybrid` preserves application-style internal URLs for hosts that still route extensionless paths.
+- **`--live-origin <origin>`**: Optional live origin for split-origin hybrid exports, such as `https://api.example.com`. The value must be an `http` or `https` origin only, with no path, query, fragment, or userinfo.
+- **`--hybrid-credentials <auto|include|omit>`**: Credential behavior for RazorWire-managed live calls. `auto` is the default and includes credentials when `--live-origin` is set; use `omit` only for intentionally anonymous live endpoints.
 - **`--app-args <token>`**: Repeatable app-argument token to pass through when launching `--project` or `--dll`.
 - **`--no-build`**: Project mode only. Skips the release publish step and reuses existing published output.
 
@@ -110,8 +112,21 @@ CDN validation fails the export when exporter-managed dependencies cannot be rep
 - `RWEXPORT003`: a required internal asset did not materialize. Add the asset route, correct path casing, make the reference external/data/hash-only, or use `--mode hybrid`.
 - `RWEXPORT004`: a managed internal URL could not be rewritten to an emitted artifact URL. Seed or expose the target route so it emits an artifact, or mark authoring-only anchors with `data-rw-export-ignore`.
 - `RWEXPORT005`: a registered redirect alias cannot safely point at its canonical route, collides with another route or provider redirect output, or was already crawled as a normal HTML page. Fix the host redirect registration so aliases map to exported canonical routes without artifact collisions.
+- `RWEXPORT006`: an export found anti-forgery behavior that cannot run safely in the selected mode. CDN mode rejects any anti-forgery surface because a plain static host cannot mint runtime tokens. Hybrid RazorWire-managed forms are auto-converted to lazy token refresh when they have a safe app-owned action and credentialed split-origin live calls are enabled. Export fails early when the form opts out, posts to an external action, uses `--hybrid-credentials omit` with `--live-origin`, or is not managed by RazorWire.
 
-`hybrid` mode preserves the older application-style URL behavior. Use it when the exported directory will still be served by infrastructure that resolves extensionless URLs, dynamic frame endpoints, or other live-server behavior. Hybrid mode logs missing discovered dependencies but does not enforce CDN static-safety validation.
+`hybrid` mode preserves the older application-style URL behavior. Use it when the exported directory will still be served by infrastructure that resolves extensionless URLs, dynamic frame endpoints, or other live-server behavior. Hybrid mode logs missing discovered dependencies but does not enforce CDN static-safety validation. Safe RazorWire forms with static anti-forgery tokens are converted to lazy runtime refresh in hybrid mode even without `--live-origin`; this supports same-origin CDN passthrough to the backend for RazorWire endpoints.
+
+Split-origin hybrid export is enabled by adding `--live-origin` to `--mode hybrid`:
+
+```bash
+razorwire export --mode hybrid \
+  --live-origin https://api.example.com \
+  --project ./MyApp.csproj
+```
+
+With a live origin, the exporter rewrites RazorWire-owned runtime surfaces to the live app: `rw-stream-source` URLs, server-backed island frame sources, safe RazorWire forms, and path-base-aware lazy anti-forgery endpoints. If a RazorWire form contains crawler-minted `__RequestVerificationToken` inputs, export removes those stale static token inputs and marks the form `data-rw-antiforgery="lazy"` so the browser fetches a fresh token from `/_rw/antiforgery/token` on first intent or immediately before submit. When the crawl target is mounted under a path base, the exporter strips that crawl path base from `data-rw-antiforgery-endpoint` before the runtime combines it with `--live-origin`; otherwise split-origin deployments would call the crawler path instead of the live app root. The runtime wakes the live origin only when the user interacts with the form, not on every static page visit.
+
+The per-form `rw-antiforgery="lazy"` TagHelper attribute is optional. Use it as an assertion when authoring a form that must lazy-refresh, but split-origin export applies the safe conversion automatically. `rw-antiforgery="off"` is an explicit opt-out and will fail export if the form still contains a static anti-forgery token.
 
 Redirect strategy is a host-integration setting, not a generic `razorwire export` CLI option. `ExportContext.AddRedirectAlias(...)` is the preferred API for registering alias-to-canonical relationships; `AddRedirectArtifact(...)` remains as a compatibility wrapper for older integrations. `ExportRedirectStrategy.Html` works on generic static hosts such as GitHub Pages. `ExportRedirectStrategy.Netlify` is for CDN exports published to Netlify-compatible providers: it writes one publish-root `_redirects` file, serializes exact site-local paths with per-segment percent encoding, uses `301!`, de-duplicates exact serialized source/target pairs, rejects self-redirects after serialization, rejects same-source/different-target rules, rejects aliases that conflict with exported `_redirects`, and never uses `PublicOrigin` or emitted `.html` artifact URLs as rule targets.
 

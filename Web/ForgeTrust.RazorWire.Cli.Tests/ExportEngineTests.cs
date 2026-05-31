@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Web;
+using ForgeTrust.RazorWire;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
@@ -280,7 +281,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "frame", "content.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "frame", "content.html")));
         }
         finally
         {
@@ -300,7 +301,7 @@ public class ExportEngineTests
         {
             var context = new ExportContext(
                 tempDir,
-                Path.Combine(tempDir, "missing-seeds.txt"),
+                Path.Join(tempDir, "missing-seeds.txt"),
                 "http://localhost:5000");
 
             await Assert.ThrowsAsync<FileNotFoundException>(() => _sut.RunAsync(context));
@@ -318,7 +319,7 @@ public class ExportEngineTests
     public async Task RunAsync_Should_Fallback_To_Root_When_Seed_File_Has_No_Valid_Routes()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["mailto:test@example.com", "javascript:void(0)", ""]);
 
@@ -331,7 +332,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
         }
         finally
         {
@@ -439,21 +440,21 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Normalize_Absolute_Seed_Urls_Against_BaseUrl_PathBase()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["http://localhost:5000/app/docs"]);
 
         try
         {
             var handler = new PathBaseSeedHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000/app");
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs.html")));
             Assert.DoesNotContain("/app/docs", context.RouteOutcomes.Keys);
             Assert.Contains("/docs", context.RouteOutcomes.Keys);
             Assert.Contains("/app/docs", handler.RequestPaths);
@@ -471,9 +472,9 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Respect_CancellationToken()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
-        var client = new HttpClient(new SlowHandler());
+        using var client = new HttpClient(new SlowHandler());
         A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
@@ -495,11 +496,11 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Continue_When_Route_Throws_During_Export()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
         try
         {
-            var client = new HttpClient(new ThrowingThenSuccessHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new ThrowingThenSuccessHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
@@ -508,7 +509,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
         }
         finally
         {
@@ -614,7 +615,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Write_404Html_When_ReservedRoute_ReturnsHtml()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -626,7 +627,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var notFoundFile = Path.Combine(tempDir, "404.html");
+            var notFoundFile = Path.Join(tempDir, "404.html");
             Assert.True(File.Exists(notFoundFile));
             var html = await File.ReadAllTextAsync(notFoundFile);
             var decodedHtml = Uri.UnescapeDataString(html);
@@ -638,10 +639,10 @@ public class ExportEngineTests
             Assert.DoesNotContain("_routes", decodedHtml, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_health", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(handler.RequestPaths, path => path.Contains("_routes", StringComparison.OrdinalIgnoreCase));
-            Assert.False(File.Exists(Path.Combine(tempDir, "_appsurface", "errors", "404.html")));
-            Assert.False(File.Exists(Path.Combine(tempDir, "401.html")));
-            Assert.False(File.Exists(Path.Combine(tempDir, "403.html")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "about.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "_appsurface", "errors", "404.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "401.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "403.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "about.html")));
         }
         finally
         {
@@ -655,20 +656,20 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Preserve_Reserved_404Html_When_SeedFile_Includes_404Html()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["/404.html"]);
 
         try
         {
-            var client = new HttpClient(new ConventionalNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new ConventionalNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var notFoundFile = Path.Combine(tempDir, "404.html");
+            var notFoundFile = Path.Join(tempDir, "404.html");
             Assert.True(File.Exists(notFoundFile));
             var html = await File.ReadAllTextAsync(notFoundFile);
             Assert.Contains("Exported 404 page", html);
@@ -741,18 +742,18 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Skip_404Html_When_ReservedRoute_IsUnavailable()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            Assert.False(File.Exists(Path.Combine(tempDir, "404.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "404.html")));
         }
         finally
         {
@@ -766,18 +767,18 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Skip_404Html_When_ReservedRoute_IsNotHtml()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new NonHtmlNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new NonHtmlNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            Assert.False(File.Exists(Path.Combine(tempDir, "404.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "404.html")));
         }
         finally
         {
@@ -791,18 +792,18 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Export_Content_JavaScript_From_Html_Script_Sources()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new ContentScriptHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new ContentScriptHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var scriptPath = Path.Combine(
+            var scriptPath = Path.Join(
                 tempDir,
                 "_content",
                 "ForgeTrust.RazorWire",
@@ -822,12 +823,12 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Export_Redirected_Stylesheet_To_Original_Route_Path()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(
+            using var client = new HttpClient(
                 new RedirectFollowingHandler(new RedirectedStylesheetHandler()))
             {
                 BaseAddress = new Uri("http://localhost:5000")
@@ -837,7 +838,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var rootStylesheetPath = Path.Combine(tempDir, "css", "site.gen.css");
+            var rootStylesheetPath = Path.Join(tempDir, "css", "site.gen.css");
             Assert.True(File.Exists(rootStylesheetPath), "Expected redirected root stylesheet to be exported.");
 
             var stylesheet = await File.ReadAllTextAsync(rootStylesheetPath);
@@ -855,13 +856,13 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Rewrite_Managed_Urls_To_Static_Artifacts()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
             var handler = new CdnRewriteHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -883,17 +884,17 @@ public class ExportEngineTests
             Assert.Contains("data-copy=\".hero { background: url('img/inline.png'); }\">.hero { background: url('/img/inline.png'); }</style>", indexHtml);
             Assert.Contains("data-copy=\"background: url('img/attr.png')\" style=\"background: url('/img/attr.png')\"", indexHtml);
 
-            var aboutHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "about.html"));
+            var aboutHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "about.html"));
             Assert.Contains("<h1>About</h1>", aboutHtml);
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs", "start.html")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs", "start.partial.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs", "start.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs", "start.partial.html")));
 
-            var css = await File.ReadAllTextAsync(Path.Combine(tempDir, "css", "site.css"));
+            var css = await File.ReadAllTextAsync(Path.Join(tempDir, "css", "site.css"));
             Assert.Contains("url('/img/bg.png?v=1')", css);
-            Assert.True(File.Exists(Path.Combine(tempDir, "_content", "pkg", "app.js")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "img", "bg.png")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "img", "hero.avif")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "img", "hero.webp")));
+            Assert.True(File.Exists(Path.Join(tempDir, "_content", "pkg", "app.js")));
+            Assert.True(File.Exists(Path.Join(tempDir, "img", "bg.png")));
+            Assert.True(File.Exists(Path.Join(tempDir, "img", "hero.avif")));
+            Assert.True(File.Exists(Path.Join(tempDir, "img", "hero.webp")));
             Assert.All(
                 context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && (outcome.IsHtml || outcome.IsCss)),
                 outcome => Assert.Null(outcome.TextBody));
@@ -984,7 +985,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Append_Html_For_Dotted_Extensionless_Page_Routes()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -995,9 +996,9 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
-            var packageHtmlPath = Path.Combine(tempDir, "docs", "web", "forgetrust.razorwire.html");
-            var childHtmlPath = Path.Combine(tempDir, "docs", "web", "forgetrust.razorwire", "docs.html");
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            var packageHtmlPath = Path.Join(tempDir, "docs", "web", "forgetrust.razorwire.html");
+            var childHtmlPath = Path.Join(tempDir, "docs", "web", "forgetrust.razorwire", "docs.html");
 
             Assert.Contains("href=\"/docs/web/forgetrust.razorwire.html\"", indexHtml);
             Assert.True(File.Exists(packageHtmlPath), "Expected dotted page route to export as an HTML artifact.");
@@ -1639,18 +1640,18 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_Should_Preserve_Extensionless_Managed_Urls()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new CdnRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new CdnRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("href=\"/about\"", indexHtml);
             Assert.Contains("href=\"/docs/start#intro\"", indexHtml);
             Assert.Contains("src=\"/docs/start\"", indexHtml);
@@ -1668,12 +1669,12 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Frame_Route_Is_Missing()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new MissingFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new MissingFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1693,12 +1694,12 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Frame_Source_Has_Query()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new QueryFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new QueryFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1718,12 +1719,12 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Required_Asset_Is_Missing()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new MissingAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new MissingAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1743,12 +1744,12 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Fail_When_Anchor_Cannot_Rewrite()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new MissingAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new MissingAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1768,18 +1769,18 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Leave_Source_Navigation_Anchors_Unvalidated_And_Unrewritten()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new SourceNavigationAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new SourceNavigationAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("""<a href="./Program.cs">Program</a>""", indexHtml, StringComparison.Ordinal);
             Assert.DoesNotContain("./Program.cs.html", indexHtml, StringComparison.Ordinal);
             Assert.DoesNotContain(context.RouteOutcomes.Keys, route => route == "/Program.cs");
@@ -1796,18 +1797,18 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Not_Rewrite_Anchors_With_DataRwExportIgnore()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new ExportIgnoreAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new ExportIgnoreAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var indexHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var indexHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("""<a href="./source.txt" data-rw-export-ignore="true">Source</a>""", indexHtml, StringComparison.Ordinal);
             Assert.Contains("""<a href="/about.html">About</a>""", indexHtml, StringComparison.Ordinal);
             Assert.DoesNotContain("./source.txt.html", indexHtml, StringComparison.Ordinal);
@@ -1825,14 +1826,14 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Export_RootSeed_And_Allow_404HomeRecoveryLink_To_Be_ExportIgnored()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["/", "/docs"]);
 
         try
         {
-            var client = new HttpClient(new RedirectFollowingHandler(new IgnoredRootRecoveryNotFoundPageHandler()))
+            using var client = new HttpClient(new RedirectFollowingHandler(new IgnoredRootRecoveryNotFoundPageHandler()))
             {
                 BaseAddress = new Uri("http://localhost:5000")
             };
@@ -1841,10 +1842,10 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var notFoundHtml = await File.ReadAllTextAsync(Path.Combine(tempDir, "404.html"));
+            var notFoundHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "404.html"));
             Assert.Contains("href=\"/\" data-rw-export-ignore=\"true\"", notFoundHtml, StringComparison.Ordinal);
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "docs.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "docs.html")));
             Assert.True(context.RouteOutcomes.TryGetValue("/", out var rootOutcome));
             Assert.True(rootOutcome.Succeeded);
         }
@@ -1860,18 +1861,895 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_Should_Continue_When_Managed_Dependency_Is_Missing()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new MissingFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new MissingFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_RewriteManagedLiveReferencesAndLazyForms()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridLiveOriginHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("data-rw-live-origin=\"https://api.example.com\"", html);
+            Assert.Contains("data-rw-hybrid-credentials=\"include\"", html);
+            Assert.Contains("data-rw-antiforgery-endpoint=\"/_rw/antiforgery/token\"", html);
+            Assert.Contains("src=\"https://api.example.com/rw/stream?channel=profile\"", html);
+            Assert.Contains("src=\"https://api.example.com/islands/profile\"", html);
+            Assert.Contains("action=\"https://api.example.com/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.DoesNotContain("crawler-token", html);
+            Assert.False(File.Exists(Path.Join(tempDir, "islands", "profile.html")));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_RewritePathBaseAbsoluteFormActions()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridPathBaseLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"https://api.example.com/profile/save\"", html);
+            Assert.DoesNotContain("action=\"https://api.example.com/app/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery-endpoint=\"/_rw/antiforgery/token\"", html);
+            Assert.DoesNotContain("data-rw-antiforgery-endpoint=\"/app/_rw/antiforgery/token\"", html);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_RewritePathBaseRootRelativeFormActions()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridPathBaseRootRelativeLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"https://api.example.com/profile/save\"", html);
+            Assert.DoesNotContain("action=\"https://api.example.com/app/profile/save\"", html);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_RewritePathBaseRootRelativeFormActions()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridPathBaseRootRelativeLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.DoesNotContain("action=\"/app/profile/save\"", html);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_RejectRootRelativeFormActionsOutsidePathBase()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridRootRelativeOutsidePathBaseLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                                 && diagnostic.Message.Contains("points outside the exported application origin", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_RewritePathBaseAbsoluteFormActions()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridPathBaseLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.DoesNotContain("action=\"/app/profile/save\"", html);
+            Assert.DoesNotContain("action=\"http://localhost:5000", html);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_RejectAbsoluteFormActionsOutsidePathBase()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridOutsidePathBaseLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                                 && diagnostic.Message.Contains("points outside the exported application origin", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_RejectAbsoluteFormActionsOutsidePathBase()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridOutsidePathBaseLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                                 && diagnostic.Message.Contains("points outside the exported application origin", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_RejectRootRelativeFormActionsOutsidePathBase()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridRootRelativeOutsidePathBaseLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                                 && diagnostic.Message.Contains("points outside the exported application origin", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_FailUnsafeStaticTokenForms()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridUnsafeTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                                 && diagnostic.Message.Contains("not managed by RazorWire", StringComparison.Ordinal));
+            Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                                 && diagnostic.Message.Contains("points outside the exported application origin", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_FailLazyAntiforgeryWhenCredentialsAreOmitted()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridLiveOriginHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Omit
+                });
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("hybrid credentials are explicitly omitted", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new StaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("CDN mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailFormAssociatedStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new FormAssociatedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("CDN mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailUnownedStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new UnownedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("not owned by any form", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailLazyAntiforgeryWithoutStaticToken()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new LazyAntiforgeryFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("CDN mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailCustomNamedStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new CustomNamedTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("CDN mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CdnMode_Should_FailXsrfNamedStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new XsrfNamedTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("CDN mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_ConvertLazyFormsForSameOriginPassthrough()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new StaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    CredentialsMode = RazorWireHybridCredentialsMode.Omit
+                });
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.DoesNotContain("crawler-token", html);
+            Assert.Empty(context.Diagnostics);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_ConvertXsrfNamedAntiforgeryTokens()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new XsrfNamedTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.DoesNotContain("xsrf-token", html);
+            Assert.DoesNotContain("crawler-token", html);
+            Assert.Empty(context.Diagnostics);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_ConvertFormAssociatedAntiforgeryTokens()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new FormAssociatedStaticTokenHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.Contains("id=\"profile\"", html);
+            Assert.DoesNotContain("crawler-token", html);
+            Assert.Empty(context.Diagnostics);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_RemoveAllOwnedStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new DuplicateStaticTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.DoesNotContain("__RequestVerificationToken", html);
+            Assert.DoesNotContain("crawler-token", html);
+            Assert.Empty(context.Diagnostics);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_PreserveCustomAntiforgeryEndpoint()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new CustomEndpointHybridHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("data-rw-antiforgery-endpoint=\"/tokens/antiforgery\"", html);
+            Assert.DoesNotContain("data-rw-antiforgery-endpoint=\"/_rw/antiforgery/token\"", html);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_PreserveFragmentShapeWhenRewritingFrameForms()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridLiveFragmentHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            await _sut.RunAsync(context);
+
+            var fragmentHtml = await File.ReadAllTextAsync(Path.Join(tempDir, "frame", "content.html"));
+            Assert.StartsWith("<turbo-frame", fragmentHtml.TrimStart(), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("<html", fragmentHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("<body", fragmentHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("action=\"https://api.example.com/frame/save\"", fragmentHtml);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", fragmentHtml);
+            Assert.DoesNotContain("crawler-token", fragmentHtml);
         }
         finally
         {
@@ -1885,19 +2763,19 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_Should_Write_Text_Artifacts_Without_Buffering_Bodies()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new CdnRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new CdnRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
-            Assert.True(File.Exists(Path.Combine(tempDir, "css", "site.css")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "css", "site.css")));
             Assert.All(
                 context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && (outcome.IsHtml || outcome.IsCss)),
                 outcome => Assert.Null(outcome.TextBody));
@@ -2094,18 +2972,18 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_Preserve_Hash_Only_References()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new HashOnlyReferenceHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new HashOnlyReferenceHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("href=\"#intro\"", html, StringComparison.Ordinal);
             Assert.Contains("url(#svg-filter)", html, StringComparison.Ordinal);
             Assert.Contains("style=\"clip-path:url('#clip-path')\"", html, StringComparison.Ordinal);
@@ -2125,13 +3003,13 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Record_Duplicate_Reference_Provenance_Without_Duplicate_Fetches()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
             var handler = new DuplicateReferenceHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -2152,12 +3030,12 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Stream_Binary_Assets_Without_Text_Body()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
         {
-            var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -2166,7 +3044,7 @@ public class ExportEngineTests
             Assert.True(context.RouteOutcomes.TryGetValue("/image.png", out var imageOutcome));
             Assert.True(imageOutcome.Succeeded);
             Assert.Null(imageOutcome.TextBody);
-            Assert.True(File.Exists(Path.Combine(tempDir, "image.png")));
+            Assert.True(File.Exists(Path.Join(tempDir, "image.png")));
         }
         finally
         {
@@ -2196,11 +3074,11 @@ public class ExportEngineTests
     [Fact]
     public void MapHtmlFilePathToPartialPath_Should_Append_Partial_Suffix()
     {
-        var htmlPath = Path.Combine("dist", "docs", "topic.html");
+        var htmlPath = Path.Join("dist", "docs", "topic.html");
 
         var partialPath = ExportEngine.MapHtmlFilePathToPartialPath(htmlPath);
 
-        Assert.EndsWith(Path.Combine("docs", "topic.partial.html"), partialPath);
+        Assert.EndsWith(Path.Join("docs", "topic.partial.html"), partialPath);
     }
 
     [Fact]
@@ -2318,8 +3196,8 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Export_Docs_Partial_Fragments()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["/docs/start", "/docs"]);
 
@@ -2332,10 +3210,10 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var fullPagePath = Path.Combine(tempDir, "docs", "start.html");
-            var partialPath = Path.Combine(tempDir, "docs", "start.partial.html");
-            var docsLandingPath = Path.Combine(tempDir, "docs.html");
-            var docsLandingPartialPath = Path.Combine(tempDir, "docs.partial.html");
+            var fullPagePath = Path.Join(tempDir, "docs", "start.html");
+            var partialPath = Path.Join(tempDir, "docs", "start.partial.html");
+            var docsLandingPath = Path.Join(tempDir, "docs.html");
+            var docsLandingPartialPath = Path.Join(tempDir, "docs.partial.html");
 
             Assert.True(File.Exists(fullPagePath), "Expected docs full page export.");
             Assert.True(File.Exists(partialPath), "Expected docs partial export.");
@@ -2352,7 +3230,7 @@ public class ExportEngineTests
             var fullHtml = await File.ReadAllTextAsync(fullPagePath);
             Assert.Contains("<meta name=\"rw-docs-static-partials\" content=\"1\" />", fullHtml);
 
-            var nextPartialPath = Path.Combine(tempDir, "docs", "next.partial.html");
+            var nextPartialPath = Path.Join(tempDir, "docs", "next.partial.html");
             Assert.True(
                 File.Exists(nextPartialPath),
                 "Expected docs partial export for crawl-discovered /docs/next.");
@@ -2386,21 +3264,21 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_Should_Export_CustomRoot_Docs_Partial_Fragments()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        var seedFile = Path.Combine(tempDir, "seeds.txt");
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        var seedFile = Path.Join(tempDir, "seeds.txt");
         Directory.CreateDirectory(tempDir);
         await File.WriteAllLinesAsync(seedFile, ["/foo/bar/next"]);
 
         try
         {
-            var client = new HttpClient(new CustomRootDocsPartialHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new CustomRootDocsPartialHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
             await _sut.RunAsync(context);
 
-            var fullPagePath = Path.Combine(tempDir, "foo", "bar", "next.html");
-            var partialPath = Path.Combine(tempDir, "foo", "bar", "next.partial.html");
+            var fullPagePath = Path.Join(tempDir, "foo", "bar", "next.html");
+            var partialPath = Path.Join(tempDir, "foo", "bar", "next.partial.html");
 
             Assert.True(File.Exists(fullPagePath), "Expected custom-root docs full page export.");
             Assert.True(File.Exists(partialPath), "Expected custom-root docs partial export.");
@@ -2664,6 +3542,359 @@ public class ExportEngineTests
             return path == "/" || path == "/index"
                 ? Html("""<html><body><turbo-frame src="/missing-frame"></turbo-frame></body></html>""")
                 : Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private sealed class HybridLiveOriginHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <!doctype html>
+                    <html>
+                      <body>
+                        <script src="/_content/ForgeTrust.RazorWire/razorwire/razorwire.js"></script>
+                        <rw-stream-source src="/rw/stream?channel=profile"></rw-stream-source>
+                        <turbo-frame id="profile" data-rw-island="true" src="/islands/profile"></turbo-frame>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                          <button>Save</button>
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class HybridUnsafeTokenHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="https://payments.example.test/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                        <form method="post" action="/newsletter">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class HybridPathBaseLiveOriginHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/app" || path == "/app/")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <script src="/app/_content/ForgeTrust.RazorWire/razorwire/razorwire.js" data-rw-antiforgery-endpoint="/app/_rw/antiforgery/token"></script>
+                        <form data-rw-form="true" method="post" action="http://localhost:5000/app/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class HybridPathBaseRootRelativeLiveOriginHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/app" || path == "/app/")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="/app/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class HybridOutsidePathBaseLiveOriginHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/app" || path == "/app/")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="http://localhost:5000/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class HybridRootRelativeOutsidePathBaseLiveOriginHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/app" || path == "/app/")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class StaticTokenFormHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                          <button>Save</button>
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class FormAssociatedStaticTokenHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form id="profile" data-rw-form="true" method="post" action="/profile/save">
+                          <button>Save</button>
+                        </form>
+                        <input type="hidden" form="profile" name="__RequestVerificationToken" value="crawler-token">
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class DuplicateStaticTokenFormHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form id="profile" data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token-a">
+                          <button>Save</button>
+                        </form>
+                        <input type="hidden" form="profile" name="__RequestVerificationToken" value="crawler-token-b">
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class UnownedStaticTokenHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <input type="hidden" form="missing" name="__RequestVerificationToken" value="crawler-token">
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class LazyAntiforgeryFormHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" data-rw-antiforgery="lazy" method="post" action="/profile/save">
+                          <button>Save</button>
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class CustomNamedTokenFormHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="csrf-token" value="crawler-token">
+                          <button>Save</button>
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class XsrfNamedTokenFormHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="xsrf-token" value="crawler-token">
+                          <button>Save</button>
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class CustomEndpointHybridHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <script src="/_content/ForgeTrust.RazorWire/razorwire/razorwire.js" data-rw-antiforgery-endpoint="/tokens/antiforgery"></script>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class HybridLiveFragmentHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <turbo-frame src="/frame/content"></turbo-frame>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            if (path == "/frame/content")
+            {
+                return Html("""
+                    <turbo-frame id="content">
+                      <form data-rw-form="true" method="post" action="/frame/save">
+                        <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                      </form>
+                    </turbo-frame>
+                    """);
+            }
+
+            return NotFound();
         }
     }
 

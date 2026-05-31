@@ -118,6 +118,31 @@ public class ExportCommandTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_Should_Validate_LiveOrigin_Before_Resolving_Source()
+    {
+        var logger = A.Fake<ILogger<ExportCommand>>();
+        var engineLogger = A.Fake<ILogger<ExportEngine>>();
+        var requestFactory = new ExportSourceRequestFactory();
+        var processFactory = new NoopProcessFactory();
+        var clientFactory = new CountingHttpClientFactory();
+        var sourceResolver = new ExportSourceResolver(
+            A.Fake<ILoggerFactory>(),
+            processFactory,
+            clientFactory);
+        var engine = new ExportEngine(engineLogger, clientFactory);
+        var command = new ExportCommand(logger, engine, requestFactory, sourceResolver)
+        {
+            BaseUrl = "http://localhost:5001",
+            LiveOrigin = "https://api.example.com/path"
+        };
+
+        var ex = await Assert.ThrowsAsync<CommandException>(async () => await command.ExecuteAsync(A.Fake<IConsole>()));
+
+        Assert.Contains("--live-origin", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(0, clientFactory.CreateCount);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WithToken_Should_Respect_Cancellation()
     {
         var tempDir = Directory.CreateTempSubdirectory("razorwire-export-command-").FullName;
@@ -246,5 +271,16 @@ public class ExportCommandTests
         public bool HasExited => true;
         public void Start() { }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class CountingHttpClientFactory : IHttpClientFactory
+    {
+        public int CreateCount { get; private set; }
+
+        public HttpClient CreateClient(string name)
+        {
+            CreateCount++;
+            throw new InvalidOperationException("The source resolver should not run before --live-origin validation.");
+        }
     }
 }

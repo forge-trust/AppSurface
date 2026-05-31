@@ -217,7 +217,7 @@ public class ReactivityController : Controller
             var savedDisplayName = normalizedDisplayName!;
 
             return this.RazorWireStream()
-                .Update(
+                .UpdateHtml(
                     "validation-result",
                     $"""
                     <p class="text-sm font-semibold text-emerald-700">Saved {System.Net.WebUtility.HtmlEncode(savedDisplayName)}.</p>

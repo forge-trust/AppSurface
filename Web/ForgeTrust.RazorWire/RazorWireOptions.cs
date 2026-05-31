@@ -24,6 +24,64 @@ public class RazorWireOptions
     /// Gets configuration options for RazorWire-enhanced form submissions.
     /// </summary>
     public RazorWireFormOptions Forms { get; } = new();
+
+    /// <summary>
+    /// Gets configuration options for split-origin hybrid deployments.
+    /// </summary>
+    public RazorWireHybridOptions Hybrid { get; } = new();
+}
+
+/// <summary>
+/// Represents split-origin hybrid deployment options for RazorWire-managed live interactions.
+/// </summary>
+public class RazorWireHybridOptions
+{
+    /// <summary>
+    /// Gets or sets the absolute live origin used by exported static pages for RazorWire-managed dynamic calls.
+    /// </summary>
+    /// <remarks>
+    /// The value must be an origin only, such as <c>https://api.example.com</c>, without a path, query string,
+    /// fragment, or user information. When unset, RazorWire preserves same-origin runtime behavior.
+    /// </remarks>
+    public string? LiveOrigin { get; set; }
+
+    /// <summary>
+    /// Gets or sets how RazorWire-managed live calls include browser credentials in hybrid deployments.
+    /// Defaults to <see cref="RazorWireHybridCredentialsMode.Auto"/>.
+    /// </summary>
+    public RazorWireHybridCredentialsMode CredentialsMode { get; set; } = RazorWireHybridCredentialsMode.Auto;
+
+    /// <summary>
+    /// Gets or sets the optional ASP.NET Core CORS policy applied to RazorWire-owned hybrid endpoints.
+    /// </summary>
+    public string? CorsPolicyName { get; set; }
+}
+
+/// <summary>
+/// Defines credential behavior for RazorWire-managed live calls from exported hybrid pages.
+/// </summary>
+/// <remarks>
+/// The numeric values are explicit because this public enum may be bound from configuration or serialized in export
+/// manifests. New values should be appended without changing existing values.
+/// </remarks>
+public enum RazorWireHybridCredentialsMode
+{
+    /// <summary>
+    /// Preserve same-origin behavior unless a split live origin is configured; split-origin managed calls include
+    /// credentials by default.
+    /// </summary>
+    Auto = 0,
+
+    /// <summary>
+    /// Include credentials for RazorWire-managed live calls.
+    /// </summary>
+    Include = 1,
+
+    /// <summary>
+    /// Omit credentials for RazorWire-managed live calls. Use only for public live surfaces that do not use cookies,
+    /// sessions, anti-forgery, tenant context, or personalization.
+    /// </summary>
+    Omit = 2
 }
 
 /// <summary>
@@ -32,9 +90,34 @@ public class RazorWireOptions
 public class RazorWireStreamOptions
 {
     /// <summary>
+    /// The default maximum channel name length, measured after route decoding.
+    /// </summary>
+    public const int DefaultMaxChannelNameLength = 128;
+
+    /// <summary>
+    /// The default maximum number of live stream channels admitted by one application process.
+    /// </summary>
+    public const int DefaultMaxLiveChannels = 64;
+
+    /// <summary>
+    /// The default maximum number of live stream subscriptions admitted by one application process.
+    /// </summary>
+    public const int DefaultMaxLiveSubscriptions = 256;
+
+    /// <summary>
+    /// The default maximum number of live stream subscriptions admitted for one channel by one application process.
+    /// </summary>
+    public const int DefaultMaxLiveSubscriptionsPerChannel = 32;
+
+    /// <summary>
     /// Gets or sets the base path used for establishing stream connections.
     /// Defaults to <c>"/_rw/streams"</c>.
     /// </summary>
+    /// <remarks>
+    /// The path must start with <c>/</c>, must not end with <c>/</c>, and must not contain route tokens, query strings,
+    /// fragments, whitespace, or ASCII control characters. RazorWire appends a single validated channel segment to this
+    /// path when mapping the stream endpoint.
+    /// </remarks>
     public string BasePath { get; set; } = "/_rw/streams";
 
     /// <summary>
@@ -48,6 +131,47 @@ public class RazorWireStreamOptions
     /// the current <c>HttpContext</c>, user, claims, route data, or tenant state.
     /// </remarks>
     public RazorWireStreamAuthorizationMode AuthorizationMode { get; set; } = RazorWireStreamAuthorizationMode.DenyAll;
+
+    /// <summary>
+    /// Gets or sets the maximum channel name length accepted by the stream endpoint.
+    /// Defaults to <see cref="DefaultMaxChannelNameLength"/>.
+    /// </summary>
+    /// <remarks>
+    /// The limit is measured on the decoded route value using .NET string length. Channel names are validated before
+    /// authorization and admission, and v1 channel names may contain only ASCII letters, ASCII digits, <c>.</c>,
+    /// <c>_</c>, <c>-</c>, and <c>:</c>. Raise this value only for intentionally finite, namespaced channel schemes.
+    /// </remarks>
+    public int MaxChannelNameLength { get; set; } = DefaultMaxChannelNameLength;
+
+    /// <summary>
+    /// Gets or sets the maximum number of live channel names admitted by one application process.
+    /// Defaults to <see cref="DefaultMaxLiveChannels"/>.
+    /// </summary>
+    /// <remarks>
+    /// This is a per-process guardrail, not a cluster-wide, tenant-wide, user-wide, or load-balancer-wide limit. A live
+    /// channel is counted only while it has at least one admitted subscription in the current process.
+    /// </remarks>
+    public int MaxLiveChannels { get; set; } = DefaultMaxLiveChannels;
+
+    /// <summary>
+    /// Gets or sets the maximum number of live stream subscriptions admitted by one application process.
+    /// Defaults to <see cref="DefaultMaxLiveSubscriptions"/>.
+    /// </summary>
+    /// <remarks>
+    /// A subscription is one admitted SSE request/browser connection. One person can consume multiple subscriptions by
+    /// opening multiple tabs or pages. This is not a distributed or user-aware quota.
+    /// </remarks>
+    public int MaxLiveSubscriptions { get; set; } = DefaultMaxLiveSubscriptions;
+
+    /// <summary>
+    /// Gets or sets the maximum number of live stream subscriptions admitted for one channel by one application process.
+    /// Defaults to <see cref="DefaultMaxLiveSubscriptionsPerChannel"/>.
+    /// </summary>
+    /// <remarks>
+    /// A subscription is one admitted SSE request/browser connection. Use this per-process limit to keep one public
+    /// channel from consuming all live subscription capacity in the current process.
+    /// </remarks>
+    public int MaxLiveSubscriptionsPerChannel { get; set; } = DefaultMaxLiveSubscriptionsPerChannel;
 }
 
 /// <summary>
@@ -158,6 +282,23 @@ public class RazorWireFormOptions
             ? DefaultFailureMessageFallback
             : value;
     }
+
+    /// <summary>
+    /// Gets configuration options for RazorWire anti-forgery token refresh behavior.
+    /// </summary>
+    public RazorWireFormAntiforgeryOptions Antiforgery { get; } = new();
+}
+
+/// <summary>
+/// Represents lazy anti-forgery token refresh options for RazorWire forms.
+/// </summary>
+public class RazorWireFormAntiforgeryOptions
+{
+    /// <summary>
+    /// Gets or sets the anti-forgery token refresh endpoint path.
+    /// Defaults to <c>"/_rw/antiforgery/token"</c>.
+    /// </summary>
+    public string TokenEndpointPath { get; set; } = "/_rw/antiforgery/token";
 }
 
 /// <summary>
