@@ -327,6 +327,15 @@ public sealed class AppSurfaceDocsTrustedReleasePathGuardTests : IDisposable
         Assert.False(AppSurfaceDocsTrustedReleasePathGuard.IsSameOrDescendant(root, sibling));
     }
 
+    [Fact]
+    public void IsSameOrDescendant_ShouldAcceptDescendantOfFilesystemRoot()
+    {
+        var filesystemRoot = Path.GetPathRoot(_tempDirectory);
+
+        Assert.NotNull(filesystemRoot);
+        Assert.True(AppSurfaceDocsTrustedReleasePathGuard.IsSameOrDescendant(filesystemRoot, _tempDirectory));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDirectory))

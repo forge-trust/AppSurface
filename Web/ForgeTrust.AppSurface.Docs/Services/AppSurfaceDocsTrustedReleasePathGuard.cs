@@ -281,7 +281,11 @@ internal static class AppSurfaceDocsTrustedReleasePathGuard
             return true;
         }
 
-        var rootWithSeparator = root + Path.DirectorySeparatorChar;
+        var filesystemRoot = Path.GetPathRoot(root);
+        var rootWithSeparator = string.Equals(filesystemRoot, root, PhysicalPathComparison)
+            || root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
         return candidate.StartsWith(rootWithSeparator, PhysicalPathComparison);
     }
 
