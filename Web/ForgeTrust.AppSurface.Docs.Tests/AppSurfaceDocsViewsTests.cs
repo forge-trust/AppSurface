@@ -230,14 +230,47 @@ public class AppSurfaceDocsViewsTests
         var harvestPage = document.QuerySelector("#docs-harvest-page");
         var returnLink = document.QuerySelector(".docs-harvest-return-link a");
         var observatory = document.QuerySelector("#docs-harvest-observatory");
+        var streamSource = document.QuerySelector("rw-stream-source");
 
         Assert.NotNull(harvestPage);
         Assert.NotNull(returnLink);
         Assert.NotNull(observatory);
+        Assert.NotNull(streamSource);
+        Assert.Equal(
+            $"/_rw/streams/{AppSurfaceDocsStreamAuthorization.HarvestProgressChannel}?replay=1",
+            streamSource.GetAttribute("src"));
         Assert.Equal(returnUrl, harvestPage.GetAttribute("data-appsurface-docs-harvest-return-url"));
         Assert.Equal(returnUrl, returnLink.GetAttribute("href"));
         Assert.DoesNotContain("filter=", observatory.InnerHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("data-appsurface-docs-harvest-return-url", observatory.InnerHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestingView_ShouldRenderStaticFallback_WhenLiveProgressIsNotAuthorized()
+    {
+        using var services = CreateServiceProvider(CreateDocs());
+
+        var html = await RenderViewAsync(
+            services,
+            "/Views/Docs/Harvesting.cshtml",
+            new AppSurfaceDocsHarvestingViewModel
+            {
+                Progress = new AppSurfaceDocsHarvestProgressSnapshot
+                {
+                    State = AppSurfaceDocsHarvestRunState.Running,
+                    StartedUtc = DateTimeOffset.UtcNow,
+                    TotalHarvesters = 1,
+                    Status = "Harvesting"
+                },
+                ReturnUrl = "/docs/search",
+                CanUseLiveProgress = false
+            });
+
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+
+        Assert.Null(document.QuerySelector("rw-stream-source"));
+        Assert.Contains("Live progress is disabled for this environment.", document.Body?.TextContent, StringComparison.Ordinal);
+        Assert.Equal("/docs/search", document.QuerySelector(".docs-harvest-return-link a")?.GetAttribute("href"));
     }
 
     [Fact]

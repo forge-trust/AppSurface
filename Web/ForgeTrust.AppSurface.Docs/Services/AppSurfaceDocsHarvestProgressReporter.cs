@@ -11,7 +11,7 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </summary>
 public sealed class AppSurfaceDocsHarvestProgressReporter
 {
-    internal const string ChannelName = "appsurfacedocs-harvest";
+    internal const string ChannelName = AppSurfaceDocsStreamAuthorization.HarvestProgressChannel;
     private const int MaxActivityCount = 8;
     private const int CompletionDelayMilliseconds = 900;
     // Resolve per subscriber so a shared harvest channel revisits each user's requested docs URL.

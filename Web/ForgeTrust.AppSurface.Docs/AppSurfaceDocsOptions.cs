@@ -795,6 +795,20 @@ public sealed class AppSurfaceDocsVersioningOptions
     /// and this property is blank, startup validation fails before the app begins serving requests.
     /// </remarks>
     public string? CatalogPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the trusted filesystem root that contains published exact-version release trees.
+    /// </summary>
+    /// <remarks>
+    /// Catalog entries use <see cref="AppSurfaceDocsPublishedVersion.ExactTreePath"/> values relative to this directory.
+    /// When this property is blank, AppSurface Docs defaults the trusted release root to the directory containing
+    /// <see cref="CatalogPath"/>, which supports the common layout where <c>catalog.json</c> sits beside a
+    /// <c>releases/</c> directory. Relative configured values resolve from the app content root.
+    /// The root and every mounted exact tree must be ordinary directories, not symbolic links, junctions, or other
+    /// reparse points. Absolute catalog <c>exactTreePath</c> values are invalid; set this property to the old parent
+    /// directory and make each catalog entry relative when migrating older catalogs.
+    /// </remarks>
+    public string? TrustedReleaseRootPath { get; set; }
 }
 
 /// <summary>

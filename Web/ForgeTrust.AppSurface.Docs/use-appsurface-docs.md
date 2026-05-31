@@ -367,6 +367,9 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Verify `/docs`, `/docs/search`, and `/docs/search-index.json`. The search page is server-rendered and should still expose starter query URLs plus browse links before the client index loads; a blocked or missing index must degrade to those links, not to a blank page.
 - For custom docs roots, path bases, or static exports, inspect the generated `search.html` and confirm its search index URL plus fallback anchors point at the mounted root.
 - For static exports with redirect aliases, use the default HTML strategy for GitHub Pages and generic static hosts, or `--mode cdn --redirects netlify` for Netlify-compatible providers. Do not hand-author `_redirects` in the export output.
+- For published version catalogs, keep the version catalog file beside the `releases/` layout when possible and leave `AppSurfaceDocs:Versioning:TrustedReleaseRootPath` unset. If your release store lives elsewhere, configure `TrustedReleaseRootPath` once and keep every catalog `exactTreePath` relative to that directory.
+- When migrating older catalogs, replace absolute `exactTreePath` values such as `/srv/appsurface-docs/releases/1.2.3` with `TrustedReleaseRootPath=/srv/appsurface-docs/releases` and `exactTreePath=1.2.3`.
+- Treat the trusted release root as an operator-owned immutable static export store. Symlinks, junctions, reparse points, hidden path segments, rooted catalog paths, and `../` escapes are unavailable and are never mounted.
 - For package maintainers changing built-in Docs browser assets, run `pnpm --dir Web run assets:build` and `pnpm --dir Web run assets:verify` before building or exporting docs. AppSurface Docs embeds `wwwroot/docs/search-client.js` and `wwwroot/docs/minisearch.min.js`, so stale generated assets can otherwise ship inside the package assembly.
 - Run the standalone host or export pipeline in CI before publishing a public docs surface.
 

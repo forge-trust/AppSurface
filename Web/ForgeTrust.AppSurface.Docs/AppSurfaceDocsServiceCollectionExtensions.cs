@@ -71,9 +71,12 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// If an <see cref="IRazorWireChannelAuthorizer"/> is already registered, AppSurface Docs wraps that authorizer with
     /// <see cref="AppSurfaceDocsHarvestChannelAuthorizer"/> so its harvest-progress channel rules run before delegating
     /// to the existing authorizer. Register a custom authorizer before calling this method to participate in that
-    /// wrapper, or register one after this method when the application intentionally wants to replace the AppSurface Docs
-    /// wrapper. When no custom authorizer is present, AppSurface Docs authorizes only its own harvest-progress stream
-    /// according to harvest visibility and leaves unrelated RazorWire streams denied. Call this method once during
+    /// wrapper. Registering an authorizer after this method is an advanced replacement mode: the application replaces
+    /// the AppSurface Docs wrapper and must apply any AppSurface Docs harvest-progress checks itself, typically with
+    /// <see cref="AppSurfaceDocsStreamAuthorization.IsHarvestProgressChannel(string?)"/>. In non-development
+    /// environments, <c>AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always</c> exposes the health routes but does not
+    /// authorize the live harvest stream unless a custom authorizer allows it. Built-in RazorWire allow-all/deny-all
+    /// authorizers are not considered custom authorization for that docs-owned stream. Call this method once during
     /// startup; repeated registration can nest authorizer wrappers and obscure the
     /// intended channel policy.
     /// Consumers that resolve <see cref="AppSurfaceDocsOptions"/> directly should expect the normalized values rather than
@@ -174,6 +177,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                             : NormalizeOrNull(options.Routing.PublicOrigin);
 
                     options.Versioning.CatalogPath = NormalizeOrNull(options.Versioning.CatalogPath);
+                    options.Versioning.TrustedReleaseRootPath =
+                        NormalizeOrNull(options.Versioning.TrustedReleaseRootPath);
                     options.Contributor.SymbolSourceUrlTemplate = NormalizeOrNull(options.Contributor.SymbolSourceUrlTemplate);
                     options.Contributor.SourceRef = NormalizeOrNull(options.Contributor.SourceRef);
                     options.Localization.DefaultLocale = NormalizeOrNull(options.Localization.DefaultLocale) ?? "en";
