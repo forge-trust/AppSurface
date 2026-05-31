@@ -984,7 +984,7 @@ public sealed class ProgramEntryPointTests
                 services => services.AddSingleton<IHttpClientFactory>(new FixedHttpClientFactory(handler))));
 
         Assert.Equal(0, result.ExitCode);
-        var html = await File.ReadAllTextAsync(Path.Combine(output.Path, "index.html"));
+        var html = await File.ReadAllTextAsync(Path.Join(output.Path, "index.html"));
         Assert.Contains("href=\"https://www.example.com/profile\"", html);
         Assert.Contains("data-rw-live-origin=\"https://api.example.com\"", html);
         Assert.Contains("action=\"https://api.example.com/profile/save\"", html);

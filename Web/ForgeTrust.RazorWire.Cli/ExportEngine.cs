@@ -419,14 +419,10 @@ public class ExportEngine
 
         if (context.Mode == ExportMode.Hybrid && context.Hybrid.HasLiveOrigin)
         {
-            foreach (var script in document.QuerySelectorAll("script[src]"))
+            foreach (var script in document.QuerySelectorAll("script[src]")
+                         .Where(script => (script.GetAttribute("src") ?? string.Empty)
+                             .Contains("/razorwire/razorwire.js", StringComparison.OrdinalIgnoreCase)))
             {
-                var src = script.GetAttribute("src") ?? string.Empty;
-                if (!src.Contains("/razorwire/razorwire.js", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
                 script.SetAttribute("data-rw-live-origin", context.Hybrid.LiveOrigin!);
                 script.SetAttribute("data-rw-hybrid-credentials", ResolveHybridCredentialsAttribute(context));
                 if (string.IsNullOrWhiteSpace(script.GetAttribute("data-rw-antiforgery-endpoint")))
@@ -437,22 +433,28 @@ public class ExportEngine
                 changed = true;
             }
 
-            foreach (var streamSource in document.QuerySelectorAll("rw-stream-source[src]"))
+            foreach (var streamResolution in document.QuerySelectorAll("rw-stream-source[src]")
+                         .Select(streamSource => (
+                             Element: streamSource,
+                             LiveUrl: TryResolveOriginUrl(streamSource.GetAttribute("src"), route, context, context.Hybrid.LiveOrigin!, out var liveUrl, out _)
+                                 ? liveUrl
+                                 : null))
+                         .Where(streamResolution => streamResolution.LiveUrl is not null))
             {
-                if (TryResolveOriginUrl(streamSource.GetAttribute("src"), route, context, context.Hybrid.LiveOrigin!, out var liveUrl, out _))
-                {
-                    streamSource.SetAttribute("src", liveUrl);
-                    changed = true;
-                }
+                streamResolution.Element.SetAttribute("src", streamResolution.LiveUrl!);
+                changed = true;
             }
 
-            foreach (var island in document.QuerySelectorAll("turbo-frame[data-rw-island=\"true\"][src]"))
+            foreach (var islandResolution in document.QuerySelectorAll("turbo-frame[data-rw-island=\"true\"][src]")
+                         .Select(island => (
+                             Element: island,
+                             LiveUrl: TryResolveOriginUrl(island.GetAttribute("src"), route, context, context.Hybrid.LiveOrigin!, out var liveUrl, out _)
+                                 ? liveUrl
+                                 : null))
+                         .Where(islandResolution => islandResolution.LiveUrl is not null))
             {
-                if (TryResolveOriginUrl(island.GetAttribute("src"), route, context, context.Hybrid.LiveOrigin!, out var liveUrl, out _))
-                {
-                    island.SetAttribute("src", liveUrl);
-                    changed = true;
-                }
+                islandResolution.Element.SetAttribute("src", islandResolution.LiveUrl!);
+                changed = true;
             }
         }
 
@@ -600,12 +602,10 @@ public class ExportEngine
 
         foreach (var token in document.QuerySelectorAll("input[form]")
                      .Where(input => IsAntiforgeryTokenInput(input)
-                                     && string.Equals(input.GetAttribute("form"), formId, StringComparison.Ordinal)))
+                                     && string.Equals(input.GetAttribute("form"), formId, StringComparison.Ordinal))
+                     .Where(token => !tokens.Contains(token)))
         {
-            if (!tokens.Contains(token))
-            {
-                tokens.Add(token);
-            }
+            tokens.Add(token);
         }
 
         return tokens;

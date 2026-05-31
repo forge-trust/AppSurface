@@ -1831,7 +1831,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_Should_Continue_When_Managed_Dependency_Is_Missing()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1842,7 +1842,7 @@ public class ExportEngineTests
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
             await _sut.RunAsync(context);
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Join(tempDir, "index.html")));
         }
         finally
         {
@@ -1856,7 +1856,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_WithLiveOrigin_Should_RewriteManagedLiveReferencesAndLazyForms()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1879,7 +1879,7 @@ public class ExportEngineTests
 
             await _sut.RunAsync(context);
 
-            var html = await File.ReadAllTextAsync(Path.Combine(tempDir, "index.html"));
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("data-rw-live-origin=\"https://api.example.com\"", html);
             Assert.Contains("data-rw-hybrid-credentials=\"include\"", html);
             Assert.Contains("data-rw-antiforgery-endpoint=\"/_rw/antiforgery/token\"", html);
@@ -1888,7 +1888,7 @@ public class ExportEngineTests
             Assert.Contains("action=\"https://api.example.com/profile/save\"", html);
             Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
             Assert.DoesNotContain("crawler-token", html);
-            Assert.False(File.Exists(Path.Combine(tempDir, "islands", "profile.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "islands", "profile.html")));
         }
         finally
         {
@@ -1902,7 +1902,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_WithLiveOrigin_Should_FailUnsafeStaticTokenForms()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1942,7 +1942,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_HybridMode_WithLiveOrigin_Should_FailLazyAntiforgeryWhenCredentialsAreOmitted()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
@@ -1980,7 +1980,7 @@ public class ExportEngineTests
     [Fact]
     public async Task RunAsync_CdnMode_Should_FailStaticAntiforgeryTokens()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
 
         try
