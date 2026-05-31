@@ -17,7 +17,8 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// The harvester is enabled by default through <see cref="AppSurfaceDocsJavaScriptHarvestOptions.Enabled"/> and scans
 /// repository-relative JavaScript candidates that pass the shared harvest path policy. V1 is deliberately strict: broad
 /// discovery requires <c>@public</c>, treats <c>@internal</c>, <c>@private</c>, and <c>@ignore</c> as hard exclusions,
-/// and turns unsupported public shapes into harvest diagnostics instead of partial docs.
+/// skips file and directory reparse points before reads or descent, and turns unsupported public shapes into harvest
+/// diagnostics instead of partial docs.
 /// </remarks>
 public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider, IDocHarvesterActivation, IDocHarvesterHealthParticipation
 {
@@ -112,7 +113,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             var includePatterns = NormalizeIncludePatterns(javaScriptOptions.IncludeGlobs ?? []).ToArray();
             var requirePublicTag = ShouldRequirePublicTag(javaScriptOptions, includePatterns);
             var harvestedItems = new List<JavaScriptApiItem>();
-            foreach (var filePath in EnumerateJavaScriptFiles(rootPath, includePatterns, pathPolicy, cancellationToken))
+            foreach (var filePath in EnumerateJavaScriptFiles(rootPath, includePatterns, pathPolicy, diagnostics, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -1380,6 +1381,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string rootPath,
         IReadOnlyList<string> includePatterns,
         IHarvestPathPolicy pathPolicy,
+        List<DocHarvestDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
         var fullRoot = Path.GetFullPath(rootPath);
@@ -1392,6 +1394,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                              fullRoot,
                              globalIncludePatterns,
                              pathPolicy,
+                             diagnostics,
                              cancellationToken))
                 {
                     yield return file;
@@ -1413,7 +1416,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             yield break;
         }
 
-        foreach (var file in EnumerateJavaScriptFilesForIncludePatterns(fullRoot, includePatterns, pathPolicy, cancellationToken))
+        foreach (var file in EnumerateJavaScriptFilesForIncludePatterns(fullRoot, includePatterns, pathPolicy, diagnostics, cancellationToken))
         {
             yield return file;
         }
@@ -1423,6 +1426,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string fullRoot,
         IReadOnlyList<string> includePatterns,
         IHarvestPathPolicy pathPolicy,
+        List<DocHarvestDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
         var includeMatcher = new AppSurfaceDocsHarvestPathMatcher(includePatterns);
@@ -1430,29 +1434,33 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         foreach (var includeRoot in ResolveIncludeRoots(fullRoot, includePatterns))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (File.Exists(includeRoot))
+            var rootCandidate = ClassifyHarvestCandidate(fullRoot, includeRoot.FullPath);
+            if (rootCandidate.Status == JavaScriptHarvestCandidateStatus.File)
             {
-                var relativeFile = NormalizeRelativePath(Path.GetRelativePath(fullRoot, includeRoot));
-                if (IsJavaScriptFile(includeRoot) && includeMatcher.MatchFirst(relativeFile) is not null && yielded.Add(includeRoot))
+                if (IsJavaScriptFile(rootCandidate.FullPath) && includeMatcher.MatchFirst(rootCandidate.RelativePath) is not null && yielded.Add(rootCandidate.FullPath))
                 {
-                    yield return includeRoot;
+                    yield return rootCandidate.FullPath;
                 }
 
                 continue;
             }
 
-            if (!Directory.Exists(includeRoot))
+            if (rootCandidate.Status != JavaScriptHarvestCandidateStatus.Directory)
             {
-                var relativeFile = NormalizeRelativePath(Path.GetRelativePath(fullRoot, includeRoot));
-                if (IsJavaScriptFile(includeRoot) && includeMatcher.MatchFirst(relativeFile) is not null && yielded.Add(includeRoot))
-                {
-                    yield return includeRoot;
-                }
-
+                AddIncludeRootDiagnostic(includeRoot, rootCandidate, diagnostics);
                 continue;
             }
 
-            foreach (var file in EnumerateJavaScriptFilesUnderRoot(fullRoot, includeRoot, includeMatcher, pathPolicy, yielded, cancellationToken))
+            if (!CanEnumerateDirectory(rootCandidate.FullPath))
+            {
+                AddIncludeRootDiagnostic(
+                    includeRoot,
+                    rootCandidate with { Status = JavaScriptHarvestCandidateStatus.Inaccessible },
+                    diagnostics);
+                continue;
+            }
+
+            foreach (var file in EnumerateJavaScriptFilesUnderRoot(fullRoot, rootCandidate.FullPath, includeMatcher, pathPolicy, yielded, cancellationToken))
             {
                 yield return file;
             }
@@ -1467,34 +1475,43 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         HashSet<string> yielded,
         CancellationToken cancellationToken)
     {
+        var traversalRootCandidate = ClassifyHarvestCandidate(repositoryRoot, traversalRoot);
+        if (traversalRootCandidate.Status != JavaScriptHarvestCandidateStatus.Directory)
+        {
+            yield break;
+        }
+
         var pending = new Stack<string>();
-        pending.Push(traversalRoot);
+        pending.Push(traversalRootCandidate.FullPath);
 
         while (pending.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var current = pending.Pop();
-            foreach (var file in EnumerateFilesSafely(current).Where(yielded.Add))
+            foreach (var file in EnumerateFilesSafely(current))
             {
-                var relativeFile = NormalizeRelativePath(Path.GetRelativePath(repositoryRoot, file));
-                if (includeMatcher.MatchFirst(relativeFile) is null)
+                var candidate = ClassifyHarvestCandidate(repositoryRoot, file);
+                if (candidate.Status != JavaScriptHarvestCandidateStatus.File
+                    || includeMatcher.MatchFirst(candidate.RelativePath) is null
+                    || !yielded.Add(candidate.FullPath))
                 {
                     continue;
                 }
 
-                yield return file;
+                yield return candidate.FullPath;
             }
 
             foreach (var directory in EnumerateDirectoriesSafely(current))
             {
-                var relativeDirectory = NormalizeRelativePath(Path.GetRelativePath(repositoryRoot, directory));
-                if (ShouldPruneDirectory(relativeDirectory, directory, pathPolicy)
-                    || includeMatcher.MatchFileInDirectoryOrDescendant(relativeDirectory) is null)
+                var candidate = ClassifyHarvestCandidate(repositoryRoot, directory);
+                if (candidate.Status != JavaScriptHarvestCandidateStatus.Directory
+                    || ShouldPruneDirectory(candidate.RelativePath, candidate.FullPath, pathPolicy)
+                    || includeMatcher.MatchFileInDirectoryOrDescendant(candidate.RelativePath) is null)
                 {
                     continue;
                 }
 
-                pending.Push(directory);
+                pending.Push(candidate.FullPath);
             }
         }
     }
@@ -1518,7 +1535,7 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
-    private static IEnumerable<string> ResolveIncludeRoots(string rootPath, IEnumerable<string> includePatterns)
+    private static IEnumerable<JavaScriptIncludeRoot> ResolveIncludeRoots(string rootPath, IEnumerable<string> includePatterns)
     {
         var fullRoot = Path.GetFullPath(rootPath);
         var yielded = new HashSet<string>(PathComparer);
@@ -1545,7 +1562,10 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                 continue;
             }
 
-            yield return candidate;
+            yield return new JavaScriptIncludeRoot(
+                candidate,
+                NormalizeRelativePath(Path.GetRelativePath(fullRoot, candidate)),
+                ContainsGlobToken(trimmedPattern));
         }
     }
 
@@ -1605,6 +1625,20 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         }
     }
 
+    private static bool CanEnumerateDirectory(string directory)
+    {
+        try
+        {
+            using var enumerator = Directory.EnumerateFileSystemEntries(directory).GetEnumerator();
+            _ = enumerator.MoveNext();
+            return true;
+        }
+        catch (Exception ex) when (IsFileReadException(ex))
+        {
+            return false;
+        }
+    }
+
     private static bool HasUsableIncludeGlobs(IEnumerable<string>? includePatterns)
     {
         return includePatterns?.Any(static pattern => !string.IsNullOrWhiteSpace(pattern)) == true;
@@ -1612,7 +1646,84 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
 
     private static bool ContainsGlobToken(string value)
     {
-        return value.Contains('*', StringComparison.Ordinal) || value.Contains('?', StringComparison.Ordinal);
+        return value.Contains('*', StringComparison.Ordinal)
+               || value.Contains('?', StringComparison.Ordinal)
+               || value.Contains('[', StringComparison.Ordinal);
+    }
+
+    private static JavaScriptHarvestCandidate ClassifyHarvestCandidate(string rootPath, string candidatePath)
+    {
+        var fullRoot = Path.GetFullPath(rootPath);
+        var fullCandidate = Path.GetFullPath(candidatePath);
+        var relativePath = NormalizeRelativePath(Path.GetRelativePath(fullRoot, fullCandidate));
+        if (!IsUnderRoot(fullRoot, fullCandidate))
+        {
+            return new JavaScriptHarvestCandidate(JavaScriptHarvestCandidateStatus.OutsideRoot, fullCandidate, relativePath);
+        }
+
+        FileAttributes attributes;
+        try
+        {
+            attributes = File.GetAttributes(fullCandidate);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new JavaScriptHarvestCandidate(JavaScriptHarvestCandidateStatus.Missing, fullCandidate, relativePath);
+        }
+        catch (Exception ex) when (IsFileReadException(ex))
+        {
+            return new JavaScriptHarvestCandidate(JavaScriptHarvestCandidateStatus.Inaccessible, fullCandidate, relativePath);
+        }
+
+        if (attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            return new JavaScriptHarvestCandidate(JavaScriptHarvestCandidateStatus.ReparsePoint, fullCandidate, relativePath);
+        }
+
+        return attributes.HasFlag(FileAttributes.Directory)
+            ? new JavaScriptHarvestCandidate(JavaScriptHarvestCandidateStatus.Directory, fullCandidate, relativePath)
+            : new JavaScriptHarvestCandidate(JavaScriptHarvestCandidateStatus.File, fullCandidate, relativePath);
+    }
+
+    private static void AddIncludeRootDiagnostic(
+        JavaScriptIncludeRoot includeRoot,
+        JavaScriptHarvestCandidate candidate,
+        List<DocHarvestDiagnostic> diagnostics)
+    {
+        if (includeRoot.HasGlobTokens
+            && candidate.Status is not JavaScriptHarvestCandidateStatus.ReparsePoint
+                and not JavaScriptHarvestCandidateStatus.Inaccessible)
+        {
+            return;
+        }
+
+        switch (candidate.Status)
+        {
+            case JavaScriptHarvestCandidateStatus.ReparsePoint:
+                diagnostics.Add(CreateDiagnostic(
+                    DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped,
+                    DocHarvestDiagnosticSeverity.Error,
+                    $"Skipped configured JavaScript include '{includeRoot.RelativePath}' because it is a file-system link.",
+                    "AppSurface Docs does not follow symlinks, junctions, or other reparse points while harvesting built-in JavaScript source files.",
+                    "Replace the link with a real source file under the repository root, include the real non-link source path, disable JavaScript harvesting, or provide a custom harvester for a host-owned trust model. See the JavaScript harvesting pitfalls in the AppSurface Docs README."));
+                break;
+            case JavaScriptHarvestCandidateStatus.Missing when !includeRoot.HasGlobTokens && IsJavaScriptFile(includeRoot.FullPath):
+                diagnostics.Add(CreateDiagnostic(
+                    DocHarvestDiagnosticCodes.JavaScriptMissingInclude,
+                    DocHarvestDiagnosticSeverity.Warning,
+                    $"Skipped configured JavaScript include '{includeRoot.RelativePath}' because it does not exist.",
+                    "The include pattern resolves to an exact JavaScript source file path, but no file exists at that repository-relative path.",
+                    "Fix the JavaScript include glob, create the source file, or remove the include if it is no longer public API surface."));
+                break;
+            case JavaScriptHarvestCandidateStatus.Inaccessible:
+                diagnostics.Add(CreateDiagnostic(
+                    DocHarvestDiagnosticCodes.JavaScriptParseFailed,
+                    DocHarvestDiagnosticSeverity.Warning,
+                    $"Skipped configured JavaScript include '{includeRoot.RelativePath}' because it could not be inspected.",
+                    "The configured include's file-system attributes or directory entries could not be inspected before JavaScript source traversal.",
+                    "Fix file permissions or locks, point the include at an inspectable source path, or remove this path from JavaScript harvesting."));
+                break;
+        }
     }
 
     private static bool IsJavaScriptFile(string path)
@@ -2015,6 +2126,26 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         string fix)
     {
         return new DocHarvestDiagnostic(code, severity, HarvesterType, problem, cause, fix);
+    }
+
+    private readonly record struct JavaScriptIncludeRoot(
+        string FullPath,
+        string RelativePath,
+        bool HasGlobTokens);
+
+    private readonly record struct JavaScriptHarvestCandidate(
+        JavaScriptHarvestCandidateStatus Status,
+        string FullPath,
+        string RelativePath);
+
+    private enum JavaScriptHarvestCandidateStatus
+    {
+        File,
+        Directory,
+        Missing,
+        OutsideRoot,
+        ReparsePoint,
+        Inaccessible
     }
 
     private enum JavaScriptApiKind

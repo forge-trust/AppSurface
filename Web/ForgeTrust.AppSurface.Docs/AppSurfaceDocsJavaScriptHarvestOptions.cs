@@ -7,10 +7,11 @@ namespace ForgeTrust.AppSurface.Docs;
 /// JavaScript harvesting is enabled by default and scans policy-approved <c>.js</c> files for explicit
 /// <c>@public</c> browser-contract doclets. Unannotated JavaScript is ignored. Global
 /// <see cref="AppSurfaceDocsHarvestOptions.Paths"/> rules apply first, then these source-specific include, exclude, and
-/// default-exclusion settings refine the JavaScript candidate set. <see cref="IncludeGlobs"/> is an optional narrowing
-/// boundary, not an enable switch. <see cref="GroupNameRules"/> names already-eligible JavaScript source trees but never
-/// includes files on its own. Tags such as <c>@internal</c>, <c>@private</c>, and <c>@ignore</c> always exclude a doclet
-/// from the generated public API surface.
+/// default-exclusion settings refine the JavaScript candidate set. File and directory reparse points are skipped before
+/// source reads or directory descent, including when a configured include points at a symlink or junction. <see
+/// cref="IncludeGlobs"/> is an optional narrowing boundary, not an enable switch. <see cref="GroupNameRules"/> names
+/// already-eligible JavaScript source trees but never includes files on its own. Tags such as <c>@internal</c>,
+/// <c>@private</c>, and <c>@ignore</c> always exclude a doclet from the generated public API surface.
 /// </remarks>
 public sealed class AppSurfaceDocsJavaScriptHarvestOptions
 {
@@ -36,7 +37,9 @@ public sealed class AppSurfaceDocsJavaScriptHarvestOptions
     /// Patterns use forward-slash <c>Microsoft.Extensions.FileSystemGlobbing</c> matching. Examples include
     /// <c>Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js</c> for a single file or
     /// <c>src/widgets/**/*.js</c> for a bounded source tree. Include globs compose with global includes using AND
-    /// semantics. Blank entries are ignored during options normalization.
+    /// semantics. Blank entries are ignored during options normalization. Configured include roots that resolve to
+    /// file-system reparse points are skipped and reported through
+    /// <c>appsurfacedocs.javascript.reparse_point_skipped</c>; point includes at real source files or directories.
     /// </remarks>
     public string[] IncludeGlobs { get; set; } = [];
 

@@ -1187,25 +1187,24 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
-    public async Task HarvestAsync_ShouldReportReadDiagnostic_WhenMatchedFileCannotBeRead()
+    public async Task HarvestAsync_ShouldReportReparseDiagnostic_WhenMatchedFileIsDanglingSymlink()
     {
-        if (OperatingSystem.IsWindows())
+        var directory = Path.Join(_testRoot, "src");
+        Directory.CreateDirectory(directory);
+        var linkPath = Path.Join(directory, "missing.js");
+        if (!TryCreateFileSymbolicLink(linkPath, Path.Join(directory, "target-does-not-exist.js")))
         {
             return;
         }
 
-        var directory = Path.Join(_testRoot, "src");
-        Directory.CreateDirectory(directory);
-        var linkPath = Path.Join(directory, "missing.js");
-        File.CreateSymbolicLink(linkPath, Path.Join(directory, "target-does-not-exist.js"));
         var harvester = CreateHarvester(CreateEnabledOptions("src/missing.js"));
 
         var docs = await harvester.HarvestAsync(_testRoot);
         var diagnostic = Assert.Single(GetDiagnostics(harvester));
 
         Assert.Empty(docs);
-        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptParseFailed, diagnostic.Code);
-        Assert.Contains("could not be read", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped, diagnostic.Code);
+        Assert.Contains("file-system link", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1217,9 +1216,372 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var diagnostic = Assert.Single(GetDiagnostics(harvester));
 
         Assert.Empty(docs);
-        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptParseFailed, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptMissingInclude, diagnostic.Code);
         Assert.Contains("src/missing.js", diagnostic.Problem, StringComparison.Ordinal);
-        Assert.Contains("could not be read", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("does not exist", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldReportReadDiagnostic_WhenExactIncludedFileCannotBeRead()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        await WriteAsync(
+            "src/unreadable.js",
+            """
+            /**
+             * Unreadable function.
+             * @public
+             * @namespace RazorWire
+             */
+            function unreadableApi() {}
+            """);
+        var filePath = Path.Join(_testRoot, "src", "unreadable.js");
+        try
+        {
+            File.SetUnixFileMode(filePath, UnixFileMode.None);
+            var harvester = CreateHarvester(CreateEnabledOptions("src/unreadable.js"));
+
+            var docs = await harvester.HarvestAsync(_testRoot);
+            var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+            Assert.Empty(docs);
+            Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptParseFailed, diagnostic.Code);
+            Assert.Contains("src/unreadable.js", diagnostic.Problem, StringComparison.Ordinal);
+            Assert.Contains("could not be read", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.SetUnixFileMode(filePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldReportReadDiagnostic_WhenIncludedDirectoryRootCannotBeEnumerated()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var unreadableDirectory = Path.Join(_testRoot, "src", "unreadable");
+        Directory.CreateDirectory(unreadableDirectory);
+        File.SetUnixFileMode(unreadableDirectory, UnixFileMode.None);
+        try
+        {
+            var directoryEnumerationDenied = false;
+            try
+            {
+                _ = Directory.GetFileSystemEntries(unreadableDirectory);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                directoryEnumerationDenied = true;
+            }
+
+            if (!directoryEnumerationDenied)
+            {
+                return;
+            }
+
+            var harvester = CreateHarvester(CreateEnabledOptions("src/unreadable/**/*.js"));
+
+            var docs = await harvester.HarvestAsync(_testRoot);
+            var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+            Assert.Empty(docs);
+            Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptParseFailed, diagnostic.Code);
+            Assert.Contains("src/unreadable", diagnostic.Problem, StringComparison.Ordinal);
+            Assert.Contains("could not be inspected", diagnostic.Problem, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.SetUnixFileMode(
+                unreadableDirectory,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipExactIncludedFileReparsePoint_WithoutReadingExternalTarget()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            var externalFile = Path.Join(externalRoot, "external.js");
+            await File.WriteAllTextAsync(
+                externalFile,
+                """
+                /**
+                 * External function.
+                 * @public
+                 * @namespace External
+                 */
+                function externalApi() {}
+                """);
+            Directory.CreateDirectory(Path.Join(_testRoot, "src"));
+            var linkPath = Path.Join(_testRoot, "src", "external.js");
+            if (!TryCreateFileSymbolicLink(linkPath, externalFile))
+            {
+                return;
+            }
+
+            var harvester = CreateHarvester(CreateEnabledOptions("src/external.js"));
+
+            var docs = await harvester.HarvestAsync(_testRoot);
+            var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+            Assert.Empty(docs);
+            Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped, diagnostic.Code);
+            Assert.Equal(DocHarvestDiagnosticSeverity.Error, diagnostic.Severity);
+            Assert.Contains("src/external.js", diagnostic.Problem, StringComparison.Ordinal);
+            Assert.DoesNotContain(externalRoot, diagnostic.Problem, StringComparison.Ordinal);
+            Assert.DoesNotContain(externalRoot, diagnostic.Cause, StringComparison.Ordinal);
+            Assert.DoesNotContain(externalRoot, diagnostic.Fix, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipExactIncludedFileReparsePoint_WhenTargetStaysInsideRepository()
+    {
+        await WriteAsync(
+            "src/real.js",
+            """
+            /**
+             * Real function.
+             * @public
+             * @namespace RazorWire
+             */
+            function realApi() {}
+            """);
+        var linkPath = Path.Join(_testRoot, "src", "linked.js");
+        if (!TryCreateFileSymbolicLink(linkPath, Path.Join(_testRoot, "src", "real.js")))
+        {
+            return;
+        }
+
+        var harvester = CreateHarvester(CreateEnabledOptions("src/linked.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+        Assert.Empty(docs);
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped, diagnostic.Code);
+        Assert.Contains("src/linked.js", diagnostic.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldReportReparseDiagnostic_WhenExactIncludedFileIsDanglingSymlink()
+    {
+        Directory.CreateDirectory(Path.Join(_testRoot, "src"));
+        var linkPath = Path.Join(_testRoot, "src", "missing.js");
+        if (!TryCreateFileSymbolicLink(linkPath, Path.Join(_testRoot, "src", "target-does-not-exist.js")))
+        {
+            return;
+        }
+
+        var harvester = CreateHarvester(CreateEnabledOptions("src/missing.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+        Assert.Empty(docs);
+        Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped, diagnostic.Code);
+        Assert.DoesNotContain("target-does-not-exist", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.DoesNotContain("target-does-not-exist", diagnostic.Cause, StringComparison.Ordinal);
+        Assert.DoesNotContain("target-does-not-exist", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipGlobbedFileReparsePoint_WithoutDiagnostic()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            var externalFile = Path.Join(externalRoot, "external.js");
+            await File.WriteAllTextAsync(
+                externalFile,
+                """
+                /**
+                 * External function.
+                 * @public
+                 * @namespace External
+                 */
+                function externalApi() {}
+                """);
+            Directory.CreateDirectory(Path.Join(_testRoot, "src"));
+            var linkPath = Path.Join(_testRoot, "src", "external.js");
+            if (!TryCreateFileSymbolicLink(linkPath, externalFile))
+            {
+                return;
+            }
+
+            var harvester = CreateHarvester(CreateEnabledOptions("src/*.js"));
+
+            var docs = await harvester.HarvestAsync(_testRoot);
+
+            Assert.Empty(docs);
+            Assert.Empty(GetDiagnostics(harvester));
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipChildDirectoryReparsePoint_WithoutReadingExternalTarget()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(externalRoot, "external.js"),
+                """
+                /**
+                 * External function.
+                 * @public
+                 * @namespace External
+                 */
+                function externalApi() {}
+                """);
+            Directory.CreateDirectory(Path.Join(_testRoot, "src"));
+            var linkPath = Path.Join(_testRoot, "src", "linked");
+            if (!TryCreateDirectorySymbolicLink(linkPath, externalRoot))
+            {
+                return;
+            }
+
+            var harvester = CreateHarvester(CreateEnabledOptions("src/**/*.js"));
+
+            var docs = await harvester.HarvestAsync(_testRoot);
+
+            Assert.Empty(docs);
+            Assert.Empty(GetDiagnostics(harvester));
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipGlobbedDirectoryReparsePoint_WithDiagnosticForConfiguredRoot()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(externalRoot, "external.js"),
+                """
+                /**
+                 * External function.
+                 * @public
+                 * @namespace External
+                 */
+                function externalApi() {}
+                """);
+            var linkPath = Path.Join(_testRoot, "linked-src");
+            if (!TryCreateDirectorySymbolicLink(linkPath, externalRoot))
+            {
+                return;
+            }
+
+            var harvester = CreateHarvester(CreateEnabledOptions("linked-src/**/*.js"));
+
+            var docs = await harvester.HarvestAsync(_testRoot);
+            var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+            Assert.Empty(docs);
+            Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped, diagnostic.Code);
+            Assert.Contains("linked-src", diagnostic.Problem, StringComparison.Ordinal);
+            Assert.DoesNotContain(externalRoot, diagnostic.Problem, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipGlobalIncludeReparsePoint_WithDiagnostic()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(externalRoot, "external.js"),
+                """
+                /**
+                 * External function.
+                 * @public
+                 * @namespace External
+                 */
+                function externalApi() {}
+                """);
+            Directory.CreateDirectory(Path.Join(_testRoot, "src"));
+            var linkPath = Path.Join(_testRoot, "src", "external.js");
+            if (!TryCreateFileSymbolicLink(linkPath, Path.Join(externalRoot, "external.js")))
+            {
+                return;
+            }
+
+            var options = new AppSurfaceDocsOptions();
+            options.Harvest.JavaScript.Enabled = true;
+            options.Harvest.Paths.IncludeGlobs = ["src/external.js"];
+            var harvester = CreateHarvester(options);
+
+            var docs = await harvester.HarvestAsync(_testRoot);
+            var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+            Assert.Empty(docs);
+            Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped, diagnostic.Code);
+            Assert.Contains("src/external.js", diagnostic.Problem, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldUseBracketGlobToken_WhenResolvingStaticRoot()
+    {
+        await WriteAsync(
+            "src/[ab]/public-api.js",
+            """
+            /**
+             * Bracket glob function.
+             * @public
+             * @namespace RazorWire
+             */
+            function bracketGlobApi() {}
+            """);
+        await WriteAsync(
+            "src/c/ignored.js",
+            """
+            /**
+             * Ignored function.
+             * @public
+             * @namespace Ignored
+             */
+            function ignoredApi() {}
+            """);
+        var harvester = CreateHarvester(CreateEnabledOptions("src/[ab]/**/*.js"));
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(docs, doc => doc.Title == "RazorWire JavaScript API");
+        Assert.Contains(docs, doc => doc.Title == "bracketGlobApi");
+        Assert.DoesNotContain(docs, doc => doc.Title == "Ignored");
+        Assert.Empty(GetDiagnostics(harvester));
     }
 
     [Fact]
@@ -1800,6 +2162,61 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task GetHarvestHealthAsync_ShouldFailStrictJavaScript_WhenExactIncludeIsReparsePoint()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            var externalFile = Path.Join(externalRoot, "external.js");
+            await File.WriteAllTextAsync(
+                externalFile,
+                """
+                /**
+                 * External function.
+                 * @public
+                 * @namespace External
+                 */
+                function externalApi() {}
+                """);
+            Directory.CreateDirectory(Path.Join(_testRoot, "src"));
+            var linkPath = Path.Join(_testRoot, "src", "external.js");
+            if (!TryCreateFileSymbolicLink(linkPath, externalFile))
+            {
+                return;
+            }
+
+            var options = CreateEnabledOptions("src/external.js");
+            options.Source.RepositoryRoot = _testRoot;
+            options.Contributor.Enabled = false;
+            var harvester = CreateHarvester(options);
+            var aggregator = new DocAggregator(
+                [new StaticHarvester([new DocNode("Guide", "docs/guide.md", "<p>Guide</p>")]), harvester],
+                options,
+                new TestWebHostEnvironment(_testRoot),
+                new Memo(new MemoryCache(new MemoryCacheOptions())),
+                new AppSurfaceDocsHtmlSanitizer(),
+                NullLogger<DocAggregator>.Instance);
+
+            var health = await aggregator.GetHarvestHealthAsync();
+
+            Assert.Equal(DocHarvestHealthStatus.Degraded, health.Status);
+            Assert.Equal(2, health.TotalHarvesters);
+            Assert.Equal(1, health.SuccessfulHarvesters);
+            Assert.Equal(1, health.FailedHarvesters);
+            Assert.Contains(health.Harvesters, item => item.HarvesterType == nameof(JavaScriptDocHarvester)
+                && item.Status == DocHarvesterHealthStatus.Failed);
+            Assert.Contains(
+                health.Diagnostics,
+                diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped
+                              && diagnostic.Severity == DocHarvestDiagnosticSeverity.Error);
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
     public async Task GetHarvestHealthAsync_ShouldFailStrictJavaScriptEventDocletsWithoutStrictHealth()
     {
         await WriteAsync(
@@ -1883,7 +2300,7 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
 
     public void Dispose()
     {
-        Directory.Delete(_testRoot, recursive: true);
+        DeleteDirectory(_testRoot);
     }
 
     private static JavaScriptDocHarvester CreateHarvester(AppSurfaceDocsOptions options)
@@ -1910,6 +2327,80 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     private static IReadOnlyList<DocHarvestDiagnostic> GetDiagnostics(JavaScriptDocHarvester harvester)
     {
         return ((IDocHarvesterDiagnosticProvider)harvester).GetHarvestDiagnostics();
+    }
+
+    private static string CreateExternalTempDirectory()
+    {
+        var path = Path.Join(Path.GetTempPath(), "AppSurfaceDocsTests_JS_External", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static bool TryCreateFileSymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryCreateDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static void DeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // Best effort cleanup for temporary symlink tests.
+        }
     }
 
     private sealed class ThrowingCandidateEnumerationPathPolicy : IHarvestPathPolicy

@@ -185,6 +185,7 @@ If docs disappear after an upgrade, diagnose one repository-relative path first:
 | Generated or bundled docs vanished. | The path matches a repository `.gitignore` rule. | Add a narrow `VcsIgnore:AllowGlobs` entry for the public docs path. |
 | A tracked file vanished even though Git still has it. | The tracked path also matches `.gitignore`. | Keep the ignore rule and add `VcsIgnore:AllowGlobs`, or move the public docs outside the ignored tree. |
 | A restored path still does not harvest. | AppSurface default exclusions or configured `ExcludeGlobs` also match it. | Add the matching default-exclusion allow, disable the intended default group, or change the configured exclude. |
+| A configured JavaScript include reports `appsurfacedocs.javascript.reparse_point_skipped`. | The global or JavaScript include resolves to a symlink, junction, or other reparse point. | Replace the link with a real source file, include the real non-link source path, disable JavaScript harvesting, or use a custom harvester for that source. |
 | The host needs time to migrate. | The repository relied on pre-existing AppSurface behavior. | Temporarily set `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled=false` while moving public docs or adding allow globs. |
 
 Use the harvest health page and JSON endpoint to inspect VCS-ignore counts and sample paths when a source-backed snapshot looks unexpectedly small.

@@ -269,6 +269,15 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict` (`appsurfacedocs.localization.locale_folder_conflict`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant` (`appsurfacedocs.localization.fallback_disabled_missing_variant`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackConflict` (`appsurfacedocs.localization.fallback_conflict`)
+- `DocHarvestDiagnosticCodes.JavaScriptFileTooLarge` (`appsurfacedocs.javascript.file_too_large`)
+- `DocHarvestDiagnosticCodes.JavaScriptParseFailed` (`appsurfacedocs.javascript.parse_failed`)
+- `DocHarvestDiagnosticCodes.JavaScriptMissingInclude` (`appsurfacedocs.javascript.missing_include`)
+- `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`)
+- `DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape` (`appsurfacedocs.javascript.unsupported_public_shape`)
+- `DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet` (`appsurfacedocs.javascript.malformed_public_doclet`)
+- `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet` (`appsurfacedocs.javascript.incomplete_public_doclet`)
+- `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`)
+- `DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor` (`appsurfacedocs.javascript.duplicate_anchor`)
 
 An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
 
@@ -657,7 +666,7 @@ dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Test
 
 The dedicated `vcs-ignore-parity.yml` workflow runs that parity suite on Linux, macOS, and Windows so case-sensitive ignore behavior and Git oracle traces stay pinned across supported runner families.
 
-Traversal uses the same policy for Markdown and C#. AppSurface Docs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file. File and directory reparse points, including symlinks and junctions, are skipped before the built-in Markdown and C# harvesters read or descend into them. This keeps the selected repository root as the source boundary even for untrusted repositories that contain links to files outside the root. The root `LICENSE` file is a Markdown candidate only when it is not a reparse point, and Markdown sidecar metadata files such as `README.md.yml` are ignored when the sidecar itself is a reparse point. When global includes are configured, the root license still needs to match an include such as `LICENSE`.
+Traversal uses the same policy for Markdown, C#, and JavaScript. AppSurface Docs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file. File and directory reparse points, including symlinks and junctions, are skipped before the built-in Markdown, C#, and JavaScript harvesters read or descend into them. This keeps the selected repository root as the source boundary even for untrusted repositories that contain links to files outside the root. The root `LICENSE` file is a Markdown candidate only when it is not a reparse point, and Markdown sidecar metadata files such as `README.md.yml` are ignored when the sidecar itself is a reparse point. When global or JavaScript-specific include roots resolve directly to JavaScript reparse points, the JavaScript harvester emits the redacted `appsurfacedocs.javascript.reparse_point_skipped` diagnostic so operators can replace the link with a real source path, point the include at a non-link source, disable JavaScript harvesting, or provide a custom harvester for a host-owned trust model. When global includes are configured, the root license still needs to match an include such as `LICENSE`.
 
 To host the same live source surface somewhere else, set the route-family root. With versioning disabled, the live docs root defaults to the route root:
 
@@ -1042,6 +1051,8 @@ static web assets.
   - Include globs default to an empty list; exclude globs default to `**/*.min.js`; default-exclusion controls mirror the global path option shape.
   - Use include globs as an optional narrowing or performance boundary, such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js`.
   - Global path rules apply first, then JavaScript-specific includes, default exclusions, and excludes refine the candidate set.
+  - Configured JavaScript include roots that resolve to symlinks, junctions, or other reparse points are skipped before reads or descent. Exact includes and symlinked include roots emit `appsurfacedocs.javascript.reparse_point_skipped` with repository-relative wording only; globbed child symlink files are skipped silently.
+  - Exact missing JavaScript include files emit `appsurfacedocs.javascript.missing_include`. This preserves a distinct compatibility signal from parse/read failures while still blocking strict JavaScript health when JavaScript participates through `StrictHealth=true` or nonempty JavaScript include globs.
 - `AppSurfaceDocs:Harvest:JavaScript:GroupNameRules`
   - Defaults to an empty list.
   - Names already-eligible JavaScript source trees when public doclets do not declare a nonblank `@namespace` or `@module`.
@@ -1225,7 +1236,7 @@ Browser-contract doclets should carry enough fields for readers to use them with
  */
 ```
 
-Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`).
+Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, missing exact includes, configured reparse-point includes, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`). The configured-link diagnostic is `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`); its problem, cause, and fix are redacted to repository-relative include paths and do not reveal the symlink target.
 
 Use the CLI health verifier in CI when degraded docs health should block release output:
 
@@ -1247,6 +1258,7 @@ Pitfalls:
 - Do not put a broad `GroupNameRules` entry before a narrower package rule unless you want the broad name to win.
 - Do not rely on fallback file names as stable product names for packages. Prefer `@namespace`, `@module`, or a configured group rule for public API families.
 - Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
+- Do not point JavaScript includes at symlinks, junctions, or other reparse points, even when the target stays inside the repository. Built-in JavaScript harvesting treats links as a trust-boundary crossing and skips them before reading. Replace the link with a real source file, include the real non-link path, disable JavaScript harvesting, or publish that source through a custom harvester.
 - When documenting package browser contracts, prefer a small docs-only contract manifest such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js` over generated runtime outputs.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
