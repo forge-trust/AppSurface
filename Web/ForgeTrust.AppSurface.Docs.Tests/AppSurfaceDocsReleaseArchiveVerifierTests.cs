@@ -373,6 +373,17 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
         Assert.False(AppSurfaceDocsReleaseArchiveVerifier.FileMatches(new ThrowingFileInfo(fileInfo.Length), svg));
     }
 
+    [Fact]
+    public void VerifiedReleaseArchiveConstructor_ShouldRejectNullArguments()
+    {
+        Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceDocsVerifiedReleaseArchive(null!, AppSurfaceDocsFrozenRouteManifest.Empty));
+        Assert.Throws<ArgumentNullException>(
+            () => new AppSurfaceDocsVerifiedReleaseArchive(
+                new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.OrdinalIgnoreCase),
+                null!));
+    }
+
     public static TheoryData<object?> InvalidEntryShapes()
     {
         return new TheoryData<object?>

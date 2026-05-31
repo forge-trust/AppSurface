@@ -141,21 +141,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
                 return false;
             }
 
-            long actualLength;
-            try
-            {
-                actualLength = new FileInfo(filePath).Length;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
-            {
-                failure = AppSurfaceDocsArchiveVerificationFailure.Create(
-                    "ASDOCSARCHIVE007",
-                    "Release archive file length could not be read.",
-                    $"Ensure '{validatedEntry.Path}' is readable. Detail: {ex.Message}",
-                    validatedEntry.Path);
-                return false;
-            }
-
+            var actualLength = new FileInfo(filePath).Length;
             if (actualLength != validatedEntry.Length)
             {
                 failure = AppSurfaceDocsArchiveVerificationFailure.Create(
