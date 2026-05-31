@@ -860,7 +860,7 @@ public class DocsController : Controller
                 HttpContext,
                 AppSurfaceDocsStreamAuthorization.HarvestProgressChannel);
         }
-        catch (InvalidOperationException exception)
+        catch (Exception exception) when (exception is not OperationCanceledException || !HttpContext.RequestAborted.IsCancellationRequested)
         {
             return LogLiveHarvestProgressAuthorizationFailure(exception);
         }

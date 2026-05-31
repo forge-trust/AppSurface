@@ -342,6 +342,8 @@ services.AddSingleton<IRazorWireChannelAuthorizer, DocsHarvestStreamAuthorizer>(
 services.AddAppSurfaceDocs();
 ```
 
+And enable the harvest health routes so the custom authorizer can approve the live progress stream:
+
 ```json
 {
   "AppSurfaceDocs": {

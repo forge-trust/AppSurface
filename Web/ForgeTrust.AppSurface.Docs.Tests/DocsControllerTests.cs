@@ -2213,6 +2213,34 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_ShouldRenderHarvestingWithoutLiveProgress_WhenProductionCustomAuthorizerThrowsUnexpectedException()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/search",
+            Environments.Production,
+            AppSurfaceDocsHarvestHealthExposure.Always,
+            new UnexpectedHarvestProgressAuthorizer());
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: false);
+    }
+
+    [Fact]
+    public async Task Search_ShouldRenderHarvestingWithoutLiveProgress_WhenProductionCustomAuthorizerCancelsWithoutRequestAbort()
+    {
+        await using var pending = CreatePendingHarvestController(
+            "/docs/search",
+            Environments.Production,
+            AppSurfaceDocsHarvestHealthExposure.Always,
+            new CanceledHarvestProgressAuthorizer());
+
+        var result = await pending.Controller.Search();
+
+        AssertHarvestingView(result, "/docs/search", canUseLiveProgress: false);
+    }
+
+    [Fact]
     public async Task Search_ShouldRethrowRequestCancellation_WhenProductionCustomAuthorizerIsCanceled()
     {
         await using var pending = CreatePendingHarvestController(
@@ -4708,6 +4736,14 @@ public class DocsControllerTests : IDisposable
         public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
         {
             throw new InvalidOperationException("Authorizer dependencies are unavailable.");
+        }
+    }
+
+    private sealed class UnexpectedHarvestProgressAuthorizer : IRazorWireChannelAuthorizer
+    {
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            throw new NullReferenceException("Authorizer dependencies are unavailable.");
         }
     }
 
