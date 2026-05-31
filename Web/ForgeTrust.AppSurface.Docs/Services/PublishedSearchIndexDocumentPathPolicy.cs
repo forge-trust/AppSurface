@@ -200,15 +200,6 @@ internal static class PublishedSearchIndexDocumentPathPolicy
 
         var suffixIndex = candidate.IndexOfAny(['?', '#']);
         var path = suffixIndex >= 0 ? candidate[..suffixIndex] : candidate;
-        var suffix = suffixIndex >= 0 ? candidate[suffixIndex..] : string.Empty;
-        if (suffix.Contains('\\') || ContainsControlCharacter(suffix))
-        {
-            return Reject(
-                suffix.Contains('\\')
-                    ? PublishedSearchIndexPathRejectionReason.Backslash
-                    : PublishedSearchIndexPathRejectionReason.ControlCharacter,
-                value);
-        }
 
         if (!TryValidatePercentEscapes(candidate, scanForSensitivePathTokens: false, out var reason)
             || !TryValidatePercentEscapes(path, scanForSensitivePathTokens: true, out reason))
@@ -217,16 +208,6 @@ internal static class PublishedSearchIndexDocumentPathPolicy
         }
 
         var decodedPath = Uri.UnescapeDataString(path);
-        if (ContainsControlCharacter(decodedPath))
-        {
-            return Reject(PublishedSearchIndexPathRejectionReason.ControlCharacter, value);
-        }
-
-        if (decodedPath.Contains('\\'))
-        {
-            return Reject(PublishedSearchIndexPathRejectionReason.Backslash, value);
-        }
-
         if (ContainsDotSegment(path) || ContainsDotSegment(decodedPath))
         {
             return Reject(PublishedSearchIndexPathRejectionReason.EncodedTraversal, value);
@@ -435,8 +416,7 @@ internal static class PublishedSearchIndexDocumentPathPolicy
         {
             >= '0' and <= '9' => value - '0',
             >= 'a' and <= 'f' => value - 'a' + 10,
-            >= 'A' and <= 'F' => value - 'A' + 10,
-            _ => 0
+            _ => value - 'A' + 10
         };
     }
 

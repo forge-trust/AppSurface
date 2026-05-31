@@ -32,6 +32,7 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
     [InlineData(" /docs/guide.html", "whitespace")]
     [InlineData("javascript:alert(1)", "scheme-url")]
     [InlineData("data:text/html,hi", "scheme-url")]
+    [InlineData("1docs:guide/path", "scheme-url")]
     [InlineData("https://evil.example/docs/guide.html", "absolute-url")]
     [InlineData("//evil.example/docs/guide.html", "protocol-relative")]
     [InlineData("/admin", "outside-docs-root")]
@@ -61,6 +62,7 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
     [InlineData("/docs/%0a", "control-character")]
     [InlineData("/docs/guide.html?q=%0a", "control-character")]
     [InlineData("/docs/guide.html?q=%250a", "control-character")]
+    [InlineData("/docs/%GG", "malformed-percent-encoding")]
     public void ValidateArchivePath_ShouldRejectUnsafeDocumentPaths(
         string path,
         string reason)
@@ -95,6 +97,7 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
     [InlineData("/foo/bar/guide.html", "/foo/bar", null)]
     [InlineData("/foo/bar/versions/1.2.3/guide.html", "/foo/bar/v/1.2.3", "/foo/bar/versions")]
     [InlineData("/versions/1.2.3/guide.html", "/v/1.2.3", "/versions")]
+    [InlineData("/docs/versions/1.2.3", "/docs", "/docs/versions")]
     public void ValidateServedPath_ShouldAcceptPathsUnderExplicitServedRoots(string path, string docsRootPath, string? archiveRootPath)
     {
         var result = PublishedSearchIndexDocumentPathPolicy.ValidateServedPath(
@@ -102,6 +105,17 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
             new PublishedSearchIndexServedPathContext(docsRootPath, archiveRootPath));
 
         Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void ValidateServedPath_ShouldRejectCommonUnsafePathsBeforeRootChecks()
+    {
+        var result = PublishedSearchIndexDocumentPathPolicy.ValidateServedPath(
+            "javascript:alert(1)",
+            new PublishedSearchIndexServedPathContext("/docs"));
+
+        Assert.False(result.IsValid);
+        Assert.Equal(PublishedSearchIndexPathRejectionReason.SchemeUrl, result.Reason);
     }
 
     [Fact]
@@ -177,5 +191,13 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
         var result = PublishedSearchIndexDocumentPathPolicy.ToDiagnosticCode((PublishedSearchIndexPathRejectionReason)999);
 
         Assert.Equal("unknown", result);
+    }
+
+    [Fact]
+    public void ToDiagnosticCode_ShouldReturnNone_ForValidResultReason()
+    {
+        var result = PublishedSearchIndexDocumentPathPolicy.ToDiagnosticCode(PublishedSearchIndexPathRejectionReason.None);
+
+        Assert.Equal("none", result);
     }
 }

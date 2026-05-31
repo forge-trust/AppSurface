@@ -613,7 +613,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
                     var reason = PublishedSearchIndexDocumentPathPolicy.ToDiagnosticCode(validation.Reason);
                     return new AvailabilityFailure(
                         PublicMessage: "Published release tree has an unsafe search-index document path.",
-                        InternalDetail: $"Version '{pathContext.Version}' search-index.json documents[{index}].path was rejected: category '{reason}', title '{SanitizeSearchIndexDiagnosticValue(title.GetString())}', value '{validation.RedactedValue}', expected root '/docs'.");
+                        InternalDetail: $"Version '{pathContext.Version}' search-index.json documents[{index}].path was rejected: category '{reason}', title '{SanitizeSearchIndexDiagnosticValue(title.GetString()!)}', value '{validation.RedactedValue}', expected root '/docs'.");
                 }
 
                 index++;
@@ -629,13 +629,8 @@ public sealed class AppSurfaceDocsVersionCatalogService
         return null;
     }
 
-    private static string SanitizeSearchIndexDiagnosticValue(string? value)
+    private static string SanitizeSearchIndexDiagnosticValue(string value)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "<blank>";
-        }
-
         var sanitized = new string(value.Trim().Select(ch => char.IsControl(ch) ? ' ' : ch).ToArray());
         return sanitized.Length <= 80 ? sanitized : sanitized[..80] + "...";
     }
