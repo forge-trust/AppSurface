@@ -425,9 +425,14 @@ public class ExportEngine
             {
                 script.SetAttribute("data-rw-live-origin", context.Hybrid.LiveOrigin!);
                 script.SetAttribute("data-rw-hybrid-credentials", ResolveHybridCredentialsAttribute(context));
-                if (string.IsNullOrWhiteSpace(script.GetAttribute("data-rw-antiforgery-endpoint")))
+                var antiforgeryEndpoint = script.GetAttribute("data-rw-antiforgery-endpoint");
+                if (string.IsNullOrWhiteSpace(antiforgeryEndpoint))
                 {
                     script.SetAttribute("data-rw-antiforgery-endpoint", "/_rw/antiforgery/token");
+                }
+                else if (TryResolveManagedUrl(antiforgeryEndpoint, route, context, out var managedEndpoint, out _))
+                {
+                    script.SetAttribute("data-rw-antiforgery-endpoint", managedEndpoint);
                 }
 
                 changed = true;

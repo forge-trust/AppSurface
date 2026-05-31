@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -130,6 +131,228 @@ public class RazorWireEndpointAuthorizationTests
         Assert.DoesNotContain("andrew@example.test", entry.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task StreamEndpoint_InvalidChannel_ReturnsBadRequestBeforeAuthorizerOrHub()
+    {
+        var hub = new TrackingStreamHub();
+        var authorizer = new CountingAllowAuthorizer();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.AddSingleton<IRazorWireChannelAuthorizer>(authorizer);
+            });
+
+        using var response = await fixture.Client.GetAsync("/_rw/streams/tenant%20secret");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, authorizer.CallCount);
+        Assert.Equal(0, hub.SubscribeCount);
+        Assert.Contains(nameof(RazorWireStreamAdmissionRejectionReason.InvalidChannelName), body, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant secret", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_OverLimit_ReturnsTooManyRequestsBeforeSseOrSubscribe()
+    {
+        var hub = new TrackingStreamHub();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Production,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.Configure<RazorWireOptions>(options =>
+                {
+                    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+                    options.Streams.MaxLiveSubscriptions = 1;
+                });
+            });
+
+        using var accepted = await fixture.Client.GetAsync(
+            "/_rw/streams/public",
+            HttpCompletionOption.ResponseHeadersRead);
+        using var rejected = await fixture.Client.GetAsync("/_rw/streams/other");
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal("text/event-stream", accepted.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.NotEqual("text/event-stream", rejected.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(1, hub.SubscribeCount);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_EncodedAllowedChannel_DecodesBeforeSubscribe()
+    {
+        var hub = new TrackingStreamHub();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Production,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.Configure<RazorWireOptions>(options =>
+                {
+                    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+                });
+            });
+
+        using var response = await fixture.Client.GetAsync(
+            "/_rw/streams/tenant%3Aorders",
+            HttpCompletionOption.ResponseHeadersRead);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("tenant:orders", hub.SubscribedChannel);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_AdmissionRejection_InDevelopmentWritesActionableSafeDiagnostic()
+    {
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            services =>
+            {
+                services.Configure<RazorWireOptions>(options =>
+                {
+                    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+                    options.Streams.MaxLiveChannels = 1;
+                });
+            });
+
+        using var accepted = await fixture.Client.GetAsync(
+            "/_rw/streams/tenant-secret-42",
+            HttpCompletionOption.ResponseHeadersRead);
+        using var rejected = await fixture.Client.GetAsync("/_rw/streams/other-secret-99");
+        var body = await rejected.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        Assert.Contains(nameof(RazorWireStreamAdmissionRejectionReason.TooManyLiveChannels), body, StringComparison.Ordinal);
+        Assert.Contains(nameof(RazorWireStreamOptions.MaxLiveChannels), body, StringComparison.Ordinal);
+        Assert.Contains("ConfiguredLimit: 1", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-42", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("other-secret-99", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_AdmissionRejection_LogStateOmitsRawChannelAndUserDetail()
+    {
+        var loggerProvider = new CapturingLoggerProvider();
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Development,
+            configureServices: services =>
+            {
+                services.Configure<RazorWireOptions>(options =>
+                {
+                    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+                    options.Streams.MaxLiveChannels = 1;
+                });
+            },
+            configureLogging: logging =>
+            {
+                logging.ClearProviders();
+                logging.AddProvider(loggerProvider);
+            },
+            configureApp: app =>
+            {
+                app.Use(async (context, next) =>
+                {
+                    context.User = new ClaimsPrincipal(
+                        new ClaimsIdentity(
+                            [
+                                new Claim(ClaimTypes.NameIdentifier, "user-123"),
+                                new Claim(ClaimTypes.Email, "andrew@example.test")
+                            ],
+                            "TestAuth"));
+
+                    await next();
+                });
+            });
+
+        using var accepted = await fixture.Client.GetAsync(
+            "/_rw/streams/tenant-secret-42",
+            HttpCompletionOption.ResponseHeadersRead);
+        using var rejected = await fixture.Client.GetAsync("/_rw/streams/other-secret-99");
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        var entry = Assert.Single(
+            loggerProvider.Entries,
+            log => log.EventId.Id == 13701 && log.EventId.Name == "StreamAdmissionRejected");
+
+        var renderedState = string.Join(
+            " ",
+            entry.State.Select(pair => $"{pair.Key}={pair.Value}"));
+
+        Assert.Contains(nameof(RazorWireStreamAdmissionRejectionReason.TooManyLiveChannels), entry.Message, StringComparison.Ordinal);
+        Assert.Contains("RejectionReason", renderedState, StringComparison.Ordinal);
+        Assert.Contains("LiveChannels=1", renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain("tenant-secret-42", entry.Message + renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain("other-secret-99", entry.Message + renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain("user-123", entry.Message + renderedState, StringComparison.Ordinal);
+        Assert.DoesNotContain("andrew@example.test", entry.Message + renderedState, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_SubscribeThrow_ReleasesAdmissionCapacity()
+    {
+        var hub = new TrackingStreamHub { ThrowOnSubscribe = true };
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Production,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.Configure<RazorWireOptions>(options =>
+                {
+                    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+                    options.Streams.MaxLiveSubscriptions = 1;
+                });
+            });
+
+        using var failed = await fixture.Client.GetAsync("/_rw/streams/public");
+        hub.ThrowOnSubscribe = false;
+        using var accepted = await fixture.Client.GetAsync(
+            "/_rw/streams/public",
+            HttpCompletionOption.ResponseHeadersRead);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal("text/event-stream", accepted.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task StreamEndpoint_UnsubscribeThrow_ReleasesAdmissionCapacity()
+    {
+        var hub = new TrackingStreamHub { ThrowOnUnsubscribe = true };
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(
+            Environments.Production,
+            services =>
+            {
+                services.AddSingleton<IRazorWireStreamHub>(hub);
+                services.Configure<RazorWireOptions>(options =>
+                {
+                    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+                    options.Streams.MaxLiveSubscriptions = 1;
+                });
+            });
+
+        using (var accepted = await fixture.Client.GetAsync(
+                   "/_rw/streams/public",
+                   HttpCompletionOption.ResponseHeadersRead))
+        {
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        }
+
+        await WaitUntilAsync(() => hub.UnsubscribeCount > 0);
+
+        hub.ThrowOnUnsubscribe = false;
+        using var next = await fixture.Client.GetAsync(
+            "/_rw/streams/public",
+            HttpCompletionOption.ResponseHeadersRead);
+
+        Assert.Equal(HttpStatusCode.OK, next.StatusCode);
+    }
+
     private sealed class RazorWireEndpointFixture : IAsyncDisposable
     {
         private RazorWireEndpointFixture(WebApplication app, HttpClient client)
@@ -185,7 +408,18 @@ public class RazorWireEndpointAuthorizationTests
 
     private sealed class TrackingStreamHub : IRazorWireStreamHub
     {
-        public int SubscribeCount { get; private set; }
+        private int _subscribeCount;
+        private int _unsubscribeCount;
+
+        public string? SubscribedChannel { get; private set; }
+
+        public bool ThrowOnSubscribe { get; set; }
+
+        public bool ThrowOnUnsubscribe { get; set; }
+
+        public int SubscribeCount => Volatile.Read(ref _subscribeCount);
+
+        public int UnsubscribeCount => Volatile.Read(ref _unsubscribeCount);
 
         public ValueTask PublishAsync(string channel, string message)
         {
@@ -194,12 +428,36 @@ public class RazorWireEndpointAuthorizationTests
 
         public ChannelReader<string> Subscribe(string channel)
         {
-            SubscribeCount++;
+            Interlocked.Increment(ref _subscribeCount);
+            SubscribedChannel = channel;
+            if (ThrowOnSubscribe)
+            {
+                throw new InvalidOperationException("Subscribe failed for test.");
+            }
+
             return Channel.CreateUnbounded<string>().Reader;
         }
 
         public void Unsubscribe(string channel, ChannelReader<string> reader)
         {
+            Interlocked.Increment(ref _unsubscribeCount);
+            if (ThrowOnUnsubscribe)
+            {
+                throw new InvalidOperationException("Unsubscribe failed for test.");
+            }
+        }
+    }
+
+    private sealed class CountingAllowAuthorizer : IRazorWireChannelAuthorizer
+    {
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public ValueTask<bool> CanSubscribeAsync(HttpContext context, string channel)
+        {
+            Interlocked.Increment(ref _callCount);
+            return ValueTask.FromResult(true);
         }
     }
 
@@ -239,11 +497,21 @@ public class RazorWireEndpointAuthorizationTests
             Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            entries.Enqueue(new CapturedLogEntry(logLevel, eventId, formatter(state, exception)));
+            var stateValues = state as IEnumerable<KeyValuePair<string, object?>>;
+            entries.Enqueue(
+                new CapturedLogEntry(
+                    logLevel,
+                    eventId,
+                    formatter(state, exception),
+                    stateValues?.ToArray() ?? []));
         }
     }
 
-    private sealed record CapturedLogEntry(LogLevel LogLevel, EventId EventId, string Message);
+    private sealed record CapturedLogEntry(
+        LogLevel LogLevel,
+        EventId EventId,
+        string Message,
+        IReadOnlyList<KeyValuePair<string, object?>> State);
 
     private sealed class NullScope : IDisposable
     {
@@ -252,5 +520,20 @@ public class RazorWireEndpointAuthorizationTests
         public void Dispose()
         {
         }
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> predicate)
+    {
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            if (predicate())
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Assert.True(predicate());
     }
 }

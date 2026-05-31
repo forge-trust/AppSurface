@@ -70,7 +70,7 @@ public class UserPresenceBackgroundService : CriticalService
                             "~/Views/Shared/_UserListEmpty.cshtml",
                             cancellationToken: stoppingToken);
 
-                        stream.Append("active-user-list", emptyHtml);
+                        stream.AppendHtml("active-user-list", emptyHtml);
                     }
 
                     await _hub.PublishAsync("reactivity", stream.Build());

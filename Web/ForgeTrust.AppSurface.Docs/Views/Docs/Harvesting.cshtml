@@ -9,12 +9,22 @@
      class="docs-harvest-page"
      data-appsurface-docs-harvest-return-url="@Model.ReturnUrl"
      data-appsurface-docs-harvest-delay="@Model.CompletionNavigationDelayMilliseconds">
-    <rw:stream-source channel="@AppSurfaceDocsHarvestProgressReporter.ChannelName" replay="true"></rw:stream-source>
+    @if (Model.CanUseLiveProgress)
+    {
+        <rw:stream-source channel="@AppSurfaceDocsStreamAuthorization.HarvestProgressChannel" replay="true"></rw:stream-source>
+    }
     <div id="docs-harvest-observatory">
         @AppSurfaceDocsHarvestProgressRenderer.RenderHtml(
             Model.Progress,
             Model.CompletionNavigationDelayMilliseconds)
     </div>
+    @if (!Model.CanUseLiveProgress)
+    {
+        <p class="docs-harvest-live-disabled">
+            Live progress is disabled for this environment. Continue when the docs snapshot is ready, or refresh this
+            page to check again.
+        </p>
+    }
     <p class="docs-harvest-return-link">
         <a href="@Model.ReturnUrl">Continue to your docs page</a>
     </p>

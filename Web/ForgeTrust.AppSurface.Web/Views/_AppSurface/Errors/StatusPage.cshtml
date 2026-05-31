@@ -1,5 +1,4 @@
 @using ForgeTrust.AppSurface.Web
-@using Microsoft.AspNetCore.Http
 @model ForgeTrust.AppSurface.Web.BrowserStatusPageModel
 @{
     Layout = null;
@@ -9,9 +8,6 @@
     var requestPath = string.IsNullOrWhiteSpace(Model.OriginalPath)
         ? "the requested page"
         : Model.OriginalPath;
-    var isDocsPath = Model.StatusCode == StatusCodes.Status404NotFound
-        && (requestPath.Equals("/docs", StringComparison.OrdinalIgnoreCase)
-            || requestPath.StartsWith("/docs/", StringComparison.OrdinalIgnoreCase));
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -105,10 +101,6 @@
     <p>We couldn't open <code>@requestPath</code>. @descriptor.Description</p>
     <nav class="actions" aria-label="Recovery actions">
         <a class="recovery-link" href="@Url.Content("~/")" data-rw-export-ignore="true">@descriptor.PrimaryActionText</a>
-        @if (isDocsPath)
-        {
-            <a class="recovery-link secondary" href="@Url.Content("~/docs/search")">Search documentation</a>
-        }
     </nav>
     <p class="developer-note">App owners can replace this fallback with <code>@descriptor.AppViewPath</code>. Keep the page useful for users first: show recovery links, explain what happened, and preserve the @Model.StatusCode status.</p>
 </main>

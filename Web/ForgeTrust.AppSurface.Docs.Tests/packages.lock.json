@@ -450,6 +450,12 @@
           "YamlDotNet": "[18.0.0, )"
         }
       },
+      "forgetrust.appsurface.docs.standalone": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Docs": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {

@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using ForgeTrust.RazorWire.Bridge;
 using ForgeTrust.RazorWire.Streams;
 
 namespace ForgeTrust.RazorWire.Tests;
@@ -135,6 +136,28 @@ public class InMemoryRazorWireStreamHubTests
         Assert.Equal("first", await reader.ReadAsync(cts.Token));
         Assert.Equal("second", await reader.ReadAsync(cts.Token));
         Assert.Equal("third", await reader.ReadAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task PublishAsync_WithBuilderOutput_DeliversEncodedStreamThroughLiveAndReplay()
+    {
+        var hub = new InMemoryRazorWireStreamHub();
+        var liveReader = hub.Subscribe("orders");
+        var stream = new RazorWireStreamBuilder()
+            .Update("<target&name>", "<script>alert(1)</script>")
+            .Build();
+
+        await hub.PublishAsync("orders", stream, new RazorWireStreamPublishOptions { Replay = true });
+        var replayReader = hub.Subscribe("orders", new RazorWireStreamSubscribeOptions { Replay = true });
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var liveMessage = await liveReader.ReadAsync(cts.Token);
+        var replayMessage = await replayReader.ReadAsync(cts.Token);
+
+        Assert.Equal(liveMessage, replayMessage);
+        Assert.Contains("target=\"&lt;target&amp;name&gt;\"", liveMessage);
+        Assert.Contains("<template>&lt;script&gt;alert(1)&lt;/script&gt;</template>", liveMessage);
+        Assert.DoesNotContain("<script>alert(1)</script>", liveMessage);
     }
 
     [Fact]

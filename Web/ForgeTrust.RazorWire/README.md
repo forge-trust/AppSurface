@@ -153,20 +153,32 @@ services.AddRazorWire(options =>
 {
     options.Streams.BasePath = "/custom-stream-path";
     options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.DenyAll;
+    options.Streams.MaxChannelNameLength = 128;
+    options.Streams.MaxLiveChannels = 64;
+    options.Streams.MaxLiveSubscriptions = 256;
+    options.Streams.MaxLiveSubscriptionsPerChannel = 32;
     options.Forms.FailureMode = RazorWireFormFailureMode.Auto;
     options.Forms.DefaultFailureMessage = "We could not submit this form. Check your input and try again.";
 });
 ```
 
-Stream subscriptions are denied by default. Choose `AllowAll` only for public/demo streams. Public channels should use
-validated, intentionally namespaced channel names so arbitrary client input cannot fan out into unlimited channel names:
+Stream subscriptions are denied by default. Choose `AllowAll` only for public/demo streams with finite channel names and
+explicit per-process limits:
 
 ```csharp
 services.AddRazorWire(options =>
 {
     options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+    options.Streams.MaxLiveChannels = 8;
+    options.Streams.MaxLiveSubscriptions = 100;
+    options.Streams.MaxLiveSubscriptionsPerChannel = 25;
 });
 ```
+
+These limits are admission guardrails for one ASP.NET Core application process. They are not tenant quotas, user quotas,
+IP fairness, load-balancer limits, or cluster-wide counters. Use ASP.NET Core rate limiting, reverse-proxy connection
+limits, SignalR, or managed pub/sub when public traffic needs client fairness, distributed fanout, groups, durable
+delivery, or cross-node capacity planning.
 
 For user, tenant, or workflow-specific streams, register a custom authorizer instead:
 
@@ -183,6 +195,8 @@ public sealed class TenantStreamAuthorizer : IRazorWireChannelAuthorizer
 services.AddSingleton<IRazorWireChannelAuthorizer, TenantStreamAuthorizer>();
 services.AddRazorWire();
 ```
+
+Package-owned sensitive streams may impose stricter rules than the global RazorWire `AllowAll` shortcut. For example, AppSurface Docs harvest progress requires a custom host authorizer outside Development even when the host exposes docs harvest health routes.
 
 ## Also Possible
 
@@ -205,7 +219,59 @@ RazorWire can push Turbo Stream updates to one or more clients over Server-Sent 
 
 RazorWire can also send a narrow same-origin visit command with `Visit(...)`. Visit streams are one-shot navigation commands, not replayable state. Use them for active subscribers only, and keep normal links or retained state available when late subscribers or no-JavaScript users need to continue.
 
-The in-memory stream hub keeps live subscriber tracking separate from opt-in replay retention. Empty live channel tracking is released after the last subscriber disconnects or publish-time cleanup prunes stale writers. Retained replay buffers are not deleted by live disconnects; they stay bounded by the replay retention policy.
+The in-memory stream hub keeps live subscription tracking separate from opt-in replay retention. Empty live channel tracking is released after the last subscriber disconnects or publish-time cleanup prunes stale writers. Retained replay buffers are not deleted by live disconnects; they stay bounded by the replay retention policy.
+
+Before a request reaches the hub, the RazorWire endpoint applies single-process admission guardrails:
+
+- Channel names, after URL decoding, may contain only ASCII letters, digits, `.`, `_`, `-`, and `:` and must fit `MaxChannelNameLength`.
+- Invalid or overlong channels return `400` before custom authorizers run.
+- Authorization denials return `403` and do not consume admission capacity.
+- Capacity denials return `429` before SSE headers are written and before `IRazorWireStreamHub.Subscribe(...)` is called.
+- `MaxLiveChannels`, `MaxLiveSubscriptions`, and `MaxLiveSubscriptionsPerChannel` are per-process limits. One browser tab or live SSE request consumes one subscription slot.
+
+### Text vs Trusted HTML in Stream Templates
+
+RazorWire stream templates have a deliberate trust boundary:
+
+| API | Template content handling | Use when |
+|---|---|---|
+| `Append`, `Prepend`, `Replace`, `Update` | Treats `content` as plain text and HTML-encodes it. `null` renders as empty text. | Updating counters, status labels, validation targets, and any caller-supplied text. |
+| `AppendHtml`, `PrependHtml`, `ReplaceHtml`, `UpdateHtml` | Writes `trustedHtml` directly. RazorWire does not encode or sanitize it. | Inserting small server-authored fragments where every user value has already been encoded. |
+| `AppendPartial`, `PrependPartial`, `ReplacePartial`, `UpdatePartial` | Renders a Razor partial through MVC. | Returning app markup that belongs in a `.cshtml` partial. |
+| `AppendComponent`, `PrependComponent`, `ReplaceComponent`, `UpdateComponent` | Renders a view component through MVC. | Returning reusable app markup with component logic. |
+| `new RazorWireStreamResult(rawContent)` and `IRazorWireStreamHub.PublishAsync(channel, content)` | Raw whole-stream boundaries. Content is transported as-is. | Advanced integrations that already built trusted Turbo Stream markup. |
+
+Prefer the text APIs by default:
+
+```csharp
+return this.RazorWireStream()
+    .Update("status", displayName)
+    .BuildResult();
+```
+
+If `displayName` is `<b>Ada</b>`, the browser receives text, not markup:
+
+```html
+<template>&lt;b&gt;Ada&lt;/b&gt;</template>
+```
+
+For app-authored markup, prefer Razor-rendered helpers:
+
+```csharp
+return this.RazorWireStream()
+    .ReplacePartial("profile-card", "_ProfileCard", model)
+    .BuildResult();
+```
+
+Use `*Html` only when the string is already trusted and caller-owned. Encode user values before composing the fragment:
+
+```csharp
+var encodedName = System.Net.WebUtility.HtmlEncode(displayName);
+
+return this.RazorWireStream()
+    .UpdateHtml("status", $"<p>Saved {encodedName}.</p>")
+    .BuildResult();
+```
 
 ### Form Enhancement
 
@@ -217,7 +283,13 @@ When `EnableFailureUx` is enabled, `form[rw-active]` also marks enhanced form po
 
 Handling anti-forgery tokens correctly is critical when updating forms via Turbo Streams. See [Security & Anti-Forgery](Docs/antiforgery.md) for the detailed patterns and recommendations.
 
-RazorWire stream subscriptions are also safe by default: `RazorWireOptions.Streams.AuthorizationMode` starts at `RazorWireStreamAuthorizationMode.DenyAll`, so `rw:stream-source` receives `403` until the app either opts into `RazorWireStreamAuthorizationMode.AllowAll` for public/demo channels or registers `IRazorWireChannelAuthorizer`. Development responses include a safe plain-text diagnostic; production denials stay generic and logs avoid raw channel names, user identifiers, and claim values.
+RazorWire stream subscriptions are also safe by default: `RazorWireOptions.Streams.AuthorizationMode` starts at `RazorWireStreamAuthorizationMode.DenyAll`, so `rw:stream-source` receives `403` until the app either opts into `RazorWireStreamAuthorizationMode.AllowAll` for public/demo channels or registers `IRazorWireChannelAuthorizer`. Development responses include safe plain-text diagnostics for `400`, `403`, and `429`; production denials stay generic and logs avoid raw channel names, user identifiers, and claim values.
+
+Native `EventSource` does not expose failed HTTP response bodies or status codes to application JavaScript. RazorWire dispatches `razorwire:stream:error` from registered `rw-stream-source` elements when the browser reports a stream error. Use that event for client-side diagnostics, and use the browser Network tab plus server log event `13700 StreamSubscriptionDenied` for authorization denials (`403`) and `13701 StreamAdmissionRejected` for validation and capacity rejections (`400`/`429`) during development.
+
+RazorWire also emits low-cardinality `System.Diagnostics.Metrics` instruments for stream admission: `razorwire.stream.live_subscriptions`, `razorwire.stream.live_channels`, and `razorwire.stream.admission.rejections` tagged by rejection reason. These metrics are process-local diagnostics for tuning limits; they are not an abuse-mitigation layer.
+
+Stream builder text APIs encode template content by default. The `*Html` builder methods, `RazorWireStreamResult(string?)`, and `IRazorWireStreamHub.PublishAsync(channel, content)` are trusted boundaries: they do not encode or sanitize raw markup. Keep user-controlled values in text APIs, Razor partials, or view components unless you explicitly encode them before composing trusted HTML.
 
 Development anti-forgery failures from RazorWire forms are rewritten into helpful form-local diagnostics when possible. Production responses stay safe and generic. See [Failed Form UX](Docs/form-failures.md#development-diagnostics).
 
@@ -237,12 +309,26 @@ RazorWire is designed for a fast feedback loop during development:
 
 ### `IRazorWireStreamHub`
 
-- `PublishAsync(channel, content)` broadcasts a Turbo Stream fragment to every subscriber on a channel.
-- `PublishAsync(channel, content, new RazorWireStreamPublishOptions { Replay = true })` broadcasts the fragment and retains it in the channel's bounded replay buffer.
+- `PublishAsync(channel, content)` broadcasts a trusted Turbo Stream fragment to every subscriber on a channel. The hub transports `content` as-is; it does not encode or sanitize template content.
+- `PublishAsync(channel, content, new RazorWireStreamPublishOptions { Replay = true })` broadcasts the trusted fragment and retains it in the channel's bounded replay buffer.
 - `Subscribe(channel)` receives only live messages published after subscription.
 - `Subscribe(channel, new RazorWireStreamSubscribeOptions { Replay = true })` receives retained replay messages first, then continues with live messages.
 
 Replay is opt-in and intentionally small. The in-memory hub keeps up to 25 retained fragments per replay channel and prunes inactive replay channels when more than 256 replay channels are retained, dropping the oldest retained fragments and inactive replay channels first. Replay subscriptions to channels with no retained messages do not allocate durable per-channel replay metadata. Use replay for idempotent state snapshots, progress indicators, and other "latest known UI" streams where a late subscriber should catch up. Do not use replay for one-time commands, sensitive personal data, secrets, or unbounded event logs.
+
+Endpoint admission is separate from hub delivery. The default endpoint validates channel names, authorizes, and admits a live subscription before calling `Subscribe`. Apps that call a custom `IRazorWireStreamHub` directly do not get endpoint admission automatically.
+
+### `RazorWireStreamOptions`
+
+- `BasePath`: endpoint base path; defaults to `/_rw/streams`. It must be an absolute path without a trailing slash, route tokens, query string, fragment, whitespace, or control characters.
+- `AuthorizationMode`: defaults to `DenyAll`.
+- `MaxChannelNameLength`: defaults to `128` decoded characters.
+- `MaxLiveChannels`: defaults to `64` live channel names per process.
+- `MaxLiveSubscriptions`: defaults to `256` live SSE requests per process.
+- `MaxLiveSubscriptionsPerChannel`: defaults to `32` live SSE requests for one channel per process.
+
+All numeric admission limits must be greater than zero and are validated at startup. Raising them increases connection,
+memory, and request-slot pressure in the current process; it does not create distributed fairness.
 
 ### `IRazorWireChannelAuthorizer`
 
@@ -259,10 +345,11 @@ Replay is opt-in and intentionally small. The in-memory hub keeps up to 25 retai
 
 ### `this.RazorWireStream()` (controller extension)
 
-- `Append(target, content)` adds content to the end of the target element.
-- `Prepend(target, content)` adds content to the beginning.
-- `Replace(target, content)` replaces the target element entirely.
-- `Update(target, content)` replaces the inner content of the target.
+- `Append(target, content)` adds HTML-encoded text to the end of the target element.
+- `Prepend(target, content)` adds HTML-encoded text to the beginning.
+- `Replace(target, content)` replaces the target element entirely with HTML-encoded text.
+- `Update(target, content)` replaces the inner content of the target with HTML-encoded text.
+- `AppendHtml(target, trustedHtml)`, `PrependHtml(target, trustedHtml)`, `ReplaceHtml(target, trustedHtml)`, and `UpdateHtml(target, trustedHtml)` insert trusted HTML without encoding or sanitizing. Use partials/components for app markup when practical, and encode user values before composing trusted fragments.
 - `Remove(target)` removes the target element.
 - `FormError(target, title, message)` updates the target with an encoded generated error block and marks the response handled.
 - `FormValidationErrors(target, ModelState, title, maxErrors, message)` updates the target with a stable MVC validation summary and marks the response handled.
@@ -316,8 +403,10 @@ Subscribes the page to a RazorWire stream channel.
 
 - `channel`: required channel name.
 - `permanent`: keeps the stream source alive across Turbo visits.
-- Stream endpoints deny subscriptions by default; configure `RazorWireStreamAuthorizationMode.AllowAll` only for public/demo channels or provide a custom `IRazorWireChannelAuthorizer`. Public/demo channels should validate or namespace channel names instead of accepting arbitrary user-supplied channel identifiers.
+- Stream endpoints deny subscriptions by default; configure `RazorWireStreamAuthorizationMode.AllowAll` only for public/demo channels or provide a custom `IRazorWireChannelAuthorizer`.
+- Channel names, after URL decoding, may contain only ASCII letters, digits, `.`, `_`, `-`, and `:`. The tag helper URL-encodes the generated path segment. Direct requests whose channel path segment decodes to spaces, slashes, query/hash characters, control characters, Unicode, or another invalid channel character are rejected with `400`; unencoded extra path segments can miss the stream route and return `404`, while query strings and fragments are not part of the channel route value.
 - `replay`: when `true`, appends `?replay=1` to the stream endpoint so the page receives retained channel messages before live updates. The in-memory hub retains at most 25 messages per replay channel and prunes inactive replay channels when more than 256 replay channels are retained.
+- Listen for `razorwire:stream:error` on the element when you need client-side diagnostics for failed native `EventSource` connections. The event detail includes `channel`, `source`, `state`, `readyState`, and `src`; it intentionally does not include server response bodies.
 
 ```html
 <rw:stream-source id="rw-stream-reactivity" channel="reactivity" permanent="true"></rw:stream-source>

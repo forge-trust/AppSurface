@@ -32,7 +32,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config\ForgeTrust.AppSurface.Config.csproj" />
     <ProjectReference Include="..\ForgeTrust.AppSurface.Docs\ForgeTrust.AppSurface.Docs.csproj" />
-    <ProjectReference Include="..\ForgeTrust.AppSurface.Docs.Standalone\ForgeTrust.AppSurface.Docs.Standalone.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\ForgeTrust.AppSurface.Docs.Standalone\ForgeTrust.AppSurface.Docs.Standalone.csproj" />
   </ItemGroup>
 
 </Project>

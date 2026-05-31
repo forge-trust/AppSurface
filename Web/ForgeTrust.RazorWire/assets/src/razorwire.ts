@@ -206,6 +206,7 @@ declare const Turbo: TurboRuntime | undefined;
                 // Hook up state listeners to the EventSource directly
                 es.onopen = () => this.updateSourceState(src, 'connected');
                 es.onerror = () => {
+                    this.dispatchStreamError(source, src);
                     if (es.readyState === 2) this.updateSourceState(src, 'disconnected');
                     else this.updateSourceState(src, 'connecting');
                 };
@@ -334,15 +335,39 @@ declare const Turbo: TurboRuntime | undefined;
             element.dispatchEvent(event);
         }
 
+        dispatchStreamError(source, src) {
+            if (!source) return;
+
+            source.elements.forEach(element => {
+                const event = new CustomEvent('razorwire:stream:error', {
+                    bubbles: true,
+                    cancelable: false,
+                    detail: {
+                        channel: source.channel,
+                        source: element,
+                        state: source.state,
+                        readyState: source.es.readyState,
+                        src
+                    }
+                });
+                element.dispatchEvent(event);
+            });
+        }
+
         getChannelName(src) {
             if (!src) return null;
             try {
                 const url = new URL(src, window.location.origin);
                 const path = url.pathname.split('/').filter(Boolean).pop() || '';
-                return path + url.search + url.hash;
+                const channel = decodeURIComponent(path);
+                return this.isValidChannelName(channel) ? channel : null;
             } catch {
                 return null;
             }
+        }
+
+        isValidChannelName(channel) {
+            return /^[A-Za-z0-9._:-]+$/.test(channel);
         }
 
         toAttributeToken(channel) {

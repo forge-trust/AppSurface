@@ -23,14 +23,38 @@ public class RazorWireStreamBuilder
     }
 
     /// <summary>
-    /// Queues an append action that inserts the provided HTML into the specified target element.
+    /// Queues an append action that inserts HTML-encoded text into the specified target element.
     /// </summary>
-    /// <param name="target">The target DOM selector or element identifier to which the HTML will be appended.</param>
-    /// <param name="templateHtml">The HTML fragment to append inside the target's template.</param>
+    /// <remarks>
+    /// This method treats <paramref name="content"/> as plain text and HTML-encodes it before writing it to the stream
+    /// template. Use <see cref="AppendHtml(string,string?)"/> only when the caller already owns a trusted HTML fragment
+    /// and has encoded any user-supplied values inside it.
+    /// </remarks>
+    /// <param name="target">The target DOM selector or element identifier to which the encoded text will be appended.</param>
+    /// <param name="content">Plain-text content to append inside the target's template; <c>null</c> renders as empty text.</param>
     /// <returns>The same <see cref="RazorWireStreamBuilder"/> instance to allow fluent chaining.</returns>
-    public RazorWireStreamBuilder Append(string target, string templateHtml)
+    public RazorWireStreamBuilder Append(string target, string? content)
     {
-        _actions.Add(new RawHtmlStreamAction("append", target, templateHtml));
+        _actions.Add(new TemplateStreamAction("append", target, content, TemplateContentKind.PlainText));
+
+        return this;
+    }
+
+    /// <summary>
+    /// Queues an append action that inserts a trusted HTML fragment into the specified target element without encoding or sanitizing it.
+    /// </summary>
+    /// <remarks>
+    /// This is the raw-markup escape hatch for server-authored fragments. RazorWire does not encode or sanitize
+    /// <paramref name="trustedHtml"/>; callers must ensure the fragment is trusted and that any user-supplied values have
+    /// already been HTML-encoded. Prefer <see cref="Append(string,string?)"/> for text and
+    /// <see cref="AppendPartial(string,string,object?)"/> or <see cref="AppendComponent{T}(string,object?)"/> for Razor-rendered markup.
+    /// </remarks>
+    /// <param name="target">The target DOM selector or element identifier to which the trusted HTML will be appended.</param>
+    /// <param name="trustedHtml">Trusted HTML to append inside the target's template; <c>null</c> renders as an empty fragment.</param>
+    /// <returns>The same <see cref="RazorWireStreamBuilder"/> instance to allow fluent chaining.</returns>
+    public RazorWireStreamBuilder AppendHtml(string target, string? trustedHtml)
+    {
+        _actions.Add(new TemplateStreamAction("append", target, trustedHtml, TemplateContentKind.TrustedHtml));
 
         return this;
     }
@@ -50,14 +74,36 @@ public class RazorWireStreamBuilder
     }
 
     /// <summary>
-    /// Queues a raw HTML prepend action targeting the specified DOM element.
+    /// Queues a prepend action that inserts HTML-encoded text into the specified target element.
     /// </summary>
     /// <param name="target">The DOM target selector or identifier to receive the content.</param>
-    /// <param name="templateHtml">The HTML content to insert before the target element's existing content.</param>
+    /// <param name="content">Plain-text content to insert before the target element's existing content; <c>null</c> renders as empty text.</param>
     /// <returns>The builder instance for fluent chaining.</returns>
-    public RazorWireStreamBuilder Prepend(string target, string templateHtml)
+    /// <remarks>
+    /// RazorWire HTML-encodes <paramref name="content"/> before placing it in the stream template. Use
+    /// <see cref="PrependHtml(string,string?)"/> only for trusted, already-safe HTML fragments.
+    /// </remarks>
+    public RazorWireStreamBuilder Prepend(string target, string? content)
     {
-        _actions.Add(new RawHtmlStreamAction("prepend", target, templateHtml));
+        _actions.Add(new TemplateStreamAction("prepend", target, content, TemplateContentKind.PlainText));
+
+        return this;
+    }
+
+    /// <summary>
+    /// Queues a prepend action that inserts a trusted HTML fragment without encoding or sanitizing it.
+    /// </summary>
+    /// <remarks>
+    /// RazorWire writes <paramref name="trustedHtml"/> directly into the stream template. Use this only for
+    /// server-authored trusted markup; encode user values before composing the fragment. Prefer
+    /// <see cref="Prepend(string,string?)"/> for text and partial or component helpers for Razor-rendered markup.
+    /// </remarks>
+    /// <param name="target">The DOM target selector or identifier to receive the trusted HTML.</param>
+    /// <param name="trustedHtml">Trusted HTML content to insert before the target element's existing content; <c>null</c> renders as an empty fragment.</param>
+    /// <returns>The builder instance for fluent chaining.</returns>
+    public RazorWireStreamBuilder PrependHtml(string target, string? trustedHtml)
+    {
+        _actions.Add(new TemplateStreamAction("prepend", target, trustedHtml, TemplateContentKind.TrustedHtml));
 
         return this;
     }
@@ -77,14 +123,36 @@ public class RazorWireStreamBuilder
     }
 
     /// <summary>
-    /// Queues a raw HTML replace action targeting the specified DOM element.
+    /// Queues a replace action that inserts HTML-encoded text into the specified target element.
     /// </summary>
     /// <param name="target">The DOM element selector or identifier to target.</param>
-    /// <param name="templateHtml">The HTML content used to replace the target's contents.</param>
+    /// <param name="content">Plain-text content used to replace the target's contents; <c>null</c> renders as empty text.</param>
     /// <returns>The current RazorWireStreamBuilder instance.</returns>
-    public RazorWireStreamBuilder Replace(string target, string templateHtml)
+    /// <remarks>
+    /// RazorWire HTML-encodes <paramref name="content"/> before placing it in the stream template. Use
+    /// <see cref="ReplaceHtml(string,string?)"/> only for trusted HTML fragments.
+    /// </remarks>
+    public RazorWireStreamBuilder Replace(string target, string? content)
     {
-        _actions.Add(new RawHtmlStreamAction("replace", target, templateHtml));
+        _actions.Add(new TemplateStreamAction("replace", target, content, TemplateContentKind.PlainText));
+
+        return this;
+    }
+
+    /// <summary>
+    /// Queues a replace action that inserts a trusted HTML fragment without encoding or sanitizing it.
+    /// </summary>
+    /// <remarks>
+    /// RazorWire writes <paramref name="trustedHtml"/> directly into the stream template. Use this only for
+    /// server-authored trusted markup; encode user values before composing the fragment. Prefer
+    /// <see cref="Replace(string,string?)"/> for text and partial or component helpers for Razor-rendered markup.
+    /// </remarks>
+    /// <param name="target">The DOM element selector or identifier to target.</param>
+    /// <param name="trustedHtml">Trusted HTML content used to replace the target's contents; <c>null</c> renders as an empty fragment.</param>
+    /// <returns>The current RazorWireStreamBuilder instance.</returns>
+    public RazorWireStreamBuilder ReplaceHtml(string target, string? trustedHtml)
+    {
+        _actions.Add(new TemplateStreamAction("replace", target, trustedHtml, TemplateContentKind.TrustedHtml));
 
         return this;
     }
@@ -104,14 +172,36 @@ public class RazorWireStreamBuilder
     }
 
     /// <summary>
-    /// Queues a raw HTML "update" turbo-stream action for the specified DOM target using the provided HTML template.
+    /// Queues an update action that inserts HTML-encoded text into the specified target element.
     /// </summary>
     /// <param name="target">The DOM target selector or identifier to apply the update to.</param>
-    /// <param name="templateHtml">The HTML fragment to use as the action's template.</param>
+    /// <param name="content">Plain-text content to use as the action's template; <c>null</c> renders as empty text.</param>
     /// <returns>The same RazorWireStreamBuilder instance for fluent chaining.</returns>
-    public RazorWireStreamBuilder Update(string target, string templateHtml)
+    /// <remarks>
+    /// RazorWire HTML-encodes <paramref name="content"/> before placing it in the stream template. Use
+    /// <see cref="UpdateHtml(string,string?)"/> only for trusted HTML fragments.
+    /// </remarks>
+    public RazorWireStreamBuilder Update(string target, string? content)
     {
-        _actions.Add(new RawHtmlStreamAction("update", target, templateHtml));
+        _actions.Add(new TemplateStreamAction("update", target, content, TemplateContentKind.PlainText));
+
+        return this;
+    }
+
+    /// <summary>
+    /// Queues an update action that inserts a trusted HTML fragment without encoding or sanitizing it.
+    /// </summary>
+    /// <remarks>
+    /// RazorWire writes <paramref name="trustedHtml"/> directly into the stream template. Use this only for
+    /// server-authored trusted markup; encode user values before composing the fragment. Prefer
+    /// <see cref="Update(string,string?)"/> for text and partial or component helpers for Razor-rendered markup.
+    /// </remarks>
+    /// <param name="target">The DOM target selector or identifier to apply the update to.</param>
+    /// <param name="trustedHtml">Trusted HTML fragment to use as the action's template; <c>null</c> renders as an empty fragment.</param>
+    /// <returns>The same RazorWireStreamBuilder instance for fluent chaining.</returns>
+    public RazorWireStreamBuilder UpdateHtml(string target, string? trustedHtml)
+    {
+        _actions.Add(new TemplateStreamAction("update", target, trustedHtml, TemplateContentKind.TrustedHtml));
 
         return this;
     }
@@ -248,7 +338,7 @@ public class RazorWireStreamBuilder
     /// <returns>The current <see cref="RazorWireStreamBuilder"/> instance for fluent chaining.</returns>
     public RazorWireStreamBuilder Remove(string target)
     {
-        _actions.Add(new RawHtmlStreamAction("remove", target, null));
+        _actions.Add(new TemplateStreamAction("remove", target, content: null, TemplateContentKind.TrustedHtml));
 
         return this;
     }
@@ -308,10 +398,11 @@ public class RazorWireStreamBuilder
     public RazorWireStreamBuilder FormError(string target, string title, string message)
     {
         _hasFormError = true;
-        _actions.Add(new RawHtmlStreamAction(
+        _actions.Add(new TemplateStreamAction(
             "update",
             target,
-            BuildGeneratedFormErrorHtml(title, message, [], "server")));
+            BuildGeneratedFormErrorHtml(title, message, [], "server"),
+            TemplateContentKind.TrustedHtml));
 
         return this;
     }
@@ -353,7 +444,7 @@ public class RazorWireStreamBuilder
             ? message
             : "Check the validation messages and try again.";
 
-        _actions.Add(new RawHtmlStreamAction(
+        _actions.Add(new TemplateStreamAction(
             "update",
             target,
             BuildGeneratedFormErrorHtml(
@@ -361,7 +452,8 @@ public class RazorWireStreamBuilder
                 fallbackMessage,
                 visibleErrors,
                 "validation",
-                hiddenCount)));
+                hiddenCount),
+            TemplateContentKind.TrustedHtml));
 
         return this;
     }
@@ -512,23 +604,36 @@ public class RazorWireStreamBuilder
 
     private sealed record RazorWireValidationError(string Key, string Message);
 
-    private class RawHtmlStreamAction : ISynchronousRazorWireStreamAction
+    private enum TemplateContentKind
+    {
+        PlainText,
+        TrustedHtml
+    }
+
+    private class TemplateStreamAction : ISynchronousRazorWireStreamAction
     {
         public string Action { get; }
         public string Target { get; }
-        public string? Html { get; }
+        public string? Content { get; }
+        public TemplateContentKind ContentKind { get; }
 
         /// <summary>
-        /// Initializes a new instance with the specified turbo-stream action, target, and optional HTML template.
+        /// Initializes a new instance with the specified turbo-stream action, target, and optional template content.
         /// </summary>
         /// <param name="action">The turbo-stream action name (e.g., "append", "prepend", "replace", "update", or "remove").</param>
         /// <param name="target">The DOM target selector or identifier that the action will be applied to.</param>
-        /// <param name="html">The HTML template to use for the action; pass <c>null</c> for actions that do not require a template (such as "remove").</param>
-        public RawHtmlStreamAction(string action, string target, string? html)
+        /// <param name="content">The template content to use for the action; pass <c>null</c> for empty templates or actions that do not require a template.</param>
+        /// <param name="contentKind">Whether the template content is plain text that must be encoded or trusted HTML that can be written as-is.</param>
+        public TemplateStreamAction(
+            string action,
+            string target,
+            string? content,
+            TemplateContentKind contentKind)
         {
             Action = action;
             Target = target;
-            Html = html;
+            Content = content;
+            ContentKind = contentKind;
         }
 
         /// <summary>
@@ -546,7 +651,19 @@ public class RazorWireStreamBuilder
             }
 
             return $"<turbo-stream action=\"{encodedAction}\" target=\"{encodedTarget}\">"
-                   + $"<template>{Html}</template></turbo-stream>";
+                   + $"<template>{RenderTemplateContent()}</template></turbo-stream>";
+        }
+
+        private string RenderTemplateContent()
+        {
+            var content = Content ?? string.Empty;
+
+            return ContentKind switch
+            {
+                TemplateContentKind.PlainText => HtmlEncoder.Default.Encode(content),
+                TemplateContentKind.TrustedHtml => content,
+                _ => throw new InvalidOperationException("Unsupported RazorWire template content kind.")
+            };
         }
 
         /// <summary>
