@@ -103,32 +103,14 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     [Fact]
     public void TryVerify_ShouldFail_WhenManifestCannotBeRead()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         var digest = WriteManifest();
         var manifestPath = Path.Join(_tempDirectory, AppSurfaceDocsReleaseArchiveVerifier.FileName);
-        var originalMode = File.GetUnixFileMode(manifestPath);
+        var fileSystem = ThrowingReleaseArchiveFileSystem.ThrowWhenReading(manifestPath);
 
-        try
-        {
-            File.SetUnixFileMode(manifestPath, UnixFileMode.None);
-            if (CanReadFile(manifestPath))
-            {
-                return;
-            }
+        var failure = VerifyFailure(digest, fileSystem);
 
-            var failure = VerifyFailure(digest);
-
-            Assert.Equal("ASDOCSARCHIVE001", failure.Code);
-            Assert.Contains("could not be read", failure.PublicMessage);
-        }
-        finally
-        {
-            File.SetUnixFileMode(manifestPath, originalMode);
-        }
+        Assert.Equal("ASDOCSARCHIVE001", failure.Code);
+        Assert.Contains("could not be read", failure.PublicMessage);
     }
 
     [Theory]
@@ -225,33 +207,15 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     [Fact]
     public void TryVerify_ShouldFail_WhenFileCannotBeReadForDigestVerification()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         var index = WriteFile("index.html", "<html>ok</html>");
         var digest = WriteManifest(index);
         var filePath = Path.Join(_tempDirectory, "index.html");
-        var originalMode = File.GetUnixFileMode(filePath);
+        var fileSystem = ThrowingReleaseArchiveFileSystem.ThrowWhenHashing(filePath);
 
-        try
-        {
-            File.SetUnixFileMode(filePath, UnixFileMode.None);
-            if (CanReadFile(filePath))
-            {
-                return;
-            }
+        var failure = VerifyFailure(digest, fileSystem);
 
-            var failure = VerifyFailure(digest);
-
-            Assert.Equal("ASDOCSARCHIVE008", failure.Code);
-            Assert.Contains("could not be read", failure.PublicMessage);
-        }
-        finally
-        {
-            File.SetUnixFileMode(filePath, originalMode);
-        }
+        Assert.Equal("ASDOCSARCHIVE008", failure.Code);
+        Assert.Contains("could not be read", failure.PublicMessage);
     }
 
     [Fact]
@@ -298,31 +262,13 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     [Fact]
     public void TryVerify_ShouldFail_WhenArchiveFilesCannotBeEnumerated()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         var digest = WriteManifest();
-        var originalMode = File.GetUnixFileMode(_tempDirectory);
+        var fileSystem = ThrowingReleaseArchiveFileSystem.ThrowWhenEnumerating();
 
-        try
-        {
-            File.SetUnixFileMode(_tempDirectory, UnixFileMode.UserExecute);
-            if (CanEnumerateDirectory(_tempDirectory))
-            {
-                return;
-            }
+        var failure = VerifyFailure(digest, fileSystem);
 
-            var failure = VerifyFailure(digest);
-
-            Assert.Equal("ASDOCSARCHIVE009", failure.Code);
-            Assert.Contains("could not be enumerated", failure.PublicMessage);
-        }
-        finally
-        {
-            File.SetUnixFileMode(_tempDirectory, originalMode);
-        }
+        Assert.Equal("ASDOCSARCHIVE009", failure.Code);
+        Assert.Contains("could not be enumerated", failure.PublicMessage);
     }
 
     [Fact]
@@ -405,13 +351,24 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
         }
     }
 
-    private AppSurfaceDocsArchiveVerificationFailure VerifyFailure(string expectedManifestSha256)
+    private AppSurfaceDocsArchiveVerificationFailure VerifyFailure(
+        string expectedManifestSha256,
+        AppSurfaceDocsReleaseArchiveFileSystem? fileSystem = null)
     {
-        var verified = AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
-            _tempDirectory,
-            expectedManifestSha256,
-            out var archive,
-            out var failure);
+        AppSurfaceDocsVerifiedReleaseArchive? archive;
+        AppSurfaceDocsArchiveVerificationFailure? failure;
+        var verified = fileSystem is null
+            ? AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+                _tempDirectory,
+                expectedManifestSha256,
+                out archive,
+                out failure)
+            : AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+                _tempDirectory,
+                expectedManifestSha256,
+                fileSystem,
+                out archive,
+                out failure);
 
         Assert.False(verified);
         Assert.Null(archive);
@@ -488,29 +445,75 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
         return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     }
 
-    private static bool CanReadFile(string path)
+    private sealed class ThrowingReleaseArchiveFileSystem : AppSurfaceDocsReleaseArchiveFileSystem
     {
-        try
-        {
-            _ = File.ReadAllBytes(path);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
+        private readonly string? _readFailurePath;
+        private readonly string? _hashFailurePath;
+        private readonly bool _throwOnEnumerate;
 
-    private static bool CanEnumerateDirectory(string path)
-    {
-        try
+        private ThrowingReleaseArchiveFileSystem(
+            string? readFailurePath = null,
+            string? hashFailurePath = null,
+            bool throwOnEnumerate = false)
         {
-            _ = Directory.EnumerateFiles(path).ToArray();
-            return true;
+            _readFailurePath = readFailurePath;
+            _hashFailurePath = hashFailurePath;
+            _throwOnEnumerate = throwOnEnumerate;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+
+        internal static ThrowingReleaseArchiveFileSystem ThrowWhenReading(string path)
         {
-            return false;
+            return new ThrowingReleaseArchiveFileSystem(readFailurePath: path);
+        }
+
+        internal static ThrowingReleaseArchiveFileSystem ThrowWhenHashing(string path)
+        {
+            return new ThrowingReleaseArchiveFileSystem(hashFailurePath: path);
+        }
+
+        internal static ThrowingReleaseArchiveFileSystem ThrowWhenEnumerating()
+        {
+            return new ThrowingReleaseArchiveFileSystem(throwOnEnumerate: true);
+        }
+
+        internal override bool FileExists(string path)
+        {
+            return File.Exists(path);
+        }
+
+        internal override byte[] ReadAllBytes(string path)
+        {
+            if (string.Equals(path, _readFailurePath, StringComparison.Ordinal))
+            {
+                throw new IOException("test read failure");
+            }
+
+            return File.ReadAllBytes(path);
+        }
+
+        internal override long GetLength(string path)
+        {
+            return new FileInfo(path).Length;
+        }
+
+        internal override string ComputeSha256(string path)
+        {
+            if (string.Equals(path, _hashFailurePath, StringComparison.Ordinal))
+            {
+                throw new IOException("test hash failure");
+            }
+
+            return ComputeFileSha256(path);
+        }
+
+        internal override IEnumerable<string> EnumerateFiles(string rootPath)
+        {
+            if (_throwOnEnumerate)
+            {
+                throw new IOException("test enumerate failure");
+            }
+
+            return Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories);
         }
     }
 

@@ -39,8 +39,33 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
         out AppSurfaceDocsVerifiedReleaseArchive? archive,
         out AppSurfaceDocsArchiveVerificationFailure? failure)
     {
+        return TryVerify(
+            exactTreePath,
+            expectedManifestSha256,
+            AppSurfaceDocsReleaseArchiveFileSystem.Physical,
+            out archive,
+            out failure);
+    }
+
+    /// <summary>
+    /// Attempts to verify an exact-version tree using the supplied filesystem adapter.
+    /// </summary>
+    /// <param name="exactTreePath">Exact-version export root.</param>
+    /// <param name="expectedManifestSha256">Catalog-pinned manifest digest.</param>
+    /// <param name="fileSystem">Filesystem adapter used for verification reads.</param>
+    /// <param name="archive">Verified archive metadata when verification succeeds.</param>
+    /// <param name="failure">Verification failure when verification fails.</param>
+    /// <returns><c>true</c> when every required archive integrity check passes.</returns>
+    internal static bool TryVerify(
+        string exactTreePath,
+        string expectedManifestSha256,
+        AppSurfaceDocsReleaseArchiveFileSystem fileSystem,
+        out AppSurfaceDocsVerifiedReleaseArchive? archive,
+        out AppSurfaceDocsArchiveVerificationFailure? failure)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(exactTreePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedManifestSha256);
+        ArgumentNullException.ThrowIfNull(fileSystem);
 
         archive = null;
         failure = null;
@@ -55,7 +80,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
         }
 
         var manifestPath = Path.Combine(exactTreePath, FileName);
-        if (!File.Exists(manifestPath))
+        if (!fileSystem.FileExists(manifestPath))
         {
             failure = AppSurfaceDocsArchiveVerificationFailure.Create(
                 "ASDOCSARCHIVE001",
@@ -68,7 +93,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
         string actualManifestDigest;
         try
         {
-            manifestBytes = File.ReadAllBytes(manifestPath);
+            manifestBytes = fileSystem.ReadAllBytes(manifestPath);
             actualManifestDigest = ComputeBytesSha256(manifestBytes);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
@@ -131,7 +156,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             }
 
             var filePath = Path.Combine(exactTreePath, validatedEntry.Path.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(filePath))
+            if (!fileSystem.FileExists(filePath))
             {
                 failure = AppSurfaceDocsArchiveVerificationFailure.Create(
                     "ASDOCSARCHIVE006",
@@ -141,7 +166,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
                 return false;
             }
 
-            var actualLength = new FileInfo(filePath).Length;
+            var actualLength = fileSystem.GetLength(filePath);
             if (actualLength != validatedEntry.Length)
             {
                 failure = AppSurfaceDocsArchiveVerificationFailure.Create(
@@ -158,12 +183,12 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             {
                 if (string.Equals(validatedEntry.Path, RouteManifestFileName, StringComparison.Ordinal))
                 {
-                    fileBytes = File.ReadAllBytes(filePath);
+                    fileBytes = fileSystem.ReadAllBytes(filePath);
                     actualDigest = ComputeBytesSha256(fileBytes);
                 }
                 else
                 {
-                    actualDigest = ComputeFileSha256(filePath);
+                    actualDigest = fileSystem.ComputeSha256(filePath);
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
@@ -198,7 +223,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             }
         }
 
-        if (File.Exists(Path.Combine(exactTreePath, RouteManifestFileName))
+        if (fileSystem.FileExists(Path.Combine(exactTreePath, RouteManifestFileName))
             && !files.ContainsKey(RouteManifestFileName))
         {
             failure = AppSurfaceDocsArchiveVerificationFailure.Create(
@@ -212,7 +237,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
         IEnumerable<string> archiveFilePaths;
         try
         {
-            archiveFilePaths = Directory.EnumerateFiles(exactTreePath, "*", SearchOption.AllDirectories).ToArray();
+            archiveFilePaths = fileSystem.EnumerateFiles(exactTreePath).ToArray();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
@@ -379,7 +404,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
         return true;
     }
 
-    private static string ComputeFileSha256(string filePath)
+    internal static string ComputeFileSha256(string filePath)
     {
         using var stream = File.OpenRead(filePath);
         var digest = SHA256.HashData(stream);
@@ -402,6 +427,74 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
         string? ContentType,
         string HashAlgorithm,
         string Sha256);
+}
+
+/// <summary>
+/// Filesystem adapter used by release archive verification.
+/// </summary>
+/// <remarks>
+/// The production adapter reads the physical release tree. Tests use custom adapters to exercise portable failure
+/// branches such as unreadable files without depending on platform-specific chmod behavior.
+/// </remarks>
+internal abstract class AppSurfaceDocsReleaseArchiveFileSystem
+{
+    /// <summary>
+    /// Gets the physical filesystem adapter used by runtime verification.
+    /// </summary>
+    internal static AppSurfaceDocsReleaseArchiveFileSystem Physical { get; } = new PhysicalReleaseArchiveFileSystem();
+
+    /// <summary>
+    /// Returns whether the path exists as a file.
+    /// </summary>
+    internal abstract bool FileExists(string path);
+
+    /// <summary>
+    /// Reads all bytes from a file.
+    /// </summary>
+    internal abstract byte[] ReadAllBytes(string path);
+
+    /// <summary>
+    /// Returns the current file length in bytes.
+    /// </summary>
+    internal abstract long GetLength(string path);
+
+    /// <summary>
+    /// Computes a lowercase SHA-256 digest for a file.
+    /// </summary>
+    internal abstract string ComputeSha256(string path);
+
+    /// <summary>
+    /// Enumerates files under an exact release tree.
+    /// </summary>
+    internal abstract IEnumerable<string> EnumerateFiles(string rootPath);
+
+    private sealed class PhysicalReleaseArchiveFileSystem : AppSurfaceDocsReleaseArchiveFileSystem
+    {
+        internal override bool FileExists(string path)
+        {
+            return File.Exists(path);
+        }
+
+        internal override byte[] ReadAllBytes(string path)
+        {
+            return File.ReadAllBytes(path);
+        }
+
+        internal override long GetLength(string path)
+        {
+            return new FileInfo(path).Length;
+        }
+
+        internal override string ComputeSha256(string path)
+        {
+            return AppSurfaceDocsReleaseArchiveVerifier.ComputeFileSha256(path);
+        }
+
+        internal override IEnumerable<string> EnumerateFiles(string rootPath)
+        {
+            return Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories);
+        }
+    }
 }
 
 /// <summary>
