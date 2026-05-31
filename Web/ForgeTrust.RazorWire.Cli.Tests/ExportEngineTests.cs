@@ -448,7 +448,7 @@ public class ExportEngineTests
         try
         {
             var handler = new PathBaseSeedHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000/app");
@@ -474,7 +474,7 @@ public class ExportEngineTests
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
         Directory.CreateDirectory(tempDir);
-        var client = new HttpClient(new SlowHandler());
+        using var client = new HttpClient(new SlowHandler());
         A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
@@ -500,7 +500,7 @@ public class ExportEngineTests
         Directory.CreateDirectory(tempDir);
         try
         {
-            var client = new HttpClient(new ThrowingThenSuccessHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new ThrowingThenSuccessHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
@@ -544,7 +544,7 @@ public class ExportEngineTests
         try
         {
             var handler = new TestHttpMessageHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
+            using var client = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, baseUrl);
@@ -633,7 +633,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new ConventionalNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new ConventionalNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
@@ -717,7 +717,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -742,7 +742,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new NonHtmlNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new NonHtmlNotFoundPageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -767,7 +767,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new ContentScriptHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new ContentScriptHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -798,7 +798,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(
+            using var client = new HttpClient(
                 new RedirectFollowingHandler(new RedirectedStylesheetHandler()))
             {
                 BaseAddress = new Uri("http://localhost:5000")
@@ -832,7 +832,7 @@ public class ExportEngineTests
         try
         {
             var handler = new CdnRewriteHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1615,7 +1615,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new CdnRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new CdnRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
@@ -1669,7 +1669,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new QueryFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new QueryFrameHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1694,7 +1694,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new MissingAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new MissingAssetHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1719,7 +1719,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new MissingAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new MissingAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1744,7 +1744,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new SourceNavigationAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new SourceNavigationAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1772,7 +1772,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new ExportIgnoreAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new ExportIgnoreAnchorHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -1803,7 +1803,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new RedirectFollowingHandler(new IgnoredRootRecoveryNotFoundPageHandler()))
+            using var client = new HttpClient(new RedirectFollowingHandler(new IgnoredRootRecoveryNotFoundPageHandler()))
             {
                 BaseAddress = new Uri("http://localhost:5000")
             };
@@ -2348,7 +2348,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new CdnRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new CdnRewriteHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000", ExportMode.Hybrid);
@@ -2557,7 +2557,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new HashOnlyReferenceHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new HashOnlyReferenceHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -2589,7 +2589,7 @@ public class ExportEngineTests
         try
         {
             var handler = new DuplicateReferenceHandler();
-            var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -2615,7 +2615,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new TestHttpMessageHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, null, "http://localhost:5000");
@@ -2851,7 +2851,7 @@ public class ExportEngineTests
 
         try
         {
-            var client = new HttpClient(new CustomRootDocsPartialHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            using var client = new HttpClient(new CustomRootDocsPartialHandler()) { BaseAddress = new Uri("http://localhost:5000") };
             A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
 
             var context = new ExportContext(tempDir, seedFile, "http://localhost:5000");
