@@ -167,7 +167,21 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
                 return false;
             }
 
-            var actualLength = fileSystem.GetLength(filePath);
+            long actualLength;
+            try
+            {
+                actualLength = fileSystem.GetLength(filePath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                failure = AppSurfaceDocsArchiveVerificationFailure.Create(
+                    "ASDOCSARCHIVE008",
+                    "Release archive file could not be read for length verification.",
+                    $"Ensure '{validatedEntry.Path}' is readable. Detail: {ex.Message}",
+                    validatedEntry.Path);
+                return false;
+            }
+
             if (actualLength != validatedEntry.Length)
             {
                 failure = AppSurfaceDocsArchiveVerificationFailure.Create(
@@ -501,6 +515,10 @@ internal abstract class AppSurfaceDocsReleaseArchiveFileSystem
 /// <summary>
 /// Describes the archive-integrity state resolved for a published AppSurface Docs version.
 /// </summary>
+/// <remarks>
+/// Numeric values are explicit and stable because catalog diagnostics, command output, and downstream consumers may
+/// serialize or persist these states outside the current process.
+/// </remarks>
 public enum AppSurfaceDocsReleaseArchiveVerificationState
 {
     /// <summary>

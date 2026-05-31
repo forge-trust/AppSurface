@@ -40,6 +40,39 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
     }
 
     [Fact]
+    public void Execute_ShouldFail_WhenCatalogPinsTamperedReleaseArchive()
+    {
+        var tree = CreateExactTree("tampered");
+        var manifestDigest = WriteReleaseManifest(tree);
+        File.AppendAllText(Path.Join(tree, "index.html"), "<!-- tampered -->");
+        var catalogPath = WriteCatalog(tree, manifestDigest);
+        var command = CreateCommand(catalogPath, "1.2.3");
+
+        var exception = Assert.Throws<CommandException>(command.Execute);
+
+        Assert.Contains("Unavailable", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Execute_ShouldUseTrustedReleaseRoot_WhenCatalogTreePathIsRootRelative()
+    {
+        var trustedRoot = Path.Join(_tempDirectory, "trusted-root");
+        Directory.CreateDirectory(trustedRoot);
+        var tree = CreateExactTree(Path.Join("trusted-root", "verified-from-root"));
+        var manifestDigest = WriteReleaseManifest(tree);
+        var catalogDirectory = Path.Join(_tempDirectory, "catalog");
+        Directory.CreateDirectory(catalogDirectory);
+        var catalogPath = WriteCatalog(
+            tree,
+            manifestDigest,
+            catalogDirectory,
+            Path.GetRelativePath(trustedRoot, tree));
+        var command = CreateCommand(catalogPath, "1.2.3", trustedRoot);
+
+        command.Execute();
+    }
+
+    [Fact]
     public void Execute_ShouldFail_WhenCatalogPathIsMissing()
     {
         var command = CreateCommand(" ", "1.2.3");
@@ -80,14 +113,18 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
         }
     }
 
-    private static DocsVerifyArchiveCommand CreateCommand(string catalogPath, string version)
+    private static DocsVerifyArchiveCommand CreateCommand(
+        string catalogPath,
+        string version,
+        string? trustedReleaseRootPath = null)
     {
         return new DocsVerifyArchiveCommand(
             NullLogger<DocsVerifyArchiveCommand>.Instance,
             NullLoggerFactory.Instance)
         {
             CatalogPath = catalogPath,
-            Version = version
+            Version = version,
+            TrustedReleaseRootPath = trustedReleaseRootPath
         };
     }
 
@@ -111,12 +148,16 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
         return root;
     }
 
-    private string WriteCatalog(string tree, string? releaseManifestSha256)
+    private string WriteCatalog(
+        string tree,
+        string? releaseManifestSha256,
+        string? catalogDirectory = null,
+        string? exactTreePath = null)
     {
         var version = new Dictionary<string, object?>
         {
             ["version"] = "1.2.3",
-            ["exactTreePath"] = Path.GetRelativePath(_tempDirectory, tree),
+            ["exactTreePath"] = exactTreePath ?? Path.GetRelativePath(_tempDirectory, tree),
             ["releaseManifestSha256"] = releaseManifestSha256
         };
         if (releaseManifestSha256 is null)
@@ -124,7 +165,7 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
             version.Remove("releaseManifestSha256");
         }
 
-        var path = Path.Join(_tempDirectory, "catalog.json");
+        var path = Path.Join(catalogDirectory ?? _tempDirectory, "catalog.json");
         File.WriteAllText(
             path,
             JsonSerializer.Serialize(

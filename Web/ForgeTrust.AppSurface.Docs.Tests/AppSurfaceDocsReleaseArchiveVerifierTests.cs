@@ -193,6 +193,21 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     }
 
     [Fact]
+    public void TryVerify_ShouldFail_WhenFileLengthCannotBeRead()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>");
+        var digest = WriteManifest(index);
+        var filePath = Path.Join(_tempDirectory, "index.html");
+        var fileSystem = ThrowingReleaseArchiveFileSystem.ThrowWhenReadingLength(filePath);
+
+        var failure = VerifyFailure(digest, fileSystem);
+
+        Assert.Equal("ASDOCSARCHIVE008", failure.Code);
+        Assert.Equal("index.html", failure.Path);
+        Assert.Contains("length verification", failure.PublicMessage);
+    }
+
+    [Fact]
     public void TryVerify_ShouldFail_WhenFileDigestDiffersFromManifest()
     {
         var index = WriteFile("index.html", "<html>ok</html>") with { Sha256 = new string('0', 64) };
@@ -463,15 +478,18 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     {
         private readonly string? _readFailurePath;
         private readonly string? _hashFailurePath;
+        private readonly string? _lengthFailurePath;
         private readonly bool _throwOnEnumerate;
 
         private ThrowingReleaseArchiveFileSystem(
             string? readFailurePath = null,
             string? hashFailurePath = null,
+            string? lengthFailurePath = null,
             bool throwOnEnumerate = false)
         {
             _readFailurePath = readFailurePath;
             _hashFailurePath = hashFailurePath;
+            _lengthFailurePath = lengthFailurePath;
             _throwOnEnumerate = throwOnEnumerate;
         }
 
@@ -483,6 +501,11 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
         internal static ThrowingReleaseArchiveFileSystem ThrowWhenHashing(string path)
         {
             return new ThrowingReleaseArchiveFileSystem(hashFailurePath: path);
+        }
+
+        internal static ThrowingReleaseArchiveFileSystem ThrowWhenReadingLength(string path)
+        {
+            return new ThrowingReleaseArchiveFileSystem(lengthFailurePath: path);
         }
 
         internal static ThrowingReleaseArchiveFileSystem ThrowWhenEnumerating()
@@ -507,6 +530,11 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
 
         internal override long GetLength(string path)
         {
+            if (string.Equals(path, _lengthFailurePath, StringComparison.Ordinal))
+            {
+                throw new IOException("test length failure");
+            }
+
             return new FileInfo(path).Length;
         }
 

@@ -60,9 +60,17 @@ public class ExportCommandTests
         }
     }
 
+    public static IEnumerable<object[]> UnsupportedArchivePaths()
+    {
+        yield return [".nojekyll", "/.nojekyll"];
+        if (!OperatingSystem.IsWindows())
+        {
+            yield return ["asset:name.svg", "/asset:name.svg"];
+        }
+    }
+
     [Theory]
-    [InlineData(".nojekyll", "/.nojekyll")]
-    [InlineData("asset:name.svg", "/asset:name.svg")]
+    [MemberData(nameof(UnsupportedArchivePaths))]
     public async Task ReleaseArchiveManifestWriter_ShouldFail_WhenOutputContainsUnsupportedArchivePath(
         string unsafePath,
         string expectedRoute)

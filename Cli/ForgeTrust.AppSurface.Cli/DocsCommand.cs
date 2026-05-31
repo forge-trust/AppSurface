@@ -289,6 +289,12 @@ internal sealed partial class DocsVerifyArchiveCommand : ICommand
     public string? Version { get; set; }
 
     /// <summary>
+    /// Gets the trusted release root used to resolve catalog <c>exactTreePath</c> entries.
+    /// </summary>
+    [CommandOption("trusted-release-root", Description = "Trusted release root for catalog exactTreePath entries.")]
+    public string? TrustedReleaseRootPath { get; set; }
+
+    /// <summary>
     /// Executes the command through the CliFx console integration.
     /// </summary>
     /// <param name="console">Console abstraction used to register cancellation handling.</param>
@@ -320,7 +326,8 @@ internal sealed partial class DocsVerifyArchiveCommand : ICommand
                 Versioning = new AppSurfaceDocsVersioningOptions
                 {
                     Enabled = true,
-                    CatalogPath = catalogPath
+                    CatalogPath = catalogPath,
+                    TrustedReleaseRootPath = TrustedReleaseRootPath
                 }
             },
             new ArchiveVerifyWebHostEnvironment(Path.GetDirectoryName(catalogPath) ?? Directory.GetCurrentDirectory()),

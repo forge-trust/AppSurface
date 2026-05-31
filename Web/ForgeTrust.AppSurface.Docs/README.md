@@ -17,13 +17,14 @@ appsurface docs --repo . --port 5189
 appsurface docs preview --repo . --port 5189
 appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
 appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
+appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3 --trusted-release-root ./published-docs
 ```
 
 `appsurface docs` and `appsurface docs preview` run the standalone host for local inspection. `appsurface docs export` starts that same host in-process, binds an internal `http://127.0.0.1:0` listener, resolves the actual Kestrel address, and exports through RazorWire's static export engine.
 
 Preview `--port` values bind localhost only. Add `--all-hosts` to a `--port` preview only when LAN, container, or other non-loopback access is intentional; the all-hosts wildcard can expose the preview host beyond the local machine.
 
-Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands. After final files are materialized, export writes `.appsurface-docs-release-manifest.json` and prints the `releaseManifestSha256` catalog snippet to copy into the published version catalog. Use `appsurface docs verify-archive --catalog <path> --version <version>` to check a pinned archive locally before deploy.
+Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands. After final files are materialized, export writes `.appsurface-docs-release-manifest.json` and prints the `releaseManifestSha256` catalog snippet to copy into the published version catalog. Use `appsurface docs verify-archive --catalog <path> --version <version>` to check a pinned archive locally before deploy. Pass `--trusted-release-root <path>` when the runtime catalog resolves root-relative `exactTreePath` values through `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; this keeps local verification on the same trusted-root contract as production.
 
 Redirect aliases default to HTML fallback materialization. Omit `--redirects`, or pass `--redirects html`, for GitHub Pages and generic static hosts. Pass `--mode cdn --redirects netlify` for Netlify-compatible CDN publishing; export writes one root `_redirects` file with exact site-local `301!` rules and does not write alias HTML files. Netlify export validates the encoded provider rule paths, so self-redirects and same-source aliases that point at different canonical routes fail before files are written. Do not hand-author `_redirects` in the export output because the exporter reserves that file for validated redirect rules.
 

@@ -103,14 +103,16 @@ Verify one exact release tree from a version catalog without starting the docs w
 
 ```bash
 appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
+appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3 --trusted-release-root ./published-docs
 ```
 
 Options:
 
 - `--catalog`: Path to the AppSurface Docs version catalog JSON file.
 - `--version`: Exact version identifier to verify.
+- `--trusted-release-root`: Trusted release root used to resolve `exactTreePath` entries. When omitted, paths resolve the same way as runtime defaults: relative to the catalog directory.
 
-The command loads the catalog, resolves the selected `exactTreePath`, and runs the same release archive verification used at runtime. It exits nonzero when the version is missing, lacks a `releaseManifestSha256` pin, has a mismatched manifest digest, has missing or changed files, or contains handler-servable files not covered by the manifest. The catalog pin proves local archive integrity relative to trusted host configuration; it is not a signature or build provenance attestation.
+The command loads the catalog, resolves the selected `exactTreePath`, and runs the same release archive verification used at runtime. Pass `--trusted-release-root` when the deployment sets `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; otherwise the local verifier may inspect a different relative tree than the host would mount. It exits nonzero when the version is missing, lacks a `releaseManifestSha256` pin, has a mismatched manifest digest, has missing or changed files, or contains handler-servable files not covered by the manifest. The catalog pin proves local archive integrity relative to trusted host configuration; it is not a signature or build provenance attestation.
 
 Migration map for repo-owned AppSurface Docs export:
 
