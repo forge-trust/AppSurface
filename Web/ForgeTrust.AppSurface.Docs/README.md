@@ -761,6 +761,8 @@ var routeInspectorJson = routes.RouteInspectorJson;
 
 The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; operator UI should submit a browser form to `Routes.SearchIndexRefresh` with `Routes.SearchIndexRefreshMethod`.
 
+Embedded hosts decide their own app-wide browser error UX. The reusable `ForgeTrust.AppSurface.Docs` package registers docs routes and route references, but it does not install a docs-aware application `404` page. Hosts that want stale-docs recovery should opt into AppSurface Web conventional browser status pages, add their own `~/Views/Shared/404.cshtml`, use `BrowserStatusPageModel` for status/original-path context, inject `DocsUrlBuilder`, and link to `DocsUrlBuilder.Routes.Search` through the host's path-base-aware rendering helper.
+
 ### Document route identity
 
 AppSurface Docs assigns each cached snapshot a route identity catalog. The catalog keeps source identity separate from browser-facing route identity, so authors can keep Markdown source links portable while readers see structured URLs.

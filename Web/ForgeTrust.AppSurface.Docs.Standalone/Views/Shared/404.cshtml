@@ -1,0 +1,98 @@
+@using ForgeTrust.AppSurface.Docs
+@using ForgeTrust.AppSurface.Docs.Services
+@using ForgeTrust.AppSurface.Web
+@model BrowserStatusPageModel
+@inject DocsUrlBuilder DocsUrlBuilder
+@{
+    Layout = null;
+    var requestPath = string.IsNullOrWhiteSpace(Model.OriginalPath)
+        ? "the requested documentation page"
+        : Model.OriginalPath;
+    var docsHomeUrl = Url.PathBaseAware(DocsUrlBuilder.Routes.Home);
+    var docsSearchUrl = Url.PathBaseAware(DocsUrlBuilder.Routes.Search);
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Documentation page not found</title>
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: "Segoe UI", sans-serif;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            background: #f8fafc;
+            color: #0f172a;
+        }
+
+        main {
+            width: min(38rem, calc(100% - 2rem));
+            padding: 2rem;
+        }
+
+        h1 {
+            margin: 0 0 0.75rem;
+            font-size: clamp(2rem, 5vw, 3rem);
+        }
+
+        p {
+            margin: 0 0 1rem;
+            line-height: 1.6;
+        }
+
+        code {
+            padding: 0.2rem 0.45rem;
+            border-radius: 999px;
+            background: #e2e8f0;
+            font-size: 0.95rem;
+        }
+
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+
+        .recovery-link {
+            display: inline-flex;
+            align-items: center;
+            min-height: 2.5rem;
+            padding: 0 1rem;
+            border-radius: 999px;
+            background: #0f766e;
+            color: #fff;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .recovery-link.secondary {
+            background: #e2e8f0;
+            color: #0f5f59;
+        }
+
+        .recovery-link:hover,
+        .recovery-link:focus-visible {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+<main>
+    <p>AppSurface Docs</p>
+    <h1>Documentation page not found</h1>
+    <p>We couldn't open <code>@requestPath</code>. The page may have moved, or the link may point at an older docs route.</p>
+    <nav class="actions" aria-label="Documentation recovery actions">
+        <a class="recovery-link" href="@docsSearchUrl">Search documentation</a>
+        <a class="recovery-link secondary" href="@docsHomeUrl" data-rw-export-ignore="true">Return to docs home</a>
+    </nav>
+</main>
+</body>
+</html>

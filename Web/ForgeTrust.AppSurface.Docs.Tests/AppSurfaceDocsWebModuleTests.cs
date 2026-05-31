@@ -4,6 +4,7 @@ using ForgeTrust.AppSurface.Core;
 using ForgeTrust.AppSurface.Docs.Controllers;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web.Tailwind;
 using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Streams;
@@ -378,6 +379,16 @@ public class AppSurfaceDocsWebModuleTests
         var assetPathResolver = serviceProvider.GetRequiredService<AppSurfaceDocsAssetPathResolver>();
 
         Assert.Equal(AppSurfaceDocsAssetPathResolver.RootStylesheetPath, assetPathResolver.StylesheetPath);
+    }
+
+    [Fact]
+    public void AssetPathResolver_ShouldUseRootStylesheetPath_WhenAssemblyMarksDocsRootHost()
+    {
+        var resolver = AppSurfaceDocsAssetPathResolver.CreateForRootModule(
+            typeof(AppSurfaceDocsStandaloneHost).Assembly);
+
+        Assert.True(AppSurfaceDocsAssetPathResolver.IsRootModuleAssembly(typeof(AppSurfaceDocsStandaloneHost).Assembly));
+        Assert.Equal(AppSurfaceDocsAssetPathResolver.RootStylesheetPath, resolver.StylesheetPath);
     }
 
     [Fact]
