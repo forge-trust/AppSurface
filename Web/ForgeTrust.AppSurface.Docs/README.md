@@ -743,6 +743,31 @@ Enable versioning when you want the host to keep serving the live unreleased sna
 }
 ```
 
+The simplest release-store layout keeps the catalog beside the published trees:
+
+```text
+artifacts/appsurfacedocs/
+  versions.json
+  releases/
+    1.2.3/
+      index.html
+      search-index.json
+```
+
+With that layout, leave `AppSurfaceDocs:Versioning:TrustedReleaseRootPath` unset and use catalog paths such as `./releases/1.2.3`. When the catalog and exported release trees live in different configured locations, point `TrustedReleaseRootPath` at the operator-owned release store and keep each catalog `exactTreePath` relative to that root:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Versioning": {
+      "Enabled": true,
+      "CatalogPath": "config/appsurfacedocs/versions.json",
+      "TrustedReleaseRootPath": "/srv/appsurface-docs/releases"
+    }
+  }
+}
+```
+
 The route-family root owns the stable entry alias, archive, and exact release routes. The docs root owns the live source-backed preview. In the example above, `/foo/bar` is the recommended-release alias, `/foo/bar/versions` is the archive, `/foo/bar/v/{version}` serves immutable release trees, and `/foo/bar/next` remains the live preview.
 
 ### Route contract
@@ -807,6 +832,8 @@ var routeInspectorJson = routes.RouteInspectorJson;
 `AppSurfaceDocsRouteReferences` contains `Home`, `Search`, `SearchIndex`, `SearchIndexRefresh`, `SearchIndexRefreshMethod`, `Versions`, `Health`, `HealthJson`, `RouteInspector`, and `RouteInspectorJson`. These values are app-relative. Apply `HttpRequest.PathBase`, `Url.PathBaseAware(...)`, or the host's equivalent presentation helper only at browser-facing boundaries.
 
 The built-in search shell uses those route references for both the enhanced search runtime and the server-rendered recovery surface. Starter query chips render as real links to `Routes.Search` with `?q=` state, and the browse recovery links are generated from the harvested docs snapshot rather than hardcoded `/docs/...` strings. Public reader retry should use `Routes.SearchIndex`; operator UI should submit a browser form to `Routes.SearchIndexRefresh` with `Routes.SearchIndexRefreshMethod`.
+
+Embedded hosts decide their own app-wide browser error UX. The reusable `ForgeTrust.AppSurface.Docs` package registers docs routes and route references, but it does not install a docs-aware application `404` page. Hosts that want stale-docs recovery should opt into AppSurface Web conventional browser status pages, add their own `~/Views/Shared/404.cshtml`, use `BrowserStatusPageModel` for status/original-path context, inject `DocsUrlBuilder`, and link to `DocsUrlBuilder.Routes.Search` through the host's path-base-aware rendering helper.
 
 ### Document route identity
 
@@ -1165,6 +1192,11 @@ static web assets.
   - Required when versioning is enabled.
   - Points to the JSON catalog that describes the published exact-version trees and the recommended release alias.
   - Relative paths resolve from the app content root.
+- `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`
+  - Optional. Defaults to the directory containing `CatalogPath`.
+  - Defines the only filesystem tree that catalog `exactTreePath` values may publish.
+  - Relative configured values resolve from the app content root.
+  - The root and exact release trees must be ordinary directories. Symlinks, junctions, reparse points, and metadata-inspection failures are denied.
 
 ### JavaScript public API harvesting
 
@@ -1340,7 +1372,8 @@ The version catalog is the release-level source of truth for version routing and
   - Optional archive summary copy.
 - `versions[].exactTreePath`
   - Path to the exported stable docs subtree for one exact release.
-  - Relative paths resolve from the directory containing the catalog file.
+  - Must be relative to `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`. When that option is unset, the trusted release root defaults to the directory containing the catalog file.
+  - Values such as `./releases/1.2.3` are valid after normalization. Rooted paths and paths containing `..` are unavailable and are never mounted.
   - AppSurface Docs can mount that same artifact at `RouteRootPath` for the recommended alias and at `{RouteRootPath}/v/{version}` for the exact release surface.
 - `versions[].supportState`
   - Archive posture badge. Supported values are `Current`, `Maintained`, `Deprecated`, and `Archived`.
@@ -1383,14 +1416,70 @@ When the hidden frozen route manifest is present, mounted archives also use it b
 
 - Version validation is best-effort and release-local.
 - A missing or malformed `exactTreePath` marks only that release unavailable.
+- A missing, invalid, or unsafe `TrustedReleaseRootPath` is catalog-level configuration failure. The archive shows a sanitized availability message, logs retain operator details, and no published exact tree is mounted.
 - Healthy published versions and the live preview surface continue to load.
 - If the configured `recommendedVersion` is hidden, missing, or unavailable, AppSurface Docs does not mount it at the route root; that entry route falls back to the archive-style recovery surface with a link to the live preview.
+
+### Migrating absolute exactTreePath values
+
+Older catalogs could point `exactTreePath` at an absolute filesystem path. Absolute values are now unavailable because catalog data must not choose an arbitrary public mount root.
+
+Before:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Versioning": {
+      "Enabled": true,
+      "CatalogPath": "config/appsurfacedocs/versions.json"
+    }
+  }
+}
+```
+
+```json
+{
+  "versions": [
+    {
+      "version": "1.2.3",
+      "exactTreePath": "/srv/appsurface-docs/releases/1.2.3"
+    }
+  ]
+}
+```
+
+After:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Versioning": {
+      "Enabled": true,
+      "CatalogPath": "config/appsurfacedocs/versions.json",
+      "TrustedReleaseRootPath": "/srv/appsurface-docs/releases"
+    }
+  }
+}
+```
+
+```json
+{
+  "versions": [
+    {
+      "version": "1.2.3",
+      "exactTreePath": "1.2.3"
+    }
+  ]
+}
+```
 
 ### Pitfalls
 
 - Do not set `AppSurfaceDocs:Routing:DocsRootPath` to the same value as `RouteRootPath` when versioning is enabled. That collides with the stable published-release alias.
 - Do not configure only `DocsRootPath=/foo/bar/next` and expect archive routes to move to `/foo/bar`; set `RouteRootPath=/foo/bar` explicitly.
 - Do not point `recommendedVersion` at a hidden or broken release tree.
+- Do not put absolute paths in `versions[].exactTreePath`. Configure `TrustedReleaseRootPath` once, then keep catalog paths relative to that release store.
+- Do not put the trusted release root, exact release trees, frozen route manifests, or served child assets behind symlinks, junctions, or other reparse points. AppSurface Docs denies them because published trees are public static-file roots.
 - Do not expect the recommended alias to rewrite ordinary links to the exact-version route. Only canonical metadata moves from the alias root to the exact root.
 - Do not assume `AppSurfaceDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.

@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Docs;
 using ForgeTrust.AppSurface.Web;
 using Microsoft.Extensions.Hosting;
 
@@ -34,9 +35,9 @@ public static class AppSurfaceDocsStandaloneHost
     /// </summary>
     /// <param name="args">Command-line arguments forwarded to the AppSurface Web startup pipeline.</param>
     /// <param name="configureOptions">
-    /// Optional web-options callback applied after module defaults, before the host is built. Package-hosted command-line
-    /// tools use this seam to disable static-web-asset manifest loading when their required assets are embedded in
-    /// assemblies instead.
+    /// Optional web-options callback applied after module defaults and standalone browser-status-page defaults, before
+    /// the host is built. Package-hosted command-line tools use this seam to disable static-web-asset manifest loading
+    /// when their required assets are embedded in assemblies instead.
     /// </param>
     /// <returns>A task that completes when the host exits.</returns>
     [ExcludeFromCodeCoverage(
@@ -44,7 +45,7 @@ public static class AppSurfaceDocsStandaloneHost
     public static Task RunAsync(string[] args, Action<WebOptions>? configureOptions)
     {
         return new AppSurfaceDocsStandaloneStartup()
-            .WithOptions(configureOptions)
+            .WithOptions(CreateStandaloneWebOptionsCallback(configureOptions))
             .RunAsync(args);
     }
 
@@ -81,7 +82,8 @@ public static class AppSurfaceDocsStandaloneHost
     /// variable mutation.
     /// </param>
     /// <param name="configureOptions">
-    /// Optional web-options callback applied after module defaults, before the host is built.
+    /// Optional web-options callback applied after module defaults and standalone browser-status-page defaults, before
+    /// the host is built.
     /// </param>
     /// <remarks>
     /// This overload preserves the original two-parameter <c>CreateBuilder</c> method for already-compiled callers while
@@ -95,17 +97,53 @@ public static class AppSurfaceDocsStandaloneHost
     {
         var context = new StartupContext(
             args,
-            new AppSurfaceDocsWebModule(),
+            new AppSurfaceDocsStandaloneWebModule(),
             EnvironmentProvider: environmentProvider)
         {
             OverrideEntryPointAssembly = typeof(AppSurfaceDocsStandaloneHost).Assembly
         };
 
-        return ((IAppSurfaceStartup)new AppSurfaceDocsStandaloneStartup().WithOptions(configureOptions))
+        return ((IAppSurfaceStartup)new AppSurfaceDocsStandaloneStartup().WithOptions(
+                CreateStandaloneWebOptionsCallback(configureOptions)))
             .CreateHostBuilder(context);
     }
 
-    private sealed class AppSurfaceDocsStandaloneStartup : WebStartup<AppSurfaceDocsWebModule>
+    private static Action<WebOptions> CreateStandaloneWebOptionsCallback(Action<WebOptions>? configureOptions)
     {
+        return options =>
+        {
+            options.Errors.UseConventionalBrowserStatusPages();
+            configureOptions?.Invoke(options);
+        };
+    }
+
+    private sealed class AppSurfaceDocsStandaloneStartup : WebStartup<AppSurfaceDocsStandaloneWebModule>
+    {
+    }
+
+    private sealed class AppSurfaceDocsStandaloneWebModule : IAppSurfaceWebModule
+    {
+        public bool IncludeAsApplicationPart => true;
+
+        public void ConfigureWebOptions(StartupContext context, WebOptions options)
+        {
+        }
+
+        public void ConfigureServices(StartupContext context, IServiceCollection services)
+        {
+        }
+
+        public void RegisterDependentModules(ModuleDependencyBuilder builder)
+        {
+            builder.AddModule<AppSurfaceDocsWebModule>();
+        }
+
+        public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+        {
+        }
+
+        public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+        {
+        }
     }
 }

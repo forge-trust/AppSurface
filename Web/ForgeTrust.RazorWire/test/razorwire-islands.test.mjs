@@ -48,7 +48,7 @@ test('missing mount marks island failed and prevents duplicate hydration', async
       'test-missing-mount': 'data:text/javascript,export const value = 1;'
     }
   });
-  await flushHydration();
+  await waitForAttributeValue(island, 'data-rw-hydrated', 'failed');
   document.dispatchEvent({ type: 'turbo:load' });
   await flushHydration();
 
@@ -201,6 +201,15 @@ function loadIslands(islands, overrides = {}) {
 async function flushHydration() {
   await new Promise(resolve => setImmediate(resolve));
   await new Promise(resolve => setImmediate(resolve));
+}
+
+async function waitForAttributeValue(element, name, value) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await flushHydration();
+    if (element.getAttribute(name) === value) {
+      return;
+    }
+  }
 }
 
 function moduleWithMount(body) {

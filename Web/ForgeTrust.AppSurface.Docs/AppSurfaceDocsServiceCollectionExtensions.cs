@@ -177,6 +177,8 @@ public static class AppSurfaceDocsServiceCollectionExtensions
                             : NormalizeOrNull(options.Routing.PublicOrigin);
 
                     options.Versioning.CatalogPath = NormalizeOrNull(options.Versioning.CatalogPath);
+                    options.Versioning.TrustedReleaseRootPath =
+                        NormalizeOrNull(options.Versioning.TrustedReleaseRootPath);
                     options.Contributor.SymbolSourceUrlTemplate = NormalizeOrNull(options.Contributor.SymbolSourceUrlTemplate);
                     options.Contributor.SourceRef = NormalizeOrNull(options.Contributor.SourceRef);
                     options.Localization.DefaultLocale = NormalizeOrNull(options.Localization.DefaultLocale) ?? "en";

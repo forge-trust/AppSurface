@@ -256,23 +256,27 @@ public sealed class BrowserStatusPageTests
         Assert.False(response.Headers.Contains("X-AppSurface-Reexecuted-401"));
     }
 
-    [Fact]
-    public async Task HtmlRequests_ToMissingDocsRoutes_IncludeDocsSearchRecovery()
+    [Theory]
+    [InlineData("/docs")]
+    [InlineData("/docs/missing-page")]
+    public async Task HtmlRequests_ToDocsRoutes_RenderGenericFallbackWithoutDocsRecovery(string path)
     {
         await using var runningApp = await StartHostAsync(
             new PlainWebModule(),
             options => { options.Mvc = options.Mvc with { MvcSupportLevel = MvcSupport.ControllersWithViews }; },
             typeof(WebApplication).Assembly);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/docs/missing-page");
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/html"));
 
         using var response = await runningApp.Client.SendAsync(request);
         var html = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        Assert.Contains("Search documentation", html);
-        Assert.Contains("/docs/search", html);
+        Assert.Contains("AppSurface default 404", html);
+        Assert.Contains("Return home", html);
+        Assert.DoesNotContain("Search documentation", html);
+        Assert.DoesNotContain("/docs/search", html);
     }
 
     [Theory]

@@ -17,6 +17,7 @@ namespace ForgeTrust.AppSurface.Docs;
 /// </remarks>
 internal sealed class AppSurfaceDocsAssetPathResolver
 {
+    internal const string RootHostAssemblyMetadataKey = "AppSurfaceDocsRootHost";
     internal const string RootStylesheetPath = "~/css/site.gen.css";
     internal const string PackagedStylesheetPath = "~/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css";
     internal const string PackagedBrandIconPath = "~/_content/ForgeTrust.AppSurface.Docs/docs/appsurface-docs-icon.svg";
@@ -74,9 +75,22 @@ internal sealed class AppSurfaceDocsAssetPathResolver
     /// Determines whether the supplied root module assembly belongs to the AppSurface Docs standalone host.
     /// </summary>
     /// <param name="rootModuleAssembly">The assembly that owns the current host's root module.</param>
-    /// <returns><see langword="true"/> when AppSurface Docs is the root module; otherwise, <see langword="false"/>.</returns>
+    /// <returns>
+    /// <see langword="true"/> when AppSurface Docs is the root module or when the root assembly explicitly marks itself
+    /// as an AppSurface Docs root host; otherwise, <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// The standalone executable uses a tiny root module from its own assembly so MVC can discover app-owned Razor
+    /// views. The assembly metadata marker lets that executable keep the same root-host asset and redirect behavior
+    /// without requiring the reusable Docs package to reference the standalone assembly.
+    /// </remarks>
     internal static bool IsRootModuleAssembly(Assembly rootModuleAssembly)
     {
-        return rootModuleAssembly == AppSurfaceDocsAssembly;
+        return rootModuleAssembly == AppSurfaceDocsAssembly
+               || rootModuleAssembly
+                   .GetCustomAttributes<AssemblyMetadataAttribute>()
+                   .Any(attribute =>
+                       string.Equals(attribute.Key, RootHostAssemblyMetadataKey, StringComparison.Ordinal)
+                       && string.Equals(attribute.Value, "true", StringComparison.OrdinalIgnoreCase));
     }
 }
