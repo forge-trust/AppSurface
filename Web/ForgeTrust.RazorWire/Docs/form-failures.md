@@ -189,6 +189,12 @@ Use `FormError` or `FormValidationErrors` for server-rendered failure UI. Those 
 
 Refresh the token whenever a stream replaces form contents. Prefer `ReplacePartial` for the whole `<form>` so the MVC Form TagHelper emits a fresh token, or include `@Html.AntiForgeryToken()` inside updated form fields. See [Security & Anti-Forgery](./antiforgery.md).
 
+## Symptom: Tags Appear As Text After A Stream Update
+
+`Append`, `Prepend`, `Replace`, and `Update` treat their `content` argument as plain text and HTML-encode it. That is the safe default for validation messages, status labels, counters, and any value that could include caller-supplied text.
+
+If you intended to render app-authored markup, move the markup into a Razor partial or view component and use `AppendPartial`, `ReplacePartial`, `UpdatePartial`, or the matching component helper. For small server-authored fragments, use `AppendHtml`, `PrependHtml`, `ReplaceHtml`, or `UpdateHtml` only after encoding any user-controlled values before composing the trusted fragment.
+
 ## Safe Reporting
 
 Production users should see short recovery messages. Detailed diagnostics should stay in development or server logs. When reporting failed-form bugs, include the action route, HTTP status, response content type, whether `X-RazorWire-Form-Handled` was present, and whether the form had `data-rw-form-failure-target`.

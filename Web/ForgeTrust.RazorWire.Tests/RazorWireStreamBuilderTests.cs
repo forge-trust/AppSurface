@@ -16,7 +16,7 @@ namespace ForgeTrust.RazorWire.Tests;
 public class RazorWireStreamBuilderTests
 {
     [Fact]
-    public void Append_RendersCorrectMarkup()
+    public void Append_EncodesPlainTextContent()
     {
         // Arrange
         var builder = new RazorWireStreamBuilder();
@@ -27,7 +27,101 @@ public class RazorWireStreamBuilderTests
         // Assert
         Assert.Contains("action=\"append\"", result);
         Assert.Contains("target=\"target-id\"", result);
-        Assert.Contains("<template><div>content</div></template>", result);
+        Assert.Contains("<template>&lt;div&gt;content&lt;/div&gt;</template>", result);
+        Assert.DoesNotContain("<template><div>content</div></template>", result);
+    }
+
+    [Theory]
+    [InlineData("append")]
+    [InlineData("prepend")]
+    [InlineData("replace")]
+    [InlineData("update")]
+    public void TextActions_EncodePlainTextContent(string action)
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder();
+
+        // Act
+        var result = QueueTextAction(builder, action, "target-id", "<strong>A&B</strong>").Build();
+
+        // Assert
+        Assert.Contains($"action=\"{action}\"", result);
+        Assert.Contains("<template>&lt;strong&gt;A&amp;B&lt;/strong&gt;</template>", result);
+        Assert.DoesNotContain("<strong>A&B</strong>", result);
+    }
+
+    [Theory]
+    [InlineData("append")]
+    [InlineData("prepend")]
+    [InlineData("replace")]
+    [InlineData("update")]
+    public void HtmlActions_PreserveTrustedHtmlContent(string action)
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder();
+
+        // Act
+        var result = QueueHtmlAction(builder, action, "target-id", "<strong>A&B</strong>").Build();
+
+        // Assert
+        Assert.Contains($"action=\"{action}\"", result);
+        Assert.Contains("<template><strong>A&B</strong></template>", result);
+        Assert.DoesNotContain("&lt;strong&gt;A&amp;B&lt;/strong&gt;", result);
+    }
+
+    [Theory]
+    [InlineData("append")]
+    [InlineData("prepend")]
+    [InlineData("replace")]
+    [InlineData("update")]
+    public void TextActions_WithNullContent_RenderEmptyTemplate(string action)
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder();
+
+        // Act
+        var result = QueueTextAction(builder, action, "target-id", null).Build();
+
+        // Assert
+        Assert.Contains($"action=\"{action}\"", result);
+        Assert.Contains("<template></template>", result);
+    }
+
+    [Theory]
+    [InlineData("append")]
+    [InlineData("prepend")]
+    [InlineData("replace")]
+    [InlineData("update")]
+    public void HtmlActions_WithNullContent_RenderEmptyTemplate(string action)
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder();
+
+        // Act
+        var result = QueueHtmlAction(builder, action, "target-id", null).Build();
+
+        // Assert
+        Assert.Contains($"action=\"{action}\"", result);
+        Assert.Contains("<template></template>", result);
+    }
+
+    [Fact]
+    public void Build_WithMixedTextAndTrustedHtmlActions_PreservesQueueOrderAndTrustModes()
+    {
+        // Arrange
+        var builder = new RazorWireStreamBuilder();
+
+        // Act
+        var result = builder
+            .Append("list", "<li>text</li>")
+            .UpdateHtml("status", "<p>trusted</p>")
+            .Build();
+
+        // Assert
+        var textIndex = result.IndexOf("<template>&lt;li&gt;text&lt;/li&gt;</template>", StringComparison.Ordinal);
+        var htmlIndex = result.IndexOf("<template><p>trusted</p></template>", StringComparison.Ordinal);
+        Assert.True(textIndex >= 0);
+        Assert.True(htmlIndex > textIndex);
     }
 
     [Fact]
@@ -153,7 +247,7 @@ public class RazorWireStreamBuilderTests
         // Assert
         Assert.Contains("action=\"append\"", result);
         Assert.Contains("target=\"list\"", result);
-        Assert.Contains("<template><li>one</li></template>", result);
+        Assert.Contains("<template>&lt;li&gt;one&lt;/li&gt;</template>", result);
         Assert.Contains("action=\"remove\"", result);
         Assert.Contains("target=\"obsolete\"", result);
     }
@@ -178,6 +272,7 @@ public class RazorWireStreamBuilderTests
         Assert.True(visitIndex > updateIndex);
         Assert.Contains("url=\"/docs/next\"", result);
         Assert.Contains("visit-action=\"replace\"", result);
+        Assert.Contains("<template>&lt;p&gt;done&lt;/p&gt;</template>", result);
     }
 
     [Fact]
@@ -442,6 +537,38 @@ public class RazorWireStreamBuilderTests
         Assert.DoesNotContain("data-rw-form-error-list", rendered);
         Assert.DoesNotContain("Name is required", rendered);
         Assert.Contains("There are 2 more validation errors.", rendered);
+    }
+
+    private static RazorWireStreamBuilder QueueTextAction(
+        RazorWireStreamBuilder builder,
+        string action,
+        string target,
+        string? content)
+    {
+        return action switch
+        {
+            "append" => builder.Append(target, content),
+            "prepend" => builder.Prepend(target, content),
+            "replace" => builder.Replace(target, content),
+            "update" => builder.Update(target, content),
+            _ => throw new ArgumentOutOfRangeException(nameof(action), action, "Unsupported test action.")
+        };
+    }
+
+    private static RazorWireStreamBuilder QueueHtmlAction(
+        RazorWireStreamBuilder builder,
+        string action,
+        string target,
+        string? trustedHtml)
+    {
+        return action switch
+        {
+            "append" => builder.AppendHtml(target, trustedHtml),
+            "prepend" => builder.PrependHtml(target, trustedHtml),
+            "replace" => builder.ReplaceHtml(target, trustedHtml),
+            "update" => builder.UpdateHtml(target, trustedHtml),
+            _ => throw new ArgumentOutOfRangeException(nameof(action), action, "Unsupported test action.")
+        };
     }
 
     private static ViewContext CreateViewContext()
