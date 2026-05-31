@@ -808,7 +808,16 @@ declare const Turbo: TurboRuntime | undefined;
             const form = this.getForm(event.target);
             if (!this.isRazorWireTransportForm(form) || !this.isLazyAntiforgeryForm(form) || this.hasAntiforgeryToken(form)) return;
 
-            this.ensureAntiforgeryToken(form).catch(error => this.handleAntiforgeryRefreshFailure(form, error));
+            this.ensureAntiforgeryToken(form).catch(error => this.handleAntiforgeryIntentRefreshFailure(form, error));
+        }
+
+        handleAntiforgeryIntentRefreshFailure(form, error) {
+            if (!this.isFormFailureEnabled(form)) {
+                form.setAttribute('data-rw-antiforgery-state', 'failed');
+                return;
+            }
+
+            this.handleAntiforgeryRefreshFailure(form, error);
         }
 
         handleSubmitStart(event) {

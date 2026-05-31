@@ -1984,6 +1984,81 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_RewritePathBaseRootRelativeFormActions()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridPathBaseRootRelativeLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.DoesNotContain("action=\"/app/profile/save\"", html);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_RejectRootRelativeFormActionsOutsidePathBase()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridRootRelativeOutsidePathBaseLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                                 && diagnostic.Message.Contains("points outside the exported application origin", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_HybridMode_WithLiveOrigin_Should_RejectAbsoluteFormActionsOutsidePathBase()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());

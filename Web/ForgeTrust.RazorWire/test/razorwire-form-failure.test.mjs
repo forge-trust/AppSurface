@@ -249,6 +249,61 @@ test('lazy antiforgery token refresh runs when form failure ux is disabled', asy
   assert.equal(document.head.querySelectorAll('#rw-form-failure-default-styles').length, 0);
 });
 
+test('intent lazy antiforgery failure dispatches when form failure ux is enabled', async () => {
+  const { document } = loadRuntime({
+    fetch: async () => {
+      throw new Error('token endpoint offline');
+    }
+  });
+  const events = [];
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.dispatchEvent = event => {
+    events.push(event);
+    return !event.defaultPrevented;
+  };
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'focusin',
+    target: form
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'failed');
+  assert.equal(events.some(event => event.type === 'razorwire:form:failure'), true);
+});
+
+test('intent lazy antiforgery failure is quiet when form failure ux is disabled', async () => {
+  const { document } = loadRuntime({
+    fetch: async () => {
+      throw new Error('token endpoint offline');
+    }
+  });
+  const events = [];
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'off');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.dispatchEvent = event => {
+    events.push(event);
+    return !event.defaultPrevented;
+  };
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'focusin',
+    target: form
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'failed');
+  assert.equal(events.some(event => event.type === 'razorwire:form:failure'), false);
+  assert.equal(form.querySelectorAll('[data-rw-form-error-generated="true"]').length, 0);
+});
+
 test('before fetch patches paused request body and header with refreshed antiforgery token', async () => {
   const fetches = [];
   const { document } = loadRuntime({
