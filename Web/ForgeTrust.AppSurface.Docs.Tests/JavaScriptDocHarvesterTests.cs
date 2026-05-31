@@ -1587,6 +1587,36 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldIgnoreGlobalNonJavaScriptReparsePoint_WithoutDiagnostic()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            var externalReadme = Path.Join(externalRoot, "README.md");
+            await File.WriteAllTextAsync(externalReadme, "# External notes");
+            var linkPath = Path.Join(_testRoot, "README.md");
+            if (!TryCreateFileSymbolicLink(linkPath, externalReadme))
+            {
+                return;
+            }
+
+            var options = new AppSurfaceDocsOptions();
+            options.Harvest.JavaScript.StrictHealth = true;
+            options.Harvest.Paths.IncludeGlobs = ["README.md"];
+            var harvester = CreateHarvester(options);
+
+            var docs = await harvester.HarvestAsync(_testRoot);
+
+            Assert.Empty(docs);
+            Assert.Empty(GetDiagnostics(harvester));
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldUseBracketGlobToken_WhenResolvingStaticRoot()
     {
         await WriteAsync(

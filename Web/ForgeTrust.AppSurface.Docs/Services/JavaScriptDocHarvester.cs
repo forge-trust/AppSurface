@@ -1559,7 +1559,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             yield return new JavaScriptIncludeRoot(
                 candidate,
                 NormalizeRelativePath(Path.GetRelativePath(fullRoot, candidate)),
-                ContainsGlobToken(trimmedPattern));
+                ContainsGlobToken(trimmedPattern),
+                CouldMatchJavaScriptFile(trimmedPattern));
         }
     }
 
@@ -1645,6 +1646,21 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
                || value.Contains('[', StringComparison.Ordinal);
     }
 
+    private static bool CouldMatchJavaScriptFile(string pattern)
+    {
+        var normalizedPattern = NormalizeRelativePath(pattern);
+        if (!ContainsGlobToken(normalizedPattern))
+        {
+            return IsJavaScriptFile(normalizedPattern);
+        }
+
+        var fileNamePattern = Path.GetFileName(normalizedPattern);
+        var extension = Path.GetExtension(fileNamePattern);
+        return extension.Length == 0
+               || ContainsGlobToken(extension)
+               || string.Equals(extension, ".js", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Classifies a JavaScript harvest candidate before the harvester reads a source file or descends into a directory.
     /// </summary>
@@ -1705,6 +1721,11 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         JavaScriptHarvestCandidate candidate,
         List<DocHarvestDiagnostic> diagnostics)
     {
+        if (!includeRoot.CouldMatchJavaScriptFile)
+        {
+            return;
+        }
+
         if (includeRoot.HasGlobTokens
             && candidate.Status is not JavaScriptHarvestCandidateStatus.ReparsePoint
                 and not JavaScriptHarvestCandidateStatus.Inaccessible)
@@ -2146,7 +2167,8 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
     private readonly record struct JavaScriptIncludeRoot(
         string FullPath,
         string RelativePath,
-        bool HasGlobTokens);
+        bool HasGlobTokens,
+        bool CouldMatchJavaScriptFile);
 
     /// <summary>
     /// Captures the normalized path and boundary decision for a JavaScript harvest file-system candidate.
