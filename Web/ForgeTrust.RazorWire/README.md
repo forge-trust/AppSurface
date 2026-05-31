@@ -223,7 +223,7 @@ The in-memory stream hub keeps live subscription tracking separate from opt-in r
 
 Before a request reaches the hub, the RazorWire endpoint applies single-process admission guardrails:
 
-- Channel names must contain only ASCII letters, digits, `.`, `_`, `-`, and `:` and must fit `MaxChannelNameLength`.
+- Channel names, after URL decoding, may contain only ASCII letters, digits, `.`, `_`, `-`, and `:` and must fit `MaxChannelNameLength`.
 - Invalid or overlong channels return `400` before custom authorizers run.
 - Authorization denials return `403` and do not consume admission capacity.
 - Capacity denials return `429` before SSE headers are written and before `IRazorWireStreamHub.Subscribe(...)` is called.
@@ -357,7 +357,7 @@ Subscribes the page to a RazorWire stream channel.
 - `channel`: required channel name.
 - `permanent`: keeps the stream source alive across Turbo visits.
 - Stream endpoints deny subscriptions by default; configure `RazorWireStreamAuthorizationMode.AllowAll` only for public/demo channels or provide a custom `IRazorWireChannelAuthorizer`.
-- Channel names must contain only ASCII letters, digits, `.`, `_`, `-`, and `:`. The tag helper URL-encodes the generated path segment; direct requests with spaces, slashes, query/hash characters, malformed escapes, escapes that decode to invalid channel characters, control characters, or Unicode are rejected with `400`.
+- Channel names, after URL decoding, may contain only ASCII letters, digits, `.`, `_`, `-`, and `:`. The tag helper URL-encodes the generated path segment. Direct requests whose channel path segment decodes to spaces, slashes, query/hash characters, control characters, Unicode, or another invalid channel character are rejected with `400`; unencoded extra path segments can miss the stream route and return `404`, while query strings and fragments are not part of the channel route value.
 - `replay`: when `true`, appends `?replay=1` to the stream endpoint so the page receives retained channel messages before live updates. The in-memory hub retains at most 25 messages per replay channel and prunes inactive replay channels when more than 256 replay channels are retained.
 - Listen for `razorwire:stream:error` on the element when you need client-side diagnostics for failed native `EventSource` connections. The event detail includes `channel`, `source`, `state`, `readyState`, and `src`; it intentionally does not include server response bodies.
 

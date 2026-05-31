@@ -58,11 +58,9 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     var channelValidation = RazorWireStreamChannelValidation.Validate(channel, options.Streams);
                     if (!channelValidation.IsValid)
                     {
-                        var result = RazorWireStreamAdmissionResult.Rejected(
-                            channelValidation.RejectionReason!.Value,
-                            channel.Length,
-                            channel.Length,
-                            new RazorWireStreamAdmissionSnapshot(0, 0));
+                        var result = admission.RejectPreAuthorizationValidation(
+                            channel,
+                            channelValidation.RejectionReason!.Value);
 
                         await RejectAdmissionAsync(context, options, result, authorizerType: "NotResolved");
 

@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using ForgeTrust.RazorWire.Streams;
 
 namespace ForgeTrust.RazorWire.Tests;
@@ -55,6 +56,62 @@ public sealed class RazorWireStreamAdmissionControllerTests
 
         Assert.False(result.Accepted);
         Assert.Equal(RazorWireStreamAdmissionRejectionReason.InvalidChannelName, result.RejectionReason);
+    }
+
+    [Fact]
+    public void RejectPreAuthorizationValidation_RecordsMetricWithCurrentSnapshotWithoutAcquiringCapacity()
+    {
+        var rejectionReasons = new List<string>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == "ForgeTrust.RazorWire"
+                && instrument.Name == "razorwire.stream.admission.rejections")
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<int>((instrument, measurement, tags, state) =>
+        {
+            foreach (var tag in tags)
+            {
+                if (tag.Key == "reason" && tag.Value?.ToString() is { } reason)
+                {
+                    rejectionReasons.Add(reason);
+                }
+            }
+        });
+        listener.Start();
+
+        var controller = CreateController(maxLiveSubscriptions: 4);
+        var accepted = controller.TryAcquire("orders");
+
+        var rejected = controller.RejectPreAuthorizationValidation(
+            "orders/1",
+            RazorWireStreamAdmissionRejectionReason.InvalidChannelName);
+
+        Assert.True(accepted.Accepted);
+        Assert.False(rejected.Accepted);
+        Assert.Equal(RazorWireStreamAdmissionRejectionReason.InvalidChannelName, rejected.RejectionReason);
+        Assert.Equal(1, rejected.Snapshot.LiveSubscriptions);
+        Assert.Equal(1, rejected.Snapshot.LiveChannels);
+        Assert.Equal(1, controller.Snapshot.LiveSubscriptions);
+        Assert.Contains(nameof(RazorWireStreamAdmissionRejectionReason.InvalidChannelName), rejectionReasons);
+
+        accepted.Lease!.Dispose();
+    }
+
+    [Fact]
+    public void RejectPreAuthorizationValidation_RejectsCapacityReasons()
+    {
+        var controller = CreateController();
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            controller.RejectPreAuthorizationValidation(
+                "orders",
+                RazorWireStreamAdmissionRejectionReason.TooManyLiveSubscriptions));
+
+        Assert.Equal("reason", exception.ParamName);
     }
 
     [Fact]
