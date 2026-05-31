@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -534,16 +535,12 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 Reason: "exceeded metadata length before read");
         }
 
-        await using var stream = fileInfo.CreateReadStream();
-        await using var cappedStream = new RewrittenFileSizeLimitStream(
-            stream,
-            _maxRewrittenFileSizeBytes,
-            relativeFilePath,
-            artifactType);
-        using var reader = new StreamReader(cappedStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         try
         {
-            return RewrittenFileReadResult.Success(await reader.ReadToEndAsync(httpContext.RequestAborted));
+            return RewrittenFileReadResult.Success(await ReadUtf8TextWithLimitAsync(
+                fileInfo,
+                _maxRewrittenFileSizeBytes,
+                httpContext.RequestAborted));
         }
         catch (RewrittenFileSizeLimitExceededException ex)
         {
@@ -603,109 +600,43 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         }
     }
 
-    private sealed class RewrittenFileSizeLimitExceededException(
-        string relativeFilePath,
-        string artifactType,
-        long observedBytes,
-        long configuredLimitBytes)
-        : IOException(
-            $"Published-tree {artifactType} '{relativeFilePath}' exceeded the configured rewrite limit of {configuredLimitBytes} bytes.")
+    private static async Task<string> ReadUtf8TextWithLimitAsync(
+        IFileInfo fileInfo,
+        long limitBytes,
+        CancellationToken cancellationToken)
     {
-        public long ObservedBytes { get; } = observedBytes;
+        await using var stream = fileInfo.CreateReadStream();
+        await using var buffer = new MemoryStream(capacity: (int)Math.Min(limitBytes, 81920));
+        var rented = ArrayPool<byte>.Shared.Rent(81920);
+        var observedBytes = 0L;
+        try
+        {
+            int bytesRead;
+            while ((bytesRead = await stream.ReadAsync(rented.AsMemory(0, rented.Length), cancellationToken)) > 0)
+            {
+                observedBytes += bytesRead;
+                if (observedBytes > limitBytes)
+                {
+                    throw new RewrittenFileSizeLimitExceededException(observedBytes, limitBytes);
+                }
+
+                await buffer.WriteAsync(rented.AsMemory(0, bytesRead), cancellationToken);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+
+        buffer.Position = 0;
+        using var reader = new StreamReader(buffer, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return await reader.ReadToEndAsync(cancellationToken);
     }
 
-    private sealed class RewrittenFileSizeLimitStream(Stream inner, long limitBytes, string relativeFilePath, string artifactType)
-        : Stream
+    private sealed class RewrittenFileSizeLimitExceededException(long observedBytes, long configuredLimitBytes)
+        : IOException($"Published-tree rewrite exceeded the configured limit of {configuredLimitBytes} bytes.")
     {
-        private long _observedBytes;
-
-        public override bool CanRead => inner.CanRead;
-
-        public override bool CanSeek => false;
-
-        public override bool CanWrite => false;
-
-        public override long Length => inner.Length;
-
-        public override long Position
-        {
-            get => inner.Position;
-            set => throw new NotSupportedException();
-        }
-
-        public override void Flush()
-        {
-            inner.Flush();
-        }
-
-        public override int Read(byte[] buffer, int offset, int count)
-        {
-            var bytesRead = inner.Read(buffer, offset, count);
-            RecordBytes(bytesRead);
-            return bytesRead;
-        }
-
-        public override int Read(Span<byte> buffer)
-        {
-            var bytesRead = inner.Read(buffer);
-            RecordBytes(bytesRead);
-            return bytesRead;
-        }
-
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            var bytesRead = await inner.ReadAsync(buffer, cancellationToken);
-            RecordBytes(bytesRead);
-            return bytesRead;
-        }
-
-        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-        {
-            return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
-        }
-
-        public override long Seek(long offset, SeekOrigin origin)
-        {
-            throw new NotSupportedException();
-        }
-
-        public override void SetLength(long value)
-        {
-            throw new NotSupportedException();
-        }
-
-        public override void Write(byte[] buffer, int offset, int count)
-        {
-            throw new NotSupportedException();
-        }
-
-        private void RecordBytes(int bytesRead)
-        {
-            if (bytesRead <= 0)
-            {
-                return;
-            }
-
-            _observedBytes += bytesRead;
-            if (_observedBytes > limitBytes)
-            {
-                throw new RewrittenFileSizeLimitExceededException(
-                    relativeFilePath,
-                    artifactType,
-                    _observedBytes,
-                    limitBytes);
-            }
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                inner.Dispose();
-            }
-
-            base.Dispose(disposing);
-        }
+        public long ObservedBytes { get; } = observedBytes;
     }
 }
 

@@ -449,8 +449,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
             availabilityFailure = ValidateExactTree(
                 trustedReleaseRootPath,
                 exactTreePath!,
-                _options.Versioning?.MaxRewrittenFileSizeBytes
-                    ?? AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes);
+                _options.Versioning.MaxRewrittenFileSizeBytes);
         }
 
         if (availabilityFailure is not null && isPublic)

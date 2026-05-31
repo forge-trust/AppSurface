@@ -683,6 +683,17 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         Assert.Contains("Published tree rewrite limit", warning.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(33_554_433)]
+    public void Ctor_ShouldRejectUnsupportedRewriteLimits(long maxRewrittenFileSizeBytes)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => CreateHandler(
+                [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", new TestFileProvider())],
+                maxRewrittenFileSizeBytes: maxRewrittenFileSizeBytes));
+    }
+
     [Fact]
     public async Task TryHandleAsync_ShouldBypassStableAliasForPreviewArchiveAndReservedVersionPaths()
     {
