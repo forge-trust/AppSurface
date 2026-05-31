@@ -747,7 +747,7 @@ test('legacy runtime mode off also disables stale form-level auto markup', () =>
 });
 
 test('rw-visit stream action visits same-origin urls with configured action', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current' });
 
   const stream = new FakeElement('turbo-stream');
   stream.setAttribute('url', '../next?tab=done#summary');
@@ -761,7 +761,7 @@ test('rw-visit stream action visits same-origin urls with configured action', ()
 });
 
 test('rw-visit stream action revisits the current page for completion sentinel urls', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current?q=old#top' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current?q=old#top' });
 
   const stream = new FakeElement('turbo-stream');
   stream.setAttribute('url', '#');
@@ -775,7 +775,7 @@ test('rw-visit stream action revisits the current page for completion sentinel u
 });
 
 test('rw-visit stream action accepts the supported same-origin url forms', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current?q=old#top' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current?q=old#top' });
   const allowed = [
     ['/docs/next', 'https://example.test/docs/next'],
     ['?tab=done', 'https://example.test/docs/current?tab=done'],
@@ -797,7 +797,7 @@ test('rw-visit stream action accepts the supported same-origin url forms', () =>
 });
 
 test('rw-visit stream action defaults to advance', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current' });
 
   const stream = new FakeElement('turbo-stream');
   stream.setAttribute('url', '#summary');
@@ -810,7 +810,7 @@ test('rw-visit stream action defaults to advance', () => {
 });
 
 test('rw-visit stream action rejects unsafe urls without throwing', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current' });
   const rejectedUrls = [
     '',
     ' /docs/next',
@@ -835,7 +835,7 @@ test('rw-visit stream action rejects unsafe urls without throwing', () => {
 });
 
 test('rw-visit stream action rejects unsupported visit action without throwing', () => {
-  const { turbo } = loadRuntime({ windowHref: 'https://example.test/docs/current' });
+  const { turbo } = loadRuntimeWithVisitAction({ windowHref: 'https://example.test/docs/current' });
 
   const stream = new FakeElement('turbo-stream');
   stream.setAttribute('url', '/docs/next');
@@ -919,6 +919,17 @@ function loadRuntime(runtimeOptions = {}) {
   vm.runInContext(readFileSync(runtimePath, 'utf8'), context);
 
   return { context, document, window, turbo };
+}
+
+function loadRuntimeWithVisitAction(runtimeOptions = {}) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const runtime = loadRuntime(runtimeOptions);
+    if (typeof runtime.turbo?.StreamActions?.['rw-visit'] === 'function') {
+      return runtime;
+    }
+  }
+
+  assert.fail('RazorWire runtime did not register the rw-visit Turbo stream action.');
 }
 
 function response(status, headers) {
