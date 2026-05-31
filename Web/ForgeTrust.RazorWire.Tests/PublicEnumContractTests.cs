@@ -26,6 +26,17 @@ public class PublicEnumContractTests
     }
 
     [Theory]
+    [InlineData(RazorWireHybridCredentialsMode.Auto, 0)]
+    [InlineData(RazorWireHybridCredentialsMode.Include, 1)]
+    [InlineData(RazorWireHybridCredentialsMode.Omit, 2)]
+    public void RazorWireHybridCredentialsMode_NumericValues_AreStable(
+        RazorWireHybridCredentialsMode value,
+        int expected)
+    {
+        Assert.Equal(expected, (int)value);
+    }
+
+    [Theory]
     [InlineData(RazorWireVisitAction.Advance, 0)]
     [InlineData(RazorWireVisitAction.Replace, 1)]
     public void RazorWireVisitAction_NumericValues_AreStable(

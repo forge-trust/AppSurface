@@ -1104,10 +1104,18 @@ declare const Turbo: TurboRuntime | undefined;
 
         handleAntiforgeryRefreshFailure(form, error) {
             form.setAttribute('data-rw-antiforgery-state', 'failed');
+            const formState = this.state.get(form) || {};
+            const submitter = formState.submitter || null;
+            const wasSubmitting = form.hasAttribute('data-rw-submitting');
+            if (wasSubmitting) {
+                this.finishSubmitting(form, formState);
+                form.setAttribute('data-rw-submit-status', 'failed');
+            }
+
             const target = this.resolveTarget(form);
             const detail = {
                 form,
-                submitter: null,
+                submitter,
                 statusCode: null,
                 handled: false,
                 responseKind: 'network',
@@ -1134,6 +1142,16 @@ declare const Turbo: TurboRuntime | undefined;
 
             if (!failureEvent.defaultPrevented && this.getMode(form) === 'auto') {
                 this.renderFailure(form, target.element, detail);
+            }
+
+            if (wasSubmitting) {
+                this.dispatch(form, 'razorwire:form:submit-end', {
+                    form,
+                    submitter,
+                    success: false,
+                    statusCode: null,
+                    handled: false
+                });
             }
         }
 

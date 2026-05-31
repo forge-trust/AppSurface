@@ -391,6 +391,59 @@ test('lazy antiforgery token refresh is shared between intent and submit', async
   assert.equal(resumed, true);
 });
 
+test('lazy antiforgery refresh failure clears active submit state', async () => {
+  const { document } = loadRuntime({
+    fetch: async () => {
+      throw new Error('token endpoint offline');
+    }
+  });
+  const events = [];
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'auto');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  form.dispatchEvent = event => {
+    events.push(event);
+    return !event.defaultPrevented;
+  };
+  const button = new FakeElement('button');
+  form.appendChild(button);
+  document.body.appendChild(form);
+
+  document.dispatchEvent({
+    type: 'turbo:submit-start',
+    target: form,
+    detail: { formSubmission: { submitter: button } }
+  });
+
+  assert.equal(form.getAttribute('data-rw-submitting'), 'true');
+  assert.equal(button.disabled, true);
+
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers: {} },
+      resume: () => {}
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const submitEnd = events.find(item => item.type === 'razorwire:form:submit-end');
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(form.hasAttribute('data-rw-submitting'), false);
+  assert.equal(form.hasAttribute('aria-busy'), false);
+  assert.equal(form.getAttribute('data-rw-submit-status'), 'failed');
+  assert.equal(button.disabled, false);
+  assert.equal(submitEnd.detail.success, false);
+  assert.equal(submitEnd.detail.submitter, button);
+});
+
 test('submit lifecycle disables only RazorWire-owned submitter state and restores it', () => {
   const { document } = loadRuntime();
   const form = new FakeForm();

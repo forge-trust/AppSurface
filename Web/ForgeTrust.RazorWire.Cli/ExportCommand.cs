@@ -143,15 +143,15 @@ public partial class ExportCommand : ICommand
     /// <returns>A <see cref="ValueTask"/> that completes when the export operation finishes.</returns>
     public async ValueTask ExecuteAsync(IConsole console, CancellationToken cancellationToken)
     {
-        var request = _requestFactory.Create(BaseUrl, ProjectPath, DllPath, Framework, AppArgs, NoBuild);
-        await using var resolvedSource = await _sourceResolver.ResolveAsync(request, cancellationToken);
-
-        _logger.LogInformation("Exporting to {OutputPath}...", OutputPath);
-
         if (!ExportHybridOptions.TryNormalizeOrigin(LiveOrigin, out var normalizedLiveOrigin))
         {
             throw new CommandException("The --live-origin value must be an absolute http or https origin, such as 'https://api.example.com', with no path, query string, fragment, or userinfo.");
         }
+
+        var request = _requestFactory.Create(BaseUrl, ProjectPath, DllPath, Framework, AppArgs, NoBuild);
+        await using var resolvedSource = await _sourceResolver.ResolveAsync(request, cancellationToken);
+
+        _logger.LogInformation("Exporting to {OutputPath}...", OutputPath);
 
         var context = new ExportContext(
             OutputPath,
