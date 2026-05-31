@@ -777,7 +777,7 @@ declare const Turbo: TurboRuntime | undefined;
 
         handleBeforeFetchRequest(event) {
             const form = this.getForm(event.target);
-            if (!this.isRazorWireForm(form)) return;
+            if (!this.isRazorWireTransportForm(form)) return;
 
             event.detail.fetchOptions = event.detail.fetchOptions || {};
             if (this.shouldIncludeCredentials(form)) {
@@ -806,7 +806,7 @@ declare const Turbo: TurboRuntime | undefined;
 
         handleAntiforgeryIntent(event) {
             const form = this.getForm(event.target);
-            if (!this.isRazorWireForm(form) || !this.isLazyAntiforgeryForm(form) || this.hasAntiforgeryToken(form)) return;
+            if (!this.isRazorWireTransportForm(form) || !this.isLazyAntiforgeryForm(form) || this.hasAntiforgeryToken(form)) return;
 
             this.ensureAntiforgeryToken(form).catch(error => this.handleAntiforgeryRefreshFailure(form, error));
         }
@@ -942,9 +942,17 @@ declare const Turbo: TurboRuntime | undefined;
         }
 
         isRazorWireForm(form): form is HTMLFormElement {
+            return this.isRazorWireTransportForm(form)
+                && this.isFormFailureEnabled(form);
+        }
+
+        isRazorWireTransportForm(form): form is HTMLFormElement {
             return form instanceof HTMLFormElement
-                && this.config.failureUxEnabled !== false
-                && form.getAttribute('data-rw-form') === 'true'
+                && form.getAttribute('data-rw-form') === 'true';
+        }
+
+        isFormFailureEnabled(form) {
+            return this.config.failureUxEnabled !== false
                 && this.getMode(form) !== 'off';
         }
 
@@ -1140,7 +1148,7 @@ declare const Turbo: TurboRuntime | undefined;
                 this.dispatch(form, 'razorwire:form:diagnostic', detail.developmentDiagnostic);
             }
 
-            if (!failureEvent.defaultPrevented && this.getMode(form) === 'auto') {
+            if (!failureEvent.defaultPrevented && this.isFormFailureEnabled(form) && this.getMode(form) === 'auto') {
                 this.renderFailure(form, target.element, detail);
             }
 

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading.Channels;
 using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Builder;
@@ -66,6 +67,23 @@ public class RazorWireEndpointAuthorizationTests
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         Assert.Equal(string.Empty, body);
+    }
+
+    [Fact]
+    public async Task AntiforgeryTokenEndpoint_ReturnsTokenPayloadWithNoStoreHeaders()
+    {
+        await using var fixture = await RazorWireEndpointFixture.StartAsync(Environments.Production);
+
+        using var response = await fixture.Client.GetAsync("/_rw/antiforgery/token");
+        var body = await response.Content.ReadAsStringAsync();
+        using var document = JsonDocument.Parse(body);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        Assert.Contains(response.Headers.Pragma, pragma => string.Equals(pragma.Name, "no-cache", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("__RequestVerificationToken", document.RootElement.GetProperty("formFieldName").GetString());
+        Assert.Equal("RequestVerificationToken", document.RootElement.GetProperty("headerName").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("requestToken").GetString()));
     }
 
     [Fact]

@@ -199,6 +199,56 @@ test('lazy antiforgery token fetch includes credentials for auto mode with live 
   assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'ready');
 });
 
+test('lazy antiforgery token refresh runs when form failure ux is disabled', async () => {
+  const fetches = [];
+  const { document } = loadRuntime({
+    formFailureEnabled: 'false',
+    failureMode: 'off',
+    fetch: async (url, options) => {
+      fetches.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          formFieldName: '__RequestVerificationToken',
+          requestToken: 'runtime-token'
+        })
+      };
+    }
+  });
+  const form = new FakeForm();
+  form.setAttribute('data-rw-form', 'true');
+  form.setAttribute('data-rw-form-failure', 'off');
+  form.setAttribute('data-rw-antiforgery', 'lazy');
+  document.body.appendChild(form);
+
+  let resumed = false;
+  const event = {
+    type: 'turbo:before-fetch-request',
+    target: form,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    detail: {
+      fetchOptions: { headers: {} },
+      resume: () => {
+        resumed = true;
+      }
+    }
+  };
+  document.dispatchEvent(event);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.detail.fetchOptions.headers['X-RazorWire-Form'], 'true');
+  assert.equal(fetches.length, 1);
+  assert.equal(fetches[0].options.credentials, 'same-origin');
+  assert.equal(form.children.find(child => child.name === '__RequestVerificationToken')?.value, 'runtime-token');
+  assert.equal(form.getAttribute('data-rw-antiforgery-state'), 'ready');
+  assert.equal(resumed, true);
+  assert.equal(document.head.querySelectorAll('#rw-form-failure-default-styles').length, 0);
+});
+
 test('before fetch patches paused request body and header with refreshed antiforgery token', async () => {
   const fetches = [];
   const { document } = loadRuntime({
@@ -625,7 +675,7 @@ test('global disabled failure UX ignores stale form-level auto markup', () => {
     detail: { formSubmission: { submitter: button } }
   });
 
-  assert.equal(beforeFetch.detail.fetchOptions.headers['X-RazorWire-Form'], undefined);
+  assert.equal(beforeFetch.detail.fetchOptions.headers['X-RazorWire-Form'], 'true');
   assert.equal(form.hasAttribute('data-rw-submitting'), false);
   assert.equal(button.disabled, false);
   assert.equal(document.head.querySelectorAll('#rw-form-failure-default-styles').length, 0);

@@ -706,9 +706,23 @@ public class ExportEngine
             return false;
         }
 
+        if (!Uri.TryCreate(EnsureTrailingSlash(context.BaseUrl), UriKind.Absolute, out var baseUri))
+        {
+            error = "The export base URL is not an absolute HTTP route.";
+            return false;
+        }
+
         string resolved;
-        if (!value.StartsWith("/", StringComparison.Ordinal)
-            && Uri.TryCreate(value, UriKind.Absolute, out var absoluteUri))
+        if (value.StartsWith("/", StringComparison.Ordinal))
+        {
+            if (!Uri.TryCreate(baseUri.GetLeftPart(UriPartial.Authority) + value, UriKind.Absolute, out var rootRelativeUri)
+                || !TryGetAppRelativeRoute(rootRelativeUri, baseUri, out resolved))
+            {
+                error = $"'{value}' points outside the exported application origin.";
+                return false;
+            }
+        }
+        else if (Uri.TryCreate(value, UriKind.Absolute, out var absoluteUri))
         {
             if (absoluteUri.Scheme != Uri.UriSchemeHttp && absoluteUri.Scheme != Uri.UriSchemeHttps)
             {
@@ -716,8 +730,7 @@ public class ExportEngine
                 return false;
             }
 
-            if (!Uri.TryCreate(EnsureTrailingSlash(context.BaseUrl), UriKind.Absolute, out var baseUri)
-                || !HasSameOrigin(absoluteUri, baseUri)
+            if (!HasSameOrigin(absoluteUri, baseUri)
                 || !TryGetAppRelativeRoute(absoluteUri, baseUri, out resolved))
             {
                 error = $"'{value}' points outside the exported application origin.";
