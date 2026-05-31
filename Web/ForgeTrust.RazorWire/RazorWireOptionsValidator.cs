@@ -54,13 +54,10 @@ internal sealed class RazorWireOptionsValidator : IValidateOptions<RazorWireOpti
             failures.Add("RazorWire:Streams:BasePath must not end with '/'.");
         }
 
-        foreach (var c in basePath)
+        if (basePath.Any(c => char.IsControl(c) || char.IsWhiteSpace(c) || c is '{' or '}' or '?' or '#'))
         {
-            if (char.IsControl(c) || char.IsWhiteSpace(c) || c is '{' or '}' or '?' or '#')
-            {
-                failures.Add("RazorWire:Streams:BasePath must not contain whitespace, route tokens, query strings, fragments, or control characters.");
-                return;
-            }
+            failures.Add("RazorWire:Streams:BasePath must not contain whitespace, route tokens, query strings, fragments, or control characters.");
+            return;
         }
     }
 

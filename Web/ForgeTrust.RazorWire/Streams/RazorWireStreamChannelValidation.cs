@@ -14,12 +14,9 @@ internal static class RazorWireStreamChannelValidation
             return RazorWireStreamChannelValidationResult.Invalid(RazorWireStreamAdmissionRejectionReason.ChannelNameTooLong);
         }
 
-        foreach (var c in channel)
+        if (channel.Any(c => !IsAllowedChannelCharacter(c)))
         {
-            if (!IsAllowedChannelCharacter(c))
-            {
-                return RazorWireStreamChannelValidationResult.Invalid(RazorWireStreamAdmissionRejectionReason.InvalidChannelName);
-            }
+            return RazorWireStreamChannelValidationResult.Invalid(RazorWireStreamAdmissionRejectionReason.InvalidChannelName);
         }
 
         return RazorWireStreamChannelValidationResult.Valid;

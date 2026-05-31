@@ -103,7 +103,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     }
 
                     var hub = context.RequestServices.GetRequiredService<IRazorWireStreamHub>();
-                    var lease = admissionResult.Lease!;
+                    using var lease = admissionResult.Lease!;
                     ChannelReader<string>? reader = null;
 
                     try
@@ -162,20 +162,9 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     }
                     finally
                     {
-                        if (reader is null)
+                        if (reader is not null)
                         {
-                            lease.Dispose();
-                        }
-                        else
-                        {
-                            try
-                            {
-                                hub.Unsubscribe(channel, reader);
-                            }
-                            finally
-                            {
-                                lease.Dispose();
-                            }
+                            hub.Unsubscribe(channel, reader);
                         }
                     }
                 })
