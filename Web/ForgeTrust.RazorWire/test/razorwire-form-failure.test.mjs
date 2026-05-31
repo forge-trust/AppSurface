@@ -356,18 +356,63 @@ test('stream registration tolerates missing Turbo global', () => {
   assert.equal(stream.getAttribute('data-rw-registered'), 'true');
 });
 
-test('stream state body attributes use safe channel tokens', () => {
+test('stream state body attributes use decoded channel identity without url modifiers', () => {
   const { context, document } = loadRuntime();
   const stream = new FakeElement('rw-stream-source');
-  stream.setAttribute('src', '/streams/orders?tenant=a#live');
+  stream.setAttribute('src', '/streams/tenant%3Aorders?replay=1#live');
   document.body.appendChild(stream);
 
   context.window.RazorWire.connectionManager.scan();
-  const source = context.window.RazorWire.connectionManager.sources.get('/streams/orders?tenant=a#live');
+  const source = context.window.RazorWire.connectionManager.sources.get('/streams/tenant%3Aorders?replay=1#live');
   source.es.onopen();
 
-  assert.equal(document.body.getAttribute('data-rw-stream-orders-tenant-a-live'), 'connected');
-  assert.equal(document.body.hasAttribute('data-rw-stream-orders?tenant=a#live'), false);
+  assert.equal(source.channel, 'tenant:orders');
+  assert.equal(document.body.getAttribute('data-rw-stream-tenant-orders'), 'connected');
+  assert.equal(document.body.hasAttribute('data-rw-stream-tenant-3Aorders-replay-1-live'), false);
+});
+
+test('stream state ignores decoded direct-request channels outside the public grammar', () => {
+  const { context, document } = loadRuntime();
+  const stream = new FakeElement('rw-stream-source');
+  const selectors = [];
+  const querySelectorAll = document.querySelectorAll.bind(document);
+  stream.setAttribute('src', '/streams/%22');
+  document.body.appendChild(stream);
+  document.querySelectorAll = selector => {
+    selectors.push(selector);
+    return querySelectorAll(selector);
+  };
+
+  context.window.RazorWire.connectionManager.scan();
+  const source = context.window.RazorWire.connectionManager.sources.get('/streams/%22');
+
+  assert.equal(source.channel, null);
+  assert.doesNotThrow(() => source.es.onerror());
+  assert.equal(selectors.some(selector => selector.startsWith('[data-rw-requires-stream="')), false);
+});
+
+test('stream errors dispatch observable detail to registered stream source elements', () => {
+  const { context, document } = loadRuntime();
+  const stream = new FakeElement('rw-stream-source');
+  const events = [];
+  stream.setAttribute('src', '/streams/orders');
+  stream.dispatchEvent = event => {
+    events.push(event);
+    return !event.defaultPrevented;
+  };
+  document.body.appendChild(stream);
+
+  context.window.RazorWire.connectionManager.scan();
+  const source = context.window.RazorWire.connectionManager.sources.get('/streams/orders');
+  source.es.readyState = 0;
+  source.es.onerror();
+
+  const error = events.find(event => event.type === 'razorwire:stream:error');
+  assert.equal(error.detail.channel, 'orders');
+  assert.equal(error.detail.source, stream);
+  assert.equal(error.detail.state, 'connecting');
+  assert.equal(error.detail.readyState, 0);
+  assert.equal(error.detail.src, '/streams/orders');
 });
 
 function loadRuntime(runtimeOptions = {}) {
