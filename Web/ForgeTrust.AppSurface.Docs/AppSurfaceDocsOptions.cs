@@ -1182,6 +1182,19 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
             ValidateHarvestSourceOptions(harvest.Markdown, "AppSurfaceDocs:Harvest:Markdown", failures);
             ValidateHarvestSourceOptions(harvest.CSharp, "AppSurfaceDocs:Harvest:CSharp", failures);
             ValidateHarvestSourceOptions(harvest.JavaScript, "AppSurfaceDocs:Harvest:JavaScript", failures);
+            if (harvest.Markdown is not null)
+            {
+                if (harvest.Markdown.MaxFileSizeBytes <= 0)
+                {
+                    failures.Add("AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes must be greater than zero.");
+                }
+
+                if (harvest.Markdown.MaxMetadataFileSizeBytes <= 0)
+                {
+                    failures.Add("AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes must be greater than zero.");
+                }
+            }
+
             if (harvest.JavaScript is not null)
             {
                 if (harvest.JavaScript.MaxFileSizeBytes <= 0)

@@ -133,7 +133,9 @@ Before pointing AppSurface Docs at a large repository, decide which paths are me
           "README.md",
           "LICENSE",
           "docs/**/*.md"
-        ]
+        ],
+        "MaxFileSizeBytes": 1048576,
+        "MaxMetadataFileSizeBytes": 65536
       },
       "CSharp": {
         "IncludeGlobs": [
@@ -151,6 +153,8 @@ Before pointing AppSurface Docs at a large repository, decide which paths are me
 ```
 
 Use repository-relative globs with `/` separators. AppSurface Docs rejects rooted paths, URI-shaped patterns, query strings, fragments, and `..` segments during startup validation. Empty includes mean the built-in harvester defaults are used; nonempty global includes become the outer boundary for Markdown, C#, and JavaScript.
+
+Markdown resource limits are byte counts. `AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes` defaults to `1048576` and skips oversized Markdown bodies before file read, inline-front-matter parsing, and Markdig parsing. `AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes` defaults to `65536` and ignores oversized paired `.md.yml` or `.md.yaml` sidecars before YAML parsing while leaving the Markdown body eligible. These guards are not parser-complexity, AST-depth, timeout, or cancellation limits. Use `AppSurfaceDocs__Harvest__Markdown__MaxFileSizeBytes` and `AppSurfaceDocs__Harvest__Markdown__MaxMetadataFileSizeBytes` for environment-variable configuration.
 
 The package also keeps protective defaults for build output, hidden directories, test projects, and C# source under `examples`. These defaults prevent common accidental publication without requiring every host to write the same excludes. If a default is too broad, use `DefaultExclusions:AllowGlobs` for narrow exceptions or `DefaultExclusions:DisabledGroups` when the entire group is intentionally public. Use the named group IDs, not numeric enum values; ordinals fail startup validation. Allows are group-aware, so a path inside `.github/bin` needs an allow for both `HiddenDirectories` and `BuildOutput` unless one group is disabled.
 
@@ -185,9 +189,11 @@ If docs disappear after an upgrade, diagnose one repository-relative path first:
 | Generated or bundled docs vanished. | The path matches a repository `.gitignore` rule. | Add a narrow `VcsIgnore:AllowGlobs` entry for the public docs path. |
 | A tracked file vanished even though Git still has it. | The tracked path also matches `.gitignore`. | Keep the ignore rule and add `VcsIgnore:AllowGlobs`, or move the public docs outside the ignored tree. |
 | A restored path still does not harvest. | AppSurface default exclusions or configured `ExcludeGlobs` also match it. | Add the matching default-exclusion allow, disable the intended default group, or change the configured exclude. |
+| A Markdown page is missing but harvest is still Healthy. | `_health.json` contains `appsurfacedocs.markdown.file_too_large` with the file path, actual bytes, and `MaxFileSizeBytes`. | Exclude generated or accidental docs with `Harvest:Markdown:ExcludeGlobs` or `Harvest:Paths:ExcludeGlobs`, or raise `MaxFileSizeBytes` only for intentional authored docs. |
+| A page publishes but its sidecar metadata is missing. | `_health.json` contains `appsurfacedocs.markdown.metadata_file_too_large` for the `.md.yml` or `.md.yaml` sidecar. | Move long prose into Markdown, trim generated metadata, or raise `MaxMetadataFileSizeBytes` only for intentional authored metadata. |
 | The host needs time to migrate. | The repository relied on pre-existing AppSurface behavior. | Temporarily set `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled=false` while moving public docs or adding allow globs. |
 
-Use the harvest health page and JSON endpoint to inspect VCS-ignore counts and sample paths when a source-backed snapshot looks unexpectedly small.
+Use the harvest health page and JSON endpoint to inspect VCS-ignore counts, Markdown resource warnings, and sample paths when a source-backed snapshot looks unexpectedly small. A `Healthy` snapshot can still contain warning diagnostics; check `diagnostics` when release workflows require warning-free docs.
 
 ## Understand first harvest behavior
 

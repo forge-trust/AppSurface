@@ -84,6 +84,46 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldSkipOversizedMarkdownBeforeReadingOrParsing()
+    {
+        var markdownPath = Path.Combine(_testRoot, "Large.md");
+        await File.WriteAllTextAsync(markdownPath, "# Large\nThis body is intentionally larger than the test limit.");
+        var readPaths = new List<string>();
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            (path, cancellationToken) =>
+            {
+                readPaths.Add(path);
+                return File.ReadAllTextAsync(path, cancellationToken);
+            },
+            new AppSurfaceDocsOptions
+            {
+                Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    Markdown = new AppSurfaceDocsMarkdownHarvestOptions
+                    {
+                        MaxFileSizeBytes = 8
+                    }
+                }
+            });
+
+        var docs = await harvester.HarvestAsync(_testRoot);
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester).GetHarvestDiagnostics();
+
+        Assert.Empty(docs);
+        Assert.DoesNotContain(markdownPath, readPaths);
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(DocHarvestDiagnosticCodes.MarkdownFileTooLarge, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Equal(nameof(MarkdownHarvester), diagnostic.HarvesterType);
+        Assert.Contains("Large.md", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("bytes", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Markdig did not receive", diagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains("AppSurfaceDocs:Harvest:Markdown:ExcludeGlobs", diagnostic.Fix, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HarvestAsync_WithContextOnDerivedHarvesterUsesPublicHarvesterContract()
     {
         var harvester = new DerivedMarkdownHarvester(_loggerFake);
@@ -964,6 +1004,49 @@ public class MarkdownHarvesterTests : IDisposable
                 call => call.Method.Name == nameof(ILogger.Log)
                         && call.GetArgument<LogLevel>(0) == LogLevel.Warning)
             .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldIgnoreOversizedMetadataSidecarBeforeReadingOrParsing()
+    {
+        var markdownPath = Path.Combine(_testRoot, "Guide.md");
+        var sidecarPath = markdownPath + ".yml";
+        await File.WriteAllTextAsync(markdownPath, "# Guide\n\nBody.");
+        await File.WriteAllTextAsync(sidecarPath, "title: Oversized Sidecar\nsummary: This sidecar should not be read.");
+        var readPaths = new List<string>();
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            (path, cancellationToken) =>
+            {
+                readPaths.Add(path);
+                return File.ReadAllTextAsync(path, cancellationToken);
+            },
+            new AppSurfaceDocsOptions
+            {
+                Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    Markdown = new AppSurfaceDocsMarkdownHarvestOptions
+                    {
+                        MaxMetadataFileSizeBytes = 8
+                    }
+                }
+            });
+
+        var doc = Assert.Single(await harvester.HarvestAsync(_testRoot));
+        var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(harvester).GetHarvestDiagnostics();
+
+        Assert.Equal("Guide", doc.Title);
+        Assert.Equal("Guide", doc.Metadata?.Title);
+        Assert.Contains(markdownPath, readPaths);
+        Assert.DoesNotContain(sidecarPath, readPaths);
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(DocHarvestDiagnosticCodes.MarkdownMetadataFileTooLarge, diagnostic.Code);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Equal(nameof(MarkdownHarvester), diagnostic.HarvesterType);
+        Assert.Contains("Guide.md.yml", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes", diagnostic.Problem, StringComparison.Ordinal);
+        Assert.Contains("Markdown body can still publish", diagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains("Move large prose into the Markdown body", diagnostic.Fix, StringComparison.Ordinal);
     }
 
     [Fact]
