@@ -55,6 +55,29 @@ public class MarkdownHarvesterTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_WithLoggerFactoryAndPathPolicyShouldCreateDefaultHighlighter()
+    {
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            NullLoggerFactory.Instance,
+            AppSurfaceDocsHarvestPathPolicy.CreateDefault());
+
+        Assert.NotNull(harvester);
+    }
+
+    [Fact]
+    public void Constructor_WithCodeHighlighterAndPathPolicyShouldCreateHarvester()
+    {
+        var harvester = new MarkdownHarvester(
+            _loggerFake,
+            File.ReadAllTextAsync,
+            new RecordingCodeHighlighter(),
+            AppSurfaceDocsHarvestPathPolicy.CreateDefault());
+
+        Assert.NotNull(harvester);
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldApplyConfiguredHarvestPathPolicy()
     {
         var harvester = new MarkdownHarvester(
