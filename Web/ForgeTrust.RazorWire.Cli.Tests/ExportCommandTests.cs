@@ -24,6 +24,8 @@ public class ExportCommandTests
         Directory.CreateDirectory(tempDir);
         try
         {
+            Directory.CreateDirectory(Path.Combine(tempDir, ".well-known"));
+            await File.WriteAllTextAsync(Path.Combine(tempDir, ".well-known", "security.txt"), "Contact: mailto:security@example.com");
             var logger = A.Fake<ILogger<ExportCommand>>();
             var engineLogger = A.Fake<ILogger<ExportEngine>>();
             var requestFactory = new ExportSourceRequestFactory();
@@ -44,6 +46,39 @@ public class ExportCommandTests
             await command.ExecuteAsync(A.Fake<IConsole>());
 
             Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(Path.Combine(tempDir, ".well-known", "security.txt")));
+            var manifestPath = Path.Combine(tempDir, ".appsurface-docs-release-manifest.json");
+            Assert.False(File.Exists(manifestPath));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(".nojekyll", "/.nojekyll")]
+    [InlineData("asset:name.svg", "/asset:name.svg")]
+    public async Task ReleaseArchiveManifestWriter_ShouldFail_WhenOutputContainsUnsupportedArchivePath(
+        string unsafePath,
+        string expectedRoute)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "index.html"), "<!DOCTYPE html><html></html>");
+            await File.WriteAllTextAsync(Path.Combine(tempDir, unsafePath), string.Empty);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(
+                () => ReleaseArchiveManifestWriter.WriteAsync(tempDir, CancellationToken.None));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("ASDOCSARCHIVE005", diagnostic.Code);
+            Assert.Equal(expectedRoute, diagnostic.Route);
         }
         finally
         {

@@ -95,6 +95,11 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 return false;
             }
 
+            if (!CanServeResolvedFile(mount, relativeFilePath, fileInfo))
+            {
+                return false;
+            }
+
             await WriteResponseAsync(
                 httpContext,
                 mount,
@@ -226,7 +231,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             return false;
         }
 
-        if (IsAllowedExactFilePath(trimmed)
+        if (IsHandlerServeableFilePath(trimmed, allowSvg: true)
             && !relativeRequestPath.EndsWith("/", StringComparison.Ordinal))
         {
             var exactFile = mount.FileProvider.GetFileInfo(trimmed);
@@ -254,7 +259,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         return false;
     }
 
-    private static bool IsAllowedExactFilePath(string path)
+    internal static bool IsHandlerServeableFilePath(string path, bool allowSvg)
     {
         if (string.IsNullOrWhiteSpace(path) || HasHiddenPathSegment(path))
         {
@@ -275,7 +280,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             return true;
         }
 
-        return HasAllowedEmbeddedAssetExtension(path);
+        return HasAllowedEmbeddedAssetExtension(path, allowSvg);
     }
 
     private static IEnumerable<string> BuildCandidatePaths(string relativeRequestPath)
@@ -293,7 +298,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             yield break;
         }
 
-        if (IsAllowedExactFilePath(trimmed))
+        if (IsHandlerServeableFilePath(trimmed, allowSvg: true))
         {
             yield break;
         }
@@ -302,7 +307,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         yield return trimmed + "/index.html";
     }
 
-    private static bool HasAllowedEmbeddedAssetExtension(string path)
+    private static bool HasAllowedEmbeddedAssetExtension(string path, bool allowSvg)
     {
         var extension = Path.GetExtension(path);
         if (string.IsNullOrWhiteSpace(extension))
@@ -310,7 +315,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             return false;
         }
 
-        return extension.Equals(".svg", StringComparison.OrdinalIgnoreCase)
+        return (allowSvg && extension.Equals(".svg", StringComparison.OrdinalIgnoreCase))
                || extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
                || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
                || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
@@ -321,6 +326,53 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                || extension.Equals(".woff2", StringComparison.OrdinalIgnoreCase)
                || extension.Equals(".ttf", StringComparison.OrdinalIgnoreCase)
                || extension.Equals(".eot", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool CanServeResolvedFile(
+        AppSurfaceDocsPublishedTreeMount mount,
+        string relativeFilePath,
+        IFileInfo fileInfo)
+    {
+        var isSvg = IsSvgPath(relativeFilePath);
+        if (mount.ArchiveVerificationState != AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified)
+        {
+            if (isSvg)
+            {
+                _logger.LogWarning(
+                    "ASDOCSARCHIVE010: Denying active SVG asset {ArchivePath} because the published AppSurface Docs archive mounted at {MountRootPath} is not verified.",
+                    relativeFilePath,
+                    mount.MountRootPath);
+                return false;
+            }
+
+            return true;
+        }
+
+        if (mount.VerifiedReleaseArchive is null
+            || !mount.VerifiedReleaseArchive.TryGetFile(relativeFilePath, out var verifiedFile))
+        {
+            _logger.LogWarning(
+                "ASDOCSARCHIVE009: Denying published AppSurface Docs archive file {ArchivePath} because it is not covered by the verified release manifest for mount {MountRootPath}.",
+                relativeFilePath,
+                mount.MountRootPath);
+            return false;
+        }
+
+        if (isSvg && !AppSurfaceDocsReleaseArchiveVerifier.FileMatches(fileInfo, verifiedFile))
+        {
+            _logger.LogWarning(
+                "ASDOCSARCHIVE010: Denying active SVG asset {ArchivePath} because its bytes no longer match the verified release manifest for mount {MountRootPath}.",
+                relativeFilePath,
+                mount.MountRootPath);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsSvgPath(string relativeFilePath)
+    {
+        return Path.GetExtension(relativeFilePath).Equals(".svg", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool HasHiddenPathSegment(string path)
@@ -439,6 +491,8 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
     /// <param name="mountRootPath">The request-path root where the tree should appear.</param>
     /// <param name="fileProvider">The static file provider for the tree contents.</param>
     /// <param name="frozenRouteManifest">Lazy cache for the tree's frozen route manifest, when one should be consulted.</param>
+    /// <param name="archiveVerificationState">Integrity state resolved for this mounted archive.</param>
+    /// <param name="verifiedReleaseArchive">Verified file metadata used to gate manifest-covered requests.</param>
     /// <param name="canonicalRootPath">
     /// The app-relative route root canonical metadata should prefer. When omitted, canonical metadata self-points to
     /// <paramref name="mountRootPath" />. Pass the exact-version root for recommended aliases that mirror a frozen tree.
@@ -447,11 +501,15 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
         string mountRootPath,
         IFileProvider fileProvider,
         AppSurfaceDocsFrozenRouteManifestCache? frozenRouteManifest = null,
+        AppSurfaceDocsReleaseArchiveVerificationState archiveVerificationState = AppSurfaceDocsReleaseArchiveVerificationState.AvailableUnverifiedLegacy,
+        AppSurfaceDocsVerifiedReleaseArchive? verifiedReleaseArchive = null,
         string? canonicalRootPath = null)
     {
         MountRootPath = NormalizeMountRootPath(mountRootPath, nameof(mountRootPath));
         FileProvider = fileProvider ?? throw new ArgumentNullException(nameof(fileProvider));
         FrozenRouteManifest = frozenRouteManifest;
+        ArchiveVerificationState = archiveVerificationState;
+        VerifiedReleaseArchive = verifiedReleaseArchive;
         CanonicalRootPath = string.IsNullOrWhiteSpace(canonicalRootPath)
             ? MountRootPath
             : NormalizeMountRootPath(canonicalRootPath, nameof(canonicalRootPath));
@@ -476,6 +534,16 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
     /// Gets the lazy cache for the tree's frozen route manifest, when one should be consulted.
     /// </summary>
     public AppSurfaceDocsFrozenRouteManifestCache? FrozenRouteManifest { get; }
+
+    /// <summary>
+    /// Gets the archive-integrity state resolved before this tree was mounted.
+    /// </summary>
+    public AppSurfaceDocsReleaseArchiveVerificationState ArchiveVerificationState { get; }
+
+    /// <summary>
+    /// Gets verified archive file metadata, when this mount is backed by a catalog-pinned release manifest.
+    /// </summary>
+    public AppSurfaceDocsVerifiedReleaseArchive? VerifiedReleaseArchive { get; }
 
     private static string NormalizeMountRootPath(string value, string parameterName)
     {

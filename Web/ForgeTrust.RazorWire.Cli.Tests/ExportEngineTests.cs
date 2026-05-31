@@ -582,6 +582,38 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldWriteReleaseArchiveManifest_WhenExplicitlyEnabled()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        var baseUrl = "http://localhost:5000";
+
+        try
+        {
+            var handler = new TestHttpMessageHandler();
+            var client = new HttpClient(handler) { BaseAddress = new Uri(baseUrl) };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(tempDir, null, baseUrl);
+            context.EnableReleaseArchiveManifest();
+
+            await _sut.RunAsync(context);
+
+            var manifestPath = Path.Combine(tempDir, ".appsurface-docs-release-manifest.json");
+            Assert.True(File.Exists(manifestPath));
+            Assert.NotNull(context.ReleaseArchiveManifest);
+            Assert.Equal(manifestPath, context.ReleaseArchiveManifest.ManifestPath);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_Should_Write_404Html_When_ReservedRoute_ReturnsHtml()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());

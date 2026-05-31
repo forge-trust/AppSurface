@@ -1165,6 +1165,69 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public void BuildPublishedTreeMounts_ShouldUseVerifiedFrozenManifestSnapshot_ForVerifiedArchives()
+    {
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "appsurfacedocs-web-module-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            var exactTreePath = Path.Combine(tempDirectory, "1.2.3");
+            Directory.CreateDirectory(exactTreePath);
+            var verifiedArchive = new AppSurfaceDocsVerifiedReleaseArchive(
+                new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.OrdinalIgnoreCase),
+                AppSurfaceDocsFrozenRouteManifest.Empty);
+            var version = new AppSurfaceDocsResolvedVersion(
+                Version: "1.2.3",
+                Label: "1.2.3",
+                Summary: null,
+                ExactTreePath: exactTreePath,
+                ExactRootUrl: "/docs/v/1.2.3",
+                SupportState: AppSurfaceDocsVersionSupportState.Current,
+                Visibility: AppSurfaceDocsVersionVisibility.Public,
+                AdvisoryState: AppSurfaceDocsVersionAdvisoryState.None,
+                IsAvailable: true,
+                AvailabilityIssue: null,
+                ArchiveVerificationState: AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+                VerifiedReleaseArchive: verifiedArchive);
+            var catalog = new AppSurfaceDocsResolvedVersionCatalog(
+                AppSurfaceDocsResolvedVersionCatalogStatus.Resolved,
+                CatalogPath: Path.Combine(tempDirectory, "catalog.json"),
+                Versions: [version],
+                RecommendedVersion: version);
+            var docsUrlBuilder = new DocsUrlBuilder(
+                new AppSurfaceDocsOptions
+                {
+                    Routing = new AppSurfaceDocsRoutingOptions
+                    {
+                        RouteRootPath = "/docs",
+                        DocsRootPath = "/docs/next"
+                    }
+                });
+
+            var (mounts, providers) = AppSurfaceDocsWebModule.BuildPublishedTreeMounts(catalog, docsUrlBuilder);
+
+            Assert.Equal(2, mounts.Count);
+            Assert.Single(providers);
+            Assert.NotNull(mounts[0].FrozenRouteManifest);
+            Assert.NotNull(mounts[1].FrozenRouteManifest);
+            Assert.Same(mounts[0].FrozenRouteManifest, mounts[1].FrozenRouteManifest);
+            Assert.True(mounts[0].FrozenRouteManifest!.UsesVerifiedSnapshot);
+            Assert.True(mounts[1].FrozenRouteManifest!.UsesVerifiedSnapshot);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void BuildPublishedTreeMounts_ShouldUseConfiguredRouteRoot_ForRecommendedAlias()
     {
         var tempDirectory = Path.Combine(

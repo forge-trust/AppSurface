@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Hosting;
@@ -77,8 +78,165 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         Assert.Equal("1.2.0", recommendedVersion.Version);
         Assert.Equal(2, catalog.PublicVersions.Count);
         Assert.All(catalog.PublicVersions, version => Assert.True(version.IsAvailable));
+        Assert.All(catalog.PublicVersions, version => Assert.Equal(AppSurfaceDocsReleaseArchiveVerificationState.AvailableUnverifiedLegacy, version.ArchiveVerificationState));
         Assert.Contains(catalog.PublicVersions, version => version.ExactRootUrl == "/docs/v/1.2.0");
         Assert.Contains(catalog.PublicVersions, version => version.AdvisoryState == AppSurfaceDocsVersionAdvisoryState.Vulnerable);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldMarkVersionVerified_WhenReleaseManifestDigestMatches()
+    {
+        var stableTree = CreateExactTree("verified");
+        File.WriteAllText(Path.Combine(stableTree, "logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+        var manifestDigest = WriteReleaseManifest(stableTree);
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                RecommendedVersion = "1.2.0",
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, stableTree),
+                        ReleaseManifestSha256 = manifestDigest
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.True(version.IsAvailable);
+        Assert.Equal(AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified, version.ArchiveVerificationState);
+        Assert.NotNull(version.VerifiedReleaseArchive);
+        Assert.Equal(manifestDigest, version.ReleaseManifestSha256);
+        Assert.Same(version, catalog.RecommendedVersion);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldMarkPinnedVersionUnavailable_WhenReleaseManifestDigestMismatches()
+    {
+        var stableTree = CreateExactTree("digest-mismatch");
+        _ = WriteReleaseManifest(stableTree);
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                RecommendedVersion = "1.2.0",
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, stableTree),
+                        ReleaseManifestSha256 = new string('a', 64)
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        Assert.Null(catalog.RecommendedVersion);
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Equal(AppSurfaceDocsReleaseArchiveVerificationState.Unavailable, version.ArchiveVerificationState);
+        Assert.Contains("ASDOCSARCHIVE002", version.AvailabilityIssue, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldMarkPinnedVersionUnavailable_WhenRouteManifestIsMalformed()
+    {
+        var stableTree = CreateExactTree("malformed-route-manifest");
+        File.WriteAllText(Path.Combine(stableTree, ".appsurface-docs-route-manifest.json"), "{");
+        var manifestDigest = WriteReleaseManifest(stableTree);
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, stableTree),
+                        ReleaseManifestSha256 = manifestDigest
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Equal(AppSurfaceDocsReleaseArchiveVerificationState.Unavailable, version.ArchiveVerificationState);
+        Assert.Contains("ASDOCSARCHIVE003", version.AvailabilityIssue, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("/index.html")]
+    [InlineData("assets\\logo.svg")]
+    [InlineData("C:/outside.html")]
+    [InlineData("C:outside.html")]
+    public void GetCatalog_ShouldMarkPinnedVersionUnavailable_WhenManifestPathIsRawUnsafe(string unsafePath)
+    {
+        var stableTree = CreateExactTree($"unsafe-manifest-path-{Guid.NewGuid():N}");
+        var manifestDigest = WriteReleaseManifestWithSinglePath(stableTree, unsafePath);
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, stableTree),
+                        ReleaseManifestSha256 = manifestDigest
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Equal(AppSurfaceDocsReleaseArchiveVerificationState.Unavailable, version.ArchiveVerificationState);
+        Assert.Contains("ASDOCSARCHIVE005", version.AvailabilityIssue, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldMarkPinnedVersionUnavailable_WhenServeableFileIsNotListed()
+    {
+        var stableTree = CreateExactTree("unlisted-servable");
+        var manifestDigest = WriteReleaseManifest(stableTree);
+        File.WriteAllText(Path.Combine(stableTree, "payload.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, stableTree),
+                        ReleaseManifestSha256 = manifestDigest
+                    }
+                ]
+            });
+
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Contains("ASDOCSARCHIVE009", version.AvailabilityIssue, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -983,6 +1141,65 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         File.WriteAllText(Path.Combine(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
         File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
         return root;
+    }
+
+    private static string WriteReleaseManifest(string root)
+    {
+        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(Path.GetFileName(path), AppSurfaceDocsReleaseArchiveVerifier.FileName, StringComparison.Ordinal))
+            .Select(
+                path => new
+                {
+                    path = NormalizeManifestPath(root, path),
+                    length = new FileInfo(path).Length,
+                    contentType = (string?)null,
+                    hashAlgorithm = "sha256",
+                    sha256 = ComputeFileSha256(path)
+                })
+            .OrderBy(entry => entry.path, StringComparer.Ordinal)
+            .ToArray();
+        var manifestPath = Path.Combine(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(
+                new { schema = AppSurfaceDocsReleaseArchiveVerifier.Schema, files },
+                new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        return ComputeFileSha256(manifestPath);
+    }
+
+    private static string WriteReleaseManifestWithSinglePath(string root, string manifestPathValue)
+    {
+        var filePath = Path.Combine(root, "index.html");
+        var files = new[]
+        {
+            new
+            {
+                path = manifestPathValue,
+                length = new FileInfo(filePath).Length,
+                contentType = (string?)null,
+                hashAlgorithm = "sha256",
+                sha256 = ComputeFileSha256(filePath)
+            }
+        };
+        var manifestPath = Path.Combine(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(
+                new { schema = AppSurfaceDocsReleaseArchiveVerifier.Schema, files },
+                new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        return ComputeFileSha256(manifestPath);
+    }
+
+    private static string NormalizeManifestPath(string root, string path)
+    {
+        return Path.GetRelativePath(root, path)
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+    }
+
+    private static string ComputeFileSha256(string path)
+    {
+        return Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
     }
 
     private string WriteCatalog(AppSurfaceDocsVersionCatalog catalog)

@@ -216,8 +216,14 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             var manifestCache = GetOrCreateFrozenRouteManifestCache(
                 version.ExactTreePath!,
                 provider,
+                version.VerifiedReleaseArchive,
                 manifestCachesByPath);
-            mounts.Add(new AppSurfaceDocsPublishedTreeMount(version.ExactRootUrl, provider, manifestCache));
+            mounts.Add(new AppSurfaceDocsPublishedTreeMount(
+                version.ExactRootUrl,
+                provider,
+                manifestCache,
+                version.ArchiveVerificationState,
+                version.VerifiedReleaseArchive));
         }
 
         if (catalog.RecommendedVersion is { IsAvailable: true, ExactTreePath: not null } recommendedVersion)
@@ -226,11 +232,14 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             var manifestCache = GetOrCreateFrozenRouteManifestCache(
                 recommendedVersion.ExactTreePath,
                 provider,
+                recommendedVersion.VerifiedReleaseArchive,
                 manifestCachesByPath);
             mounts.Add(new AppSurfaceDocsPublishedTreeMount(
                 docsUrlBuilder.DocsEntryRootPath,
                 provider,
                 manifestCache,
+                recommendedVersion.ArchiveVerificationState,
+                recommendedVersion.VerifiedReleaseArchive,
                 recommendedVersion.ExactRootUrl));
         }
 
@@ -255,15 +264,24 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     private static AppSurfaceDocsFrozenRouteManifestCache GetOrCreateFrozenRouteManifestCache(
         string exactTreePath,
         PhysicalFileProvider provider,
+        AppSurfaceDocsVerifiedReleaseArchive? verifiedReleaseArchive,
         IDictionary<string, AppSurfaceDocsFrozenRouteManifestCache> manifestCachesByPath)
     {
         var normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(exactTreePath));
         if (manifestCachesByPath.TryGetValue(normalizedPath, out var cache))
         {
+            if (verifiedReleaseArchive is not null && !cache.UsesVerifiedSnapshot)
+            {
+                cache = new AppSurfaceDocsFrozenRouteManifestCache(verifiedReleaseArchive.FrozenRouteManifest, normalizedPath);
+                manifestCachesByPath[normalizedPath] = cache;
+            }
+
             return cache;
         }
 
-        cache = new AppSurfaceDocsFrozenRouteManifestCache(provider, normalizedPath);
+        cache = verifiedReleaseArchive is null
+            ? new AppSurfaceDocsFrozenRouteManifestCache(provider, normalizedPath)
+            : new AppSurfaceDocsFrozenRouteManifestCache(verifiedReleaseArchive.FrozenRouteManifest, normalizedPath);
         manifestCachesByPath[normalizedPath] = cache;
         return cache;
     }

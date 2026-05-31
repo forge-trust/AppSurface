@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.FileProviders;
@@ -137,6 +139,47 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldDenySvg_ForLegacyUnverifiedArchives()
+    {
+        var tree = CreatePublishedTree("legacy-svg");
+        File.WriteAllText(Path.Combine(tree, "logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/logo.svg");
+
+        var handled = await handler.TryHandleAsync(request);
+
+        Assert.False(handled);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldServeSvg_ForVerifiedArchives()
+    {
+        var tree = CreatePublishedTree("verified-svg");
+        File.WriteAllText(Path.Combine(tree, "logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Logo</title></svg>");
+        var handler = CreateVerifiedHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/logo.svg");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal("image/svg+xml", request.Response.ContentType);
+        Assert.Contains("<title>Logo</title>", ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldDenySvg_WhenVerifiedArchiveChangesAfterStartup()
+    {
+        var tree = CreatePublishedTree("tampered-svg");
+        var svgPath = Path.Combine(tree, "logo.svg");
+        File.WriteAllText(svgPath, "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Original</title></svg>");
+        var handler = CreateVerifiedHandler(tree, "/docs/v/1.2.3");
+        File.WriteAllText(svgPath, "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Tampered</title></svg>");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/logo.svg");
+
+        var handled = await handler.TryHandleAsync(request);
+
+        Assert.False(handled);
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldRedirectFrozenManifestAliases_ToMountedCanonicalRoutes()
     {
         var tree = CreatePublishedTree("release-with-frozen-manifest");
@@ -168,6 +211,47 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
         Assert.True(await handler.TryHandleAsync(declaredAliasRequest));
         Assert.Equal("/docs/v/1.2.3/packages", declaredAliasRequest.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldUseVerifiedFrozenManifest_WhenRouteManifestChangesAfterStartup()
+    {
+        var tree = CreatePublishedTree("verified-route-manifest-tamper");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "packages/README.md",
+                  "canonicalRoutePath": "packages",
+                  "recoveryAliases": ["packages/README.md"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var handler = CreateVerifiedHandler(tree, "/docs/v/1.2.3");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "packages/README.md",
+                  "canonicalRoutePath": "tampered",
+                  "recoveryAliases": ["packages/README.md"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal("/docs/v/1.2.3/packages", request.Response.Headers.Location);
     }
 
     [Fact]
@@ -993,11 +1077,34 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
                     mountRootPath,
                     provider,
                     new AppSurfaceDocsFrozenRouteManifestCache(provider, treePath),
-                    canonicalRootPath)
+                    canonicalRootPath: canonicalRootPath)
             ],
             previewRootPath,
             routeRootPath,
             publicOrigin);
+    }
+
+    private AppSurfaceDocsPublishedTreeHandler CreateVerifiedHandler(string treePath, string mountRootPath)
+    {
+        var manifestDigest = WriteReleaseManifest(treePath);
+        Assert.True(AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+            treePath,
+            manifestDigest,
+            out var archive,
+            out var failure), failure?.Detail);
+
+        var provider = new PhysicalFileProvider(treePath, ExclusionFilters.None);
+        _disposables.Add(provider);
+
+        return CreateHandler(
+            [
+                new AppSurfaceDocsPublishedTreeMount(
+                    mountRootPath,
+                    provider,
+                    new AppSurfaceDocsFrozenRouteManifestCache(archive!.FrozenRouteManifest, treePath),
+                    AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+                    archive)
+            ]);
     }
 
     private AppSurfaceDocsPublishedTreeHandler CreateHandler(
@@ -1062,6 +1169,42 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     private static void WriteFrozenManifest(string treePath, string json)
     {
         File.WriteAllText(Path.Join(treePath, ".appsurface-docs-route-manifest.json"), json);
+    }
+
+    private static string WriteReleaseManifest(string root)
+    {
+        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(Path.GetFileName(path), AppSurfaceDocsReleaseArchiveVerifier.FileName, StringComparison.Ordinal))
+            .Select(
+                path => new
+                {
+                    path = NormalizeManifestPath(root, path),
+                    length = new FileInfo(path).Length,
+                    contentType = (string?)null,
+                    hashAlgorithm = "sha256",
+                    sha256 = ComputeFileSha256(path)
+                })
+            .OrderBy(entry => entry.path, StringComparer.Ordinal)
+            .ToArray();
+        var manifestPath = Path.Combine(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(
+                new { schema = AppSurfaceDocsReleaseArchiveVerifier.Schema, files },
+                new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        return ComputeFileSha256(manifestPath);
+    }
+
+    private static string NormalizeManifestPath(string root, string path)
+    {
+        return Path.GetRelativePath(root, path)
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+    }
+
+    private static string ComputeFileSha256(string path)
+    {
+        return Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
     }
 
     private static DefaultHttpContext CreateContext(string method, string requestPath, string? pathBase = null)

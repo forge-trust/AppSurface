@@ -136,6 +136,26 @@ public class ExportEngine
         ValidateExport(context);
         await MaterializeTextRoutesAsync(context, cancellationToken);
         await MaterializeRedirectsAsync(context, cancellationToken);
+        if (context.ReleaseArchiveManifestEnabled)
+        {
+            context.ReleaseArchiveManifest = await ReleaseArchiveManifestWriter.WriteAsync(context.OutputPath, cancellationToken);
+            _logger.LogInformation(
+                """
+                Release archive manifest written:
+                  path: {ManifestPath}
+                  schema: {ManifestSchema}
+                  files: {ManifestFileCount}
+                  sha256: {ManifestSha256}
+
+                Catalog entry:
+                  "releaseManifestSha256": "{ManifestSha256}"
+                """,
+                context.ReleaseArchiveManifest.ManifestPath,
+                context.ReleaseArchiveManifest.Schema,
+                context.ReleaseArchiveManifest.FileCount,
+                context.ReleaseArchiveManifest.Sha256,
+                context.ReleaseArchiveManifest.Sha256);
+        }
 
         sw.Stop();
         _logger.LogInformation("Export completed in {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);

@@ -1299,6 +1299,7 @@ public sealed class ProgramEntryPointTests
 
         await new AppSurfaceDocsExportContextConfigurator().ConfigureAsync(host, context, CancellationToken.None);
 
+        Assert.True(context.ReleaseArchiveManifestEnabled);
         Assert.Contains("/docs/packages", context.AdditionalSeedRoutes);
         Assert.Contains("/docs/start-here/intro", context.AdditionalSeedRoutes);
         Assert.Contains(

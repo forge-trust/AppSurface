@@ -16,13 +16,14 @@ Use the AppSurface CLI when working with this repository's AppSurface Docs surfa
 appsurface docs --repo . --port 5189
 appsurface docs preview --repo . --port 5189
 appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
+appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
 ```
 
 `appsurface docs` and `appsurface docs preview` run the standalone host for local inspection. `appsurface docs export` starts that same host in-process, binds an internal `http://127.0.0.1:0` listener, resolves the actual Kestrel address, and exports through RazorWire's static export engine.
 
 Preview `--port` values bind localhost only. Add `--all-hosts` to a `--port` preview only when LAN, container, or other non-loopback access is intentional; the all-hosts wildcard can expose the preview host beyond the local machine.
 
-Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands.
+Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands. After final files are materialized, export writes `.appsurface-docs-release-manifest.json` and prints the `releaseManifestSha256` catalog snippet to copy into the published version catalog. Use `appsurface docs verify-archive --catalog <path> --version <version>` to check a pinned archive locally before deploy.
 
 Redirect aliases default to HTML fallback materialization. Omit `--redirects`, or pass `--redirects html`, for GitHub Pages and generic static hosts. Pass `--mode cdn --redirects netlify` for Netlify-compatible CDN publishing; export writes one root `_redirects` file with exact site-local `301!` rules and does not write alias HTML files. Netlify export validates the encoded provider rule paths, so self-redirects and same-source aliases that point at different canonical routes fail before files are written. Do not hand-author `_redirects` in the export output because the exporter reserves that file for validated redirect rules.
 
@@ -1265,6 +1266,7 @@ The version catalog is the release-level source of truth for version routing and
       "label": "1.2.3 (Current)",
       "summary": "Recommended release for new evaluations and adoption.",
       "exactTreePath": "./releases/1.2.3",
+      "releaseManifestSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       "supportState": "Current",
       "visibility": "Public",
       "advisoryState": "None"
@@ -1295,6 +1297,11 @@ The version catalog is the release-level source of truth for version routing and
   - Path to the exported stable docs subtree for one exact release.
   - Relative paths resolve from the directory containing the catalog file.
   - AppSurface Docs can mount that same artifact at `RouteRootPath` for the recommended alias and at `{RouteRootPath}/v/{version}` for the exact release surface.
+- `versions[].releaseManifestSha256`
+  - Optional SHA-256 digest of `.appsurface-docs-release-manifest.json` for this exact tree.
+  - When present, AppSurface Docs verifies the manifest digest, manifest schema, listed file lengths, listed file digests, and handler-servable file coverage before mounting the release.
+  - When absent, a shape-valid legacy tree can still mount ordinary docs content, but archive SVG is denied because the archive is not catalog-verified.
+  - A manifest inside an archive is not trusted by itself; the catalog-pinned digest is the trust anchor.
 - `versions[].supportState`
   - Archive posture badge. Supported values are `Current`, `Maintained`, `Deprecated`, and `Archived`.
 - `versions[].visibility`
@@ -1309,7 +1316,14 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `.appsurface-docs-route-manifest.json` at the tree root for new exports
   - The hidden manifest freezes the docs-root-relative canonical route and alias graph that existed when the release was exported.
   - It stores route identity only. It does not store `PublicOrigin`, PathBase, `RouteRootPath`, exact-version mount roots, or absolute URLs.
-  - Missing manifests are supported for legacy archives; malformed manifests disable archive alias recovery for that release without disabling normal file serving.
+  - Missing manifests are supported for legacy archives; malformed legacy manifests disable archive alias recovery for that release without disabling normal file serving.
+  - Verified archives parse this manifest from bytes covered by `.appsurface-docs-release-manifest.json`; malformed pinned route manifests keep the release unavailable because redirects are behavior-affecting archive content.
+- `.appsurface-docs-release-manifest.json` at the tree root for new exports
+  - The hidden release manifest lists the final exported files, byte lengths, content types when known, SHA-256 algorithm names, and lowercase SHA-256 digests.
+  - The manifest is deterministic and is written after final export materialization, so rewritten HTML, redirect artifacts, binary assets, and `.appsurface-docs-route-manifest.json` are covered.
+  - Export refuses unsupported hidden paths such as `.nojekyll` or `.well-known/...` with `ASDOCSARCHIVE005` instead of printing a catalog pin the runtime cannot verify.
+  - The manifest excludes itself. Its own SHA-256 digest is printed by export and should be copied into `versions[].releaseManifestSha256`.
+  - The release manifest proves local archive integrity only when the trusted catalog pins its digest. It is not a signature or build provenance attestation.
 - `index.html` at the tree root
 - `search.html` at the tree root
   - The shell should contain useful server-rendered anchors before JavaScript runs: starter query URLs and browse recovery links for the strongest available docs entry points.
@@ -1336,8 +1350,13 @@ When the hidden frozen route manifest is present, mounted archives also use it b
 
 - Version validation is best-effort and release-local.
 - A missing or malformed `exactTreePath` marks only that release unavailable.
+- A public version with a valid `releaseManifestSha256` pin mounts only after archive verification succeeds.
+- A public version with a `releaseManifestSha256` pin whose manifest is missing, mismatched, malformed, incomplete, or inconsistent is unavailable and does not mount.
+- A public version without `releaseManifestSha256` is treated as a legacy unverified archive: normal docs HTML, search, image, font, and runtime assets continue when the tree shape is valid, but archive SVG is denied with `ASDOCSARCHIVE010`.
 - Healthy published versions and the live preview surface continue to load.
 - If the configured `recommendedVersion` is hidden, missing, or unavailable, AppSurface Docs does not mount it at the route root; that entry route falls back to the archive-style recovery surface with a link to the live preview.
+
+Archive verification diagnostics use stable `ASDOCSARCHIVE###` codes in structured logs. Common branches include `ASDOCSARCHIVE001` for a missing manifest, `ASDOCSARCHIVE002` for a catalog digest mismatch, `ASDOCSARCHIVE003` for unsupported schema or invalid payload, `ASDOCSARCHIVE004` for duplicate manifest paths, `ASDOCSARCHIVE005` for unsafe paths, `ASDOCSARCHIVE006` for missing listed files, `ASDOCSARCHIVE007` for length mismatch, `ASDOCSARCHIVE008` for digest mismatch, `ASDOCSARCHIVE009` for handler-servable files not listed in the manifest, and `ASDOCSARCHIVE010` for denied active SVG. Public archive messages stay sanitized and do not expose absolute filesystem paths.
 
 ### Pitfalls
 
@@ -1348,6 +1367,8 @@ When the hidden frozen route manifest is present, mounted archives also use it b
 - Do not assume `AppSurfaceDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
 - Do not hand-edit `.appsurface-docs-route-manifest.json` to add aliases. New exports validate duplicate aliases, aliases that collide with canonical routes, and aliases that equal their own canonical route. Runtime ignores ambiguous aliases from hand-edited or legacy manifests and keeps serving normal files.
+- Do not hand-edit `.appsurface-docs-release-manifest.json` after export. Any byte change requires copying the new manifest digest into `releaseManifestSha256`, and file changes require a fresh export.
+- Do not describe catalog-pinned release manifests as signed provenance. A compromised catalog can pin compromised archive bytes; Sigstore, GitHub artifact attestations, and SLSA-style provenance are future trust layers.
 
 `AppSurfaceDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
 

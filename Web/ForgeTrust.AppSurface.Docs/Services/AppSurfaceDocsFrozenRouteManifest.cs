@@ -140,6 +140,43 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
     }
 
     /// <summary>
+    /// Parses verified frozen route manifest bytes that have already matched a catalog-pinned release archive manifest.
+    /// </summary>
+    /// <param name="utf8Bytes">The exact UTF-8 bytes covered by the verified release archive manifest.</param>
+    /// <param name="manifest">The immutable route manifest when parsing succeeds.</param>
+    /// <param name="issue">A human-readable parse or validation issue when parsing fails.</param>
+    /// <returns><c>true</c> when the verified bytes describe a supported frozen route manifest.</returns>
+    internal static bool TryLoadVerified(
+        byte[] utf8Bytes,
+        out AppSurfaceDocsFrozenRouteManifest manifest,
+        out string issue)
+    {
+        ArgumentNullException.ThrowIfNull(utf8Bytes);
+
+        manifest = Empty;
+        issue = string.Empty;
+
+        try
+        {
+            var document = JsonSerializer.Deserialize<FrozenRouteManifestDocument>(utf8Bytes, SerializerOptions);
+            if (document is null || !string.Equals(document.Schema, Schema, StringComparison.Ordinal))
+            {
+                issue = "unsupported schema";
+                return false;
+            }
+
+            var aliasMap = ValidateDocument(document, strict: true, out _);
+            manifest = aliasMap.Count == 0 ? Empty : new AppSurfaceDocsFrozenRouteManifest(aliasMap);
+            return true;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or NotSupportedException)
+        {
+            issue = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Attempts to resolve a docs-root-relative alias route to its frozen canonical route path.
     /// </summary>
     /// <param name="aliasRoutePath">Docs-root-relative request path.</param>
@@ -361,7 +398,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
 /// </summary>
 internal sealed class AppSurfaceDocsFrozenRouteManifestCache
 {
-    private readonly IFileProvider _fileProvider;
+    private readonly IFileProvider? _fileProvider;
     private readonly string _sourceDescription;
     private readonly object _gate = new();
     private AppSurfaceDocsFrozenRouteManifest? _manifest;
@@ -378,6 +415,22 @@ internal sealed class AppSurfaceDocsFrozenRouteManifestCache
     }
 
     /// <summary>
+    /// Initializes a new instance of <see cref="AppSurfaceDocsFrozenRouteManifestCache" /> with already-verified manifest data.
+    /// </summary>
+    /// <param name="manifest">Manifest parsed from bytes covered by the verified release archive manifest.</param>
+    /// <param name="sourceDescription">Human-readable tree identity used for diagnostics.</param>
+    internal AppSurfaceDocsFrozenRouteManifestCache(AppSurfaceDocsFrozenRouteManifest manifest, string sourceDescription)
+    {
+        _manifest = manifest ?? throw new ArgumentNullException(nameof(manifest));
+        _sourceDescription = string.IsNullOrWhiteSpace(sourceDescription) ? "verified published tree" : sourceDescription;
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether this cache is backed by manifest data parsed during release archive verification.
+    /// </summary>
+    internal bool UsesVerifiedSnapshot => _fileProvider is null;
+
+    /// <summary>
     /// Returns the cached manifest, loading it from the tree on first use.
     /// </summary>
     /// <param name="logger">Logger used when a present manifest cannot be loaded.</param>
@@ -391,6 +444,12 @@ internal sealed class AppSurfaceDocsFrozenRouteManifestCache
 
         lock (_gate)
         {
+            if (_fileProvider is null)
+            {
+                _manifest ??= AppSurfaceDocsFrozenRouteManifest.Empty;
+                return _manifest;
+            }
+
             _manifest ??= AppSurfaceDocsFrozenRouteManifest.Load(_fileProvider, logger, _sourceDescription);
             return _manifest;
         }
