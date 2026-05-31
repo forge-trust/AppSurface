@@ -2460,6 +2460,39 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_CdnMode_Should_FailXsrfNamedStaticAntiforgeryTokens()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new XsrfNamedTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Cdn,
+                redirectStrategy: ExportRedirectStrategy.Html);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            var diagnostic = Assert.Single(exception.Diagnostics, item => item.Code == "RWEXPORT006");
+            Assert.Contains("CDN mode", diagnostic.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_ConvertLazyFormsForSameOriginPassthrough()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -2487,6 +2520,44 @@ public class ExportEngineTests
             var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
             Assert.Contains("action=\"/profile/save\"", html);
             Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.DoesNotContain("crawler-token", html);
+            Assert.Empty(context.Diagnostics);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithoutLiveOrigin_Should_ConvertXsrfNamedAntiforgeryTokens()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new XsrfNamedTokenFormHandler()) { BaseAddress = new Uri("http://localhost:5000") };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions());
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"/profile/save\"", html);
+            Assert.Contains("data-rw-antiforgery=\"lazy\"", html);
+            Assert.DoesNotContain("xsrf-token", html);
             Assert.DoesNotContain("crawler-token", html);
             Assert.Empty(context.Diagnostics);
         }
@@ -3706,6 +3777,29 @@ public class ExportEngineTests
                       <body>
                         <form data-rw-form="true" method="post" action="/profile/save">
                           <input type="hidden" name="csrf-token" value="crawler-token">
+                          <button>Save</button>
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class XsrfNamedTokenFormHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/" || path == "/index")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="/profile/save">
+                          <input type="hidden" name="xsrf-token" value="crawler-token">
                           <button>Save</button>
                         </form>
                       </body>

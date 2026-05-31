@@ -567,7 +567,8 @@ public class ExportEngine
                || html.Contains("__RequestVerificationToken", StringComparison.Ordinal)
                || html.Contains("VerificationToken", StringComparison.OrdinalIgnoreCase)
                || html.Contains("antiforgery", StringComparison.OrdinalIgnoreCase)
-               || html.Contains("csrf", StringComparison.OrdinalIgnoreCase);
+               || html.Contains("csrf", StringComparison.OrdinalIgnoreCase)
+               || html.Contains("xsrf", StringComparison.OrdinalIgnoreCase);
     }
 
     private void AddUnownedAntiforgeryTokenDiagnostics(IDocument document, ExportContext context, string route)
@@ -658,7 +659,8 @@ public class ExportEngine
                || name.Contains("VerificationToken", StringComparison.OrdinalIgnoreCase)
                || name.Contains("Antiforgery", StringComparison.OrdinalIgnoreCase)
                || name.Contains("AntiForgery", StringComparison.OrdinalIgnoreCase)
-               || name.Contains("csrf", StringComparison.OrdinalIgnoreCase);
+               || name.Contains("csrf", StringComparison.OrdinalIgnoreCase)
+               || name.Contains("xsrf", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool TryResolveOriginUrl(

@@ -91,6 +91,7 @@ public class RazorWireFormTagHelper : TagHelper
         if (string.Equals(Antiforgery, "lazy", StringComparison.OrdinalIgnoreCase))
         {
             output.Attributes.SetAttribute("data-rw-antiforgery", "lazy");
+            output.Attributes.SetAttribute("data-rw-form", "true");
             return;
         }
 
