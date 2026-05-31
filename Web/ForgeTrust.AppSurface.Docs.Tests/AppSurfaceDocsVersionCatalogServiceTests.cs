@@ -674,7 +674,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         var brokenTree = CreateExactTree("broken-search-document-path");
         var healthyTree = CreateExactTree("healthy-search-document-path");
         File.WriteAllText(
-            Path.Combine(brokenTree, "search-index.json"),
+            Path.Join(brokenTree, "search-index.json"),
             "{\"documents\":[{\"path\":\"javascript:alert(1)\",\"title\":\"Guide\"}]}");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
@@ -715,7 +715,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     {
         var brokenTree = CreateExactTree("broken-search-document-path-diagnostics");
         File.WriteAllText(
-            Path.Combine(brokenTree, "search-index.json"),
+            Path.Join(brokenTree, "search-index.json"),
             "{\"documents\":[{\"path\":\"/docs/%2e%2e/admin\",\"title\":\"Guide\"}]}");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
@@ -740,6 +740,38 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         Assert.Contains("category 'encoded-traversal'", warning, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Version '1.2.3'", warning, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("%2e%2e", warning, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("Unsafe\r\nTitle", "Unsafe  Title")]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...")]
+    public void GetCatalog_ShouldSanitizeUnsafeSearchIndexPathDiagnosticTitle(string title, string expectedDiagnosticTitle)
+    {
+        var brokenTree = CreateExactTree("broken-search-document-title-diagnostics");
+        var encodedTitle = JsonSerializer.Serialize(title);
+        File.WriteAllText(
+            Path.Join(brokenTree, "search-index.json"),
+            $$"""{"documents":[{"path":"https://evil.example/docs/guide.html","title":{{encodedTitle}}}]}""");
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, brokenTree),
+                        SupportState = AppSurfaceDocsVersionSupportState.Current
+                    }
+                ]
+            });
+        var logger = new CapturingLogger<AppSurfaceDocsVersionCatalogService>();
+        var service = CreateCatalogService(catalogPath, logger: logger);
+
+        _ = service.GetCatalog();
+
+        var warning = Assert.Single(logger.Messages);
+        Assert.Contains($"title '{expectedDiagnosticTitle}'", warning, StringComparison.Ordinal);
     }
 
     [Fact]

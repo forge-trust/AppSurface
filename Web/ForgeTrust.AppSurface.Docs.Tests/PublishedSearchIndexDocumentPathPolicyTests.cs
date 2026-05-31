@@ -8,8 +8,12 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
     [Theory]
     [InlineData("/docs/guide.html")]
     [InlineData("/docs/packages/README.md.html")]
+    [InlineData("/docs")]
+    [InlineData("/docs/%41pi.html")]
     [InlineData("/docs/v/1.2.3/guide.html")]
+    [InlineData("/docs/v/1.2.3")]
     [InlineData("/docs/versions/1.2.3/guide.html")]
+    [InlineData("/docs/versions/1.2.3")]
     [InlineData("/docs/guide.html?q=term#section-2")]
     public void ValidateArchivePath_ShouldAcceptCanonicalDocsDocumentPaths(string path)
     {
@@ -24,6 +28,7 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
 
     [Theory]
     [InlineData("", "missing")]
+    [InlineData("docs/guide.html", "not-root-relative")]
     [InlineData(" /docs/guide.html", "whitespace")]
     [InlineData("javascript:alert(1)", "scheme-url")]
     [InlineData("data:text/html,hi", "scheme-url")]
@@ -51,6 +56,7 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
     [InlineData("/docs/%252fadmin", "encoded-separator")]
     [InlineData("/docs/%5cadmin", "encoded-separator")]
     [InlineData("/docs/guide.html\\evil", "backslash")]
+    [InlineData("/docs/guide.html?q=bad\\path", "backslash")]
     [InlineData("/docs/%", "malformed-percent-encoding")]
     [InlineData("/docs/%0a", "control-character")]
     [InlineData("/docs/guide.html?q=%0a", "control-character")]
@@ -80,6 +86,10 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
     }
 
     [Theory]
+    [InlineData("/docs/guide.html", "", null)]
+    [InlineData("/guide.html", "/", null)]
+    [InlineData("/docs/versions/1.2.3/guide.html", "docs", "/docs/versions/")]
+    [InlineData("/docs/versions/1.2.3/guide.html", "/docs", " /docs/versions ")]
     [InlineData("/some-base/docs/v/1.2.3/guide.html", "/some-base/docs/v/1.2.3", null)]
     [InlineData("/some-base/docs/versions/1.2.3/guide.html", "/some-base/docs/v/1.2.3", "/some-base/docs/versions")]
     [InlineData("/foo/bar/guide.html", "/foo/bar", null)]
@@ -90,6 +100,16 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
         var result = PublishedSearchIndexDocumentPathPolicy.ValidateServedPath(
             path,
             new PublishedSearchIndexServedPathContext(docsRootPath, archiveRootPath));
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void ValidateServedPath_ShouldPreferLongerArchiveRoot_WhenRootsOverlap()
+    {
+        var result = PublishedSearchIndexDocumentPathPolicy.ValidateServedPath(
+            "/docs/versions/1.2.3/guide.html",
+            new PublishedSearchIndexServedPathContext("/docs", "/docs/versions"));
 
         Assert.True(result.IsValid);
     }
@@ -136,5 +156,26 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
             Assert.False(result.IsValid);
             Assert.Equal(PublishedSearchIndexPathRejectionReason.ReservedRoute, result.Reason);
         }
+    }
+
+    [Theory]
+    [InlineData("/docs/versions")]
+    [InlineData("/docs/versions/search")]
+    public void ValidateServedPath_ShouldRejectArchiveRootWithoutDocumentChild(string path)
+    {
+        var result = PublishedSearchIndexDocumentPathPolicy.ValidateServedPath(
+            path,
+            new PublishedSearchIndexServedPathContext("/docs", "/docs/versions"));
+
+        Assert.False(result.IsValid);
+        Assert.Equal(PublishedSearchIndexPathRejectionReason.ReservedRoute, result.Reason);
+    }
+
+    [Fact]
+    public void ToDiagnosticCode_ShouldReturnUnknown_ForUnsupportedEnumValue()
+    {
+        var result = PublishedSearchIndexDocumentPathPolicy.ToDiagnosticCode((PublishedSearchIndexPathRejectionReason)999);
+
+        Assert.Equal("unknown", result);
     }
 }
