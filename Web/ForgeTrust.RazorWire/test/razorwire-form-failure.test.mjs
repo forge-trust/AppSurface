@@ -827,17 +827,20 @@ function loadRuntime(runtimeOptions = {}) {
   const window = {
     RazorWireInitialized: false,
     RazorWire: { config: { existing: true } },
-    Turbo: turbo,
     location: {
       href: runtimeOptions.windowHref ?? 'https://example.test/',
       origin: 'https://example.test'
     },
     addEventListener: () => {}
   };
+  if (turbo !== null) {
+    window.Turbo = turbo;
+  }
   const context = {
     console: { log: () => {} },
     document,
     window,
+    Turbo: turbo ?? undefined,
     Element: FakeElement,
     HTMLFormElement: FakeForm,
     CustomEvent: FakeCustomEvent,
@@ -856,9 +859,6 @@ function loadRuntime(runtimeOptions = {}) {
     URLSearchParams,
     fetch: runtimeOptions.fetch
   };
-  if (turbo !== null) {
-    context.Turbo = turbo;
-  }
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(readFileSync(runtimePath, 'utf8'), context);
