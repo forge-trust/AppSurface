@@ -3,22 +3,26 @@ namespace ForgeTrust.RazorWire.Cli;
 /// <summary>
 /// Identifies the kind of application source the exporter should crawl.
 /// </summary>
+/// <remarks>
+/// Numeric values are explicit because this public enum may be bound from configuration or serialized by host tooling.
+/// New values should be appended without changing existing values.
+/// </remarks>
 public enum ExportSourceKind
 {
     /// <summary>
     /// Crawl an already-running application URL.
     /// </summary>
-    Url,
+    Url = 0,
 
     /// <summary>
     /// Publish a project and crawl the launched output.
     /// </summary>
-    Project,
+    Project = 1,
 
     /// <summary>
     /// Launch a compiled application assembly and crawl it.
     /// </summary>
-    Dll
+    Dll = 2
 }
 
 /// <summary>

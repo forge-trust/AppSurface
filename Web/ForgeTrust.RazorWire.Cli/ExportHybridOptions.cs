@@ -8,9 +8,12 @@ namespace ForgeTrust.RazorWire.Cli;
 public sealed class ExportHybridOptions
 {
     /// <summary>
-    /// Gets a default instance that preserves existing export behavior.
+    /// Gets a new default instance that preserves existing export behavior.
     /// </summary>
-    public static ExportHybridOptions Default { get; } = new();
+    /// <remarks>
+    /// A fresh mutable instance is returned on each access so caller changes do not affect later default callers.
+    /// </remarks>
+    public static ExportHybridOptions Default => new();
 
     /// <summary>
     /// Gets or sets the live origin used by RazorWire-managed dynamic references.
