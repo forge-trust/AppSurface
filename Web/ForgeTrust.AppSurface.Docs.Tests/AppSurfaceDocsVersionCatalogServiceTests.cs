@@ -674,7 +674,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         var brokenTree = CreateExactTree("broken-search-document-path");
         var healthyTree = CreateExactTree("healthy-search-document-path");
         File.WriteAllText(
-            Path.Join(brokenTree, "search-index.json"),
+            TestPathUtils.PathUnder(brokenTree, "search-index.json"),
             "{\"documents\":[{\"path\":\"javascript:alert(1)\",\"title\":\"Guide\"}]}");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
@@ -715,7 +715,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     {
         var brokenTree = CreateExactTree("broken-search-document-path-diagnostics");
         File.WriteAllText(
-            Path.Join(brokenTree, "search-index.json"),
+            TestPathUtils.PathUnder(brokenTree, "search-index.json"),
             "{\"documents\":[{\"path\":\"/docs/%2e%2e/admin\",\"title\":\"Guide\"}]}");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
@@ -750,7 +750,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         var brokenTree = CreateExactTree("broken-search-document-title-diagnostics");
         var encodedTitle = JsonSerializer.Serialize(title);
         File.WriteAllText(
-            Path.Join(brokenTree, "search-index.json"),
+            TestPathUtils.PathUnder(brokenTree, "search-index.json"),
             $$"""{"documents":[{"path":"https://evil.example/docs/guide.html","title":{{encodedTitle}}}]}""");
         var catalogPath = WriteCatalog(
             new AppSurfaceDocsVersionCatalog
