@@ -65,8 +65,8 @@ public sealed class AppSurfaceDocsVersionCatalogService
     /// The resolved catalog including availability information for each published version. Returns
     /// <see cref="AppSurfaceDocsResolvedVersionCatalog.Disabled" /> when versioning is off for this host,
     /// <see cref="AppSurfaceDocsResolvedVersionCatalog.EnabledWithoutCatalog" /> when versioning is on but no catalog path
-    /// was configured, and <see cref="AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(string?)" /> semantics when a
-    /// configured catalog could not be loaded into a usable published-release set.
+    /// was configured, and enabled-but-unavailable semantics when a configured catalog or trusted release root could
+    /// not be loaded into a usable published-release set.
     /// </returns>
     public AppSurfaceDocsResolvedVersionCatalog GetCatalog()
     {
@@ -135,6 +135,36 @@ public sealed class AppSurfaceDocsVersionCatalogService
         }
 
         var catalogDirectory = Path.GetDirectoryName(catalogPath) ?? _environment.ContentRootPath;
+        string trustedReleaseRootPath;
+        try
+        {
+            trustedReleaseRootPath = AppSurfaceDocsTrustedReleasePathGuard.ResolveConfiguredRoot(
+                _environment.ContentRootPath,
+                _options.Versioning.TrustedReleaseRootPath,
+                catalogDirectory);
+        }
+        catch (Exception ex) when (AppSurfaceDocsTrustedReleasePathGuard.IsPathMetadataException(ex))
+        {
+            _logger.LogWarning(
+                ex,
+                "AppSurface Docs trusted release root configuration is invalid. Published release trees will stay unavailable.");
+            return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(
+                catalogPath,
+                "Trusted release root path is invalid.");
+        }
+
+        if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
+                trustedReleaseRootPath,
+                "Trusted release root directory does not exist.",
+                "Trusted release root must be an ordinary directory.",
+                out var trustedRootPublicIssue,
+                out _))
+        {
+            _logger.LogWarning(
+                "AppSurface Docs trusted release root is unavailable. Published release trees will stay unavailable.");
+            return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath, trustedRootPublicIssue);
+        }
+
         var seenVersions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var versions = new List<AppSurfaceDocsResolvedVersion>();
         string? recommendedVersion;
@@ -190,7 +220,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
                 continue;
             }
 
-            var resolved = ResolveVersion(version, normalizedVersion, catalogDirectory);
+            var resolved = ResolveVersion(version, normalizedVersion, trustedReleaseRootPath);
             versions.Add(resolved);
         }
 
@@ -393,7 +423,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
     private AppSurfaceDocsResolvedVersion ResolveVersion(
         AppSurfaceDocsPublishedVersion version,
         string normalizedVersion,
-        string catalogDirectory)
+        string trustedReleaseRootPath)
     {
         var label = string.IsNullOrWhiteSpace(version.Label) ? normalizedVersion : version.Label.Trim();
         var summary = string.IsNullOrWhiteSpace(version.Summary) ? null : version.Summary.Trim();
@@ -402,17 +432,18 @@ public sealed class AppSurfaceDocsVersionCatalogService
         string? exactTreePath;
         AvailabilityFailure? availabilityFailure;
 
-        try
+        if (!AppSurfaceDocsTrustedReleasePathGuard.TryResolveCatalogTreePath(
+                trustedReleaseRootPath,
+                version.ExactTreePath,
+                out exactTreePath,
+                out var publicIssue,
+                out var internalDetail))
         {
-            exactTreePath = ResolveCatalogRelativePath(catalogDirectory, version.ExactTreePath);
-            availabilityFailure = ValidateExactTree(exactTreePath, normalizedVersion);
+            availabilityFailure = new AvailabilityFailure(publicIssue!, internalDetail!);
         }
-        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+        else
         {
-            exactTreePath = null;
-            availabilityFailure = new AvailabilityFailure(
-                PublicMessage: "Published release tree path is invalid.",
-                InternalDetail: $"ExactTreePath '{version.ExactTreePath?.Trim()}' is invalid: {ex.Message}");
+            availabilityFailure = ValidateExactTree(trustedReleaseRootPath, exactTreePath!, normalizedVersion);
         }
 
         if (availabilityFailure is not null && isPublic)
@@ -483,53 +514,52 @@ public sealed class AppSurfaceDocsVersionCatalogService
     private string ResolveAbsolutePath(string path)
     {
         path = path.Trim();
-        return Path.IsPathRooted(path)
-            ? path
-            : Path.GetFullPath(Path.Combine(_environment.ContentRootPath, path));
+        return AppSurfaceDocsTrustedReleasePathGuard.ResolveContentRootRelativePath(_environment.ContentRootPath, path);
     }
 
-    private static string? ResolveCatalogRelativePath(string catalogDirectory, string? configuredPath)
+    private static AvailabilityFailure? ValidateExactTree(string trustedReleaseRootPath, string exactTreePath, string version)
     {
-        configuredPath = configuredPath?.Trim();
-        if (string.IsNullOrWhiteSpace(configuredPath))
-        {
-            return null;
-        }
-
-        return Path.IsPathRooted(configuredPath)
-            ? configuredPath
-            : Path.GetFullPath(Path.Combine(catalogDirectory, configuredPath));
-    }
-
-    private static AvailabilityFailure? ValidateExactTree(string? exactTreePath, string version)
-    {
-        if (string.IsNullOrWhiteSpace(exactTreePath))
+        if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
+                exactTreePath,
+                "Published release tree directory does not exist.",
+                "Published release tree path is not an ordinary directory.",
+                out var directoryPublicIssue,
+                out var directoryInternalDetail))
         {
             return new AvailabilityFailure(
-                PublicMessage: "Published release tree path is missing.",
-                InternalDetail: "ExactTreePath is missing.");
+                PublicMessage: directoryPublicIssue!,
+                InternalDetail: $"ExactTreePath '{exactTreePath}' is unavailable: {directoryInternalDetail}");
         }
 
-        if (!Directory.Exists(exactTreePath))
+        if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateNoReparseSegments(
+                trustedReleaseRootPath,
+                exactTreePath,
+                expectLeafFile: false,
+                out var trustedRootDenialReason))
         {
             return new AvailabilityFailure(
-                PublicMessage: "Published release tree directory does not exist.",
-                InternalDetail: $"ExactTreePath '{exactTreePath}' does not exist.");
+                PublicMessage: "Published release tree path is not an ordinary directory.",
+                InternalDetail: $"ExactTreePath '{exactTreePath}' is unavailable: {trustedRootDenialReason}");
         }
 
         foreach (var requiredFile in RequiredExactTreeFiles)
         {
-            var requiredPath = Path.Combine(exactTreePath, requiredFile);
-            if (!File.Exists(requiredPath))
+            var requiredPath = Path.Join(exactTreePath, requiredFile);
+            if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
+                    exactTreePath,
+                    requiredFile,
+                    out _,
+                    out var fileDenialReason)
+                || !File.Exists(requiredPath))
             {
                 return new AvailabilityFailure(
                     PublicMessage: $"Published release tree is missing {requiredFile}.",
-                    InternalDetail: $"ExactTreePath '{exactTreePath}' is missing {requiredFile}.");
+                    InternalDetail: $"ExactTreePath '{exactTreePath}' is missing or cannot safely read {requiredFile}: {fileDenialReason}");
             }
         }
 
         var searchIndexValidationIssue = ValidateSearchIndexPayload(
-            Path.Combine(exactTreePath, "search-index.json"),
+            Path.Join(exactTreePath, "search-index.json"),
             new PublishedSearchIndexArchivePathContext(version));
         if (searchIndexValidationIssue is not null)
         {
@@ -654,7 +684,7 @@ public enum AppSurfaceDocsResolvedVersionCatalogStatus
 /// <see cref="Disabled" /> and <see cref="EnabledWithoutCatalog" /> sentinels, is typically an absolute filesystem
 /// path after successful resolution or file-based unavailability checks, and can remain the normalized configured
 /// value when <see cref="Status" /> is <see cref="AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable" /> because
-/// absolute resolution failed before <see cref="CreateUnavailable(string?)" /> was created.
+/// absolute resolution failed before an unavailable catalog result was created.
 /// </param>
 /// <param name="Versions">
 /// The resolved catalog entries in authored catalog order. Entries stay present even when a published tree is
@@ -711,6 +741,16 @@ public sealed record AppSurfaceDocsResolvedVersionCatalog(
         .ToList();
 
     /// <summary>
+    /// Gets a sanitized catalog-level availability explanation when catalog or trusted-root configuration failed.
+    /// </summary>
+    /// <remarks>
+    /// Version-level failures continue to live on <see cref="AppSurfaceDocsResolvedVersion.AvailabilityIssue"/>.
+    /// This property is for host-level failures such as a missing or unsafe trusted release root where no exact tree can
+    /// be mounted safely.
+    /// </remarks>
+    public string? AvailabilityIssue { get; init; }
+
+    /// <summary>
     /// Creates an enabled catalog result with no available versions because the backing catalog could not be used.
     /// </summary>
     /// <param name="catalogPath">
@@ -718,10 +758,14 @@ public sealed record AppSurfaceDocsResolvedVersionCatalog(
     /// but can also be the normalized configured value when resolution failed before an absolute path could be
     /// constructed.
     /// </param>
+    /// <param name="availabilityIssue">Optional sanitized catalog-level availability explanation.</param>
     /// <returns>An enabled-but-unavailable catalog result.</returns>
-    public static AppSurfaceDocsResolvedVersionCatalog CreateUnavailable(string? catalogPath)
+    public static AppSurfaceDocsResolvedVersionCatalog CreateUnavailable(string? catalogPath, string? availabilityIssue = null)
     {
-        return new AppSurfaceDocsResolvedVersionCatalog(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalogPath, [], null);
+        return new AppSurfaceDocsResolvedVersionCatalog(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalogPath, [], null)
+        {
+            AvailabilityIssue = availabilityIssue
+        };
     }
 }
 

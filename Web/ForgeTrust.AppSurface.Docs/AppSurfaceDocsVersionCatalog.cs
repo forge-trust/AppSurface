@@ -43,13 +43,17 @@ public sealed class AppSurfaceDocsPublishedVersion
     public string? Summary { get; set; }
 
     /// <summary>
-    /// Gets or sets the path to the exported exact-version docs subtree.
+    /// Gets or sets the trusted-release-root-relative path to the exported exact-version docs subtree.
     /// </summary>
     /// <remarks>
     /// The directory should contain the static files exported from the stable docs surface for one exact release, such as
     /// <c>index.html</c>, <c>search-index.json</c>, section routes, and detail pages. AppSurface Docs can then mount that same
     /// artifact at either <c>RouteRootPath</c> or <c>{RouteRootPath}/v/{version}</c> by rebasing stable-root links at
-    /// response time. Relative paths resolve from the directory containing the version catalog file.
+    /// response time. Relative paths resolve from
+    /// <see cref="AppSurfaceDocsVersioningOptions.TrustedReleaseRootPath"/>. When that option is blank, the trusted
+    /// release root defaults to the directory containing the version catalog file. Values such as
+    /// <c>./releases/1.2.3</c> are valid after normalization, but rooted paths and paths containing <c>..</c> are
+    /// unavailable and are never mounted.
     /// </remarks>
     public string? ExactTreePath { get; set; }
 
