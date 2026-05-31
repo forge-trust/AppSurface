@@ -444,13 +444,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifestCache
 
         lock (_gate)
         {
-            if (_fileProvider is null)
-            {
-                _manifest ??= AppSurfaceDocsFrozenRouteManifest.Empty;
-                return _manifest;
-            }
-
-            _manifest ??= AppSurfaceDocsFrozenRouteManifest.Load(_fileProvider, logger, _sourceDescription);
+            _manifest ??= AppSurfaceDocsFrozenRouteManifest.Load(_fileProvider!, logger, _sourceDescription);
             return _manifest;
         }
     }

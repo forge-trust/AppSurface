@@ -1,0 +1,525 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using ForgeTrust.AppSurface.Docs.Services;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.FileProviders.Physical;
+
+namespace ForgeTrust.AppSurface.Docs.Tests;
+
+[Trait("Category", "Unit")]
+public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
+{
+    private static readonly string EmptySha256 = ComputeBytesSha256([]);
+
+    private readonly string _tempDirectory;
+
+    public AppSurfaceDocsReleaseArchiveVerifierTests()
+    {
+        _tempDirectory = Path.Join(Path.GetTempPath(), "appsurfacedocs-release-archive-verifier-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_tempDirectory);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldPass_WhenManifestDigestAndFilesMatch()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>", "text/html");
+        var svg = WriteFile("assets/logo.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>", "image/svg+xml");
+        var routeManifest = WriteFile(
+            AppSurfaceDocsFrozenRouteManifest.FileName,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "guide.md",
+                  "canonicalRoutePath": "guide",
+                  "recoveryAliases": [ "legacy-guide" ],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """,
+            "application/json");
+        var digest = WriteManifest(index, routeManifest, svg);
+
+        var verified = AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+            _tempDirectory,
+            digest.ToUpperInvariant(),
+            out var archive,
+            out var failure);
+
+        Assert.True(verified, failure?.Detail);
+        Assert.Null(failure);
+        Assert.NotNull(archive);
+        Assert.Equal(3, archive.FileCount);
+        Assert.True(archive.TryGetFile(Path.Join("assets", "logo.svg"), out var file));
+        Assert.Equal("image/svg+xml", file.ContentType);
+        Assert.True(archive.FrozenRouteManifest.TryResolveAlias("legacy-guide", out var canonicalRoutePath));
+        Assert.Equal("guide", canonicalRoutePath);
+    }
+
+    [Theory]
+    [InlineData("not-a-sha")]
+    [InlineData("abc")]
+    public void TryVerify_ShouldFail_WhenCatalogDigestIsInvalid(string digest)
+    {
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE002", failure.Code);
+        Assert.Contains("digest is invalid", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenManifestIsMissing()
+    {
+        var failure = VerifyFailure(new string('0', 64));
+
+        Assert.Equal("ASDOCSARCHIVE001", failure.Code);
+        Assert.Contains("missing", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenManifestDigestDoesNotMatchCatalogPin()
+    {
+        WriteManifest();
+
+        var failure = VerifyFailure(new string('f', 64));
+
+        Assert.Equal("ASDOCSARCHIVE002", failure.Code);
+        Assert.Contains("does not match", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenManifestJsonIsMalformed()
+    {
+        var digest = WriteRawManifest("{");
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE003", failure.Code);
+        Assert.Contains("unreadable", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenManifestCannotBeRead()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var digest = WriteManifest();
+        var manifestPath = Path.Join(_tempDirectory, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        var originalMode = File.GetUnixFileMode(manifestPath);
+
+        try
+        {
+            File.SetUnixFileMode(manifestPath, UnixFileMode.None);
+            if (CanReadFile(manifestPath))
+            {
+                return;
+            }
+
+            var failure = VerifyFailure(digest);
+
+            Assert.Equal("ASDOCSARCHIVE001", failure.Code);
+            Assert.Contains("could not be read", failure.PublicMessage);
+        }
+        finally
+        {
+            File.SetUnixFileMode(manifestPath, originalMode);
+        }
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("""{ "schema": "future", "files": [] }""")]
+    public void TryVerify_ShouldFail_WhenManifestSchemaIsUnsupported(string json)
+    {
+        var digest = WriteRawManifest(json);
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE003", failure.Code);
+        Assert.Contains("schema is unsupported", failure.PublicMessage);
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidEntryShapes))]
+    public void TryVerify_ShouldFail_WhenFileEntryShapeIsInvalid(object? entry)
+    {
+        var digest = WriteManifest(entry);
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE003", failure.Code);
+        Assert.Contains("invalid file entry", failure.PublicMessage);
+    }
+
+    [Theory]
+    [InlineData("/index.html")]
+    [InlineData("folder\\index.html")]
+    [InlineData("c:index.html")]
+    [InlineData("search?.html")]
+    [InlineData("foo//bar.html")]
+    [InlineData(".")]
+    [InlineData("docs/../index.html")]
+    [InlineData(".hidden")]
+    public void TryVerify_ShouldFail_WhenManifestPathIsUnsafe(string path)
+    {
+        var digest = WriteManifest(Entry(path, length: 0, sha256: EmptySha256));
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE005", failure.Code);
+        Assert.Contains("unsafe path", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenManifestContainsDuplicatePaths()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>");
+        var digest = WriteManifest(index, index);
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE004", failure.Code);
+        Assert.Contains("duplicate path", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenManifestListsMissingFile()
+    {
+        var digest = WriteManifest(Entry("missing.html", length: 0, sha256: EmptySha256));
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE006", failure.Code);
+        Assert.Equal("missing.html", failure.Path);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenFileLengthDiffersFromManifest()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>") with { Length = 999 };
+        var digest = WriteManifest(index);
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE007", failure.Code);
+        Assert.Contains("length does not match", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenFileDigestDiffersFromManifest()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>") with { Sha256 = new string('0', 64) };
+        var digest = WriteManifest(index);
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE008", failure.Code);
+        Assert.Contains("digest does not match", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenFileCannotBeReadForDigestVerification()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var index = WriteFile("index.html", "<html>ok</html>");
+        var digest = WriteManifest(index);
+        var filePath = Path.Join(_tempDirectory, "index.html");
+        var originalMode = File.GetUnixFileMode(filePath);
+
+        try
+        {
+            File.SetUnixFileMode(filePath, UnixFileMode.None);
+            if (CanReadFile(filePath))
+            {
+                return;
+            }
+
+            var failure = VerifyFailure(digest);
+
+            Assert.Equal("ASDOCSARCHIVE008", failure.Code);
+            Assert.Contains("could not be read", failure.PublicMessage);
+        }
+        finally
+        {
+            File.SetUnixFileMode(filePath, originalMode);
+        }
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenRouteManifestIsMalformed()
+    {
+        var routeManifest = WriteFile(AppSurfaceDocsFrozenRouteManifest.FileName, "{", "application/json");
+        var digest = WriteManifest(routeManifest);
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE003", failure.Code);
+        Assert.Equal(AppSurfaceDocsFrozenRouteManifest.FileName, failure.Path);
+        Assert.Contains("route manifest is malformed", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenRouteManifestExistsButIsNotListed()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>");
+        WriteFile(AppSurfaceDocsFrozenRouteManifest.FileName, ValidRouteManifestJson(), "application/json");
+        var digest = WriteManifest(index);
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE009", failure.Code);
+        Assert.Equal(AppSurfaceDocsFrozenRouteManifest.FileName, failure.Path);
+        Assert.Contains("not listed", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenServeableArchiveFileIsNotListed()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>");
+        WriteFile("search.css", "body { color: #fff; }", "text/css");
+        var digest = WriteManifest(index);
+
+        var failure = VerifyFailure(digest);
+
+        Assert.Equal("ASDOCSARCHIVE009", failure.Code);
+        Assert.Equal("search.css", failure.Path);
+        Assert.Contains("serveable file", failure.PublicMessage);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldFail_WhenArchiveFilesCannotBeEnumerated()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var digest = WriteManifest();
+        var originalMode = File.GetUnixFileMode(_tempDirectory);
+
+        try
+        {
+            File.SetUnixFileMode(_tempDirectory, UnixFileMode.UserExecute);
+            if (CanEnumerateDirectory(_tempDirectory))
+            {
+                return;
+            }
+
+            var failure = VerifyFailure(digest);
+
+            Assert.Equal("ASDOCSARCHIVE009", failure.Code);
+            Assert.Contains("could not be enumerated", failure.PublicMessage);
+        }
+        finally
+        {
+            File.SetUnixFileMode(_tempDirectory, originalMode);
+        }
+    }
+
+    [Fact]
+    public void TryVerify_ShouldIgnoreUnlistedFilesThatHandlerWillNotServe()
+    {
+        var index = WriteFile("index.html", "<html>ok</html>");
+        WriteFile("notes.txt", "not serveable");
+        var digest = WriteManifest(index);
+
+        var verified = AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+            _tempDirectory,
+            digest,
+            out var archive,
+            out var failure);
+
+        Assert.True(verified, failure?.Detail);
+        Assert.NotNull(archive);
+        Assert.Equal(1, archive.FileCount);
+    }
+
+    [Fact]
+    public void TryVerify_ShouldAllowManifestWithoutFiles_WhenTreeContainsOnlyManifest()
+    {
+        var digest = WriteRawManifest($$"""{ "schema": "{{AppSurfaceDocsReleaseArchiveVerifier.Schema}}" }""");
+
+        var verified = AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+            _tempDirectory,
+            digest,
+            out var archive,
+            out var failure);
+
+        Assert.True(verified, failure?.Detail);
+        Assert.NotNull(archive);
+        Assert.Equal(0, archive.FileCount);
+    }
+
+    [Fact]
+    public void FileMatches_ShouldCompareFileInfoAgainstVerifiedMetadata()
+    {
+        var svg = WriteFile("logo.svg", "<svg></svg>", "image/svg+xml");
+        using var provider = new PhysicalFileProvider(_tempDirectory, ExclusionFilters.None);
+        var fileInfo = provider.GetFileInfo("logo.svg");
+
+        Assert.True(AppSurfaceDocsReleaseArchiveVerifier.FileMatches(fileInfo, svg));
+        Assert.False(AppSurfaceDocsReleaseArchiveVerifier.FileMatches(new NotFoundFileInfo("missing.svg"), svg));
+        Assert.False(AppSurfaceDocsReleaseArchiveVerifier.FileMatches(fileInfo, svg with { Length = svg.Length + 1 }));
+        Assert.False(AppSurfaceDocsReleaseArchiveVerifier.FileMatches(fileInfo, svg with { Sha256 = new string('0', 64) }));
+        Assert.False(AppSurfaceDocsReleaseArchiveVerifier.FileMatches(new ThrowingFileInfo(fileInfo.Length), svg));
+    }
+
+    public static TheoryData<object?> InvalidEntryShapes()
+    {
+        return new TheoryData<object?>
+        {
+            null,
+            Entry("   ", length: 0, sha256: EmptySha256),
+            Entry("index.html", length: -1, sha256: EmptySha256),
+            Entry("index.html", length: 0, hashAlgorithm: "sha1", sha256: EmptySha256),
+            Entry("index.html", length: 0, sha256: "   "),
+            Entry("index.html", length: 0, sha256: "not-a-sha")
+        };
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_tempDirectory))
+        {
+            Directory.Delete(_tempDirectory, recursive: true);
+        }
+    }
+
+    private AppSurfaceDocsArchiveVerificationFailure VerifyFailure(string expectedManifestSha256)
+    {
+        var verified = AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+            _tempDirectory,
+            expectedManifestSha256,
+            out var archive,
+            out var failure);
+
+        Assert.False(verified);
+        Assert.Null(archive);
+        Assert.NotNull(failure);
+        Assert.False(string.IsNullOrWhiteSpace(failure.Detail));
+        return failure;
+    }
+
+    private AppSurfaceDocsReleaseArchiveFile WriteFile(string relativePath, string content, string? contentType = null)
+    {
+        var path = Path.Combine(new[] { _tempDirectory }.Concat(relativePath.Split('/')).ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+        return new AppSurfaceDocsReleaseArchiveFile(
+            relativePath,
+            new FileInfo(path).Length,
+            contentType,
+            ComputeFileSha256(path));
+    }
+
+    private string WriteManifest(params object?[] entries)
+    {
+        var jsonEntries = entries.Select(
+            entry => entry is AppSurfaceDocsReleaseArchiveFile file
+                ? Entry(file.Path, file.Length, file.ContentType, "sha256", file.Sha256)
+                : entry);
+        return WriteRawManifest(
+            JsonSerializer.Serialize(
+                new { schema = AppSurfaceDocsReleaseArchiveVerifier.Schema, files = jsonEntries },
+                new JsonSerializerOptions { WriteIndented = true }) + "\n");
+    }
+
+    private string WriteRawManifest(string json)
+    {
+        var path = Path.Join(_tempDirectory, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        File.WriteAllText(path, json);
+        return ComputeFileSha256(path);
+    }
+
+    private static object Entry(
+        string path,
+        long length,
+        string? contentType = null,
+        string hashAlgorithm = "sha256",
+        string? sha256 = null)
+    {
+        return new
+        {
+            path,
+            length,
+            contentType,
+            hashAlgorithm,
+            sha256 = sha256 ?? EmptySha256
+        };
+    }
+
+    private static string ValidRouteManifestJson()
+    {
+        return """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": []
+            }
+            """;
+    }
+
+    private static string ComputeFileSha256(string path)
+    {
+        return ComputeBytesSha256(File.ReadAllBytes(path));
+    }
+
+    private static string ComputeBytesSha256(byte[] bytes)
+    {
+        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    }
+
+    private static bool CanReadFile(string path)
+    {
+        try
+        {
+            _ = File.ReadAllBytes(path);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool CanEnumerateDirectory(string path)
+    {
+        try
+        {
+            _ = Directory.EnumerateFiles(path).ToArray();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private sealed class ThrowingFileInfo(long length) : IFileInfo
+    {
+        public bool Exists => true;
+
+        public long Length => length;
+
+        public string? PhysicalPath => null;
+
+        public string Name => "throwing.svg";
+
+        public DateTimeOffset LastModified => DateTimeOffset.UnixEpoch;
+
+        public bool IsDirectory => false;
+
+        public Stream CreateReadStream()
+        {
+            throw new IOException("test stream failure");
+        }
+    }
+}

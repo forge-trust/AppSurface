@@ -39,6 +39,39 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
         Assert.Contains("AvailableUnverifiedLegacy", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Execute_ShouldFail_WhenCatalogPathIsMissing()
+    {
+        var command = CreateCommand(" ", "1.2.3");
+
+        var exception = Assert.Throws<CommandException>(command.Execute);
+
+        Assert.Contains("--catalog", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Execute_ShouldFail_WhenVersionIsMissing()
+    {
+        var command = CreateCommand("catalog.json", " ");
+
+        var exception = Assert.Throws<CommandException>(command.Execute);
+
+        Assert.Contains("--version", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Execute_ShouldFail_WhenCatalogDoesNotContainVersion()
+    {
+        var tree = CreateExactTree("missing-version");
+        var manifestDigest = WriteReleaseManifest(tree);
+        var catalogPath = WriteCatalog(tree, manifestDigest);
+        var command = CreateCommand(catalogPath, "9.9.9");
+
+        var exception = Assert.Throws<CommandException>(command.Execute);
+
+        Assert.Contains("could not find version '9.9.9'", exception.Message, StringComparison.Ordinal);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempDirectory))

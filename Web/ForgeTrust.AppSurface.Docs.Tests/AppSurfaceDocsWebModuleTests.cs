@@ -1520,6 +1520,77 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public void BuildPublishedTreeMounts_ShouldReplaceSharedManifestCache_WhenLaterMountUsesVerifiedArchive()
+    {
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "appsurfacedocs-web-module-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            var exactTreePath = Path.Combine(tempDirectory, "shared");
+            Directory.CreateDirectory(exactTreePath);
+            var verifiedArchive = new AppSurfaceDocsVerifiedReleaseArchive(
+                new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.OrdinalIgnoreCase),
+                AppSurfaceDocsFrozenRouteManifest.Empty);
+            var legacyVersion = new AppSurfaceDocsResolvedVersion(
+                Version: "1.2.2",
+                Label: "1.2.2",
+                Summary: null,
+                ExactTreePath: exactTreePath,
+                ExactRootUrl: "/docs/v/1.2.2",
+                SupportState: AppSurfaceDocsVersionSupportState.Current,
+                Visibility: AppSurfaceDocsVersionVisibility.Public,
+                AdvisoryState: AppSurfaceDocsVersionAdvisoryState.None,
+                IsAvailable: true,
+                AvailabilityIssue: null);
+            var verifiedVersion = new AppSurfaceDocsResolvedVersion(
+                Version: "1.2.3",
+                Label: "1.2.3",
+                Summary: null,
+                ExactTreePath: exactTreePath,
+                ExactRootUrl: "/docs/v/1.2.3",
+                SupportState: AppSurfaceDocsVersionSupportState.Current,
+                Visibility: AppSurfaceDocsVersionVisibility.Public,
+                AdvisoryState: AppSurfaceDocsVersionAdvisoryState.None,
+                IsAvailable: true,
+                AvailabilityIssue: null,
+                ArchiveVerificationState: AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+                VerifiedReleaseArchive: verifiedArchive);
+            var catalog = new AppSurfaceDocsResolvedVersionCatalog(
+                AppSurfaceDocsResolvedVersionCatalogStatus.Resolved,
+                CatalogPath: Path.Combine(tempDirectory, "catalog.json"),
+                Versions: [legacyVersion, verifiedVersion],
+                RecommendedVersion: null);
+            var docsUrlBuilder = new DocsUrlBuilder(
+                new AppSurfaceDocsOptions
+                {
+                    Routing = new AppSurfaceDocsRoutingOptions
+                    {
+                        RouteRootPath = "/docs",
+                        DocsRootPath = "/docs/next"
+                    }
+                });
+
+            var (mounts, providers) = AppSurfaceDocsWebModule.BuildPublishedTreeMounts(catalog, docsUrlBuilder);
+
+            Assert.Equal(2, mounts.Count);
+            Assert.Single(providers);
+            Assert.False(mounts[0].FrozenRouteManifest!.UsesVerifiedSnapshot);
+            Assert.True(mounts[1].FrozenRouteManifest!.UsesVerifiedSnapshot);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void BuildPublishedTreeMounts_ShouldNotReuseProvider_ForCaseNeighborTreesOnCaseSensitivePlatforms()
     {
         var tempDirectory = Path.Join(

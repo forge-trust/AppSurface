@@ -180,6 +180,32 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldDenyVerifiedArchiveFilesMissingFromManifest()
+    {
+        var tree = CreatePublishedTree("verified-unlisted-file");
+        var provider = new PhysicalFileProvider(tree, ExclusionFilters.None);
+        _disposables.Add(provider);
+        var archive = new AppSurfaceDocsVerifiedReleaseArchive(
+            new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.OrdinalIgnoreCase),
+            AppSurfaceDocsFrozenRouteManifest.Empty);
+        var handler = CreateHandler(
+            [
+                new AppSurfaceDocsPublishedTreeMount(
+                    "/docs/v/1.2.3",
+                    provider,
+                    tree,
+                    new AppSurfaceDocsFrozenRouteManifestCache(AppSurfaceDocsFrozenRouteManifest.Empty, tree),
+                    AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+                    archive)
+            ]);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
+
+        var handled = await handler.TryHandleAsync(request);
+
+        Assert.False(handled);
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldRedirectFrozenManifestAliases_ToMountedCanonicalRoutes()
     {
         var tree = CreatePublishedTree("release-with-frozen-manifest");
