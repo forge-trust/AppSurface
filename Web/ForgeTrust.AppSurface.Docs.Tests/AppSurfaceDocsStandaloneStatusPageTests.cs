@@ -317,8 +317,21 @@ public sealed class AppSurfaceDocsStandaloneStatusPageTests
             {
                 lastProbeException = ex;
             }
+            catch (OperationCanceledException ex) when (requestTimeout.IsCancellationRequested)
+            {
+                lastProbeException = ex;
+                break;
+            }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(100), requestTimeout.Token);
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), requestTimeout.Token);
+            }
+            catch (OperationCanceledException ex) when (requestTimeout.IsCancellationRequested)
+            {
+                lastProbeException = ex;
+                break;
+            }
         }
 
         var timeoutMessage = lastProbeException is null

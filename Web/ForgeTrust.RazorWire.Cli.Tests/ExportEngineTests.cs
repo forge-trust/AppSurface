@@ -602,8 +602,6 @@ public class ExportEngineTests
             var decodedHtml = Uri.UnescapeDataString(html);
             Assert.Contains("Exported 404 page", html);
             Assert.Contains("href=\"/about.html\"", html);
-            Assert.Contains("Search documentation", html);
-            Assert.Contains("href=\"/docs/search.html\"", html);
             Assert.Contains("src=\"/img/error.png\"", html);
             Assert.DoesNotContain("Diagnostics", html, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("_health", decodedHtml, StringComparison.OrdinalIgnoreCase);

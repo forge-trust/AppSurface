@@ -31,4 +31,32 @@ public sealed class TestPathUtilsTests
 
         Assert.Throws<ArgumentException>(() => TestPathUtils.RelativePath("Web", rootedSegment, "Docs.csproj"));
     }
+
+    [Fact]
+    public void RelativePath_ShouldRejectEmptySegments()
+    {
+        Assert.Throws<ArgumentException>(() => TestPathUtils.RelativePath());
+    }
+
+    [Fact]
+    public void RelativePath_ShouldRejectNullSegment()
+    {
+        Assert.Throws<ArgumentException>(() => TestPathUtils.RelativePath("Web", null!, "Docs.csproj"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RelativePath_ShouldRejectBlankSegment(string segment)
+    {
+        Assert.Throws<ArgumentException>(() => TestPathUtils.RelativePath("Web", segment, "Docs.csproj"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void PathUnder_ShouldRejectBlankBasePath(string basePath)
+    {
+        Assert.Throws<ArgumentException>(() => TestPathUtils.PathUnder(basePath, "Web", "Docs.csproj"));
+    }
 }
