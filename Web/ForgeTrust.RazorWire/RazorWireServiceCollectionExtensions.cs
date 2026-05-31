@@ -37,14 +37,17 @@ public static class RazorWireServiceCollectionExtensions
         this IServiceCollection services,
         Action<RazorWireOptions>? configure = null)
     {
-        services.AddOptions<RazorWireOptions>();
+        services.AddOptions<RazorWireOptions>()
+            .ValidateOnStart();
 
         services.Configure(configure ?? (_ => { }));
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<RazorWireOptions>, RazorWireOptionsValidator>());
 
         services.AddSingleton(sp =>
             sp.GetRequiredService<IOptions<RazorWireOptions>>().Value);
 
         services.TryAddSingleton<IRazorWireStreamHub, InMemoryRazorWireStreamHub>();
+        services.TryAddSingleton<RazorWireStreamAdmissionController>();
         services.TryAddSingleton<DenyAllRazorWireChannelAuthorizer>();
         services.TryAddSingleton<AllowAllRazorWireChannelAuthorizer>();
         services.TryAddSingleton<IRazorWireChannelAuthorizer>(sp =>
