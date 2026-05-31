@@ -79,7 +79,8 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             return false;
         }
 
-        var manifestPath = Path.Combine(exactTreePath, FileName);
+        var manifestFileName = Path.GetFileName(FileName);
+        var manifestPath = Path.Join(exactTreePath, manifestFileName);
         if (!fileSystem.FileExists(manifestPath))
         {
             failure = AppSurfaceDocsArchiveVerificationFailure.Create(
@@ -155,7 +156,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
                 return false;
             }
 
-            var filePath = Path.Combine(exactTreePath, validatedEntry.Path.Replace('/', Path.DirectorySeparatorChar));
+            var filePath = Path.Join(exactTreePath, validatedEntry.Path.Replace('/', Path.DirectorySeparatorChar));
             if (!fileSystem.FileExists(filePath))
             {
                 failure = AppSurfaceDocsArchiveVerificationFailure.Create(
@@ -223,7 +224,7 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             }
         }
 
-        if (fileSystem.FileExists(Path.Combine(exactTreePath, RouteManifestFileName))
+        if (fileSystem.FileExists(Path.Join(exactTreePath, Path.GetFileName(RouteManifestFileName)))
             && !files.ContainsKey(RouteManifestFileName))
         {
             failure = AppSurfaceDocsArchiveVerificationFailure.Create(

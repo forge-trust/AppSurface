@@ -93,19 +93,21 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
 
     private string CreateExactTree(string name)
     {
-        if (Path.IsPathRooted(name))
+        var fullTempDirectory = Path.GetFullPath(_tempDirectory);
+        var root = Path.GetFullPath(Path.Join(fullTempDirectory, name));
+        if (!string.Equals(root, fullTempDirectory, StringComparison.Ordinal)
+            && !root.StartsWith(fullTempDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal))
         {
             throw new ArgumentException("Exact tree names must be relative to the test directory.", nameof(name));
         }
 
-        var root = Path.Combine(_tempDirectory, name);
         Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "index.html"), "<html>ok</html>");
-        File.WriteAllText(Path.Combine(root, "search.html"), "<html>search</html>");
-        File.WriteAllText(Path.Combine(root, "search-index.json"), "{\"documents\":[]}");
-        File.WriteAllText(Path.Combine(root, "search.css"), "body { color: #fff; }");
-        File.WriteAllText(Path.Combine(root, "search-client.js"), "window.__searchClientLoaded = true;");
-        File.WriteAllText(Path.Combine(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
+        File.WriteAllText(Path.Join(root, "index.html"), "<html>ok</html>");
+        File.WriteAllText(Path.Join(root, "search.html"), "<html>search</html>");
+        File.WriteAllText(Path.Join(root, "search-index.json"), "{\"documents\":[]}");
+        File.WriteAllText(Path.Join(root, "search.css"), "body { color: #fff; }");
+        File.WriteAllText(Path.Join(root, "search-client.js"), "window.__searchClientLoaded = true;");
+        File.WriteAllText(Path.Join(root, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
         return root;
     }
 
@@ -122,7 +124,7 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
             version.Remove("releaseManifestSha256");
         }
 
-        var path = Path.Combine(_tempDirectory, "catalog.json");
+        var path = Path.Join(_tempDirectory, "catalog.json");
         File.WriteAllText(
             path,
             JsonSerializer.Serialize(
@@ -151,7 +153,7 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
                 })
             .OrderBy(entry => entry.path, StringComparer.Ordinal)
             .ToArray();
-        var manifestPath = Path.Combine(root, ".appsurface-docs-release-manifest.json");
+        var manifestPath = Path.Join(root, ".appsurface-docs-release-manifest.json");
         File.WriteAllText(
             manifestPath,
             JsonSerializer.Serialize(
