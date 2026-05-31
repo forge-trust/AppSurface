@@ -120,12 +120,26 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
     /// <summary>
     /// Gets the live origin used for RazorWire-managed live references in hybrid exports.
     /// </summary>
+    /// <remarks>
+    /// This option is only needed for split-origin hybrid output. The value must be an absolute <c>http</c> or
+    /// <c>https</c> origin with no path, query string, fragment, or userinfo. When configured, RazorWire-owned live
+    /// surfaces such as streams, islands, and lazy anti-forgery form posts are rewritten to this origin while docs
+    /// navigation and canonical routes remain on the static docs host. Leave it unset when the published docs and live
+    /// app share an origin.
+    /// </remarks>
     [CommandOption("live-origin", Description = "Live origin for RazorWire-managed hybrid interactions, such as https://api.example.com.")]
     public string? LiveOrigin { get; set; }
 
     /// <summary>
     /// Gets credential behavior for RazorWire-managed live references.
     /// </summary>
+    /// <remarks>
+    /// Defaults to <see cref="RazorWireHybridCredentialsMode.Auto"/>, which includes credentials when
+    /// <see cref="LiveOrigin"/> is set and omits them otherwise. Choose
+    /// <see cref="RazorWireHybridCredentialsMode.Include"/> for cookie-backed live docs interactions across origins.
+    /// Choose <see cref="RazorWireHybridCredentialsMode.Omit"/> only for public live endpoints that do not need cookies
+    /// or lazy anti-forgery token refresh.
+    /// </remarks>
     [CommandOption("hybrid-credentials", Description = "Hybrid credentials mode: auto (default), include, or omit.")]
     public RazorWireHybridCredentialsMode HybridCredentials { get; set; } = RazorWireHybridCredentialsMode.Auto;
 

@@ -36,8 +36,14 @@ public class RazorWireFormTagHelper : TagHelper
 
     /// <summary>
     /// Gets or sets the anti-forgery behavior assertion for this form.
-    /// Use <c>lazy</c> for hybrid/static exports that should refresh a token at runtime, or <c>off</c> to opt out.
     /// </summary>
+    /// <remarks>
+    /// Supported values are <c>lazy</c> and <c>off</c>. <c>lazy</c> emits <c>data-rw-antiforgery="lazy"</c>, asserting
+    /// that the runtime should fetch a fresh anti-forgery token before the form is submitted. <c>off</c> emits
+    /// <c>data-rw-antiforgery="off"</c>, an explicit opt-out that the exporter treats as unsafe if a static token is
+    /// still present. When this property is unset, normal server-rendered forms keep their default ASP.NET Core
+    /// anti-forgery behavior, and hybrid export can still convert RazorWire-owned static token forms to lazy refresh.
+    /// </remarks>
     [HtmlAttributeName("rw-antiforgery")]
     public string? Antiforgery { get; set; }
 

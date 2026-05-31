@@ -45,6 +45,18 @@ public class RazorWireScriptsTagHelper : TagHelper
     /// </summary>
     /// <param name="context">The current tag helper context.</param>
     /// <param name="output">The tag helper output that will be modified to contain the script elements and have no wrapper tag.</param>
+    /// <remarks>
+    /// The generated runtime script includes data attributes for form failure UX, development diagnostics, split-origin
+    /// live origin, hybrid credential behavior, and the lazy anti-forgery token endpoint. The helper normalizes
+    /// <see cref="RazorWireOptions.Hybrid"/>.<see cref="RazorWireHybridOptions.LiveOrigin"/> before emitting it so the
+    /// browser receives only an origin, never a path-bearing URL. Use
+    /// <see cref="RazorWireHybridCredentialsMode.Auto"/> to include credentials automatically when a live origin is
+    /// configured; use explicit include or omit only when the live endpoint contract requires it.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <see cref="RazorWireOptions.Hybrid"/>.<see cref="RazorWireHybridOptions.LiveOrigin"/> is not an
+    /// absolute HTTP(S) origin or includes a path, query string, fragment, or userinfo.
+    /// </exception>
     public override void Process(TagHelperContext context, TagHelperOutput output)
     {
         output.TagName = null; // No wrapper tag

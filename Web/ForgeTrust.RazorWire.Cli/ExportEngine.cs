@@ -716,14 +716,13 @@ public class ExportEngine
                 return false;
             }
 
-            if (!Uri.TryCreate(context.BaseUrl + "/", UriKind.Absolute, out var baseUri)
-                || !HasSameOrigin(absoluteUri, baseUri))
+            if (!Uri.TryCreate(EnsureTrailingSlash(context.BaseUrl), UriKind.Absolute, out var baseUri)
+                || !HasSameOrigin(absoluteUri, baseUri)
+                || !TryGetAppRelativeRoute(absoluteUri, baseUri, out resolved))
             {
                 error = $"'{value}' points outside the exported application origin.";
                 return false;
             }
-
-            resolved = absoluteUri.PathAndQuery + absoluteUri.Fragment;
         }
         else
         {
@@ -883,13 +882,13 @@ public class ExportEngine
             return true;
         }
 
-        if (string.Equals(seedPath, basePath, StringComparison.Ordinal))
+        if (string.Equals(seedPath, basePath, StringComparison.OrdinalIgnoreCase))
         {
             route = "/" + seedUri.Query + seedUri.Fragment;
             return true;
         }
 
-        if (seedPath.StartsWith(basePath + "/", StringComparison.Ordinal))
+        if (seedPath.StartsWith(basePath + "/", StringComparison.OrdinalIgnoreCase))
         {
             route = seedPath[basePath.Length..] + seedUri.Query + seedUri.Fragment;
             return true;

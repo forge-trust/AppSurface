@@ -2864,10 +2864,24 @@ public sealed class ProgramEntryPointTests
             var path = request.RequestUri?.AbsolutePath ?? "/";
             if (path == "/" || path == "/index")
             {
-                return Task.FromResult(_okResponses.Dequeue());
+                return Task.FromResult(DequeueOrThrow(_okResponses, HttpStatusCode.OK, path));
             }
 
-            return Task.FromResult(_notFoundResponses.Dequeue());
+            return Task.FromResult(DequeueOrThrow(_notFoundResponses, HttpStatusCode.NotFound, path));
+        }
+
+        private static HttpResponseMessage DequeueOrThrow(
+            Queue<HttpResponseMessage> responses,
+            HttpStatusCode statusCode,
+            string path)
+        {
+            if (responses.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"No queued {statusCode} response available for request path '{path}'. Increase test handler capacity.");
+            }
+
+            return responses.Dequeue();
         }
 
         protected override void Dispose(bool disposing)

@@ -1900,6 +1900,89 @@ public class ExportEngineTests
     }
 
     [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_RewritePathBaseAbsoluteFormActions()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridPathBaseLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            await _sut.RunAsync(context);
+
+            var html = await File.ReadAllTextAsync(Path.Join(tempDir, "index.html"));
+            Assert.Contains("action=\"https://api.example.com/profile/save\"", html);
+            Assert.DoesNotContain("action=\"https://api.example.com/app/profile/save\"", html);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_HybridMode_WithLiveOrigin_Should_RejectAbsoluteFormActionsOutsidePathBase()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new HttpClient(new HybridOutsidePathBaseLiveOriginHandler())
+            {
+                BaseAddress = new Uri("http://localhost:5000")
+            };
+            A.CallTo(() => _httpClientFactory.CreateClient("ExportEngine")).Returns(client);
+
+            var context = new ExportContext(
+                tempDir,
+                seedRoutesPath: null,
+                initialSeedRoutes: ["/"],
+                baseUrl: "http://localhost:5000/app",
+                mode: ExportMode.Hybrid,
+                redirectStrategy: ExportRedirectStrategy.Html,
+                hybridOptions: new ExportHybridOptions
+                {
+                    LiveOrigin = "https://api.example.com",
+                    CredentialsMode = RazorWireHybridCredentialsMode.Auto
+                });
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(() => _sut.RunAsync(context));
+
+            Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "RWEXPORT006"
+                                                                 && diagnostic.Message.Contains("points outside the exported application origin", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_HybridMode_WithLiveOrigin_Should_FailUnsafeStaticTokenForms()
     {
         var tempDir = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
@@ -3166,6 +3249,50 @@ public class ExportEngineTests
                           <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
                         </form>
                         <form method="post" action="/newsletter">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class HybridPathBaseLiveOriginHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/app" || path == "/app/")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="http://localhost:5000/app/profile/save">
+                          <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
+                        </form>
+                      </body>
+                    </html>
+                    """);
+            }
+
+            return NotFound();
+        }
+    }
+
+    private sealed class HybridOutsidePathBaseLiveOriginHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath ?? "/";
+            if (path == "/app" || path == "/app/")
+            {
+                return Html("""
+                    <html>
+                      <body>
+                        <form data-rw-form="true" method="post" action="http://localhost:5000/profile/save">
                           <input type="hidden" name="__RequestVerificationToken" value="crawler-token">
                         </form>
                       </body>

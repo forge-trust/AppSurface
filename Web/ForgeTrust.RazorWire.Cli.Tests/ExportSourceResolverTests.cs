@@ -78,6 +78,15 @@ public class ExportSourceResolverTests
         Assert.Throws<ArgumentNullException>(() => new ExportSourceResolver(_loggerFactory, processFactory, httpFactory, null!));
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ResolvedExportSource_Constructor_Should_Reject_Blank_BaseUrl(string? baseUrl)
+    {
+        Assert.ThrowsAny<ArgumentException>(() => new ResolvedExportSource(baseUrl!, null));
+    }
+
     [Fact]
     public async Task ResolveAsync_Should_Start_Process_And_Return_Resolved_Url()
     {

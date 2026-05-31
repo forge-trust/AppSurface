@@ -23,6 +23,13 @@ internal sealed partial class AppSurfaceExportCommand : ICommand
     private readonly ExportSourceRequestFactory _requestFactory;
     private readonly ExportSourceResolver _sourceResolver;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AppSurfaceExportCommand"/> class.
+    /// </summary>
+    /// <param name="logger">Logger used to report export progress and diagnostics.</param>
+    /// <param name="engine">Shared RazorWire export engine that crawls, validates, rewrites, and writes artifacts.</param>
+    /// <param name="requestFactory">Factory that validates the mutually exclusive source options.</param>
+    /// <param name="sourceResolver">Resolver that turns a URL, project, or DLL source into a crawlable base URL.</param>
     public AppSurfaceExportCommand(
         ILogger<AppSurfaceExportCommand> logger,
         ExportEngine engine,
@@ -65,9 +72,27 @@ internal sealed partial class AppSurfaceExportCommand : ICommand
     [CommandOption("public-origin", Description = "Public static origin for same-origin canonical metadata, such as https://www.example.com.")]
     public string? PublicOrigin { get; set; }
 
+    /// <summary>
+    /// Gets or sets the optional live origin for RazorWire-managed split-origin hybrid interactions.
+    /// </summary>
+    /// <remarks>
+    /// The value must be an absolute <c>http</c> or <c>https</c> origin with no path, query string, fragment, or
+    /// userinfo. Use this when the exported static files are served from one origin but RazorWire-owned live streams,
+    /// islands, and lazy anti-forgery forms must call a different live app origin. Leave it unset for same-origin
+    /// hybrid deployments.
+    /// </remarks>
     [CommandOption("live-origin", Description = "Live origin for RazorWire-managed hybrid interactions, such as https://api.example.com.")]
     public string? LiveOrigin { get; set; }
 
+    /// <summary>
+    /// Gets or sets credential behavior for RazorWire-managed live calls in hybrid output.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see cref="RazorWireHybridCredentialsMode.Auto"/>, which includes credentials only when
+    /// <see cref="LiveOrigin"/> is set. Use <see cref="RazorWireHybridCredentialsMode.Include"/> for cookie-backed
+    /// cross-origin live apps and <see cref="RazorWireHybridCredentialsMode.Omit"/> for public live surfaces that do not
+    /// depend on cookies or anti-forgery token refreshes.
+    /// </remarks>
     [CommandOption("hybrid-credentials", Description = "Hybrid credentials mode: auto (default), include, or omit.")]
     public RazorWireHybridCredentialsMode HybridCredentials { get; set; } = RazorWireHybridCredentialsMode.Auto;
 
