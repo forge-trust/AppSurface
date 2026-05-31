@@ -51,10 +51,31 @@ public sealed class AppSurfaceDocsTrustedReleasePathGuardTests : IDisposable
         Assert.Null(internalDetail);
     }
 
+    [Fact]
+    public void TryResolveCatalogTreePath_ShouldAllowLeadingCurrentDirectorySegment()
+    {
+        var trustedRoot = Directory.CreateDirectory(Path.Join(_tempDirectory, "releases")).FullName;
+
+        var resolved = AppSurfaceDocsTrustedReleasePathGuard.TryResolveCatalogTreePath(
+            trustedRoot,
+            "./1.2.3",
+            out var exactTreePath,
+            out var publicIssue,
+            out var internalDetail);
+
+        Assert.True(resolved);
+        Assert.Equal(Path.Join(trustedRoot, "1.2.3"), exactTreePath);
+        Assert.Null(publicIssue);
+        Assert.Null(internalDetail);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("../release")]
+    [InlineData("/absolute/path")]
+    [InlineData(".private/1.2.3")]
+    [InlineData("release/.private")]
     public void TryResolveCatalogTreePath_ShouldRejectUnsafeConfiguredPaths(string configuredPath)
     {
         var trustedRoot = Directory.CreateDirectory(Path.Join(_tempDirectory, "releases")).FullName;
@@ -70,6 +91,42 @@ public sealed class AppSurfaceDocsTrustedReleasePathGuardTests : IDisposable
         Assert.Null(exactTreePath);
         Assert.NotNull(publicIssue);
         Assert.NotNull(internalDetail);
+    }
+
+    [Fact]
+    public void TryValidateDirectory_ShouldAcceptValidDirectory()
+    {
+        var directoryPath = Directory.CreateDirectory(Path.Join(_tempDirectory, "safe-directory")).FullName;
+
+        var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
+            directoryPath,
+            "missing",
+            "unsafe",
+            out var publicIssue,
+            out var internalDetail);
+
+        Assert.True(result);
+        Assert.Null(publicIssue);
+        Assert.Null(internalDetail);
+    }
+
+    [Fact]
+    public void TryValidateDirectory_ShouldRejectSymlink()
+    {
+        Assert.True(
+            TryCreateSymbolicLinkTestDirectory(out _, out var linkPath),
+            "symlink support is required to verify trusted release directory rejection.");
+
+        var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
+            linkPath,
+            "missing",
+            "unsafe",
+            out var publicIssue,
+            out var internalDetail);
+
+        Assert.False(result);
+        Assert.Equal("unsafe", publicIssue);
+        Assert.Contains("symlink", internalDetail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -106,6 +163,7 @@ public sealed class AppSurfaceDocsTrustedReleasePathGuardTests : IDisposable
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("../index.html")]
+    [InlineData("/absolute/file.html")]
     public void TryValidateFileCandidate_ShouldRejectUnsafeRelativeFilePaths(string relativeFilePath)
     {
         var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
@@ -117,6 +175,42 @@ public sealed class AppSurfaceDocsTrustedReleasePathGuardTests : IDisposable
         Assert.False(result);
         Assert.Equal(string.Empty, physicalFilePath);
         Assert.Equal("candidate path is not a safe relative path.", denialReason);
+    }
+
+    [Fact]
+    public void TryValidateFileCandidate_ShouldAcceptValidFile()
+    {
+        var filePath = Path.Join(_tempDirectory, "valid.html");
+        File.WriteAllText(filePath, "<html>ok</html>");
+
+        var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
+            _tempDirectory,
+            "valid.html",
+            out var physicalFilePath,
+            out var denialReason);
+
+        Assert.True(result);
+        Assert.Equal(AppSurfaceDocsTrustedReleasePathGuard.NormalizePhysicalPath(filePath), physicalFilePath);
+        Assert.Null(denialReason);
+    }
+
+    [Fact]
+    public void TryValidateFileCandidate_ShouldRejectSymlinkedFile()
+    {
+        Assert.True(
+            TryCreateSymbolicLinkTestFile(out var targetPath, out var linkPath),
+            "symlink support is required to verify trusted release file rejection.");
+        File.WriteAllText(targetPath, "<html>external</html>");
+
+        var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
+            _tempDirectory,
+            Path.GetFileName(linkPath),
+            out var physicalFilePath,
+            out var denialReason);
+
+        Assert.False(result);
+        Assert.Equal(AppSurfaceDocsTrustedReleasePathGuard.NormalizePhysicalPath(linkPath), physicalFilePath);
+        Assert.Contains("symlink", denialReason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -164,6 +258,39 @@ public sealed class AppSurfaceDocsTrustedReleasePathGuardTests : IDisposable
     }
 
     [Fact]
+    public void TryValidateNoReparseSegments_ShouldAcceptNestedDirectoryPath()
+    {
+        var nestedPath = Directory.CreateDirectory(Path.Join(_tempDirectory, "release", "nested")).FullName;
+
+        var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateNoReparseSegments(
+            _tempDirectory,
+            nestedPath,
+            expectLeafFile: false,
+            out var denialReason);
+
+        Assert.True(result);
+        Assert.Null(denialReason);
+    }
+
+    [Fact]
+    public void TryValidateNoReparseSegments_ShouldRejectSymlinkInPath()
+    {
+        Assert.True(
+            TryCreateSymbolicLinkTestDirectory(out var targetPath, out var linkPath),
+            "symlink support is required to verify trusted release segment rejection.");
+        Directory.CreateDirectory(Path.Join(targetPath, "nested"));
+
+        var result = AppSurfaceDocsTrustedReleasePathGuard.TryValidateNoReparseSegments(
+            _tempDirectory,
+            Path.Join(linkPath, "nested"),
+            expectLeafFile: false,
+            out var denialReason);
+
+        Assert.False(result);
+        Assert.Contains("symlink", denialReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void TryValidateNoReparseSegments_ShouldRejectCandidateOutsideTrustedRoot()
     {
         var outsidePath = Path.Join(Path.GetTempPath(), $"outside-{Guid.NewGuid():N}");
@@ -205,6 +332,38 @@ public sealed class AppSurfaceDocsTrustedReleasePathGuardTests : IDisposable
         if (Directory.Exists(_tempDirectory))
         {
             Directory.Delete(_tempDirectory, recursive: true);
+        }
+    }
+
+    private bool TryCreateSymbolicLinkTestFile(out string targetPath, out string linkPath)
+    {
+        targetPath = Path.Join(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}.txt");
+        linkPath = Path.Join(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}.html");
+        try
+        {
+            File.WriteAllText(targetPath, "target");
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private bool TryCreateSymbolicLinkTestDirectory(out string targetPath, out string linkPath)
+    {
+        targetPath = Path.Join(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}");
+        linkPath = Path.Join(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(targetPath);
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
         }
     }
 }

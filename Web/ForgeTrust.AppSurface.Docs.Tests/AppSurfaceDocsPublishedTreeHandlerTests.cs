@@ -465,10 +465,9 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     [Fact]
     public async Task TryHandleAsync_ShouldRejectSymlinkedEmbeddedAssets()
     {
-        if (!TryCreateSymbolicLinkTestFile(out var targetPath, out _))
-        {
-            return;
-        }
+        Assert.True(
+            TryCreateSymbolicLinkTestFile(out var targetPath, out _),
+            "symlink support is required to verify embedded asset rejection.");
 
         var tree = CreatePublishedTree("symlinked-asset");
         var imageDirectory = Path.Join(tree, "img");
@@ -484,10 +483,9 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     [Fact]
     public async Task TryHandleAsync_ShouldRejectAssetsUnderSymlinkedDirectories()
     {
-        if (!TryCreateSymbolicLinkTestDirectory(out var targetPath, out var linkPath))
-        {
-            return;
-        }
+        Assert.True(
+            TryCreateSymbolicLinkTestDirectory(out var targetPath, out var linkPath),
+            "symlink support is required to verify symlinked directory rejection.");
 
         var tree = CreatePublishedTree("symlinked-asset-directory");
         var nestedDirectory = Path.Join(targetPath, "nested");
@@ -504,10 +502,9 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     [Fact]
     public async Task TryHandleAsync_ShouldRejectSymlinkedFallbackHtml()
     {
-        if (!TryCreateSymbolicLinkTestFile(out var targetPath, out _))
-        {
-            return;
-        }
+        Assert.True(
+            TryCreateSymbolicLinkTestFile(out var targetPath, out _),
+            "symlink support is required to verify fallback HTML rejection.");
 
         var tree = CreatePublishedTree("symlinked-fallback");
         File.WriteAllText(targetPath, "<!DOCTYPE html><html><body>external</body></html>");
@@ -521,10 +518,9 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     [Fact]
     public async Task TryHandleAsync_ShouldIgnoreSymlinkedFrozenRouteManifest()
     {
-        if (!TryCreateSymbolicLinkTestFile(out var targetPath, out _))
-        {
-            return;
-        }
+        Assert.True(
+            TryCreateSymbolicLinkTestFile(out var targetPath, out _),
+            "symlink support is required to verify frozen route manifest rejection.");
 
         var tree = CreatePublishedTree("symlinked-manifest");
         File.WriteAllText(

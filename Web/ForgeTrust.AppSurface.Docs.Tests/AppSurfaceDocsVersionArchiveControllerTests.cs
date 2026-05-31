@@ -148,6 +148,33 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
         Assert.Empty(model.Versions);
     }
 
+    [Fact]
+    public void VersionEntry_ShouldPreferCatalogLevelAvailabilityMessage_WhenTrustedReleaseRootIsMissing()
+    {
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.3",
+                        ExactTreePath = "1.2.3"
+                    }
+                ]
+            });
+        var controller = CreateController(catalogPath, trustedReleaseRootPath: "missing-release-store");
+
+        var result = controller.VersionEntry();
+
+        var view = Assert.IsType<ViewResult>(result);
+        Assert.Equal("Versions", view.ViewName);
+        var model = Assert.IsType<AppSurfaceDocsVersionArchiveViewModel>(view.Model);
+        Assert.Contains("Trusted release root", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("No healthy recommended release tree", model.AvailabilityMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(model.Versions);
+    }
+
 
     [Fact]
     public void Versions_ShouldKeepArchiveHrefsAppRelative_ForViewPathBaseHandling()
