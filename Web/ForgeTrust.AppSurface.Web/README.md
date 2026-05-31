@@ -135,7 +135,8 @@ Important behavior:
 
 - Only empty `401`, `403`, and `404` responses from `GET` or `HEAD` requests that accept `text/html` or `application/xhtml+xml` are re-executed.
 - JSON, non-HTML, non-empty, and non-GET/HEAD responses keep their original API-friendly behavior.
-- Missing default documentation `404` routes include a documentation search recovery link because stale docs links are the most common browser miss. The default AppSurface Docs route family is `/docs`, so the default recovery target is `/docs/search`. Apps that set `AppSurfaceDocs:Routing:RouteRootPath` should derive the search target from that root, for example `AppSurfaceDocs:Routing:RouteRootPath=/foo/bar` points stale-docs recovery links at `/foo/bar/search`.
+- The framework fallback is app-agnostic. It includes a generic home recovery link and does not inspect product-specific route families such as `/docs`.
+- Apps that need domain-specific recovery, such as documentation search for stale docs links, should add `~/Views/Shared/404.cshtml` and render links from their own route contracts.
 - Static export remains conservative: RazorWire CLI probes `/_appsurface/errors/404` and writes only `404.html`; it does not emit `401.html` or `403.html`. In CDN mode, that `404.html` page is validated and rewritten with the rest of the static output. The fallback `Return home` link is marked `data-rw-export-ignore` so apps that do not export `/` can still publish a valid conventional `404.html`.
 - Production `500` exception pages are intentionally separate from browser status pages and must be enabled with `UseConventionalExceptionPage()`.
 
@@ -157,6 +158,16 @@ The conventional exception page uses ASP.NET Core exception handling, not status
 - Development keeps its existing developer exception behavior. AppSurface does not install the conventional production handler when `StartupContext.IsDevelopment` is true.
 - API-only apps, JSON problem-details APIs, tenant-specific error pages, or apps with telemetry-first exception middleware should leave this disabled and register their own exception handling.
 - Once ASP.NET Core has started a response, exception handling cannot replace it with the conventional page. Design streaming endpoints so failures are reported through the stream protocol rather than relying on a late 500 page.
+
+### Executable error-page proof
+
+Use the focused [web error-page proof](../../examples/web-error-pages/README.md) when you want executable evidence rather than API reference prose:
+
+```bash
+bash examples/web-error-pages/verify.sh
+```
+
+The proof starts a local production-mode app, verifies browser HTML for empty `401`, `403`, `404`, and thrown `500` paths, verifies API requests do not receive browser HTML, and checks that synthetic request sentinels are absent from the production `500` response body.
 
 ### Configuration and Port Overrides
 

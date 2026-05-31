@@ -1474,6 +1474,32 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task AppSurfaceDocsInProcessExportRunner_Should_WriteStandalone404HtmlWithDocsSearchRecovery()
+    {
+        using var repository = TempDirectory.Create("appsurface-docs-export-repo-");
+        using var output = TempDirectory.Create("appsurface-docs-export-output-");
+        await File.WriteAllTextAsync(Path.Join(repository.Path, "README.md"), "# AppSurface Docs\n");
+        var exportEngine = new ExportEngine(
+            NullLogger<ExportEngine>.Instance,
+            new DefaultHttpClientFactory());
+        var runner = new AppSurfaceDocsInProcessExportRunner(
+            NullLogger<AppSurfaceDocsInProcessExportRunner>.Instance,
+            new RazorWireExportEngineAdapter(exportEngine));
+
+        await runner.ExportAsync(
+            CreateExportArgs(repository.Path, output.Path, TimeSpan.FromSeconds(15)),
+            CancellationToken.None);
+
+        var notFoundFile = Path.Join(output.Path, "404.html");
+        Assert.True(File.Exists(notFoundFile));
+        var html = await File.ReadAllTextAsync(notFoundFile);
+        Assert.Contains("Documentation page not found", html);
+        Assert.Contains("Search documentation", html);
+        Assert.Contains("href=\"/docs/search.html\"", html);
+        Assert.DoesNotContain("AppSurface default 404", html);
+    }
+
+    [Fact]
     public async Task AppSurfaceDocsStandaloneHostRunner_Should_Open_Docs_Url_When_Host_Is_Ready()
     {
         var loggerProvider = new InMemoryLoggerProvider();
@@ -2749,6 +2775,14 @@ public sealed class ProgramEntryPointTests
             Context = context;
             WorkingDirectoryDuringExport = Directory.GetCurrentDirectory();
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class DefaultHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+        {
+            return new HttpClient();
         }
     }
 

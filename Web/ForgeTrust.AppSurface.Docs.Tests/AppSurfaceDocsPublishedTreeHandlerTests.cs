@@ -62,7 +62,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldExhaustRootTrailingSlashAndExtensionCandidates_WhenFilesAreMissing()
     {
         var tree = CreatePublishedTree("missing-candidates");
-        File.Delete(Path.Combine(tree, "index.html"));
+        File.Delete(Path.Join(tree, "index.html"));
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
 
         var missingRootRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3");
@@ -78,7 +78,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldResolveRootDirectoryAndFallbackDirectoryCandidates()
     {
         var tree = CreatePublishedTree("release");
-        File.WriteAllText(Path.Combine(tree, "System.Text.html"), "<!DOCTYPE html><html><body>dotted-slug</body></html>");
+        File.WriteAllText(Path.Join(tree, "System.Text.html"), "<!DOCTYPE html><html><body>dotted-slug</body></html>");
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
 
         var rootRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3");
@@ -129,7 +129,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldServeExactHtmlFiles()
     {
         var tree = CreatePublishedTree("release");
-        File.WriteAllText(Path.Combine(tree, "guide.html"), "<!DOCTYPE html><html><body>guide page</body></html>");
+        File.WriteAllText(Path.Join(tree, "guide.html"), "<!DOCTYPE html><html><body>guide page</body></html>");
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/guide.html");
 
@@ -251,6 +251,41 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md");
 
         Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal("/docs/v/1.2.3/packages", request.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRedirectFrozenManifestAliases_WhenMountDoesNotUseExactTreeGuard()
+    {
+        var tree = CreatePublishedTree("release-with-unguarded-frozen-manifest");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "packages/README.md",
+                  "canonicalRoutePath": "packages",
+                  "recoveryAliases": ["packages/README.md"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var provider = new PhysicalFileProvider(tree, ExclusionFilters.None);
+        _disposables.Add(provider);
+        var handler = CreateHandler(
+            [
+                new AppSurfaceDocsPublishedTreeMount(
+                    "/docs/v/1.2.3",
+                    provider,
+                    frozenRouteManifest: new AppSurfaceDocsFrozenRouteManifestCache(provider, tree))
+            ]);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status301MovedPermanently, request.Response.StatusCode);
         Assert.Equal("/docs/v/1.2.3/packages", request.Response.Headers.Location);
     }
 
@@ -456,7 +491,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldRejectUnexpectedExactFiles()
     {
         var tree = CreatePublishedTree("custom-asset");
-        File.WriteAllText(Path.Combine(tree, "asset.weird"), "custom-asset");
+        File.WriteAllText(Path.Join(tree, "asset.weird"), "custom-asset");
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/asset.weird");
 
@@ -467,8 +502,8 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldRejectExactFilesUnderDotSegments()
     {
         var tree = CreatePublishedTree("dot-segment-asset");
-        Directory.CreateDirectory(Path.Combine(tree, ".private"));
-        File.WriteAllText(Path.Combine(tree, ".private", "search.css"), "body { color: red; }");
+        Directory.CreateDirectory(Path.Join(tree, ".private"));
+        File.WriteAllText(Path.Join(tree, ".private", "search.css"), "body { color: red; }");
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/.private/search.css");
 
@@ -479,8 +514,8 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldRejectHiddenDirectoriesThroughIndexFallback()
     {
         var tree = CreatePublishedTree("dot-segment-index");
-        Directory.CreateDirectory(Path.Combine(tree, ".private"));
-        File.WriteAllText(Path.Combine(tree, ".private", "index.html"), "<html>secret</html>");
+        Directory.CreateDirectory(Path.Join(tree, ".private"));
+        File.WriteAllText(Path.Join(tree, ".private", "index.html"), "<html>secret</html>");
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/.private/");
 
@@ -491,7 +526,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldRejectNonContractTextArtifacts()
     {
         var tree = CreatePublishedTree("text-artifact");
-        File.WriteAllText(Path.Combine(tree, "notes.txt"), "notes");
+        File.WriteAllText(Path.Join(tree, "notes.txt"), "notes");
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/notes.txt");
 
@@ -502,13 +537,92 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldServeEmbeddedImageAssets()
     {
         var tree = CreatePublishedTree("embedded-image");
-        Directory.CreateDirectory(Path.Combine(tree, "img"));
-        File.WriteAllBytes(Path.Combine(tree, "img", "hero.png"), [0x89, 0x50, 0x4E, 0x47]);
+        Directory.CreateDirectory(Path.Join(tree, "img"));
+        File.WriteAllBytes(Path.Join(tree, "img", "hero.png"), [0x89, 0x50, 0x4E, 0x47]);
         var handler = CreateHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/img/hero.png");
 
         Assert.True(await handler.TryHandleAsync(request));
         Assert.Equal("image/png", request.Response.ContentType);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRejectSymlinkedEmbeddedAssets()
+    {
+        Assert.True(
+            TryCreateSymbolicLinkTestFile(out var targetPath, out _),
+            "symlink support is required to verify embedded asset rejection.");
+
+        var tree = CreatePublishedTree("symlinked-asset");
+        var imageDirectory = Path.Join(tree, "img");
+        Directory.CreateDirectory(imageDirectory);
+        File.WriteAllBytes(targetPath, [0x89, 0x50, 0x4E, 0x47]);
+        File.CreateSymbolicLink(Path.Join(imageDirectory, "hero.png"), targetPath);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/img/hero.png");
+
+        Assert.False(await handler.TryHandleAsync(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRejectAssetsUnderSymlinkedDirectories()
+    {
+        Assert.True(
+            TryCreateSymbolicLinkTestDirectory(out var targetPath, out var linkPath),
+            "symlink support is required to verify symlinked directory rejection.");
+
+        var tree = CreatePublishedTree("symlinked-asset-directory");
+        var nestedDirectory = Path.Join(targetPath, "nested");
+        Directory.CreateDirectory(nestedDirectory);
+        File.WriteAllBytes(Path.Join(nestedDirectory, "hero.png"), [0x89, 0x50, 0x4E, 0x47]);
+        Directory.Move(linkPath, Path.Join(tree, "linked-img"));
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/linked-img/nested/hero.png");
+
+        Assert.False(await handler.TryHandleAsync(request));
+    }
+
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRejectSymlinkedFallbackHtml()
+    {
+        Assert.True(
+            TryCreateSymbolicLinkTestFile(out var targetPath, out _),
+            "symlink support is required to verify fallback HTML rejection.");
+
+        var tree = CreatePublishedTree("symlinked-fallback");
+        File.WriteAllText(targetPath, "<!DOCTYPE html><html><body>external</body></html>");
+        File.CreateSymbolicLink(Path.Join(tree, "external.html"), targetPath);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/external");
+
+        Assert.False(await handler.TryHandleAsync(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldIgnoreSymlinkedFrozenRouteManifest()
+    {
+        Assert.True(
+            TryCreateSymbolicLinkTestFile(out var targetPath, out _),
+            "symlink support is required to verify frozen route manifest rejection.");
+
+        var tree = CreatePublishedTree("symlinked-manifest");
+        File.WriteAllText(
+            targetPath,
+            """
+            {
+              "aliases": [
+                { "aliasRoute": "old-guide", "canonicalRoute": "guide" }
+              ]
+            }
+            """);
+        File.CreateSymbolicLink(Path.Join(tree, ".appsurface-docs-route-manifest.json"), targetPath);
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/old-guide");
+
+        Assert.False(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
+        Assert.False(request.Response.Headers.ContainsKey("Location"));
     }
 
     [Fact]
@@ -585,7 +699,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var tree = CreatePublishedTree("custom-preview-root");
         File.WriteAllText(
-            Path.Combine(tree, "index.html"),
+            Path.Join(tree, "index.html"),
             """
             <!DOCTYPE html>
             <html>
@@ -611,7 +725,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var tree = CreatePublishedTree("null-config");
         File.WriteAllText(
-            Path.Combine(tree, "index.html"),
+            Path.Join(tree, "index.html"),
             """
             <!DOCTYPE html>
             <html>
@@ -637,7 +751,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var tree = CreatePublishedTree("head-rewritten-html");
         File.WriteAllText(
-            Path.Combine(tree, "index.html"),
+            Path.Join(tree, "index.html"),
             """
             <!DOCTYPE html>
             <html>
@@ -664,7 +778,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var tree = CreatePublishedTree("path-base");
         File.WriteAllText(
-            Path.Combine(tree, "index.html"),
+            Path.Join(tree, "index.html"),
             """
             <!DOCTYPE html>
             <html>
@@ -699,8 +813,8 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var stableTree = CreatePublishedTree("stable");
         var versionedTree = CreatePublishedTree("versioned");
-        File.WriteAllText(Path.Combine(stableTree, "search.css"), "body { color: #fff; }");
-        File.WriteAllText(Path.Combine(versionedTree, "search.css"), "body { color: #0ea5e9; }");
+        File.WriteAllText(Path.Join(stableTree, "search.css"), "body { color: #fff; }");
+        File.WriteAllText(Path.Join(versionedTree, "search.css"), "body { color: #0ea5e9; }");
         using var stableProvider = new PhysicalFileProvider(stableTree);
         using var versionedProvider = new PhysicalFileProvider(versionedTree);
 
@@ -723,7 +837,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var tree = CreatePublishedTree("stable-path-base");
         File.WriteAllText(
-            Path.Combine(tree, "index.html"),
+            Path.Join(tree, "index.html"),
             """
             <!DOCTYPE html>
             <html>
@@ -997,7 +1111,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var tree = CreatePublishedTree("path-base-with-trailing-slash");
         File.WriteAllText(
-            Path.Combine(tree, "index.html"),
+            Path.Join(tree, "index.html"),
             """
             <!DOCTYPE html>
             <html>
@@ -1029,8 +1143,8 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var stableTree = CreatePublishedTree("stable-overlap");
         var versionedTree = CreatePublishedTree("versioned-overlap");
-        File.WriteAllText(Path.Combine(stableTree, "search.css"), "body { color: #fff; }");
-        File.WriteAllText(Path.Combine(versionedTree, "search.css"), "body { color: #0ea5e9; }");
+        File.WriteAllText(Path.Join(stableTree, "search.css"), "body { color: #fff; }");
+        File.WriteAllText(Path.Join(versionedTree, "search.css"), "body { color: #0ea5e9; }");
         using var stableProvider = new PhysicalFileProvider(stableTree);
         using var versionedProvider = new PhysicalFileProvider(versionedTree);
 
@@ -1076,6 +1190,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
                 new AppSurfaceDocsPublishedTreeMount(
                     mountRootPath,
                     provider,
+                    treePath,
                     new AppSurfaceDocsFrozenRouteManifestCache(provider, treePath),
                     canonicalRootPath: canonicalRootPath)
             ],
@@ -1101,6 +1216,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
                 new AppSurfaceDocsPublishedTreeMount(
                     mountRootPath,
                     provider,
+                    treePath,
                     new AppSurfaceDocsFrozenRouteManifestCache(archive!.FrozenRouteManifest, treePath),
                     AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
                     archive)
@@ -1118,13 +1234,13 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
     private string CreatePublishedTree(string name)
     {
-        var root = Path.Combine(_tempDirectory, name);
+        var root = Path.Join(_tempDirectory, name);
         Directory.CreateDirectory(root);
-        Directory.CreateDirectory(Path.Combine(root, "guide"));
-        Directory.CreateDirectory(Path.Combine(root, "folder-only"));
+        Directory.CreateDirectory(Path.Join(root, "guide"));
+        Directory.CreateDirectory(Path.Join(root, "folder-only"));
 
         File.WriteAllText(
-            Path.Combine(root, "index.html"),
+            Path.Join(root, "index.html"),
             """
             <!DOCTYPE html>
             <html>
@@ -1136,13 +1252,45 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
             </body>
             </html>
             """);
-        File.WriteAllText(Path.Combine(root, "guide", "index.html"), "<!DOCTYPE html><html><body>guide-index</body></html>");
-        File.WriteAllText(Path.Combine(root, "folder-only", "index.html"), "<!DOCTYPE html><html><body>folder-only</body></html>");
+        File.WriteAllText(Path.Join(root, "guide", "index.html"), "<!DOCTYPE html><html><body>guide-index</body></html>");
+        File.WriteAllText(Path.Join(root, "folder-only", "index.html"), "<!DOCTYPE html><html><body>folder-only</body></html>");
         File.WriteAllText(Path.Join(root, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Join(root, "search-index.json"), "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}");
         File.WriteAllText(Path.Join(root, "outline-client.js"), "window.__outlineClientLoaded = true;");
 
         return root;
+    }
+
+    private bool TryCreateSymbolicLinkTestFile(out string targetPath, out string linkPath)
+    {
+        targetPath = Path.Join(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}.txt");
+        linkPath = Path.Join(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}.txt");
+        try
+        {
+            File.WriteAllText(targetPath, "target");
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private bool TryCreateSymbolicLinkTestDirectory(out string targetPath, out string linkPath)
+    {
+        targetPath = Path.Join(_tempDirectory, $"symlink-target-{Guid.NewGuid():N}");
+        linkPath = Path.Join(_tempDirectory, $"symlink-link-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(targetPath);
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static void WriteCanonicalPage(string treePath, string canonicalHref, string rel = "canonical")

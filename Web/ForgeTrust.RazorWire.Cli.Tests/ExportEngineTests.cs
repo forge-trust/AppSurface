@@ -3110,6 +3110,7 @@ public class ExportEngineTests
                               <a href="/docs/%5Froutes">Encoded routes</a>
                             </details>
                             <a href="/about">About</a>
+                            <a href="/docs/search">Search documentation</a>
                             <img src="/img/error.png">
                           </body>
                         </html>
@@ -3125,6 +3126,11 @@ public class ExportEngineTests
                 {
                     Content = new StringContent("<html><body><h1>About</h1></body></html>", Encoding.UTF8, "text/html")
                 });
+            }
+
+            if (path == "/docs/search")
+            {
+                return Html("<html><body><h1>Search</h1></body></html>");
             }
 
             if (path == "/img/error.png")

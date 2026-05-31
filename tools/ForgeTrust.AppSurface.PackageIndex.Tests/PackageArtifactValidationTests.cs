@@ -23,6 +23,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 order: 10
                 use_when: Install this first.
@@ -52,6 +53,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -60,6 +62,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Web/ForgeTrust.AppSurface.Docs.Standalone/ForgeTrust.AppSurface.Docs.Standalone.csproj
+                product_family: forge_trust
                 classification: proof_host
                 publish_decision: do_not_publish
                 order: 20
@@ -91,6 +94,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -99,6 +103,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Web.
                 start_here_path: ForgeTrust.AppSurface.Core/README.md
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -136,6 +141,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -144,6 +150,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
+                product_family: razorwire
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -203,6 +210,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             $$"""
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -211,6 +219,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj
+                product_family: appsurface
                 classification: {{classification}}
                 publish_decision: {{publishDecision}}
                 order: 20
@@ -242,6 +251,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: support_publish
                 order: 10
@@ -272,16 +282,19 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: support
                 publish_decision: support_publish
                 order: 10
                 note: Shared dependency package.
               - project: Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj
+                product_family: appsurface
                 classification: support
                 publish_decision: support_publish
                 order: 20
                 note: Optional OpenAPI dependency package.
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 30
@@ -561,6 +574,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -593,6 +607,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -601,6 +616,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
+                product_family: razorwire
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -1646,6 +1662,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -1882,11 +1899,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: support
                 publish_decision: support_publish
                 order: 10
                 note: Core dependency.
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -1980,6 +1999,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -1988,6 +2008,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Web.
                 start_here_path: ForgeTrust.AppSurface.Core/README.md
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2060,6 +2081,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2068,6 +2090,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Web.
                 start_here_path: ForgeTrust.AppSurface.Core/README.md
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2146,11 +2169,13 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj
+                product_family: appsurface
                 classification: support
                 publish_decision: support_publish
                 order: 10
                 note: Core dependency.
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2159,6 +2184,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 30
@@ -2243,6 +2269,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2251,6 +2278,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Config/ForgeTrust.AppSurface.Config/ForgeTrust.AppSurface.Config.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2332,6 +2360,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2340,6 +2369,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2428,6 +2458,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2436,6 +2467,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2519,6 +2551,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2527,6 +2560,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20
@@ -2666,6 +2700,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2759,6 +2794,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
             """
             packages:
               - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 10
@@ -2767,6 +2803,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 does_not_include: Extras.
                 start_here_path: Web/ForgeTrust.AppSurface.Web/README.md
               - project: Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+                product_family: appsurface
                 classification: public
                 publish_decision: publish
                 order: 20

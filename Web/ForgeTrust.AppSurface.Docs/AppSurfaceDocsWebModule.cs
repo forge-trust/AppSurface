@@ -187,7 +187,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// public exact tree, this helper adds the configured route-family root alias as an extra mount root that reuses the
     /// same <see cref="PhysicalFileProvider" /> instance instead of duplicating file watchers for the same export path.
     /// Frozen route manifest caches follow the same reuse rule: exact tree paths are resolved to full paths, trimmed of
-    /// trailing directory separators, and compared with <see cref="StringComparer.OrdinalIgnoreCase" /> so canonical and
+    /// trailing directory separators, and compared with the platform-aware physical path comparer so canonical and
     /// recommended mounts that point at the same tree share one <see cref="AppSurfaceDocsFrozenRouteManifestCache" />.
     /// Consumers should treat the cache as an immutable mount dependency. The cache lazy-loads the hidden manifest in a
     /// thread-safe manner on first use, and its lifetime is tied to the returned mount/provider collection; do not mutate
@@ -206,8 +206,10 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(docsUrlBuilder);
 
-        var providersByPath = new Dictionary<string, PhysicalFileProvider>(StringComparer.OrdinalIgnoreCase);
-        var manifestCachesByPath = new Dictionary<string, AppSurfaceDocsFrozenRouteManifestCache>(StringComparer.OrdinalIgnoreCase);
+        var providersByPath = new Dictionary<string, PhysicalFileProvider>(
+            AppSurfaceDocsTrustedReleasePathGuard.PhysicalPathComparer);
+        var manifestCachesByPath = new Dictionary<string, AppSurfaceDocsFrozenRouteManifestCache>(
+            AppSurfaceDocsTrustedReleasePathGuard.PhysicalPathComparer);
         var mounts = new List<AppSurfaceDocsPublishedTreeMount>();
 
         foreach (var version in catalog.PublicVersions.Where(version => version.IsAvailable && version.ExactTreePath is not null))
@@ -221,6 +223,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             mounts.Add(new AppSurfaceDocsPublishedTreeMount(
                 version.ExactRootUrl,
                 provider,
+                version.ExactTreePath,
                 manifestCache,
                 version.ArchiveVerificationState,
                 version.VerifiedReleaseArchive));
@@ -237,6 +240,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             mounts.Add(new AppSurfaceDocsPublishedTreeMount(
                 docsUrlBuilder.DocsEntryRootPath,
                 provider,
+                recommendedVersion.ExactTreePath,
                 manifestCache,
                 recommendedVersion.ArchiveVerificationState,
                 recommendedVersion.VerifiedReleaseArchive,
@@ -250,7 +254,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         string exactTreePath,
         IDictionary<string, PhysicalFileProvider> providersByPath)
     {
-        var normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(exactTreePath));
+        var normalizedPath = AppSurfaceDocsTrustedReleasePathGuard.NormalizePhysicalPath(exactTreePath);
         if (providersByPath.TryGetValue(normalizedPath, out var provider))
         {
             return provider;
@@ -267,7 +271,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         AppSurfaceDocsVerifiedReleaseArchive? verifiedReleaseArchive,
         IDictionary<string, AppSurfaceDocsFrozenRouteManifestCache> manifestCachesByPath)
     {
-        var normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(exactTreePath));
+        var normalizedPath = AppSurfaceDocsTrustedReleasePathGuard.NormalizePhysicalPath(exactTreePath);
         if (manifestCachesByPath.TryGetValue(normalizedPath, out var cache))
         {
             if (verifiedReleaseArchive is not null && !cache.UsesVerifiedSnapshot)

@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using AngleSharp.Html.Parser;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.FileProviders.Physical;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
@@ -145,6 +146,11 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             return false;
         }
 
+        if (!TryValidateFrozenManifestPath(mount))
+        {
+            return false;
+        }
+
         var manifest = mount.FrozenRouteManifest.GetManifest(_logger);
         if (!manifest.TryResolveAlias(aliasRoutePath, out var canonicalRoutePath))
         {
@@ -235,7 +241,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             && !relativeRequestPath.EndsWith("/", StringComparison.Ordinal))
         {
             var exactFile = mount.FileProvider.GetFileInfo(trimmed);
-            if (exactFile.Exists)
+            if (exactFile.Exists && TryValidateResolvedFile(mount, trimmed, exactFile))
             {
                 fileInfo = exactFile;
                 relativeFilePath = trimmed;
@@ -246,7 +252,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         foreach (var candidate in BuildCandidatePaths(relativeRequestPath))
         {
             var candidateFile = mount.FileProvider.GetFileInfo(candidate);
-            if (!candidateFile.Exists)
+            if (!candidateFile.Exists || !TryValidateResolvedFile(mount, candidate, candidateFile))
             {
                 continue;
             }
@@ -257,6 +263,74 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         }
 
         return false;
+    }
+
+    private bool TryValidateFrozenManifestPath(AppSurfaceDocsPublishedTreeMount mount)
+    {
+        if (mount.ExactTreeRootPath is null)
+        {
+            return true;
+        }
+
+        var manifestInfo = mount.FileProvider.GetFileInfo(AppSurfaceDocsFrozenRouteManifest.FileName);
+        if (!manifestInfo.Exists)
+        {
+            return true;
+        }
+
+        if (AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
+                mount.ExactTreeRootPath,
+                AppSurfaceDocsFrozenRouteManifest.FileName,
+                out var manifestPath,
+                out _)
+            && IsPhysicalFileInsideMountRoot(mount, manifestInfo, manifestPath))
+        {
+            return true;
+        }
+
+        _logger.LogWarning(
+            "Ignoring AppSurface Docs frozen route manifest because the manifest path is not safe.");
+        return false;
+    }
+
+    private static bool TryValidateResolvedFile(
+        AppSurfaceDocsPublishedTreeMount mount,
+        string relativeFilePath,
+        IFileInfo fileInfo)
+    {
+        if (mount.ExactTreeRootPath is null)
+        {
+            return true;
+        }
+
+        if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
+                mount.ExactTreeRootPath,
+                relativeFilePath,
+                out var physicalFilePath,
+                out _))
+        {
+            return false;
+        }
+
+        return IsPhysicalFileInsideMountRoot(mount, fileInfo, physicalFilePath);
+    }
+
+    private static bool IsPhysicalFileInsideMountRoot(
+        AppSurfaceDocsPublishedTreeMount mount,
+        IFileInfo fileInfo,
+        string expectedPhysicalPath)
+    {
+        if (fileInfo is not PhysicalFileInfo physicalFileInfo || string.IsNullOrWhiteSpace(physicalFileInfo.PhysicalPath))
+        {
+            return false;
+        }
+
+        var actualPhysicalPath = AppSurfaceDocsTrustedReleasePathGuard.NormalizePhysicalPath(physicalFileInfo.PhysicalPath);
+        return string.Equals(
+                   actualPhysicalPath,
+                   AppSurfaceDocsTrustedReleasePathGuard.NormalizePhysicalPath(expectedPhysicalPath),
+                   AppSurfaceDocsTrustedReleasePathGuard.PhysicalPathComparison)
+               && AppSurfaceDocsTrustedReleasePathGuard.IsSameOrDescendant(mount.ExactTreeRootPath!, actualPhysicalPath);
     }
 
     internal static bool IsHandlerServeableFilePath(string path, bool allowSvg)
@@ -490,6 +564,7 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
     /// </summary>
     /// <param name="mountRootPath">The request-path root where the tree should appear.</param>
     /// <param name="fileProvider">The static file provider for the tree contents.</param>
+    /// <param name="exactTreeRootPath">The resolved physical root for the exact tree, when path-guard checks should run.</param>
     /// <param name="frozenRouteManifest">Lazy cache for the tree's frozen route manifest, when one should be consulted.</param>
     /// <param name="archiveVerificationState">Integrity state resolved for this mounted archive.</param>
     /// <param name="verifiedReleaseArchive">Verified file metadata used to gate manifest-covered requests.</param>
@@ -500,6 +575,7 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
     internal AppSurfaceDocsPublishedTreeMount(
         string mountRootPath,
         IFileProvider fileProvider,
+        string? exactTreeRootPath = null,
         AppSurfaceDocsFrozenRouteManifestCache? frozenRouteManifest = null,
         AppSurfaceDocsReleaseArchiveVerificationState archiveVerificationState = AppSurfaceDocsReleaseArchiveVerificationState.AvailableUnverifiedLegacy,
         AppSurfaceDocsVerifiedReleaseArchive? verifiedReleaseArchive = null,
@@ -507,6 +583,9 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
     {
         MountRootPath = NormalizeMountRootPath(mountRootPath, nameof(mountRootPath));
         FileProvider = fileProvider ?? throw new ArgumentNullException(nameof(fileProvider));
+        ExactTreeRootPath = string.IsNullOrWhiteSpace(exactTreeRootPath)
+            ? null
+            : AppSurfaceDocsTrustedReleasePathGuard.NormalizePhysicalPath(exactTreeRootPath);
         FrozenRouteManifest = frozenRouteManifest;
         ArchiveVerificationState = archiveVerificationState;
         VerifiedReleaseArchive = verifiedReleaseArchive;
@@ -524,6 +603,11 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
     /// Gets the static file provider for the tree contents.
     /// </summary>
     public IFileProvider FileProvider { get; }
+
+    /// <summary>
+    /// Gets the resolved physical root for the exact published tree, when path-guard checks should run.
+    /// </summary>
+    public string? ExactTreeRootPath { get; }
 
     /// <summary>
     /// Gets the app-relative route root canonical metadata should prefer for this mount.
