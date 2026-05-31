@@ -843,15 +843,11 @@ public class DocsController : Controller
 
     private async ValueTask<bool> CanUseLiveHarvestProgressAsync()
     {
-        if (!AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment))
-        {
-            return false;
-        }
-
         var authorizer = HttpContext.RequestServices.GetService<IRazorWireChannelAuthorizer>();
         if (authorizer is null)
         {
-            return _environment.IsDevelopment();
+            return AppSurfaceDocsHarvestHealthVisibility.AreRoutesExposed(_options, _environment)
+                   && _environment.IsDevelopment();
         }
 
         try
