@@ -1508,6 +1508,46 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestAsync_ShouldSkipExactIncludeUnderDirectoryReparsePoint_WithoutReadingExternalTarget()
+    {
+        var externalRoot = CreateExternalTempDirectory();
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Join(externalRoot, "api.js"),
+                """
+                /**
+                 * External function.
+                 * @public
+                 * @namespace External
+                 */
+                function externalApi() {}
+                """);
+            var linkPath = Path.Join(_testRoot, "linked-src");
+            if (!TryCreateDirectorySymbolicLink(linkPath, externalRoot))
+            {
+                return;
+            }
+
+            var harvester = CreateHarvester(CreateEnabledOptions("linked-src/api.js"));
+
+            var docs = await harvester.HarvestAsync(_testRoot);
+            var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+            Assert.Empty(docs);
+            Assert.Equal(DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped, diagnostic.Code);
+            Assert.Contains("linked-src/api.js", diagnostic.Problem, StringComparison.Ordinal);
+            Assert.DoesNotContain(externalRoot, diagnostic.Problem, StringComparison.Ordinal);
+            Assert.DoesNotContain(externalRoot, diagnostic.Cause, StringComparison.Ordinal);
+            Assert.DoesNotContain(externalRoot, diagnostic.Fix, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteDirectory(externalRoot);
+        }
+    }
+
+    [Fact]
     public async Task HarvestAsync_ShouldSkipGlobbedDirectoryReparsePoint_WithDiagnosticForConfiguredRoot()
     {
         var externalRoot = CreateExternalTempDirectory();

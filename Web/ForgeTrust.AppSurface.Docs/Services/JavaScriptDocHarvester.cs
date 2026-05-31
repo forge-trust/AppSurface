@@ -1692,10 +1692,37 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
             return new JavaScriptHarvestCandidate(JavaScriptHarvestCandidateStatus.OutsideRoot, fullCandidate, relativePath);
         }
 
-        FileAttributes attributes;
+        var current = fullRoot;
+        var candidateRelativePath = Path.GetRelativePath(fullRoot, fullCandidate);
+        if (string.Equals(candidateRelativePath, ".", StringComparison.Ordinal))
+        {
+            current = fullCandidate;
+        }
+
+        FileAttributes attributes = default;
         try
         {
-            attributes = getAttributes(fullCandidate);
+            foreach (var segment in candidateRelativePath.Split(
+                         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (string.Equals(segment, ".", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                current = Path.GetFullPath(Path.Join(current, segment));
+                attributes = getAttributes(current);
+                if (attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return new JavaScriptHarvestCandidate(JavaScriptHarvestCandidateStatus.ReparsePoint, fullCandidate, relativePath);
+                }
+            }
+
+            if (string.Equals(current, fullRoot, PathComparison))
+            {
+                attributes = getAttributes(fullCandidate);
+            }
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -1704,11 +1731,6 @@ public sealed class JavaScriptDocHarvester : IDocHarvester, IDocHarvesterDiagnos
         catch (Exception ex) when (IsFileReadException(ex))
         {
             return new JavaScriptHarvestCandidate(JavaScriptHarvestCandidateStatus.Inaccessible, fullCandidate, relativePath);
-        }
-
-        if (attributes.HasFlag(FileAttributes.ReparsePoint))
-        {
-            return new JavaScriptHarvestCandidate(JavaScriptHarvestCandidateStatus.ReparsePoint, fullCandidate, relativePath);
         }
 
         return attributes.HasFlag(FileAttributes.Directory)
