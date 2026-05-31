@@ -1,3 +1,4 @@
+using ForgeTrust.RazorWire.Streams;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 
 namespace ForgeTrust.RazorWire.TagHelpers;
@@ -58,9 +59,17 @@ public class StreamSourceTagHelper : TagHelper
                 $"The 'channel' attribute is required for the 'rw:stream-source' tag helper.");
         }
 
+        var validation = RazorWireStreamChannelValidation.Validate(Channel, _options.Streams);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException(
+                $"The 'channel' attribute for the 'rw:stream-source' tag helper must contain only ASCII letters, digits, '.', '_', '-', or ':' and must be {nameof(RazorWireStreamOptions.MaxChannelNameLength)} characters or fewer.");
+        }
+
+        var encodedChannel = Uri.EscapeDataString(Channel);
         var src = Replay
-            ? $"{_options.Streams.BasePath}/{Channel}?replay=1"
-            : $"{_options.Streams.BasePath}/{Channel}";
+            ? $"{_options.Streams.BasePath}/{encodedChannel}?replay=1"
+            : $"{_options.Streams.BasePath}/{encodedChannel}";
         output.Attributes.SetAttribute("src", src);
 
         if (Permanent)

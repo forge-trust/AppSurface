@@ -96,6 +96,22 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
+ * A RazorWire stream source reported a native EventSource error.
+ * @public
+ * @namespace RazorWire
+ * @event razorwire:stream:error
+ * @target rw-stream-source
+ * @firesWhen The browser reports an EventSource error for a registered RazorWire stream source. Native EventSource does not expose HTTP status codes or response bodies to application JavaScript, so use server logs and the Network tab for exact rejection reasons.
+ * @property {string|null} detail.channel - Client-derived channel token for the stream source.
+ * @property {Element} detail.source - Stream source element that observed the error.
+ * @property {"connecting"|"connected"|"disconnected"|string} detail.state - Last RazorWire stream state before the error callback.
+ * @property {number} detail.readyState - Native EventSource readyState value.
+ * @property {string} detail.src - Stream source URL.
+ * @bubbles true
+ * @cancelable false
+ */
+
+/**
  * Enables RazorWire form failure handling on a form.
  * @public
  * @namespace RazorWire
