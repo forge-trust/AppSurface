@@ -2121,7 +2121,13 @@ public class AppSurfaceDocsWebModuleRegressionTests
                 })
             .OrderBy(entry => entry.path, StringComparer.Ordinal)
             .ToArray();
-        var manifestPath = Path.Combine(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        var manifestFileName = AppSurfaceDocsReleaseArchiveVerifier.FileName;
+        if (Path.IsPathRooted(manifestFileName))
+        {
+            throw new InvalidOperationException("Release manifest file name must not be rooted.");
+        }
+
+        var manifestPath = Path.Combine(root, manifestFileName);
         File.WriteAllText(
             manifestPath,
             JsonSerializer.Serialize(

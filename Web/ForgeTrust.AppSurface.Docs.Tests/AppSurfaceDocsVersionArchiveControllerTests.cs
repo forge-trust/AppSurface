@@ -413,7 +413,7 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                 continue;
             }
 
-            var candidatePath = Path.GetFullPath(Path.Combine(_tempDirectory, version.ExactTreePath.Trim()));
+            var candidatePath = Path.GetFullPath(Path.Join(_tempDirectory, version.ExactTreePath.Trim()));
             if (Directory.Exists(candidatePath)
                 && candidatePath.StartsWith(_tempDirectory, StringComparison.Ordinal))
             {
@@ -439,7 +439,8 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                 })
             .OrderBy(entry => entry.path, StringComparer.Ordinal)
             .ToArray();
-        var manifestPath = Path.Combine(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        var manifestFileName = Path.GetFileName(AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        var manifestPath = Path.Combine(root, manifestFileName);
         File.WriteAllText(
             manifestPath,
             JsonSerializer.Serialize(

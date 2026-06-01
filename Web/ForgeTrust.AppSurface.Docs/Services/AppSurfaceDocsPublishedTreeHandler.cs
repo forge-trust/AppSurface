@@ -687,11 +687,6 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         RewrittenFileReadResult readResult,
         string artifactType)
     {
-        if (mount.ArchiveVerificationState != AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified)
-        {
-            return true;
-        }
-
         if (mount.VerifiedReleaseArchive is not null
             && mount.VerifiedReleaseArchive.TryGetFile(relativeFilePath, out var verifiedFile)
             && readResult.ObservedBytes == verifiedFile.Length
