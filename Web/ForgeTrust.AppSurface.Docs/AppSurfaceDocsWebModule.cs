@@ -52,10 +52,10 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         ".jpg",
         ".jpeg",
         ".png",
-        ".svg",
         ".webp"
     };
 
+    private const string SvgAssetExtension = ".svg";
     private static readonly Assembly AppSurfaceDocsAssembly = typeof(AppSurfaceDocsWebModule).Assembly;
     private const string AppSurfaceDocsStaticAssetBasePath = "/_content/ForgeTrust.AppSurface.Docs/docs";
     private const string AppSurfaceDocsPackagedStylesheetPath = "/_content/ForgeTrust.AppSurface.Docs/css/site.gen.css";
@@ -783,6 +783,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         }
 
         var provider = CreateLifetimeOwnedBrandingAssetProvider(endpoints.ServiceProvider, directoryPath);
+        var allowSvgAssets = options.Identity?.BrandingAssets?.AllowSvgAssets == true;
 
         endpoints.MapMethods(
             $"{requestPath}/{{*assetPath}}",
@@ -791,6 +792,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             {
                 if (!TryResolveSafeBrandingAssetPath(
                         context.Request.RouteValues["assetPath"],
+                        allowSvgAssets,
                         out var assetPath))
                 {
                     context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -898,7 +900,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// <summary>
     /// Resolves a route-captured branding asset path only when it stays relative and points at an allowed image asset.
     /// </summary>
-    internal static bool TryResolveSafeBrandingAssetPath(object? routeValue, out string assetPath)
+    internal static bool TryResolveSafeBrandingAssetPath(object? routeValue, bool allowSvgAssets, out string assetPath)
     {
         assetPath = string.Empty;
         var rawPath = Convert.ToString(routeValue, CultureInfo.InvariantCulture);
@@ -926,7 +928,9 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             return false;
         }
 
-        if (!AllowedBrandingAssetExtensions.Contains(Path.GetExtension(decodedPath)))
+        var extension = Path.GetExtension(decodedPath);
+        if (!AllowedBrandingAssetExtensions.Contains(extension)
+            && !(allowSvgAssets && extension.Equals(SvgAssetExtension, StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
