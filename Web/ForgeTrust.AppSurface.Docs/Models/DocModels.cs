@@ -987,6 +987,16 @@ public static class DocHarvestDiagnosticCodes
     public const string MetadataUnsafeTrustMigrationHref = "appsurfacedocs.metadata.unsafe_trust_migration_href";
 
     /// <summary>
+    /// A Markdown body file matched the configured include set but exceeded the configured pre-read size limit.
+    /// </summary>
+    public const string MarkdownFileTooLarge = "appsurfacedocs.markdown.file_too_large";
+
+    /// <summary>
+    /// A paired Markdown metadata sidecar exceeded the configured pre-read size limit and was ignored.
+    /// </summary>
+    public const string MarkdownMetadataFileTooLarge = "appsurfacedocs.markdown.metadata_file_too_large";
+
+    /// <summary>
     /// A JavaScript source file matched the configured include set but exceeded the configured parse size limit.
     /// </summary>
     public const string JavaScriptFileTooLarge = "appsurfacedocs.javascript.file_too_large";
