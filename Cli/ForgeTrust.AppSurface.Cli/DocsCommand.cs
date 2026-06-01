@@ -19,6 +19,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using CliCommand = CliWrap.Cli;
@@ -285,6 +286,124 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
         return new[] { "/", docsUrlBuilder.CurrentDocsRootPath }
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+    }
+}
+
+/// <summary>
+/// Verifies one catalog-pinned AppSurface Docs release archive without starting a web host.
+/// </summary>
+/// <remarks>
+/// This command exercises the same catalog and archive verification path used at runtime so operators can diagnose
+/// manifest, digest, and file drift locally before deploying a version catalog change.
+/// </remarks>
+[Command("docs verify-archive", Description = "Verify one catalog-pinned AppSurface Docs release archive.")]
+internal sealed partial class DocsVerifyArchiveCommand : ICommand
+{
+    private readonly ILogger<DocsVerifyArchiveCommand> _logger;
+    private readonly ILoggerFactory _loggerFactory;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocsVerifyArchiveCommand"/> class.
+    /// </summary>
+    /// <param name="logger">Logger used for verification diagnostics.</param>
+    /// <param name="loggerFactory">Factory used to create runtime catalog verification loggers.</param>
+    public DocsVerifyArchiveCommand(ILogger<DocsVerifyArchiveCommand> logger, ILoggerFactory loggerFactory)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+    }
+
+    /// <summary>
+    /// Gets the path to the AppSurface Docs version catalog JSON file.
+    /// </summary>
+    [CommandOption("catalog", Description = "Path to the AppSurface Docs version catalog JSON file.")]
+    public string? CatalogPath { get; set; }
+
+    /// <summary>
+    /// Gets the version identifier to verify from the catalog.
+    /// </summary>
+    [CommandOption("version", Description = "Catalog version identifier to verify.")]
+    public string? Version { get; set; }
+
+    /// <summary>
+    /// Gets the trusted release root used to resolve catalog <c>exactTreePath</c> entries.
+    /// </summary>
+    [CommandOption("trusted-release-root", Description = "Trusted release root for catalog exactTreePath entries.")]
+    public string? TrustedReleaseRootPath { get; set; }
+
+    /// <summary>
+    /// Executes the command through the CliFx console integration.
+    /// </summary>
+    /// <param name="console">Console abstraction used to register cancellation handling.</param>
+    /// <returns>A value task that completes after archive verification.</returns>
+    [ExcludeFromCodeCoverage]
+    public ValueTask ExecuteAsync(IConsole console)
+    {
+        _ = console.RegisterCancellationHandler();
+        Execute();
+        return ValueTask.CompletedTask;
+    }
+
+    internal void Execute()
+    {
+        if (string.IsNullOrWhiteSpace(CatalogPath))
+        {
+            throw new CommandException("The --catalog option is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Version))
+        {
+            throw new CommandException("The --version option is required.");
+        }
+
+        var catalogPath = Path.GetFullPath(CatalogPath);
+        var service = new AppSurfaceDocsVersionCatalogService(
+            new AppSurfaceDocsOptions
+            {
+                Versioning = new AppSurfaceDocsVersioningOptions
+                {
+                    Enabled = true,
+                    CatalogPath = catalogPath,
+                    TrustedReleaseRootPath = TrustedReleaseRootPath
+                }
+            },
+            new ArchiveVerifyWebHostEnvironment(Path.GetDirectoryName(catalogPath) ?? Directory.GetCurrentDirectory()),
+            _loggerFactory.CreateLogger<AppSurfaceDocsVersionCatalogService>());
+        var catalog = service.GetCatalog();
+        var version = catalog.Versions.FirstOrDefault(
+            entry => string.Equals(entry.Version, Version.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        if (version is null)
+        {
+            throw new CommandException($"AppSurface Docs archive verification could not find version '{Version.Trim()}' in {catalogPath}.");
+        }
+
+        if (version.ArchiveVerificationState != AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified)
+        {
+            throw new CommandException(
+                $"AppSurface Docs archive verification failed for {version.Version}: {version.ArchiveVerificationState}. {version.AvailabilityIssue ?? "No releaseManifestSha256 catalog pin is configured."}");
+        }
+
+        _logger.LogInformation(
+            "AppSurface Docs archive verified for {Version}: {ManifestSha256}.",
+            version.Version,
+            version.ReleaseManifestSha256);
+    }
+
+    private sealed class ArchiveVerifyWebHostEnvironment : IWebHostEnvironment
+    {
+        public ArchiveVerifyWebHostEnvironment(string contentRootPath)
+        {
+            ContentRootPath = contentRootPath;
+            WebRootPath = contentRootPath;
+        }
+
+        public string EnvironmentName { get; set; } = Environments.Production;
+        public string ApplicationName { get; set; } = "ForgeTrust.AppSurface.Cli";
+        public string WebRootPath { get; set; }
+        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
+        public string ContentRootPath { get; set; }
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }
 
@@ -2406,6 +2525,8 @@ internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsE
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(context);
+
+        context.EnableReleaseArchiveManifest();
 
         var routeManifest = await host.Services
             .GetRequiredService<DocAggregator>()

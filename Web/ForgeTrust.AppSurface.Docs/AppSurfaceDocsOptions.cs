@@ -772,7 +772,8 @@ public sealed class AppSurfaceDocsRoutingOptions
 /// The catalog stays file-based in this slice: runtime consumes a JSON manifest plus prebuilt exact release trees and
 /// does not perform Git or bundle resolution at request time. The catalog must describe the recommended version
 /// alias plus one or more exact release trees whose exported contents satisfy the exact-tree contract documented in
-/// the package README.
+/// the package README. New exact release trees should also pin <c>releaseManifestSha256</c> in the catalog so runtime
+/// verification can prove local archive integrity before serving active archive SVG.
 /// </remarks>
 public sealed class AppSurfaceDocsVersioningOptions
 {
@@ -804,7 +805,9 @@ public sealed class AppSurfaceDocsVersioningOptions
     /// The catalog describes available exact-version trees, the recommended version alias, and release-level status
     /// metadata such as support and advisory state. Relative paths resolve from the app content root.
     /// The JSON payload is expected to contain a top-level recommended version plus a <c>versions</c> array whose
-    /// entries point at exported exact-version trees.
+    /// entries point at exported exact-version trees. Each entry may include <c>releaseManifestSha256</c> to pin the
+    /// digest of that tree's <c>.appsurface-docs-release-manifest.json</c>. Entries without the pin are treated as
+    /// legacy unverified archives and cannot serve archive SVG.
     /// A missing, unreadable, or malformed catalog does not crash AppSurface Docs, but it leaves all published releases
     /// unavailable until the catalog can be loaded successfully. When <see cref="Enabled"/> is <see langword="true"/>
     /// and this property is blank, startup validation fails before the app begins serving requests.

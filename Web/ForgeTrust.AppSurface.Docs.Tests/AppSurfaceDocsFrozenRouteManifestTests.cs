@@ -216,6 +216,21 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
         Assert.False(manifest.TryResolveAlias("README.md", out _));
     }
 
+    [Theory]
+    [InlineData("""{ "schema": "unknown", "entries": [] }""", "unsupported schema")]
+    [InlineData("{", "Expected")]
+    public void TryLoadVerified_ShouldReturnIssue_WhenVerifiedBytesAreInvalid(string json, string expectedIssue)
+    {
+        var loaded = AppSurfaceDocsFrozenRouteManifest.TryLoadVerified(
+            System.Text.Encoding.UTF8.GetBytes(json),
+            out var manifest,
+            out var issue);
+
+        Assert.False(loaded);
+        Assert.Same(AppSurfaceDocsFrozenRouteManifest.Empty, manifest);
+        Assert.Contains(expectedIssue, issue, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void Load_ShouldIgnoreAliasThatMatchesItsCanonicalRoute()
     {

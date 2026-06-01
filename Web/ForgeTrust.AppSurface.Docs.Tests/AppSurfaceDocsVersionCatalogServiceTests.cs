@@ -1316,6 +1316,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     [Theory]
     [InlineData("label", "false")]
     [InlineData("summary", "[]")]
+    [InlineData("releaseManifestSha256", "[]")]
     [InlineData("visibility", "\"\"")]
     [InlineData("visibility", "\"NotAVisibility\"")]
     [InlineData("advisoryState", "\"NotAnAdvisory\"")]
@@ -1379,6 +1380,36 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         Assert.Equal("1.2.3", version.Version);
         Assert.True(version.IsAvailable);
         Assert.NotNull(catalog.RecommendedVersion);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldMarkPinnedArchiveUnavailable_WhenReleaseManifestVerificationFails()
+    {
+        var stableTree = CreateExactTree("stable-invalid-release-manifest");
+        var relativeTree = EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree));
+        var catalogPath = WriteRawCatalogJson(
+            $$"""
+            {
+              "recommendedVersion": "1.2.3",
+              "versions": [
+                {
+                  "version": "1.2.3",
+                  "exactTreePath": "{{relativeTree}}",
+                  "releaseManifestSha256": "{{new string('0', 64)}}"
+                }
+              ]
+            }
+            """);
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        Assert.Null(catalog.RecommendedVersion);
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Equal(AppSurfaceDocsReleaseArchiveVerificationState.Unavailable, version.ArchiveVerificationState);
+        Assert.Contains("ASDOCSARCHIVE", version.AvailabilityIssue, StringComparison.Ordinal);
+        Assert.Null(version.VerifiedReleaseArchive);
     }
 
     public void Dispose()
