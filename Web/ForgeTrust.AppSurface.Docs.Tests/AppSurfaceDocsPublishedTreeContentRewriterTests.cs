@@ -33,6 +33,7 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
         Assert.Contains("/docs/v/1.2.3/guide.html", rewritten);
         Assert.Contains("/docs/v/1.2.3/search", rewritten);
         Assert.Contains("\"docsRootPath\":\"/docs/v/1.2.3\"", rewritten);
+        Assert.Contains("\"docsArchiveRootPath\":\"/docs/versions\"", rewritten);
         Assert.Contains("\"docsSearchUrl\":\"/docs/v/1.2.3/search\"", rewritten);
         Assert.Contains("\"docsSearchIndexUrl\":\"/docs/v/1.2.3/search-index.json\"", rewritten);
         Assert.Contains("\"miniSearchUrl\":\"/docs/v/1.2.3/minisearch.min.js?v=abc\"", rewritten);
@@ -275,6 +276,7 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
         Assert.Contains("href=\"/some-base/docs/v/1.2.3/search.css\"", rewritten);
         Assert.Contains("src=\"/some-base/docs/v/1.2.3/outline-client.js\"", rewritten);
         Assert.Contains("\"docsRootPath\":\"/some-base/docs/v/1.2.3\"", rewritten);
+        Assert.Contains("\"docsArchiveRootPath\":\"/some-base/docs/versions\"", rewritten);
         Assert.Contains("\"docsSearchUrl\":\"/some-base/docs/v/1.2.3/search\"", rewritten);
         Assert.Contains("\"docsSearchIndexUrl\":\"/some-base/docs/v/1.2.3/search-index.json\"", rewritten);
         Assert.Contains("\"miniSearchUrl\":\"/some-base/docs/v/1.2.3/minisearch.min.js?v=abc\"", rewritten);

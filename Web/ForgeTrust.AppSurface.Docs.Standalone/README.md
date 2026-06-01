@@ -99,6 +99,8 @@ The standalone host ships an `appsettings.json` that dogfoods the reusable harve
 
 Those excludes are dogfood policy, not package defaults. Reusable AppSurface Docs defaults still cover build output, hidden directories, test projects, and C# example source for every host. Add or override `AppSurfaceDocs:Harvest:Paths`, `AppSurfaceDocs:Harvest:Markdown`, or `AppSurfaceDocs:Harvest:CSharp` in environment-specific configuration when using this executable for another repository.
 
+Markdown resource limits also come from reusable package defaults: `AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes=1048576` for Markdown bodies and `AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes=65536` for paired `.md.yml` / `.md.yaml` metadata sidecars. Oversized Markdown files or sidecars emit harvest-health warnings; generated docs should usually be excluded, while intentional authored docs can raise the byte limits in this host's environment-specific configuration.
+
 ## Local URL Behavior
 
 When you run this host in `Development` without explicit endpoint configuration, AppSurface Web assigns a deterministic localhost-only development URL from the current workspace path. That keeps sibling worktrees from colliding on the same default localhost URL.

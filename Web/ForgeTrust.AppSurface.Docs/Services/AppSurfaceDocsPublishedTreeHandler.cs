@@ -976,7 +976,7 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
                 continue;
             }
 
-            var rewrittenScript = RewriteDocsClientConfigScript(scriptContent, mountRootPath, requestPathBase);
+            var rewrittenScript = RewriteDocsClientConfigScript(scriptContent, mountRootPath, routeRootPath, requestPathBase);
             if (!string.Equals(scriptContent, rewrittenScript, StringComparison.Ordinal))
             {
                 script.TextContent = rewrittenScript;
@@ -1141,7 +1141,11 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         return value;
     }
 
-    private static string RewriteDocsClientConfigScript(string scriptContent, string mountRootPath, string? requestPathBase)
+    private static string RewriteDocsClientConfigScript(
+        string scriptContent,
+        string mountRootPath,
+        string routeRootPath,
+        string? requestPathBase)
     {
         return DocsClientConfigRegex.Replace(
             scriptContent,
@@ -1158,6 +1162,7 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
                 }
 
                 configNode["docsRootPath"] = PrefixPathBase(mountRootPath, requestPathBase);
+                configNode["docsArchiveRootPath"] = PrefixPathBase(DocsUrlBuilder.JoinPath(routeRootPath, "versions"), requestPathBase);
                 configNode["docsSearchUrl"] = PrefixPathBase(DocsUrlBuilder.JoinPath(mountRootPath, "search"), requestPathBase);
                 configNode["docsSearchIndexUrl"] = PrefixPathBase(DocsUrlBuilder.JoinPath(mountRootPath, "search-index.json"), requestPathBase);
                 if (configNode.TryGetPropertyValue("miniSearchUrl", out var miniSearchUrlNode)

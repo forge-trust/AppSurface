@@ -987,6 +987,16 @@ public static class DocHarvestDiagnosticCodes
     public const string MetadataUnsafeTrustMigrationHref = "appsurfacedocs.metadata.unsafe_trust_migration_href";
 
     /// <summary>
+    /// A Markdown body file matched the configured include set but exceeded the configured pre-read size limit.
+    /// </summary>
+    public const string MarkdownFileTooLarge = "appsurfacedocs.markdown.file_too_large";
+
+    /// <summary>
+    /// A paired Markdown metadata sidecar exceeded the configured pre-read size limit and was ignored.
+    /// </summary>
+    public const string MarkdownMetadataFileTooLarge = "appsurfacedocs.markdown.metadata_file_too_large";
+
+    /// <summary>
     /// A JavaScript source file matched the configured include set but exceeded the configured parse size limit.
     /// </summary>
     public const string JavaScriptFileTooLarge = "appsurfacedocs.javascript.file_too_large";
@@ -1000,6 +1010,11 @@ public static class DocHarvestDiagnosticCodes
     /// JavaScript harvesting is enabled but is missing a usable include configuration.
     /// </summary>
     public const string JavaScriptMissingInclude = "appsurfacedocs.javascript.missing_include";
+
+    /// <summary>
+    /// A configured JavaScript include resolved to a file-system reparse point and was skipped before source read.
+    /// </summary>
+    public const string JavaScriptReparsePointSkipped = "appsurfacedocs.javascript.reparse_point_skipped";
 
     /// <summary>
     /// A public JavaScript doclet used a shape outside the v1 harvester contract and was skipped.

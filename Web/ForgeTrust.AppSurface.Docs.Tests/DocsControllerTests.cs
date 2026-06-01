@@ -2916,6 +2916,67 @@ public class DocsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task HarvestHealthJson_ShouldRemainHealthyWithVisibleMarkdownResourceWarnings()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-docs-markdown-health-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(root, "Keep.md"), "# Keep");
+            await File.WriteAllTextAsync(Path.Join(root, "Huge.md"), "# Huge\nThis file exceeds the tiny test limit.");
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions
+                {
+                    RepositoryRoot = root
+                },
+                Harvest = new AppSurfaceDocsHarvestOptions
+                {
+                    Markdown = new AppSurfaceDocsMarkdownHarvestOptions
+                    {
+                        MaxFileSizeBytes = 8
+                    }
+                }
+            };
+            var harvester = new MarkdownHarvester(
+                NullLogger<MarkdownHarvester>.Instance,
+                NullLoggerFactory.Instance,
+                options,
+                AppSurfaceDocsHarvestPathPolicy.CreateDefault());
+            var (controller, cache, memo) = CreateController(options, harvester);
+            using (memo)
+            using (cache)
+            {
+                var result = Assert.IsType<JsonResult>(await controller.HarvestHealthJson());
+                var response = Assert.IsType<AppSurfaceDocsHarvestHealthResponse>(result.Value);
+                var serialized = JsonSerializer.Serialize(response, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                using var document = JsonDocument.Parse(serialized);
+
+                Assert.Equal(StatusCodes.Status200OK, result.StatusCode);
+                Assert.Equal("Healthy", response.Status);
+                Assert.True(response.Verification.Ok);
+                Assert.Equal(StatusCodes.Status200OK, response.Verification.HttpStatusCode);
+                var diagnostic = Assert.Single(response.Diagnostics);
+                Assert.Equal(DocHarvestDiagnosticCodes.MarkdownFileTooLarge, diagnostic.Code);
+                Assert.Equal("Warning", diagnostic.Severity);
+                Assert.Equal(nameof(MarkdownHarvester), diagnostic.HarvesterType);
+                Assert.Contains("Huge.md", diagnostic.Problem, StringComparison.Ordinal);
+                Assert.Contains("8 bytes", diagnostic.Problem, StringComparison.Ordinal);
+                Assert.Contains("AppSurfaceDocs:Harvest:Markdown:ExcludeGlobs", diagnostic.Fix, StringComparison.Ordinal);
+                Assert.DoesNotContain(root, serialized, StringComparison.Ordinal);
+                Assert.True(document.RootElement.GetProperty("verification").GetProperty("ok").GetBoolean());
+                Assert.Equal("Healthy", document.RootElement.GetProperty("status").GetString());
+                Assert.Equal(
+                    DocHarvestDiagnosticCodes.MarkdownFileTooLarge,
+                    document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task HarvestHealthJson_ShouldTreatEmptyHarvestAsOk()
     {
         var harvester = A.Fake<IDocHarvester>();

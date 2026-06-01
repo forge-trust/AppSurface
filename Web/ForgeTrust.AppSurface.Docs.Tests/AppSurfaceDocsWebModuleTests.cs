@@ -146,6 +146,46 @@ public class AppSurfaceDocsWebModuleTests
     }
 
     [Fact]
+    public async Task AddAppSurfaceDocs_ShouldWireConfiguredMarkdownResourceLimitsIntoBuiltInHarvester()
+    {
+        var root = Directory.CreateTempSubdirectory("appsurface-docs-di-markdown-limit-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(root, "Small.md"), "# Ok");
+            await File.WriteAllTextAsync(Path.Join(root, "Large.md"), "# Large\nThis file exceeds the configured test limit.");
+            var services = new ServiceCollection();
+            services.AddSingleton<IConfiguration>(
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(
+                        new Dictionary<string, string?>
+                        {
+                            ["AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes"] = "8"
+                        })
+                    .Build());
+            services.AddSingleton<IWebHostEnvironment>(new TestWebHostEnvironment { ContentRootPath = root });
+            services.AddSingleton<IHostEnvironment>(new TestWebHostEnvironment { ContentRootPath = root });
+            services.AddLogging();
+            services.AddAppSurfaceDocs();
+
+            await using var serviceProvider = services.BuildServiceProvider();
+            var markdownHarvester = serviceProvider.GetServices<IDocHarvester>().OfType<MarkdownHarvester>().Single();
+
+            var docs = await markdownHarvester.HarvestAsync(root);
+            var diagnostics = Assert.IsAssignableFrom<IDocHarvesterDiagnosticProvider>(markdownHarvester).GetHarvestDiagnostics();
+
+            var doc = Assert.Single(docs);
+            Assert.Equal("Small.md", doc.Path);
+            var diagnostic = Assert.Single(diagnostics);
+            Assert.Equal(DocHarvestDiagnosticCodes.MarkdownFileTooLarge, diagnostic.Code);
+            Assert.Contains("8 bytes", diagnostic.Problem, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AddAppSurfaceDocs_WhenProductionHostHasNoCustomChannelAuthorizer_DeniesHarvestChannel()
     {
         var environment = new TestWebHostEnvironment { EnvironmentName = Environments.Production };

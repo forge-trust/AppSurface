@@ -306,6 +306,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
             sp => new MarkdownHarvester(
                 sp.GetRequiredService<ILogger<MarkdownHarvester>>(),
                 sp.GetRequiredService<ILoggerFactory>(),
+                sp.GetRequiredService<AppSurfaceDocsOptions>(),
                 sp.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>()));
     }
 

@@ -461,6 +461,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
             availabilityFailure = ValidateExactTree(
                 trustedReleaseRootPath,
                 exactTreePath!,
+                normalizedVersion,
                 _options.Versioning.MaxRewrittenFileSizeBytes);
             if (availabilityFailure is null)
             {
@@ -575,6 +576,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
     private static AvailabilityFailure? ValidateExactTree(
         string trustedReleaseRootPath,
         string exactTreePath,
+        string version,
         long maxRewrittenFileSizeBytes)
     {
         if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
@@ -618,6 +620,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
 
         var searchIndexValidationIssue = ValidateSearchIndexPayload(
             Path.Join(exactTreePath, "search-index.json"),
+            new PublishedSearchIndexArchivePathContext(version),
             maxRewrittenFileSizeBytes);
         if (searchIndexValidationIssue is not null)
         {
@@ -627,7 +630,10 @@ public sealed class AppSurfaceDocsVersionCatalogService
         return null;
     }
 
-    private static AvailabilityFailure? ValidateSearchIndexPayload(string searchIndexPath, long maxRewrittenFileSizeBytes)
+    private static AvailabilityFailure? ValidateSearchIndexPayload(
+        string searchIndexPath,
+        PublishedSearchIndexArchivePathContext pathContext,
+        long maxRewrittenFileSizeBytes)
     {
         try
         {
@@ -656,12 +662,12 @@ public sealed class AppSurfaceDocsVersionCatalogService
                     InternalDetail: $"ExactTreePath '{Path.GetDirectoryName(searchIndexPath)}' has a search-index.json payload without a documents array.");
             }
 
+            var index = 0;
             foreach (var item in documents.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.Object
                     || !item.TryGetProperty("path", out var path)
                     || path.ValueKind != JsonValueKind.String
-                    || string.IsNullOrWhiteSpace(path.GetString())
                     || !item.TryGetProperty("title", out var title)
                     || title.ValueKind != JsonValueKind.String
                     || string.IsNullOrWhiteSpace(title.GetString()))
@@ -670,6 +676,17 @@ public sealed class AppSurfaceDocsVersionCatalogService
                         PublicMessage: "Published release tree has a search-index.json document entry without the required path/title fields.",
                         InternalDetail: $"ExactTreePath '{Path.GetDirectoryName(searchIndexPath)}' has a search-index.json document entry without the required path/title fields.");
                 }
+
+                var validation = PublishedSearchIndexDocumentPathPolicy.ValidateArchivePath(path.GetString(), pathContext);
+                if (!validation.IsValid)
+                {
+                    var reason = PublishedSearchIndexDocumentPathPolicy.ToDiagnosticCode(validation.Reason);
+                    return new AvailabilityFailure(
+                        PublicMessage: "Published release tree has an unsafe search-index document path.",
+                        InternalDetail: $"Version '{pathContext.Version}' search-index.json documents[{index}].path was rejected: category '{reason}', title '{SanitizeSearchIndexDiagnosticValue(title.GetString()!)}', value '{validation.RedactedValue}', expected root '/docs'.");
+                }
+
+                index++;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -680,6 +697,12 @@ public sealed class AppSurfaceDocsVersionCatalogService
         }
 
         return null;
+    }
+
+    private static string SanitizeSearchIndexDiagnosticValue(string value)
+    {
+        var sanitized = new string(value.Trim().Select(ch => char.IsControl(ch) ? ' ' : ch).ToArray());
+        return sanitized.Length <= 80 ? sanitized : sanitized[..80] + "...";
     }
 }
 
@@ -814,22 +837,40 @@ public sealed record AppSurfaceDocsResolvedVersionCatalog(
 /// <summary>
 /// Represents one resolved published docs version and its runtime availability.
 /// </summary>
-/// <param name="Version">The exact published version identifier.</param>
-/// <param name="Label">The archive label shown to readers.</param>
-/// <param name="Summary">Optional summary copy shown in the archive.</param>
-/// <param name="ExactTreePath">The resolved absolute path to the exported exact-version subtree.</param>
-/// <param name="ExactRootUrl">The canonical public root URL for the exact version.</param>
+/// <param name="Version">The non-null exact published version identifier from the catalog.</param>
+/// <param name="Label">The non-null archive label shown to readers; catalog loading falls back to <paramref name="Version"/> when no label is configured.</param>
+/// <param name="Summary">Optional summary copy shown in the archive, or <see langword="null"/> when the catalog entry has no non-blank summary.</param>
+/// <param name="ExactTreePath">The resolved absolute path to the exported exact-version subtree, or <see langword="null"/> when catalog path resolution failed before an exact tree could be selected.</param>
+/// <param name="ExactRootUrl">The non-null canonical public root URL for the exact version.</param>
 /// <param name="SupportState">The support-state badge surfaced in the archive.</param>
 /// <param name="Visibility">The archive visibility state.</param>
 /// <param name="AdvisoryState">The release-level advisory state.</param>
-/// <param name="IsAvailable">Whether the exact-version tree validated successfully.</param>
+/// <param name="IsAvailable">Whether the exact-version tree validated successfully and may be mounted or recommended.</param>
 /// <param name="AvailabilityIssue">
-/// The sanitized public-facing availability explanation when the tree is unavailable. Internal logs retain filesystem
-/// paths and exception details, but this message is safe to surface in archive UI and reader-facing diagnostics.
+/// Optional sanitized public-facing availability explanation when <paramref name="IsAvailable"/> is <see langword="false"/>.
+/// Callers should branch on <paramref name="IsAvailable"/> first, then display this value when present; they should not
+/// infer availability by parsing message text. Internal logs retain filesystem paths and exception details, but this
+/// message is safe to surface in archive UI and reader-facing diagnostics.
 /// </param>
-/// <param name="ReleaseManifestSha256">Catalog-pinned release manifest digest when configured.</param>
-/// <param name="ArchiveVerificationState">Archive integrity state resolved for the exact-version tree.</param>
-/// <param name="VerifiedReleaseArchive">Verified archive file metadata used by runtime mounts, when available.</param>
+/// <param name="ReleaseManifestSha256">
+/// Optional catalog-pinned release manifest digest. The value is <see langword="null"/> for unpinned legacy catalog
+/// entries and for entries whose configured digest is blank; a non-null value means the catalog requested release archive
+/// verification, not that verification necessarily succeeded.
+/// </param>
+/// <param name="ArchiveVerificationState">
+/// Archive integrity state resolved for the exact-version tree. The default
+/// <see cref="AppSurfaceDocsReleaseArchiveVerificationState.AvailableUnverifiedLegacy"/> represents an available,
+/// shape-valid legacy tree without a catalog-pinned release manifest digest. Treat this state as meaningful only when
+/// <paramref name="IsAvailable"/> is <see langword="true"/>; unavailable versions report
+/// <see cref="AppSurfaceDocsReleaseArchiveVerificationState.Unavailable"/> and carry the public failure reason in
+/// <paramref name="AvailabilityIssue"/>.
+/// </param>
+/// <param name="VerifiedReleaseArchive">
+/// Verified archive file metadata used by runtime mounts. This value is <see langword="null"/> unless
+/// <paramref name="IsAvailable"/> is <see langword="true"/> and <paramref name="ArchiveVerificationState"/> is
+/// <see cref="AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified"/>. When non-null, callers may rely on that
+/// invariant instead of rechecking catalog digest details.
+/// </param>
 public sealed record AppSurfaceDocsResolvedVersion(
     string Version,
     string Label,
