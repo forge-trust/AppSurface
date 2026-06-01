@@ -3,6 +3,15 @@ namespace ForgeTrust.AppSurface.Flow.Tests;
 public sealed class FlowOutcomeTests
 {
     [Fact]
+    public void FlowRunStatus_ValuesAreStable()
+    {
+        Assert.Equal(0, (int)FlowRunStatus.Waiting);
+        Assert.Equal(1, (int)FlowRunStatus.Completed);
+        Assert.Equal(2, (int)FlowRunStatus.Faulted);
+        Assert.Equal(3, (int)FlowRunStatus.TimedOut);
+    }
+
+    [Fact]
     public void Factories_CreateExpectedOutcomeTypes()
     {
         var state = new TestState("ready");

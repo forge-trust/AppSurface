@@ -52,8 +52,10 @@ public interface IDurableTaskFlowRunner<TContext>
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="step"/> is null.</exception>
     /// <remarks>
-    /// This method validates the input context before executing the node and validates returned contexts before
-    /// scheduling, waiting, timing out, or completing. Callers must branch on the returned decision kind.
+    /// When <see cref="AppSurfaceFlowDurableTaskOptions.ValidateContextSerialization"/> is enabled, this method
+    /// validates the input context before executing the node and validates returned contexts before scheduling, waiting,
+    /// timing out, or completing. Disabling that option skips the serialization round-trip check. Callers must branch on
+    /// the returned decision kind.
     /// </remarks>
     ValueTask<DurableTaskFlowDecision<TContext>> RunNodeAsync(
         DurableTaskFlowStep<TContext> step,
@@ -74,8 +76,10 @@ public interface IDurableTaskFlowRunner<TContext>
     /// <exception cref="ArgumentException">Thrown when <paramref name="expectedEventName"/> is empty.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="step"/> is null.</exception>
     /// <remarks>
-    /// Deliver only the event the orchestration is currently waiting for. Late or stale events are represented as
-    /// decisions, so callers should inspect the returned kind before scheduling more work.
+    /// The <paramref name="expectedEventName"/> comparison uses <see cref="StringComparison.Ordinal"/>, so matching is
+    /// case-sensitive. Deliver only the exact event the orchestration is currently waiting for, or normalize event names
+    /// before calling this method. Mismatches are represented as late-event or fault decisions, so callers should
+    /// inspect the returned kind before scheduling more work.
     /// </remarks>
     ValueTask<DurableTaskFlowDecision<TContext>> ResumeAsync(
         DurableTaskFlowStep<TContext> step,

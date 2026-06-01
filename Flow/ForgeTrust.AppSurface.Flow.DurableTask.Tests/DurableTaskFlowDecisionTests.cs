@@ -3,6 +3,17 @@ namespace ForgeTrust.AppSurface.Flow.DurableTask.Tests;
 public sealed class DurableTaskFlowDecisionTests
 {
     [Fact]
+    public void DurableTaskFlowDecisionKind_ValuesAreStable()
+    {
+        Assert.Equal(0, (int)DurableTaskFlowDecisionKind.ScheduleNode);
+        Assert.Equal(1, (int)DurableTaskFlowDecisionKind.WaitForExternalEvent);
+        Assert.Equal(2, (int)DurableTaskFlowDecisionKind.Complete);
+        Assert.Equal(3, (int)DurableTaskFlowDecisionKind.Fault);
+        Assert.Equal(4, (int)DurableTaskFlowDecisionKind.TimedOut);
+        Assert.Equal(5, (int)DurableTaskFlowDecisionKind.IgnoreLateEvent);
+    }
+
+    [Fact]
     public void ScheduleNode_CapturesContextAndRetryPolicy()
     {
         var retryPolicy = new FlowRetryPolicy(2, TimeSpan.FromSeconds(1));

@@ -21,7 +21,7 @@ var completed = await runner.ResumeAsync(
     definition,
     waiting.NodeId,
     waiting.Context,
-    new FlowResumeEvent("approval-submitted", true));
+    new FlowResumeEvent("approval-submitted", payload: true));
 
 Console.WriteLine($"{completed.Status}: {completed.Context?.Status}");
 

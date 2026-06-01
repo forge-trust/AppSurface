@@ -5,6 +5,11 @@ namespace ForgeTrust.AppSurface.Flow.DurableTask;
 /// <summary>
 /// Identifies the durable orchestration decision produced from a flow node outcome.
 /// </summary>
+/// <remarks>
+/// The numeric values are part of the Durable Task adapter compatibility contract and may appear in durable
+/// persistence, telemetry, or wire payloads. Do not reorder, renumber, remove, or reuse values. Add new decisions only
+/// at the end with explicit numeric values and migration/versioning considerations.
+/// </remarks>
 public enum DurableTaskFlowDecisionKind
 {
     /// <summary>

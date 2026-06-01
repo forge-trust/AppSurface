@@ -183,5 +183,8 @@ public sealed record FlowFaultOutcome<TContext> : FlowNodeOutcome<TContext>
     /// <summary>
     /// Gets the fault details.
     /// </summary>
+    /// <remarks>
+    /// This member intentionally hides the static fault factory on <see cref="FlowNodeOutcome{TContext}"/>.
+    /// </remarks>
     public new FlowFault Fault { get; }
 }

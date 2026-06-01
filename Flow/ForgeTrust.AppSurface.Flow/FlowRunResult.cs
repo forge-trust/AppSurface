@@ -3,6 +3,11 @@ namespace ForgeTrust.AppSurface.Flow;
 /// <summary>
 /// Identifies the terminal or pause status returned by an AppSurface Flow runner.
 /// </summary>
+/// <remarks>
+/// The numeric values are part of the public compatibility contract for logs, persisted state, and tests. Do not
+/// reorder, renumber, remove, or reuse values. Add new statuses only at the end with explicit numeric values and a
+/// migration/versioning plan.
+/// </remarks>
 public enum FlowRunStatus
 {
     /// <summary>
