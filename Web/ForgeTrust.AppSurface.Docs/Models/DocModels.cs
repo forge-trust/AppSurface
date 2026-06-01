@@ -1012,6 +1012,11 @@ public static class DocHarvestDiagnosticCodes
     public const string JavaScriptMissingInclude = "appsurfacedocs.javascript.missing_include";
 
     /// <summary>
+    /// A configured JavaScript include resolved to a file-system reparse point and was skipped before source read.
+    /// </summary>
+    public const string JavaScriptReparsePointSkipped = "appsurfacedocs.javascript.reparse_point_skipped";
+
+    /// <summary>
     /// A public JavaScript doclet used a shape outside the v1 harvester contract and was skipped.
     /// </summary>
     public const string JavaScriptUnsupportedPublicShape = "appsurfacedocs.javascript.unsupported_public_shape";

@@ -67,6 +67,24 @@ If `_FormFields.cshtml` is rendered inside an outer `<form asp-action="..." meth
 
 Both methods provide the same security protection when used correctly.
 
+## Static and Hybrid Export
+
+Anti-forgery tokens minted during export are not valid for the eventual browser user. Plain CDN exports fail early when a page contains any anti-forgery surface because there is no backend endpoint available to mint a fresh token for the browser user.
+
+In hybrid export, RazorWire handles the safe case automatically:
+
+```bash
+razorwire export --mode hybrid --live-origin https://api.example.com --project ./MyApp.csproj
+```
+
+When export sees a RazorWire-managed form with static `__RequestVerificationToken` inputs, including valid HTML form-associated token inputs that use `form="..."` outside the form element, it rewrites the form action to the live origin, removes the baked token inputs, and marks the form with `data-rw-antiforgery="lazy"`. The browser then fetches a fresh token from `/_rw/antiforgery/token` on first form intent or just before Turbo submits the form. Managed live calls include credentials by default when `--live-origin` is set. If the crawled app uses a path base, split-origin export normalizes `data-rw-antiforgery-endpoint` to the live app route before the runtime prefixes `--live-origin`; avoid hard-coding the crawl path base into custom live-origin token endpoints.
+
+Hybrid export without `--live-origin` is also supported for deployments where the CDN passes RazorWire endpoints back to the backend on the same public origin. In that mode, export removes safe static token inputs and marks the form for lazy refresh while preserving an app-owned same-origin action.
+
+You may write `rw-antiforgery="lazy"` on a form as an explicit assertion, but it is not required for safe static-token conversion. Do not use `rw-antiforgery="off"` on exported forms that contain anti-forgery tokens unless the form is loaded from a live endpoint instead of static HTML.
+
+Export fails with `RWEXPORT006` when anti-forgery cannot be made safe: any anti-forgery marker in CDN mode, unmanaged forms, external form actions, omitted split-origin hybrid credentials, or explicit anti-forgery opt-out. This is intentionally early and noisy so stale tokens do not ship to production.
+
 ## Symptom: The First Submit Works, The Second Submit Returns 400
 
 The most common cause is a stale or missing anti-forgery token after a stream update. Replace the whole form, or render `@Html.AntiForgeryToken()` inside the updated fragment.

@@ -16,13 +16,15 @@ Use the AppSurface CLI when working with this repository's AppSurface Docs surfa
 appsurface docs --repo . --port 5189
 appsurface docs preview --repo . --port 5189
 appsurface docs export --repo . --output ./dist/docs --mode cdn --strict
+appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3
+appsurface docs verify-archive --catalog ./docs-versions.json --version 1.2.3 --trusted-release-root ./published-docs
 ```
 
 `appsurface docs` and `appsurface docs preview` run the standalone host for local inspection. `appsurface docs export` starts that same host in-process, binds an internal `http://127.0.0.1:0` listener, resolves the actual Kestrel address, and exports through RazorWire's static export engine.
 
 Preview `--port` values bind localhost only. Add `--all-hosts` to a `--port` preview only when LAN, container, or other non-loopback access is intentional; the all-hosts wildcard can expose the preview host beyond the local machine.
 
-Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands.
+Export defaults to `Production`, writes to `dist/docs` when `--output` is omitted, rejects existing files passed to `--output`, and seeds `/` plus the resolved docs root, `/docs` by default. Pass `--seeds <file>` for deterministic crawl roots in CI. `--seeds` has no short alias because `-r` means `--repo` for AppSurface docs commands. After final files are materialized, export writes `.appsurface-docs-release-manifest.json` and prints the `releaseManifestSha256` catalog snippet to copy into the published version catalog. Use `appsurface docs verify-archive --catalog <path> --version <version>` to check a pinned archive locally before deploy. Pass `--trusted-release-root <path>` when the runtime catalog resolves root-relative `exactTreePath` values through `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; this keeps local verification on the same trusted-root contract as production.
 
 Redirect aliases default to HTML fallback materialization. Omit `--redirects`, or pass `--redirects html`, for GitHub Pages and generic static hosts. Pass `--mode cdn --redirects netlify` for Netlify-compatible CDN publishing; export writes one root `_redirects` file with exact site-local `301!` rules and does not write alias HTML files. Netlify export validates the encoded provider rule paths, so self-redirects and same-source aliases that point at different canonical routes fail before files are written. Do not hand-author `_redirects` in the export output because the exporter reserves that file for validated redirect rules.
 
@@ -270,6 +272,15 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict` (`appsurfacedocs.localization.locale_folder_conflict`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant` (`appsurfacedocs.localization.fallback_disabled_missing_variant`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackConflict` (`appsurfacedocs.localization.fallback_conflict`)
+- `DocHarvestDiagnosticCodes.JavaScriptFileTooLarge` (`appsurfacedocs.javascript.file_too_large`)
+- `DocHarvestDiagnosticCodes.JavaScriptParseFailed` (`appsurfacedocs.javascript.parse_failed`)
+- `DocHarvestDiagnosticCodes.JavaScriptMissingInclude` (`appsurfacedocs.javascript.missing_include`)
+- `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`)
+- `DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape` (`appsurfacedocs.javascript.unsupported_public_shape`)
+- `DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet` (`appsurfacedocs.javascript.malformed_public_doclet`)
+- `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet` (`appsurfacedocs.javascript.incomplete_public_doclet`)
+- `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`)
+- `DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor` (`appsurfacedocs.javascript.duplicate_anchor`)
 
 An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
 
@@ -705,7 +716,11 @@ dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Test
 
 The dedicated `vcs-ignore-parity.yml` workflow runs that parity suite on Linux, macOS, and Windows so case-sensitive ignore behavior and Git oracle traces stay pinned across supported runner families.
 
-Traversal uses the same policy for Markdown and C#. AppSurface Docs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file. File and directory reparse points, including symlinks and junctions, are skipped before the built-in Markdown and C# harvesters read or descend into them. This keeps the selected repository root as the source boundary even for untrusted repositories that contain links to files outside the root. The root `LICENSE` file is a Markdown candidate only when it is not a reparse point, and Markdown sidecar metadata files such as `README.md.yml` are ignored when the sidecar itself is a reparse point. When global includes are configured, the root license still needs to match an include such as `LICENSE`.
+Traversal uses the same policy for Markdown, C#, and JavaScript. AppSurface Docs prunes clear default-excluded or configured `/**` subtrees for speed, but it does not prune just because an include glob might miss; includes are evaluated at file level so a narrow include does not accidentally hide a deeper matching file.
+
+File and directory reparse points, including symlinks and junctions, are skipped before the built-in Markdown, C#, and JavaScript harvesters read or descend into them. This keeps the selected repository root as the source boundary even for untrusted repositories that contain links to files outside the root. When global or JavaScript-specific include roots resolve directly to JavaScript reparse points, the JavaScript harvester emits the redacted `appsurfacedocs.javascript.reparse_point_skipped` diagnostic so operators can replace the link with a real source path, point the include at a non-link source, disable JavaScript harvesting, or provide a custom harvester for a host-owned trust model.
+
+The root `LICENSE` file is a Markdown candidate only when it is not a reparse point, and Markdown sidecar metadata files such as `README.md.yml` are ignored when the sidecar itself is a reparse point. When global includes are configured, the root license still needs to match an include such as `LICENSE`.
 
 To host the same live source surface somewhere else, set the route-family root. With versioning disabled, the live docs root defaults to the route root:
 
@@ -1123,6 +1138,8 @@ static web assets.
   - Include globs default to an empty list; exclude globs default to `**/*.min.js`; default-exclusion controls mirror the global path option shape.
   - Use include globs as an optional narrowing or performance boundary, such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js`.
   - Global path rules apply first, then JavaScript-specific includes, default exclusions, and excludes refine the candidate set.
+  - Configured JavaScript include roots that resolve to symlinks, junctions, or other reparse points are skipped before reads or descent. Exact includes and symlinked include roots emit `appsurfacedocs.javascript.reparse_point_skipped` with repository-relative wording only; globbed child symlink files are skipped silently.
+  - Exact missing JavaScript include files emit `appsurfacedocs.javascript.missing_include`. This preserves a distinct compatibility signal from parse/read failures while still blocking strict JavaScript health when JavaScript participates through `StrictHealth=true` or nonempty JavaScript include globs.
 - `AppSurfaceDocs:Harvest:JavaScript:GroupNameRules`
   - Defaults to an empty list.
   - Names already-eligible JavaScript source trees when public doclets do not declare a nonblank `@namespace` or `@module`.
@@ -1231,6 +1248,26 @@ These settings are pre-read byte guards. They do not provide Markdig parser-comp
   - Defines the only filesystem tree that catalog `exactTreePath` values may publish.
   - Relative configured values resolve from the app content root.
   - The root and exact release trees must be ordinary directories. Symlinks, junctions, reparse points, and metadata-inspection failures are denied.
+- `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`
+  - Defaults to `2097152` bytes (2 MiB).
+  - Must be between `1` and `33554432` bytes (32 MiB). There is no disable sentinel.
+  - Defines the published-tree HTML/search-index rewrite limit. AppSurface Docs checks exported `.html` files and the root `search-index.json` before request-time rewrites, and checks `search-index.json` during catalog validation before parsing.
+  - Does not limit streamed static assets such as images, fonts, CSS, JavaScript, or the source-backed docs harvesters.
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Versioning": {
+      "Enabled": true,
+      "CatalogPath": "config/appsurfacedocs/versions.json",
+      "TrustedReleaseRootPath": "/srv/appsurface-docs/releases",
+      "MaxRewrittenFileSizeBytes": 2097152
+    }
+  }
+}
+```
+
+Production hosts can set the same value with `AppSurfaceDocs__Versioning__MaxRewrittenFileSizeBytes`.
 
 ### JavaScript public API harvesting
 
@@ -1336,7 +1373,7 @@ Browser-contract doclets should carry enough fields for readers to use them with
  */
 ```
 
-Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`).
+Unsupported public classes, CommonJS export inference, malformed public doclets, incomplete event contracts, oversized files, parse failures, missing exact includes, configured reparse-point includes, and duplicate normalized anchors emit `DocHarvestDiagnostic` entries. Hosts should branch on `DocHarvestDiagnosticCodes.JavaScript*` constants rather than parsing log text. Unsupported shapes are skipped instead of rendered partially. The strict event diagnostic code is `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`). The configured-link diagnostic is `DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped` (`appsurfacedocs.javascript.reparse_point_skipped`); its problem, cause, and fix are redacted to repository-relative include paths and do not reveal the symlink target.
 
 Use the CLI health verifier in CI when degraded docs health should block release output:
 
@@ -1358,6 +1395,7 @@ Pitfalls:
 - Do not put a broad `GroupNameRules` entry before a narrower package rule unless you want the broad name to win.
 - Do not rely on fallback file names as stable product names for packages. Prefer `@namespace`, `@module`, or a configured group rule for public API families.
 - Do not document minified, generated, `node_modules`, `bin`, `obj`, or test assets. The default JavaScript and shared path policy excludes minified, build-output, and test paths; add explicit excludes for host-specific generated source.
+- Do not point JavaScript includes at symlinks, junctions, or other reparse points, even when the target stays inside the repository. Built-in JavaScript harvesting treats links as a trust-boundary crossing and skips them before reading. Replace the link with a real source file, include the real non-link path, disable JavaScript harvesting, or publish that source through a custom harvester.
 - When documenting package browser contracts, prefer a small docs-only contract manifest such as `Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js` over generated runtime outputs.
 - Do not attach one public doclet to `const first = ..., second = ...`; split public JavaScript API constants or functions into one declaration statement per doclet.
 - Do not rely on automatic event inference from `dispatchEvent(new CustomEvent(...))`. V1 documents explicit public doclets only.
@@ -1378,6 +1416,7 @@ The version catalog is the release-level source of truth for version routing and
       "label": "1.2.3 (Current)",
       "summary": "Recommended release for new evaluations and adoption.",
       "exactTreePath": "./releases/1.2.3",
+      "releaseManifestSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       "supportState": "Current",
       "visibility": "Public",
       "advisoryState": "None"
@@ -1409,6 +1448,11 @@ The version catalog is the release-level source of truth for version routing and
   - Must be relative to `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`. When that option is unset, the trusted release root defaults to the directory containing the catalog file.
   - Values such as `./releases/1.2.3` are valid after normalization. Rooted paths and paths containing `..` are unavailable and are never mounted.
   - AppSurface Docs can mount that same artifact at `RouteRootPath` for the recommended alias and at `{RouteRootPath}/v/{version}` for the exact release surface.
+- `versions[].releaseManifestSha256`
+  - Optional SHA-256 digest of `.appsurface-docs-release-manifest.json` for this exact tree.
+  - When present, AppSurface Docs verifies the manifest digest, manifest schema, listed file lengths, listed file digests, and handler-servable file coverage before mounting the release.
+  - When absent, a shape-valid legacy tree can still mount ordinary docs content, but archive SVG is denied because the archive is not catalog-verified.
+  - A manifest inside an archive is not trusted by itself; the catalog-pinned digest is the trust anchor.
 - `versions[].supportState`
   - Archive posture badge. Supported values are `Current`, `Maintained`, `Deprecated`, and `Archived`.
 - `versions[].visibility`
@@ -1423,7 +1467,14 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `.appsurface-docs-route-manifest.json` at the tree root for new exports
   - The hidden manifest freezes the docs-root-relative canonical route and alias graph that existed when the release was exported.
   - It stores route identity only. It does not store `PublicOrigin`, PathBase, `RouteRootPath`, exact-version mount roots, or absolute URLs.
-  - Missing manifests are supported for legacy archives; malformed manifests disable archive alias recovery for that release without disabling normal file serving.
+  - Missing manifests are supported for legacy archives; malformed legacy manifests disable archive alias recovery for that release without disabling normal file serving.
+  - Verified archives parse this manifest from bytes covered by `.appsurface-docs-release-manifest.json`; malformed pinned route manifests keep the release unavailable because redirects are behavior-affecting archive content.
+- `.appsurface-docs-release-manifest.json` at the tree root for new exports
+  - The hidden release manifest lists the final exported files, byte lengths, content types when known, SHA-256 algorithm names, and lowercase SHA-256 digests.
+  - The manifest is deterministic and is written after final export materialization, so rewritten HTML, redirect artifacts, binary assets, and `.appsurface-docs-route-manifest.json` are covered.
+  - Export refuses unsupported hidden paths such as `.nojekyll` or `.well-known/...` with `ASDOCSARCHIVE005` instead of printing a catalog pin the runtime cannot verify.
+  - The manifest excludes itself. Its own SHA-256 digest is printed by export and should be copied into `versions[].releaseManifestSha256`.
+  - The release manifest proves local archive integrity only when the trusted catalog pins its digest. It is not a signature or build provenance attestation.
 - `index.html` at the tree root
 - `search.html` at the tree root
   - The shell should contain useful server-rendered anchors before JavaScript runs: starter query URLs and browse recovery links for the strongest available docs entry points.
@@ -1431,13 +1482,20 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
   - The payload must remain valid JSON with a top-level `documents` array so version-local search can load safely.
   - Every `documents[]` entry must include non-empty string `path` and `title` properties.
   - Missing or blank `path`/`title` values cause AppSurface Docs to reject the published release tree during startup validation.
+  - The payload must stay under `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`; oversized payloads are rejected during catalog validation before JSON parsing, so the release is marked unavailable before readers hit broken search.
 - `search.css` at the tree root. The bundled search stylesheet carries search-local fallbacks for the shared style tokens so exact release search controls remain styled even when a historical/static export does not include `site.gen.css`.
 - `search-client.js` at the tree root
 - `outline-client.js` at the tree root for outline-aware exports whose HTML references the page-local outline runtime
 - `minisearch.min.js` at the tree root
 - any section, detail, partial, and asset routes that belong to the exported docs surface for that release
 
-AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. The mount contract has two roots: `MountRootPath` controls normal serving, links, assets, search config, search-index payloads, and redirects; `CanonicalRootPath` controls only `<link rel="canonical">` metadata. Exact mounts self-canonicalize. Recommended alias mounts use the route-family root as `MountRootPath` and the matching exact-version root as `CanonicalRootPath`, so `/docs` remains friendly while crawlers see `/docs/v/{version}` as the durable duplicate URL.
+AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. Exported `.html` files and the root `search-index.json` must stay under the published tree rewrite limit in `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`. Oversized rewritten artifacts fail closed instead of streaming unrewritten content; other static assets continue to stream normally. The mount contract has two roots: `MountRootPath` controls normal serving, links, assets, search config, search-index payloads, and redirects; `CanonicalRootPath` controls only `<link rel="canonical">` metadata. Exact mounts self-canonicalize. Recommended alias mounts use the route-family root as `MountRootPath` and the matching exact-version root as `CanonicalRootPath`, so `/docs` remains friendly while crawlers see `/docs/v/{version}` as the durable duplicate URL.
+
+### Published tree rewrite limit
+
+`AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` is a public resource guard for published release trees. The default is `2097152` bytes (2 MiB), chosen conservatively because this repository does not check in a representative exported docs corpus outside build outputs. Hosts with larger generated docs can raise the value up to `33554432` bytes (32 MiB), but raising it increases per-request memory exposure for public rewritten HTML and search-index requests.
+
+Use the limit for exported `.html` pages and the root `search-index.json` only. It is not a general docs file-size policy, it does not cap source harvesting, and it does not block images, fonts, CSS, JavaScript, or other streamed assets. When AppSurface Docs rejects an oversized rewritten artifact, diagnostics include the artifact type, observed size, configured limit, `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`, the failure outcome, and this section name. Remediate by shrinking or re-exporting the artifact, or by setting a larger explicit limit within the supported range.
 
 When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
 
@@ -1451,8 +1509,13 @@ When the hidden frozen route manifest is present, mounted archives also use it b
 - Version validation is best-effort and release-local.
 - A missing or malformed `exactTreePath` marks only that release unavailable.
 - A missing, invalid, or unsafe `TrustedReleaseRootPath` is catalog-level configuration failure. The archive shows a sanitized availability message, logs retain operator details, and no published exact tree is mounted.
+- A public version with a valid `releaseManifestSha256` pin mounts only after archive verification succeeds.
+- A public version with a `releaseManifestSha256` pin whose manifest is missing, mismatched, malformed, incomplete, or inconsistent is unavailable and does not mount.
+- A public version without `releaseManifestSha256` is treated as a legacy unverified archive: normal docs HTML, search, image, font, and runtime assets continue when the tree shape is valid, but archive SVG is denied with `ASDOCSARCHIVE010`.
 - Healthy published versions and the live preview surface continue to load.
 - If the configured `recommendedVersion` is hidden, missing, or unavailable, AppSurface Docs does not mount it at the route root; that entry route falls back to the archive-style recovery surface with a link to the live preview.
+
+Archive verification diagnostics use stable `ASDOCSARCHIVE###` codes in structured logs. Common branches include `ASDOCSARCHIVE001` for a missing manifest, `ASDOCSARCHIVE002` for a catalog digest mismatch, `ASDOCSARCHIVE003` for unsupported schema or invalid payload, `ASDOCSARCHIVE004` for duplicate manifest paths, `ASDOCSARCHIVE005` for unsafe paths, `ASDOCSARCHIVE006` for missing listed files, `ASDOCSARCHIVE007` for length mismatch, `ASDOCSARCHIVE008` for digest mismatch, `ASDOCSARCHIVE009` for handler-servable files not listed in the manifest, and `ASDOCSARCHIVE010` for denied active SVG. Public archive messages stay sanitized and do not expose absolute filesystem paths.
 
 ### Migrating absolute exactTreePath values
 
@@ -1517,7 +1580,11 @@ After:
 - Do not expect the recommended alias to rewrite ordinary links to the exact-version route. Only canonical metadata moves from the alias root to the exact root.
 - Do not assume `AppSurfaceDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
+- Do not treat `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` as a cache or total CPU limit. It bounds rewritten input size for published `.html` and root `search-index.json`; under-limit rewritten files can still require request-time parsing and rewriting.
+- Do not raise `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` casually. Larger limits allow larger public request-time reads; prefer shrinking or re-exporting unusually large HTML or search-index artifacts when practical.
 - Do not hand-edit `.appsurface-docs-route-manifest.json` to add aliases. New exports validate duplicate aliases, aliases that collide with canonical routes, and aliases that equal their own canonical route. Runtime ignores ambiguous aliases from hand-edited or legacy manifests and keeps serving normal files.
+- Do not hand-edit `.appsurface-docs-release-manifest.json` after export. Any byte change requires copying the new manifest digest into `releaseManifestSha256`, and file changes require a fresh export.
+- Do not describe catalog-pinned release manifests as signed provenance. A compromised catalog can pin compromised archive bytes; Sigstore, GitHub artifact attestations, and SLSA-style provenance are future trust layers.
 
 `AppSurfaceDocs:CacheExpirationMinutes` is interpreted as minutes. Use shorter values for source-backed development hosts where authors need edits to appear quickly; use longer values for production hosts when harvesters are expensive or the docs corpus changes only during deploys.
 

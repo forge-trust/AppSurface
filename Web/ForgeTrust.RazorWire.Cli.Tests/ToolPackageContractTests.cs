@@ -127,10 +127,12 @@ public sealed class ToolPackageContractTests
             "export",
             "--project",
             sampleProjectPath,
+            "--mode",
+            "hybrid",
             "--output",
             exportDirectory.Path);
 
-        exportResult.AssertSucceeded("Expected the installed RazorWire tool to export the MVC sample.");
+        exportResult.AssertSucceeded("Expected the installed RazorWire tool to export the MVC sample in hybrid mode.");
         var indexPath = Path.Combine(exportDirectory.Path, "index.html");
         Assert.True(File.Exists(indexPath), $"Expected the export to create {indexPath}.");
         var indexHtml = await File.ReadAllTextAsync(indexPath);

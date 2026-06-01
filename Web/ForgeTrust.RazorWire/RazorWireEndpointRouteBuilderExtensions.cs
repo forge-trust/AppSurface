@@ -1,8 +1,10 @@
 using System.Threading.Channels;
 using ForgeTrust.RazorWire.Streams;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -29,12 +31,19 @@ public static class RazorWireEndpointRouteBuilderExtensions
     /// </summary>
     /// <param name="endpoints">The endpoint route builder to configure.</param>
     /// <remarks>
-    /// The endpoint enforces channel subscription authorization, streams hub messages as SSE (each line emitted as a `data:` event), sends a 20-second heartbeat comment when idle, and unsubscribes on client disconnect.
+    /// The endpoint maps both RazorWire live transport surfaces: a stream endpoint at
+    /// <see cref="RazorWireStreamOptions.BasePath"/> plus a form anti-forgery token endpoint at
+    /// <see cref="RazorWireFormAntiforgeryOptions.TokenEndpointPath"/>. The stream endpoint enforces channel subscription
+    /// authorization, streams hub messages as SSE (each line emitted as a <c>data:</c> event), sends a 20-second
+    /// heartbeat comment when idle, and unsubscribes on client disconnect.
     /// A <c>replay</c> query value of <c>1</c> or <c>true</c> maps to
     /// <see cref="RazorWireStreamSubscribeOptions.Replay"/> and asks the hub to deliver retained messages before live
     /// messages. Replay is disabled when the query is absent or has any other value. The helper that parses this input is
     /// intentionally narrow so live delivery remains the default and replay stays a one-time historical catch-up before
-    /// ongoing stream delivery.
+    /// ongoing stream delivery. The anti-forgery endpoint returns JSON for the runtime's lazy form-token refresh flow,
+    /// sets no-store cache headers, and applies the configured hybrid CORS policy when one is set. Call
+    /// <see cref="RazorWireServiceCollectionExtensions.AddRazorWire"/> before mapping this endpoint so the hub,
+    /// authorizer, options, and ASP.NET Core anti-forgery services are registered.
     /// </remarks>
     /// <returns>The original <see cref="IEndpointRouteBuilder"/> instance.</returns>
     public static IEndpointRouteBuilder MapRazorWire(this IEndpointRouteBuilder endpoints)
@@ -43,7 +52,7 @@ public static class RazorWireEndpointRouteBuilderExtensions
         var admission = endpoints.ServiceProvider.GetService<RazorWireStreamAdmissionController>()
             ?? new RazorWireStreamAdmissionController(options);
 
-        endpoints.MapGet(
+        var streamEndpoint = endpoints.MapGet(
                 $"{options.Streams.BasePath}/{{channel}}",
                 async context =>
                 {
@@ -167,6 +176,33 @@ public static class RazorWireEndpointRouteBuilderExtensions
                     }
                 })
             .ExcludeFromDescription();
+
+        if (!string.IsNullOrWhiteSpace(options.Hybrid.CorsPolicyName))
+        {
+            streamEndpoint.RequireCors(options.Hybrid.CorsPolicyName);
+        }
+
+        var tokenEndpoint = endpoints.MapGet(
+                options.Forms.Antiforgery.TokenEndpointPath,
+                (HttpContext context, [FromServices] IAntiforgery antiforgery) =>
+                {
+                    var tokens = antiforgery.GetAndStoreTokens(context);
+                    context.Response.Headers.CacheControl = "no-store";
+                    context.Response.Headers.Pragma = "no-cache";
+
+                    return Results.Json(new
+                    {
+                        formFieldName = tokens.FormFieldName ?? "__RequestVerificationToken",
+                        requestToken = tokens.RequestToken ?? string.Empty,
+                        headerName = tokens.HeaderName ?? "RequestVerificationToken"
+                    });
+                })
+            .ExcludeFromDescription();
+
+        if (!string.IsNullOrWhiteSpace(options.Hybrid.CorsPolicyName))
+        {
+            tokenEndpoint.RequireCors(options.Hybrid.CorsPolicyName);
+        }
 
         return endpoints;
     }

@@ -1,6 +1,7 @@
 using System.Text;
 using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -46,6 +47,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(2, (int)DocHarvesterHealthStatus.Failed);
         Assert.Equal(3, (int)DocHarvesterHealthStatus.TimedOut);
         Assert.Equal(4, (int)DocHarvesterHealthStatus.Canceled);
+        Assert.Equal(0, (int)AppSurfaceDocsReleaseArchiveVerificationState.Unavailable);
+        Assert.Equal(1, (int)AppSurfaceDocsReleaseArchiveVerificationState.AvailableUnverifiedLegacy);
+        Assert.Equal(2, (int)AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified);
         Assert.Equal(0, (int)DocHarvestDiagnosticSeverity.Information);
         Assert.Equal(1, (int)DocHarvestDiagnosticSeverity.Warning);
         Assert.Equal(2, (int)DocHarvestDiagnosticSeverity.Error);
@@ -68,6 +72,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.javascript.file_too_large", DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
         Assert.Equal("appsurfacedocs.javascript.parse_failed", DocHarvestDiagnosticCodes.JavaScriptParseFailed);
         Assert.Equal("appsurfacedocs.javascript.missing_include", DocHarvestDiagnosticCodes.JavaScriptMissingInclude);
+        Assert.Equal("appsurfacedocs.javascript.reparse_point_skipped", DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped);
         Assert.Equal("appsurfacedocs.javascript.unsupported_public_shape", DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
         Assert.Equal("appsurfacedocs.javascript.malformed_public_doclet", DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
         Assert.Equal("appsurfacedocs.javascript.incomplete_public_doclet", DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet);
@@ -406,6 +411,17 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(5, options.CacheExpirationMinutes);
         Assert.Equal(1d / 60d, AppSurfaceDocsOptions.MinCacheExpirationMinutes);
         Assert.Equal((int.MaxValue - 1) / 60d, AppSurfaceDocsOptions.MaxCacheExpirationMinutes);
+    }
+
+    [Fact]
+    public void AppSurfaceDocsOptions_ShouldDefaultVersioningRewriteLimitToTwoMiB()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.Equal(2_097_152, options.Versioning.MaxRewrittenFileSizeBytes);
+        Assert.Equal(2_097_152, AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes);
+        Assert.Equal(1, AppSurfaceDocsVersioningOptions.MinMaxRewrittenFileSizeBytes);
+        Assert.Equal(33_554_432, AppSurfaceDocsVersioningOptions.MaxMaxRewrittenFileSizeBytes);
     }
 
     [Fact]
@@ -1123,6 +1139,27 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Equal("/docs", options.Routing.RouteRootPath);
         Assert.Equal("/docs/next", options.Routing.DocsRootPath);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindConfiguredVersioningRewriteLimit()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes"] = "4194304"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal(4_194_304, options.Versioning.MaxRewrittenFileSizeBytes);
     }
 
     [Fact]
@@ -2689,6 +2726,49 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(
             result.Failures,
             failure => failure.Contains("requires AppSurfaceDocs:Versioning:CatalogPath", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(33_554_433)]
+    public void Validator_ShouldRejectInvalidVersioningRewriteLimit(long maxRewrittenFileSizeBytes)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Versioning = new AppSurfaceDocsVersioningOptions
+            {
+                MaxRewrittenFileSizeBytes = maxRewrittenFileSizeBytes
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes", StringComparison.OrdinalIgnoreCase)
+                       && failure.Contains("33554432", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(33_554_432)]
+    public void Validator_ShouldAllowBoundaryVersioningRewriteLimits(long maxRewrittenFileSizeBytes)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Versioning = new AppSurfaceDocsVersioningOptions
+            {
+                MaxRewrittenFileSizeBytes = maxRewrittenFileSizeBytes
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(result.Failed);
     }
 
     [Fact]

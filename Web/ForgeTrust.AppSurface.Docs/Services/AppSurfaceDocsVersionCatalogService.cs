@@ -16,6 +16,9 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </remarks>
 public sealed class AppSurfaceDocsVersionCatalogService
 {
+    private const string MaxRewrittenFileSizeKey = "AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes";
+    private const string RewriteLimitDocsAnchor = "AppSurface Docs README section 'Published tree rewrite limit'";
+
     private readonly record struct AvailabilityFailure(string PublicMessage, string InternalDetail);
 
     private static readonly string[] RequiredExactTreeFiles =
@@ -92,7 +95,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
         {
             catalogPath = ResolveAbsolutePath(configuredCatalogPath);
         }
-        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or PathTooLongException or NotSupportedException)
         {
             var trimmedCatalogPath = configuredCatalogPath.Trim();
             _logger.LogWarning(
@@ -289,6 +292,12 @@ public sealed class AppSurfaceDocsVersionCatalogService
             return false;
         }
 
+        if (!TryReadOptionalTrimmedString(versionEntry, "releaseManifestSha256", out var releaseManifestSha256, out var releaseManifestSha256Issue))
+        {
+            LogInvalidVersionEntry(versionIdentifier, catalogPath, releaseManifestSha256Issue!);
+            return false;
+        }
+
         if (!TryReadEnum(versionEntry, "supportState", AppSurfaceDocsVersionSupportState.Current, out var supportState, out var supportStateIssue))
         {
             LogInvalidVersionEntry(versionIdentifier, catalogPath, supportStateIssue!);
@@ -313,6 +322,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
             Label = label,
             Summary = summary,
             ExactTreePath = exactTreePath,
+            ReleaseManifestSha256 = releaseManifestSha256,
             SupportState = supportState,
             Visibility = visibility,
             AdvisoryState = advisoryState
@@ -431,6 +441,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
         var isPublic = version.Visibility == AppSurfaceDocsVersionVisibility.Public;
         string? exactTreePath;
         AvailabilityFailure? availabilityFailure;
+        AppSurfaceDocsReleaseArchiveVerificationState archiveVerificationState = AppSurfaceDocsReleaseArchiveVerificationState.Unavailable;
+        AppSurfaceDocsVerifiedReleaseArchive? verifiedReleaseArchive = null;
+        var releaseManifestSha256 = string.IsNullOrWhiteSpace(version.ReleaseManifestSha256)
+            ? null
+            : version.ReleaseManifestSha256.Trim();
 
         if (!AppSurfaceDocsTrustedReleasePathGuard.TryResolveCatalogTreePath(
                 trustedReleaseRootPath,
@@ -443,7 +458,42 @@ public sealed class AppSurfaceDocsVersionCatalogService
         }
         else
         {
-            availabilityFailure = ValidateExactTree(trustedReleaseRootPath, exactTreePath!);
+            availabilityFailure = ValidateExactTree(
+                trustedReleaseRootPath,
+                exactTreePath!,
+                _options.Versioning.MaxRewrittenFileSizeBytes);
+            if (availabilityFailure is null)
+            {
+                if (string.IsNullOrWhiteSpace(releaseManifestSha256))
+                {
+                    archiveVerificationState = AppSurfaceDocsReleaseArchiveVerificationState.AvailableUnverifiedLegacy;
+                }
+                else
+                {
+                    var verificationStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                    if (AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+                            exactTreePath!,
+                            releaseManifestSha256,
+                            out verifiedReleaseArchive,
+                            out var archiveFailure))
+                    {
+                        verificationStopwatch.Stop();
+                        archiveVerificationState = AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified;
+                        _logger.LogInformation(
+                            "AppSurface Docs version {Version} release archive verified {VerifiedFileCount} file(s) against catalog-pinned releaseManifestSha256 in {ElapsedMilliseconds}ms.",
+                            normalizedVersion,
+                            verifiedReleaseArchive!.FileCount,
+                            verificationStopwatch.ElapsedMilliseconds);
+                    }
+                    else
+                    {
+                        verificationStopwatch.Stop();
+                        availabilityFailure = new AvailabilityFailure(
+                            PublicMessage: $"Published release archive verification failed ({archiveFailure!.Code}).",
+                            InternalDetail: $"Release archive verification failed for ExactTreePath '{exactTreePath}' in {verificationStopwatch.ElapsedMilliseconds}ms: {archiveFailure.Code} {archiveFailure.Detail}");
+                    }
+                }
+            }
         }
 
         if (availabilityFailure is not null && isPublic)
@@ -465,7 +515,10 @@ public sealed class AppSurfaceDocsVersionCatalogService
             Visibility: version.Visibility,
             AdvisoryState: version.AdvisoryState,
             IsAvailable: availabilityFailure is null,
-            AvailabilityIssue: availabilityFailure?.PublicMessage);
+            AvailabilityIssue: availabilityFailure?.PublicMessage,
+            ReleaseManifestSha256: releaseManifestSha256,
+            ArchiveVerificationState: archiveVerificationState,
+            VerifiedReleaseArchive: verifiedReleaseArchive);
     }
 
     private AppSurfaceDocsResolvedVersion? ResolveRecommendedVersion(
@@ -517,7 +570,10 @@ public sealed class AppSurfaceDocsVersionCatalogService
         return AppSurfaceDocsTrustedReleasePathGuard.ResolveContentRootRelativePath(_environment.ContentRootPath, path);
     }
 
-    private static AvailabilityFailure? ValidateExactTree(string trustedReleaseRootPath, string exactTreePath)
+    private static AvailabilityFailure? ValidateExactTree(
+        string trustedReleaseRootPath,
+        string exactTreePath,
+        long maxRewrittenFileSizeBytes)
     {
         if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
                 exactTreePath,
@@ -558,7 +614,9 @@ public sealed class AppSurfaceDocsVersionCatalogService
             }
         }
 
-        var searchIndexValidationIssue = ValidateSearchIndexPayload(Path.Join(exactTreePath, "search-index.json"));
+        var searchIndexValidationIssue = ValidateSearchIndexPayload(
+            Path.Join(exactTreePath, "search-index.json"),
+            maxRewrittenFileSizeBytes);
         if (searchIndexValidationIssue is not null)
         {
             return searchIndexValidationIssue;
@@ -567,10 +625,18 @@ public sealed class AppSurfaceDocsVersionCatalogService
         return null;
     }
 
-    private static AvailabilityFailure? ValidateSearchIndexPayload(string searchIndexPath)
+    private static AvailabilityFailure? ValidateSearchIndexPayload(string searchIndexPath, long maxRewrittenFileSizeBytes)
     {
         try
         {
+            var searchIndexInfo = new FileInfo(searchIndexPath);
+            if (searchIndexInfo.Length > maxRewrittenFileSizeBytes)
+            {
+                return new AvailabilityFailure(
+                    PublicMessage: $"Published release tree has a search-index.json payload larger than {MaxRewrittenFileSizeKey}.",
+                    InternalDetail: $"ExactTreePath '{Path.GetDirectoryName(searchIndexPath)}' has a search-index.json payload with observed size {searchIndexInfo.Length} bytes, which exceeds the configured limit of {maxRewrittenFileSizeBytes} bytes from {MaxRewrittenFileSizeKey}. The release was skipped; shrink or re-export the artifact, or raise {MaxRewrittenFileSizeKey} within the supported range. See {RewriteLimitDocsAnchor}.");
+            }
+
             using var stream = File.OpenRead(searchIndexPath);
             using var document = JsonDocument.Parse(stream);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
@@ -759,6 +825,9 @@ public sealed record AppSurfaceDocsResolvedVersionCatalog(
 /// The sanitized public-facing availability explanation when the tree is unavailable. Internal logs retain filesystem
 /// paths and exception details, but this message is safe to surface in archive UI and reader-facing diagnostics.
 /// </param>
+/// <param name="ReleaseManifestSha256">Catalog-pinned release manifest digest when configured.</param>
+/// <param name="ArchiveVerificationState">Archive integrity state resolved for the exact-version tree.</param>
+/// <param name="VerifiedReleaseArchive">Verified archive file metadata used by runtime mounts, when available.</param>
 public sealed record AppSurfaceDocsResolvedVersion(
     string Version,
     string Label,
@@ -769,4 +838,7 @@ public sealed record AppSurfaceDocsResolvedVersion(
     AppSurfaceDocsVersionVisibility Visibility,
     AppSurfaceDocsVersionAdvisoryState AdvisoryState,
     bool IsAvailable,
-    string? AvailabilityIssue);
+    string? AvailabilityIssue,
+    string? ReleaseManifestSha256 = null,
+    AppSurfaceDocsReleaseArchiveVerificationState ArchiveVerificationState = AppSurfaceDocsReleaseArchiveVerificationState.AvailableUnverifiedLegacy,
+    AppSurfaceDocsVerifiedReleaseArchive? VerifiedReleaseArchive = null);
