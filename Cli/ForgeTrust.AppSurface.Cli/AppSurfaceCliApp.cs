@@ -72,6 +72,9 @@ internal static class AppSurfaceCliApp
         services.AddSingleton<IAppSurfaceDocsHealthVerifyRunner, AppSurfaceDocsInProcessHealthVerifyRunner>();
         services.AddSingleton<IRazorWireStaticExporter, RazorWireExportEngineAdapter>();
         services.AddSingleton<ExportEngine>();
+        services.AddSingleton<ExportSourceRequestFactory>();
+        services.AddSingleton<ExportSourceResolver>();
+        services.AddSingleton<ITargetAppProcessFactory, TargetAppProcessFactory>();
         services.AddHttpClient("ExportEngine", client => { client.Timeout = TimeSpan.FromSeconds(60); });
         services.AddHttpClient<IAppSurfaceDocsHealthHttpClient, AppSurfaceDocsHealthHttpClient>(
             client => { client.Timeout = TimeSpan.FromSeconds(60); });

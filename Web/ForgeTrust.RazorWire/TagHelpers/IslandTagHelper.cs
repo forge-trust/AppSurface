@@ -67,6 +67,9 @@ public class IslandTagHelper : TagHelper
     /// </summary>
     /// <remarks>
     /// Validates that <see cref="Id"/> is not null, empty, or whitespace and sets attributes such as id, src, loading, data-turbo-permanent, data-rw-swr, style (view-transition-name), data-rw-export, and client-related data attributes when the corresponding properties are provided.
+    /// The rendered frame always includes <c>data-rw-island="true"</c>. The exporter treats that marker as the
+    /// ownership signal for RazorWire-managed island frame URLs in hybrid output, so callers should not remove or
+    /// override it when the frame should keep RazorWire island behavior.
     /// </remarks>
     /// <exception cref="ArgumentException">Thrown when <see cref="Id"/> is null, empty, or consists only of white-space characters.</exception>
     public override void Process(TagHelperContext context, TagHelperOutput output)
@@ -80,6 +83,7 @@ public class IslandTagHelper : TagHelper
         }
 
         output.Attributes.SetAttribute("id", Id);
+        output.Attributes.SetAttribute("data-rw-island", "true");
 
         if (!string.IsNullOrEmpty(Src))
         {

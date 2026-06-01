@@ -13,11 +13,13 @@ using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.Standalone;
 using ForgeTrust.AppSurface.Web;
+using ForgeTrust.RazorWire;
 using ForgeTrust.RazorWire.Cli;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using CliCommand = CliWrap.Cli;
@@ -117,6 +119,32 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
     public ExportMode Mode { get; set; } = ExportMode.Cdn;
 
     /// <summary>
+    /// Gets the live origin used for RazorWire-managed live references in hybrid exports.
+    /// </summary>
+    /// <remarks>
+    /// This option is only needed for split-origin hybrid output. The value must be an absolute <c>http</c> or
+    /// <c>https</c> origin with no path, query string, fragment, or userinfo. When configured, RazorWire-owned live
+    /// surfaces such as streams, islands, and lazy anti-forgery form posts are rewritten to this origin while docs
+    /// navigation and canonical routes remain on the static docs host. Leave it unset when the published docs and live
+    /// app share an origin.
+    /// </remarks>
+    [CommandOption("live-origin", Description = "Live origin for RazorWire-managed hybrid interactions, such as https://api.example.com.")]
+    public string? LiveOrigin { get; set; }
+
+    /// <summary>
+    /// Gets credential behavior for RazorWire-managed live references.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see cref="RazorWireHybridCredentialsMode.Auto"/>, which includes credentials when
+    /// <see cref="LiveOrigin"/> is set and omits them otherwise. Choose
+    /// <see cref="RazorWireHybridCredentialsMode.Include"/> for cookie-backed live docs interactions across origins.
+    /// Choose <see cref="RazorWireHybridCredentialsMode.Omit"/> only for public live endpoints that do not need cookies
+    /// or lazy anti-forgery token refresh.
+    /// </remarks>
+    [CommandOption("hybrid-credentials", Description = "Hybrid credentials mode: auto (default), include, or omit.")]
+    public RazorWireHybridCredentialsMode HybridCredentials { get; set; } = RazorWireHybridCredentialsMode.Auto;
+
+    /// <summary>
     /// Gets the redirect alias materialization strategy used by the underlying RazorWire exporter.
     /// </summary>
     /// <remarks>
@@ -196,6 +224,11 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
             throw new CommandException("The --redirects netlify strategy requires --mode cdn because Netlify rules point at publish-root static routes.");
         }
 
+        if (!ExportHybridOptions.TryNormalizeOrigin(LiveOrigin, out var normalizedLiveOrigin))
+        {
+            throw new CommandException("The --live-origin value must be an absolute http or https origin, such as 'https://api.example.com', with no path, query string, fragment, or userinfo.");
+        }
+
         var outputPath = Path.GetFullPath(OutputPath);
         if (File.Exists(outputPath))
         {
@@ -227,7 +260,12 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
             initialSeedRoutes,
             Mode,
             RedirectStrategy,
-            DefaultExportUrl);
+            DefaultExportUrl,
+            new ExportHybridOptions
+            {
+                LiveOrigin = normalizedLiveOrigin,
+                CredentialsMode = HybridCredentials
+            });
     }
 
     /// <summary>
@@ -248,6 +286,124 @@ internal sealed partial class DocsExportCommand : AppSurfaceDocsStrictRepository
         return new[] { "/", docsUrlBuilder.CurrentDocsRootPath }
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+    }
+}
+
+/// <summary>
+/// Verifies one catalog-pinned AppSurface Docs release archive without starting a web host.
+/// </summary>
+/// <remarks>
+/// This command exercises the same catalog and archive verification path used at runtime so operators can diagnose
+/// manifest, digest, and file drift locally before deploying a version catalog change.
+/// </remarks>
+[Command("docs verify-archive", Description = "Verify one catalog-pinned AppSurface Docs release archive.")]
+internal sealed partial class DocsVerifyArchiveCommand : ICommand
+{
+    private readonly ILogger<DocsVerifyArchiveCommand> _logger;
+    private readonly ILoggerFactory _loggerFactory;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocsVerifyArchiveCommand"/> class.
+    /// </summary>
+    /// <param name="logger">Logger used for verification diagnostics.</param>
+    /// <param name="loggerFactory">Factory used to create runtime catalog verification loggers.</param>
+    public DocsVerifyArchiveCommand(ILogger<DocsVerifyArchiveCommand> logger, ILoggerFactory loggerFactory)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+    }
+
+    /// <summary>
+    /// Gets the path to the AppSurface Docs version catalog JSON file.
+    /// </summary>
+    [CommandOption("catalog", Description = "Path to the AppSurface Docs version catalog JSON file.")]
+    public string? CatalogPath { get; set; }
+
+    /// <summary>
+    /// Gets the version identifier to verify from the catalog.
+    /// </summary>
+    [CommandOption("version", Description = "Catalog version identifier to verify.")]
+    public string? Version { get; set; }
+
+    /// <summary>
+    /// Gets the trusted release root used to resolve catalog <c>exactTreePath</c> entries.
+    /// </summary>
+    [CommandOption("trusted-release-root", Description = "Trusted release root for catalog exactTreePath entries.")]
+    public string? TrustedReleaseRootPath { get; set; }
+
+    /// <summary>
+    /// Executes the command through the CliFx console integration.
+    /// </summary>
+    /// <param name="console">Console abstraction used to register cancellation handling.</param>
+    /// <returns>A value task that completes after archive verification.</returns>
+    [ExcludeFromCodeCoverage]
+    public ValueTask ExecuteAsync(IConsole console)
+    {
+        _ = console.RegisterCancellationHandler();
+        Execute();
+        return ValueTask.CompletedTask;
+    }
+
+    internal void Execute()
+    {
+        if (string.IsNullOrWhiteSpace(CatalogPath))
+        {
+            throw new CommandException("The --catalog option is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Version))
+        {
+            throw new CommandException("The --version option is required.");
+        }
+
+        var catalogPath = Path.GetFullPath(CatalogPath);
+        var service = new AppSurfaceDocsVersionCatalogService(
+            new AppSurfaceDocsOptions
+            {
+                Versioning = new AppSurfaceDocsVersioningOptions
+                {
+                    Enabled = true,
+                    CatalogPath = catalogPath,
+                    TrustedReleaseRootPath = TrustedReleaseRootPath
+                }
+            },
+            new ArchiveVerifyWebHostEnvironment(Path.GetDirectoryName(catalogPath) ?? Directory.GetCurrentDirectory()),
+            _loggerFactory.CreateLogger<AppSurfaceDocsVersionCatalogService>());
+        var catalog = service.GetCatalog();
+        var version = catalog.Versions.FirstOrDefault(
+            entry => string.Equals(entry.Version, Version.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        if (version is null)
+        {
+            throw new CommandException($"AppSurface Docs archive verification could not find version '{Version.Trim()}' in {catalogPath}.");
+        }
+
+        if (version.ArchiveVerificationState != AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified)
+        {
+            throw new CommandException(
+                $"AppSurface Docs archive verification failed for {version.Version}: {version.ArchiveVerificationState}. {version.AvailabilityIssue ?? "No releaseManifestSha256 catalog pin is configured."}");
+        }
+
+        _logger.LogInformation(
+            "AppSurface Docs archive verified for {Version}: {ManifestSha256}.",
+            version.Version,
+            version.ReleaseManifestSha256);
+    }
+
+    private sealed class ArchiveVerifyWebHostEnvironment : IWebHostEnvironment
+    {
+        public ArchiveVerifyWebHostEnvironment(string contentRootPath)
+        {
+            ContentRootPath = contentRootPath;
+            WebRootPath = contentRootPath;
+        }
+
+        public string EnvironmentName { get; set; } = Environments.Production;
+        public string ApplicationName { get; set; } = "ForgeTrust.AppSurface.Cli";
+        public string WebRootPath { get; set; }
+        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
+        public string ContentRootPath { get; set; }
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }
 
@@ -809,6 +965,7 @@ internal readonly record struct AppSurfaceDocsHostArgs(
 /// affects only alias materialization after the loopback host is crawled from <paramref name="RequestedBaseUrl"/>.
 /// </param>
 /// <param name="RequestedBaseUrl">Loopback URL passed to Kestrel. The default uses port 0 so the OS chooses a free port.</param>
+/// <param name="HybridOptions">Optional split-origin hybrid settings forwarded into the RazorWire export context.</param>
 internal readonly record struct AppSurfaceDocsExportArgs(
     AppSurfaceDocsHostArgs HostArgs,
     string OutputPath,
@@ -816,7 +973,8 @@ internal readonly record struct AppSurfaceDocsExportArgs(
     IReadOnlyList<string>? InitialSeedRoutes,
     ExportMode Mode,
     ExportRedirectStrategy RedirectStrategy,
-    string RequestedBaseUrl);
+    string RequestedBaseUrl,
+    ExportHybridOptions? HybridOptions = null);
 
 /// <summary>
 /// Describes a one-shot AppSurface Docs harvest-health verification request.
@@ -1760,7 +1918,8 @@ internal sealed class AppSurfaceDocsInProcessExportRunner : IAppSurfaceDocsExpor
                 args.InitialSeedRoutes,
                 baseUrl,
                 args.Mode,
-                args.RedirectStrategy);
+                args.RedirectStrategy,
+                args.HybridOptions);
 
             await _contextConfigurator.ConfigureAsync(host, context, cancellationToken);
 
@@ -2366,6 +2525,8 @@ internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsE
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(context);
+
+        context.EnableReleaseArchiveManifest();
 
         var routeManifest = await host.Services
             .GetRequiredService<DocAggregator>()

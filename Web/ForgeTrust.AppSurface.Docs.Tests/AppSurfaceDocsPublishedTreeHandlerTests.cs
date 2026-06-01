@@ -1,8 +1,13 @@
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.FileProviders.Physical;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Primitives;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -137,6 +142,110 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldDenySvg_ForLegacyUnverifiedArchives()
+    {
+        var tree = CreatePublishedTree("legacy-svg");
+        File.WriteAllText(TestPathUtils.PathUnder(tree, "logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/logo.svg");
+
+        var handled = await handler.TryHandleAsync(request);
+
+        Assert.False(handled);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldServeSvg_ForVerifiedArchives()
+    {
+        var tree = CreatePublishedTree("verified-svg");
+        File.WriteAllText(
+            TestPathUtils.PathUnder(tree, "logo.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Logo</title></svg>");
+        var handler = CreateVerifiedHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/logo.svg");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal("image/svg+xml", request.Response.ContentType);
+        Assert.Contains("<title>Logo</title>", ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldDenySvg_WhenVerifiedArchiveChangesAfterStartup()
+    {
+        var tree = CreatePublishedTree("tampered-svg");
+        var svgPath = TestPathUtils.PathUnder(tree, "logo.svg");
+        File.WriteAllText(svgPath, "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Original</title></svg>");
+        var handler = CreateVerifiedHandler(tree, "/docs/v/1.2.3");
+        File.WriteAllText(svgPath, "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Tampered</title></svg>");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/logo.svg");
+
+        var handled = await handler.TryHandleAsync(request);
+
+        Assert.False(handled);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldDenyVerifiedArchiveFilesMissingFromManifest()
+    {
+        var tree = CreatePublishedTree("verified-unlisted-file");
+        var provider = new PhysicalFileProvider(tree, ExclusionFilters.None);
+        _disposables.Add(provider);
+        var archive = new AppSurfaceDocsVerifiedReleaseArchive(
+            new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.OrdinalIgnoreCase),
+            AppSurfaceDocsFrozenRouteManifest.Empty);
+        var handler = CreateHandler(
+            [
+                new AppSurfaceDocsPublishedTreeMount(
+                    "/docs/v/1.2.3",
+                    provider,
+                    tree,
+                    new AppSurfaceDocsFrozenRouteManifestCache(AppSurfaceDocsFrozenRouteManifest.Empty, tree),
+                    AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+                    archive)
+            ]);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
+
+        var handled = await handler.TryHandleAsync(request);
+
+        Assert.False(handled);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldDenyVerifiedArchiveCaseMismatchedFiles()
+    {
+        var tree = CreatePublishedTree("verified-case-mismatched-file");
+        var caseVariantPath = TestPathUtils.PathUnder(tree, "INDEX.HTML");
+        File.WriteAllText(caseVariantPath, "<!DOCTYPE html><html><body>case variant</body></html>");
+        var provider = new PhysicalFileProvider(tree, ExclusionFilters.None);
+        _disposables.Add(provider);
+        var archive = new AppSurfaceDocsVerifiedReleaseArchive(
+            new Dictionary<string, AppSurfaceDocsReleaseArchiveFile>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["index.html"] = new AppSurfaceDocsReleaseArchiveFile(
+                    "index.html",
+                    new FileInfo(caseVariantPath).Length,
+                    "text/html",
+                    ComputeFileSha256(caseVariantPath))
+            },
+            AppSurfaceDocsFrozenRouteManifest.Empty);
+        var handler = CreateHandler(
+            [
+                new AppSurfaceDocsPublishedTreeMount(
+                    "/docs/v/1.2.3",
+                    provider,
+                    tree,
+                    new AppSurfaceDocsFrozenRouteManifestCache(AppSurfaceDocsFrozenRouteManifest.Empty, tree),
+                    AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+                    archive)
+            ]);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/INDEX.HTML");
+
+        var handled = await handler.TryHandleAsync(request);
+
+        Assert.False(handled);
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldRedirectFrozenManifestAliases_ToMountedCanonicalRoutes()
     {
         var tree = CreatePublishedTree("release-with-frozen-manifest");
@@ -168,6 +277,47 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
         Assert.True(await handler.TryHandleAsync(declaredAliasRequest));
         Assert.Equal("/docs/v/1.2.3/packages", declaredAliasRequest.Response.Headers.Location);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldUseVerifiedFrozenManifest_WhenRouteManifestChangesAfterStartup()
+    {
+        var tree = CreatePublishedTree("verified-route-manifest-tamper");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "packages/README.md",
+                  "canonicalRoutePath": "packages",
+                  "recoveryAliases": ["packages/README.md"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var handler = CreateVerifiedHandler(tree, "/docs/v/1.2.3");
+        WriteFrozenManifest(
+            tree,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "entries": [
+                {
+                  "sourcePath": "packages/README.md",
+                  "canonicalRoutePath": "tampered",
+                  "recoveryAliases": ["packages/README.md"],
+                  "declaredAliases": []
+                }
+              ]
+            }
+            """);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal("/docs/v/1.2.3/packages", request.Response.Headers.Location);
     }
 
     [Fact]
@@ -558,6 +708,137 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         Assert.Equal("application/json; charset=utf-8", headRequest.Response.ContentType);
         Assert.Equal(string.Empty, ReadBody(headRequest));
         Assert.NotNull(headRequest.Response.ContentLength);
+    }
+
+    [Theory]
+    [InlineData("oversized.html", "text/html")]
+    [InlineData("search-index.json", "application/json")]
+    public async Task TryHandleAsync_ShouldRejectOversizedRewrittenFilesBeforeOpeningStream(string relativeFilePath, string expectedContentTypePrefix)
+    {
+        var fileInfo = new TestFileInfo(
+            relativeFilePath,
+            length: 9,
+            streamFactory: () => throw new InvalidOperationException("Oversized rewritten files must not be opened."));
+        var provider = new TestFileProvider((relativeFilePath, fileInfo));
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, $"/docs/v/1.2.3/{relativeFilePath}");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(0, request.Response.ContentLength);
+        Assert.Null(request.Response.ContentType);
+        Assert.Equal(0, fileInfo.OpenCount);
+        Assert.DoesNotContain(expectedContentTypePrefix, request.Response.Headers.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRejectUnknownLengthRewrittenFilesBeforeOpeningStream()
+    {
+        var fileInfo = new TestFileInfo(
+            "unknown.html",
+            length: -1,
+            streamFactory: () => throw new InvalidOperationException("Unknown-length rewritten files must not be opened."));
+        var provider = new TestFileProvider(("unknown.html", fileInfo));
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/unknown.html");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(0, fileInfo.OpenCount);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRejectRewrittenFilesThatGrowPastLimitWhileReading()
+    {
+        var fileInfo = new TestFileInfo(
+            "race.html",
+            length: 8,
+            streamFactory: () => new MemoryStream(Encoding.UTF8.GetBytes("<html>123</html>")));
+        var provider = new TestFileProvider(("race.html", fileInfo));
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/race.html");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(1, fileInfo.OpenCount);
+        Assert.Equal(string.Empty, ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldAllowRewrittenFilesAtConfiguredLimit()
+    {
+        var html = "<p>1</p>";
+        var fileInfo = new TestFileInfo(
+            "at-limit.html",
+            length: Encoding.UTF8.GetByteCount(html),
+            streamFactory: () => new MemoryStream(Encoding.UTF8.GetBytes(html)));
+        var provider = new TestFileProvider(("at-limit.html", fileInfo));
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: Encoding.UTF8.GetByteCount(html));
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/at-limit.html");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
+        Assert.Equal("text/html", request.Response.ContentType);
+        Assert.Contains("<p>1</p>", ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldNotApplyRewriteLimitToStaticAssets()
+    {
+        var fileInfo = new TestFileInfo(
+            "search.css",
+            length: 64,
+            streamFactory: () => new MemoryStream(Encoding.UTF8.GetBytes("body { color: #fff; }")));
+        var provider = new TestFileProvider(("search.css", fileInfo));
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
+        Assert.Equal("text/css", request.Response.ContentType);
+        Assert.Contains("body { color: #fff; }", ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldLogOnlyFirstOversizedRewriteWarningPerHandler()
+    {
+        var firstFile = new TestFileInfo("first.html", length: 9, streamFactory: () => Stream.Null);
+        var secondFile = new TestFileInfo("second.html", length: 10, streamFactory: () => Stream.Null);
+        var provider = new TestFileProvider(("first.html", firstFile), ("second.html", secondFile));
+        var logger = new RecordingLogger<AppSurfaceDocsPublishedTreeHandler>();
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: 8,
+            logger: logger);
+
+        Assert.True(await handler.TryHandleAsync(CreateContext(HttpMethods.Get, "/docs/v/1.2.3/first.html")));
+        Assert.True(await handler.TryHandleAsync(CreateContext(HttpMethods.Get, "/docs/v/1.2.3/second.html")));
+
+        var warning = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        Assert.Contains("AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("404", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("Published tree rewrite limit", warning.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(33_554_433)]
+    public void Ctor_ShouldRejectUnsupportedRewriteLimits(long maxRewrittenFileSizeBytes)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => CreateHandler(
+                [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", new TestFileProvider())],
+                maxRewrittenFileSizeBytes: maxRewrittenFileSizeBytes));
     }
 
     [Fact]
@@ -1108,20 +1389,52 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
                     provider,
                     treePath,
                     new AppSurfaceDocsFrozenRouteManifestCache(provider, treePath),
-                    canonicalRootPath)
+                    canonicalRootPath: canonicalRootPath)
             ],
             previewRootPath,
             routeRootPath,
             publicOrigin);
     }
 
+    private AppSurfaceDocsPublishedTreeHandler CreateVerifiedHandler(string treePath, string mountRootPath)
+    {
+        var manifestDigest = WriteReleaseManifest(treePath);
+        Assert.True(AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+            treePath,
+            manifestDigest,
+            out var archive,
+            out var failure), failure?.Detail);
+
+        var provider = new PhysicalFileProvider(treePath, ExclusionFilters.None);
+        _disposables.Add(provider);
+
+        return CreateHandler(
+            [
+                new AppSurfaceDocsPublishedTreeMount(
+                    mountRootPath,
+                    provider,
+                    treePath,
+                    new AppSurfaceDocsFrozenRouteManifestCache(archive!.FrozenRouteManifest, treePath),
+                    AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+                    archive)
+            ]);
+    }
+
     private AppSurfaceDocsPublishedTreeHandler CreateHandler(
         IReadOnlyList<AppSurfaceDocsPublishedTreeMount> mounts,
         string previewRootPath = "/docs/next",
         string routeRootPath = DocsUrlBuilder.DocsEntryPath,
-        string? publicOrigin = null)
+        string? publicOrigin = null,
+        long maxRewrittenFileSizeBytes = AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes,
+        ILogger<AppSurfaceDocsPublishedTreeHandler>? logger = null)
     {
-        return new AppSurfaceDocsPublishedTreeHandler(mounts, previewRootPath, routeRootPath, publicOrigin);
+        return new AppSurfaceDocsPublishedTreeHandler(
+            mounts,
+            previewRootPath,
+            routeRootPath,
+            publicOrigin,
+            maxRewrittenFileSizeBytes,
+            logger);
     }
 
     private string CreatePublishedTree(string name)
@@ -1211,6 +1524,42 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         File.WriteAllText(Path.Join(treePath, ".appsurface-docs-route-manifest.json"), json);
     }
 
+    private static string WriteReleaseManifest(string root)
+    {
+        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(Path.GetFileName(path), AppSurfaceDocsReleaseArchiveVerifier.FileName, StringComparison.Ordinal))
+            .Select(
+                path => new
+                {
+                    path = NormalizeManifestPath(root, path),
+                    length = new FileInfo(path).Length,
+                    contentType = (string?)null,
+                    hashAlgorithm = "sha256",
+                    sha256 = ComputeFileSha256(path)
+                })
+            .OrderBy(entry => entry.path, StringComparer.Ordinal)
+            .ToArray();
+        var manifestPath = TestPathUtils.PathUnder(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(
+                new { schema = AppSurfaceDocsReleaseArchiveVerifier.Schema, files },
+                new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        return ComputeFileSha256(manifestPath);
+    }
+
+    private static string NormalizeManifestPath(string root, string path)
+    {
+        return Path.GetRelativePath(root, path)
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+    }
+
+    private static string ComputeFileSha256(string path)
+    {
+        return Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
+    }
+
     private static DefaultHttpContext CreateContext(string method, string requestPath, string? pathBase = null)
     {
         var context = new DefaultHttpContext();
@@ -1230,5 +1579,95 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         httpContext.Response.Body.Position = 0;
         using var reader = new StreamReader(httpContext.Response.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
         return reader.ReadToEnd();
+    }
+
+    private sealed class TestFileProvider(params (string Path, TestFileInfo FileInfo)[] files) : IFileProvider
+    {
+        private readonly Dictionary<string, TestFileInfo> _files = files.ToDictionary(
+            file => file.Path,
+            file => file.FileInfo,
+            StringComparer.OrdinalIgnoreCase);
+
+        public IFileInfo GetFileInfo(string subpath)
+        {
+            return _files.TryGetValue(subpath.TrimStart('/'), out var fileInfo)
+                ? fileInfo
+                : new NotFoundFileInfo(subpath);
+        }
+
+        public IDirectoryContents GetDirectoryContents(string subpath)
+        {
+            return NotFoundDirectoryContents.Singleton;
+        }
+
+        public IChangeToken Watch(string filter)
+        {
+            return NullChangeToken.Singleton;
+        }
+    }
+
+    private sealed class TestFileInfo(
+        string name,
+        long length,
+        Func<Stream> streamFactory) : IFileInfo
+    {
+        public bool Exists => true;
+
+        public long Length => length;
+
+        public string? PhysicalPath => null;
+
+        public string Name => name;
+
+        public DateTimeOffset LastModified { get; } = DateTimeOffset.UtcNow;
+
+        public bool IsDirectory => false;
+
+        public int OpenCount { get; private set; }
+
+        public Stream CreateReadStream()
+        {
+            OpenCount++;
+            return streamFactory();
+        }
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        private readonly List<LogEntry> _entries = [];
+
+        public IReadOnlyList<LogEntry> Entries => _entries;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return NullScope.Instance;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            _entries.Add(new LogEntry(logLevel, formatter(state, exception), exception));
+        }
+
+        public sealed record LogEntry(LogLevel Level, string Message, Exception? Exception);
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+
+            public void Dispose()
+            {
+            }
+        }
     }
 }

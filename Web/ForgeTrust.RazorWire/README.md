@@ -494,6 +494,8 @@ validation and rewrite path. Use `--mode hybrid` when the exported directory wil
 still be served behind infrastructure that resolves application-style extensionless
 URLs.
 
+Hybrid export can serve RazorWire endpoints through same-origin backend passthrough. Safe RazorWire forms with static anti-forgery tokens are converted to lazy runtime token refresh so the backend wakes only when the user starts interacting with the form or submits it. For split-origin hybrid sites, add `--live-origin https://api.example.com`; RazorWire export then also rewrites managed live surfaces to that origin without requiring per-form flags: stream sources, live island frames, and RazorWire forms with static anti-forgery tokens. Unsafe anti-forgery fails early with `RWEXPORT006` when the form is unmanaged, opts out with `rw-antiforgery="off"`, posts to an external action, or split-origin credentials are omitted. CDN mode fails any anti-forgery surface because a plain static host cannot mint runtime tokens.
+
 CDN export validates the static references it can discover while crawling.
 Missing frame routes, unsafe query-bearing frame sources, missing internal assets,
 and managed URLs that cannot be rewritten fail the export with `RWEXPORT###`

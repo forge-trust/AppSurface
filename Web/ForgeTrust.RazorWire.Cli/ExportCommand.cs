@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using CliFx;
 using CliFx.Binding;
 using CliFx.Infrastructure;
+using ForgeTrust.RazorWire;
 using Microsoft.Extensions.Logging;
 
 namespace ForgeTrust.RazorWire.Cli;
@@ -43,6 +44,32 @@ public partial class ExportCommand : ICommand
     /// </remarks>
     [CommandOption("mode", 'm', Description = "Export mode: cdn (default) or hybrid.")]
     public ExportMode Mode { get; set; } = ExportMode.Cdn;
+
+    /// <summary>
+    /// Gets or sets the live origin used for RazorWire-managed live references in hybrid exports.
+    /// </summary>
+    /// <remarks>
+    /// This option is optional and defaults to same-origin behavior. When set, the value must be an absolute
+    /// <c>http</c> or <c>https</c> origin with no path, query string, fragment, or userinfo; for example,
+    /// <c>https://api.example.com</c>. In split-origin hybrid exports, RazorWire-owned streams, islands, and safe
+    /// lazy anti-forgery forms are rewritten to this origin while ordinary application links stay app-relative.
+    /// Prefer leaving this unset when the exported files and live app share an origin.
+    /// </remarks>
+    [CommandOption("live-origin", Description = "Live origin for RazorWire-managed hybrid interactions, such as https://api.example.com.")]
+    public string? LiveOrigin { get; set; }
+
+    /// <summary>
+    /// Gets or sets credential behavior for RazorWire-managed live references.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see cref="RazorWireHybridCredentialsMode.Auto"/>. Auto includes credentials when
+    /// <see cref="LiveOrigin"/> is configured and omits them otherwise. Choose
+    /// <see cref="RazorWireHybridCredentialsMode.Include"/> when the live origin requires cookie-backed sessions across
+    /// origins, and choose <see cref="RazorWireHybridCredentialsMode.Omit"/> only for public, credential-free live
+    /// surfaces. Lazy anti-forgery form refreshes require credentials when a split live origin is configured.
+    /// </remarks>
+    [CommandOption("hybrid-credentials", Description = "Hybrid credentials mode: auto (default), include, or omit.")]
+    public RazorWireHybridCredentialsMode HybridCredentials { get; set; } = RazorWireHybridCredentialsMode.Auto;
 
     /// <summary>
     /// Gets or sets the base URL of a running application to crawl.
@@ -130,12 +157,28 @@ public partial class ExportCommand : ICommand
     /// <returns>A <see cref="ValueTask"/> that completes when the export operation finishes.</returns>
     public async ValueTask ExecuteAsync(IConsole console, CancellationToken cancellationToken)
     {
+        if (!ExportHybridOptions.TryNormalizeOrigin(LiveOrigin, out var normalizedLiveOrigin))
+        {
+            throw new CommandException("The --live-origin value must be an absolute http or https origin, such as 'https://api.example.com', with no path, query string, fragment, or userinfo.");
+        }
+
         var request = _requestFactory.Create(BaseUrl, ProjectPath, DllPath, Framework, AppArgs, NoBuild);
         await using var resolvedSource = await _sourceResolver.ResolveAsync(request, cancellationToken);
 
         _logger.LogInformation("Exporting to {OutputPath}...", OutputPath);
 
-        var context = new ExportContext(OutputPath, SeedRoutesPath, resolvedSource.BaseUrl, Mode);
+        var context = new ExportContext(
+            OutputPath,
+            SeedRoutesPath,
+            initialSeedRoutes: null,
+            resolvedSource.BaseUrl,
+            Mode,
+            ExportRedirectStrategy.Html,
+            new ExportHybridOptions
+            {
+                LiveOrigin = normalizedLiveOrigin,
+                CredentialsMode = HybridCredentials
+            });
         try
         {
             await _engine.RunAsync(context, cancellationToken);

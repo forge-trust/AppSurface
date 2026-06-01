@@ -72,6 +72,25 @@ public class ExportContext
     public ExportRedirectStrategy RedirectStrategy { get; }
 
     /// <summary>
+    /// Gets split-origin hybrid export options.
+    /// </summary>
+    /// <remarks>
+    /// The context stores normalized options. <see cref="ExportHybridOptions.LiveOrigin"/> is either
+    /// <see langword="null"/> or an absolute HTTP(S) origin with no path, query, fragment, or userinfo.
+    /// </remarks>
+    public ExportHybridOptions Hybrid { get; }
+
+    /// <summary>
+    /// Gets the optional public origin used when export rewrites same-origin metadata for the published static host.
+    /// </summary>
+    /// <remarks>
+    /// This origin does not change the crawl source or application links. It is intended for metadata such as canonical
+    /// links that must identify the public static host even though the exporter crawls a loopback or private source URL.
+    /// When set, it is normalized to an absolute HTTP(S) origin with no path, query, fragment, or userinfo.
+    /// </remarks>
+    public string? PublicOrigin { get; }
+
+    /// <summary>
     /// Gets the set of URLs that have already been visited during the crawl.
     /// </summary>
     public HashSet<string> Visited { get; } = new();
@@ -120,6 +139,39 @@ public class ExportContext
     /// Gets redirect aliases registered by host-specific exporters.
     /// </summary>
     internal List<ExportRedirectArtifact> RedirectArtifacts { get; } = [];
+
+    /// <summary>
+    /// Gets the release archive manifest summary written after export materialization completes.
+    /// </summary>
+    /// <remarks>
+    /// The summary is populated by <see cref="ExportEngine"/> after final static files have been written when
+    /// <see cref="ReleaseArchiveManifestEnabled"/> is <see langword="true"/>. Command surfaces use it to print the
+    /// catalog digest operators should pin with <c>releaseManifestSha256</c>.
+    /// </remarks>
+    public ReleaseArchiveManifestSummary? ReleaseArchiveManifest { get; internal set; }
+
+    /// <summary>
+    /// Gets a value indicating whether this export should emit an AppSurface Docs release archive manifest.
+    /// </summary>
+    /// <remarks>
+    /// Generic RazorWire exports leave this disabled because arbitrary static sites may need valid hidden web paths such
+    /// as <c>.well-known</c>. AppSurface Docs exact-release export enables it after writing the frozen route manifest so
+    /// operators receive a catalog-pinned integrity digest for that release archive.
+    /// </remarks>
+    public bool ReleaseArchiveManifestEnabled { get; private set; }
+
+    /// <summary>
+    /// Enables generation of the AppSurface Docs release archive manifest after final export materialization.
+    /// </summary>
+    /// <remarks>
+    /// Host integrations should call this only when the output tree is intended to satisfy the AppSurface Docs exact
+    /// release archive contract. The exporter then writes <c>.appsurface-docs-release-manifest.json</c> and populates
+    /// <see cref="ReleaseArchiveManifest"/> with the digest that should be pinned in trusted catalog configuration.
+    /// </remarks>
+    public void EnableReleaseArchiveManifest()
+    {
+        ReleaseArchiveManifestEnabled = true;
+    }
 
     /// <summary>
     /// Registers a route alias that should redirect to an already-exported canonical route.
@@ -326,6 +378,46 @@ public class ExportContext
         string baseUrl,
         ExportMode mode,
         ExportRedirectStrategy redirectStrategy)
+        : this(outputPath, seedRoutesPath, initialSeedRoutes, baseUrl, mode, redirectStrategy, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="ExportContext"/> with in-memory seed routes, export mode, redirect strategy, and hybrid options.
+    /// </summary>
+    /// <param name="outputPath">The target directory for export.</param>
+    /// <param name="seedRoutesPath">The path to initial seed routes, if any.</param>
+    /// <param name="initialSeedRoutes">Optional in-memory initial seed routes used when <paramref name="seedRoutesPath"/> is null or blank.</param>
+    /// <param name="baseUrl">The base URL of the site to export.</param>
+    /// <param name="mode">The export mode.</param>
+    /// <param name="redirectStrategy">Strategy used to materialize redirect aliases.</param>
+    /// <param name="hybridOptions">
+    /// Optional split-origin hybrid options. <see cref="ExportHybridOptions.LiveOrigin"/> must be either blank or an
+    /// absolute HTTP(S) origin with no path, query, fragment, or userinfo; it is normalized before use.
+    /// </param>
+    /// <param name="publicOrigin">
+    /// Optional public origin for same-origin metadata rewrites. It must be either blank or an absolute HTTP(S) origin
+    /// with no path, query, fragment, or userinfo; it is normalized before use.
+    /// </param>
+    /// <remarks>
+    /// The constructor validates public origin and hybrid live origin before export begins so direct API callers get the
+    /// same origin contract as CLI callers. Use <paramref name="publicOrigin"/> for metadata that should point at the
+    /// published static host, and use <paramref name="hybridOptions"/>.<see cref="ExportHybridOptions.LiveOrigin"/> only
+    /// for RazorWire-managed live interactions in split-origin hybrid output.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// Thrown when either configured origin is not an HTTP(S) origin or includes a path, query string, fragment, or
+    /// userinfo.
+    /// </exception>
+    public ExportContext(
+        string outputPath,
+        string? seedRoutesPath,
+        IEnumerable<string>? initialSeedRoutes,
+        string baseUrl,
+        ExportMode mode,
+        ExportRedirectStrategy redirectStrategy,
+        ExportHybridOptions? hybridOptions,
+        string? publicOrigin = null)
     {
         OutputPath = outputPath;
         SeedRoutesPath = seedRoutesPath;
@@ -333,6 +425,27 @@ public class ExportContext
         BaseUrl = baseUrl.TrimEnd('/');
         Mode = mode;
         RedirectStrategy = redirectStrategy;
+        var effectiveHybrid = hybridOptions ?? new ExportHybridOptions();
+        if (!ExportHybridOptions.TryNormalizeOrigin(effectiveHybrid.LiveOrigin, out var normalizedLiveOrigin))
+        {
+            throw new ArgumentException(
+                "Hybrid live origin must be an absolute http or https origin with no path, query, fragment, or userinfo.",
+                nameof(hybridOptions));
+        }
+
+        if (!ExportHybridOptions.TryNormalizeOrigin(publicOrigin, out var normalizedPublicOrigin))
+        {
+            throw new ArgumentException(
+                "Public origin must be an absolute http or https origin with no path, query, fragment, or userinfo.",
+                nameof(publicOrigin));
+        }
+
+        Hybrid = new ExportHybridOptions
+        {
+            LiveOrigin = normalizedLiveOrigin,
+            CredentialsMode = effectiveHybrid.CredentialsMode
+        };
+        PublicOrigin = normalizedPublicOrigin;
     }
 
     private static string NormalizeRedirectArtifactRoute(string route, string paramName)
