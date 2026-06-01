@@ -12,7 +12,7 @@ namespace ForgeTrust.AppSurface.Flow;
 /// host-specific adapters. It does not start background workers, create storage, schedule timers, or replace AppSurface
 /// startup composition.
 /// </remarks>
-public class AppSurfaceFlowModule : IAppSurfaceModule
+public sealed class AppSurfaceFlowModule : IAppSurfaceModule
 {
     /// <inheritdoc />
     public void ConfigureServices(StartupContext context, IServiceCollection services)

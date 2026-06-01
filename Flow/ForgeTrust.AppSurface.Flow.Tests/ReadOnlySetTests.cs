@@ -5,6 +5,12 @@ namespace ForgeTrust.AppSurface.Flow.Tests;
 public sealed class ReadOnlySetTests
 {
     [Fact]
+    public void Constructor_WithNullValues_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new ReadOnlySet<string>(null!));
+    }
+
+    [Fact]
     public void Constructor_CopiesDistinctValues()
     {
         var source = new[] { "review", "approve", "review" };

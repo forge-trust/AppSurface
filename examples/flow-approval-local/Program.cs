@@ -12,10 +12,15 @@ var waiting = await runner.RunAsync(definition, new ApprovalState("deploy-previe
 
 Console.WriteLine($"{waiting.Status}: {waiting.WaitingEventName}");
 
+if (waiting.Status != FlowRunStatus.Waiting || waiting.NodeId is null || waiting.Context is null)
+{
+    throw new InvalidOperationException("Expected the approval flow to wait for input before resuming.");
+}
+
 var completed = await runner.ResumeAsync(
     definition,
-    waiting.NodeId!,
-    waiting.Context!,
+    waiting.NodeId,
+    waiting.Context,
     new FlowResumeEvent("approval-submitted", true));
 
 Console.WriteLine($"{completed.Status}: {completed.Context?.Status}");

@@ -49,13 +49,13 @@ public sealed class FlowDependencyGuardTests
 
     private static XDocument LoadProject(string projectPath)
     {
-        var repositoryRoot = FindRepositoryRoot();
         var normalizedProjectPath = projectPath.Replace('/', Path.DirectorySeparatorChar);
         if (Path.IsPathRooted(normalizedProjectPath))
         {
             throw new ArgumentException("Project path must be relative.", nameof(projectPath));
         }
 
+        var repositoryRoot = FindRepositoryRoot();
         return XDocument.Load(Path.Join(repositoryRoot, normalizedProjectPath));
     }
 

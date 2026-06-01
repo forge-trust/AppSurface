@@ -8,22 +8,22 @@ public enum FlowRunStatus
     /// <summary>
     /// The flow is waiting for an external event.
     /// </summary>
-    Waiting,
+    Waiting = 0,
 
     /// <summary>
     /// The flow completed successfully.
     /// </summary>
-    Completed,
+    Completed = 1,
 
     /// <summary>
     /// The flow returned a process-level fault.
     /// </summary>
-    Faulted,
+    Faulted = 2,
 
     /// <summary>
     /// The flow handled a timeout branch.
     /// </summary>
-    TimedOut,
+    TimedOut = 3,
 }
 
 /// <summary>
@@ -88,6 +88,18 @@ public sealed record FlowRunResult<TContext>
     /// <summary>
     /// Creates a waiting result.
     /// </summary>
+    /// <param name="nodeId">Node id where the flow paused.</param>
+    /// <param name="eventName">External event name the node is waiting for.</param>
+    /// <param name="context">Context to preserve while the flow is waiting.</param>
+    /// <param name="timeout">Optional timeout associated with the wait.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> or <paramref name="eventName"/> is empty.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// Inspect <see cref="Status"/> before reading wait-specific properties. <paramref name="timeout"/> is optional and
+    /// remains null for waits without a timeout.
+    /// </remarks>
     public static FlowRunResult<TContext> Waiting(
         string nodeId,
         string eventName,
@@ -105,6 +117,14 @@ public sealed record FlowRunResult<TContext>
     /// <summary>
     /// Creates a completed result.
     /// </summary>
+    /// <param name="nodeId">Node id that completed the flow.</param>
+    /// <param name="context">Final flow context.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="nodeId"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// A completed result does not carry wait, timeout, or fault details. Inspect <see cref="Status"/> before reading
+    /// status-specific properties.
+    /// </remarks>
     public static FlowRunResult<TContext> Completed(string nodeId, TContext context) =>
         new(
             FlowRunStatus.Completed,
@@ -118,6 +138,17 @@ public sealed record FlowRunResult<TContext>
     /// <summary>
     /// Creates a timed-out result.
     /// </summary>
+    /// <param name="nodeId">Node id that handled the timeout branch.</param>
+    /// <param name="eventName">Event whose wait timed out.</param>
+    /// <param name="context">Context after timeout handling.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> or <paramref name="eventName"/> is empty.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// A timed-out result means timeout handling ran; it is distinct from a waiting result that carries a future
+    /// timeout. Inspect <see cref="Status"/> before reading timeout-specific properties.
+    /// </remarks>
     public static FlowRunResult<TContext> TimedOut(string nodeId, string eventName, TContext context) =>
         new(
             FlowRunStatus.TimedOut,
@@ -131,6 +162,13 @@ public sealed record FlowRunResult<TContext>
     /// <summary>
     /// Creates a faulted result.
     /// </summary>
+    /// <param name="nodeId">Node id that produced the fault.</param>
+    /// <param name="fault">Flow fault details.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="nodeId"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="fault"/> is null.</exception>
+    /// <remarks>
+    /// Faulted results do not carry a context. Inspect <see cref="Status"/> before reading fault-specific properties.
+    /// </remarks>
     public static FlowRunResult<TContext> Faulted(string nodeId, FlowFault fault) =>
         new(
             FlowRunStatus.Faulted,

@@ -8,6 +8,7 @@ internal sealed class ReadOnlySet<T> : IReadOnlySet<T>
 
     internal ReadOnlySet(IEnumerable<T> values)
     {
+        ArgumentNullException.ThrowIfNull(values);
         _inner = new HashSet<T>(values);
     }
 

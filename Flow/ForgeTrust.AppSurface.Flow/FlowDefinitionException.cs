@@ -17,4 +17,14 @@ public sealed class FlowDefinitionException : InvalidOperationException
         : base(message)
     {
     }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FlowDefinitionException"/> class.
+    /// </summary>
+    /// <param name="message">Diagnostic message.</param>
+    /// <param name="innerException">Exception that caused this flow definition failure.</param>
+    public FlowDefinitionException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }

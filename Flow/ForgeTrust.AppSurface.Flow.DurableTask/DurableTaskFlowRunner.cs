@@ -17,6 +17,23 @@ public interface IDurableTaskFlowRunner<TContext>
     /// <summary>
     /// Starts a durable flow by evaluating the definition's start node.
     /// </summary>
+    /// <param name="flowId">Flow id to start.</param>
+    /// <param name="version">Flow version to start.</param>
+    /// <param name="instanceId">Durable Task instance id associated with the flow.</param>
+    /// <param name="context">Initial flow context.</param>
+    /// <param name="cancellationToken">Token that cancels node execution.</param>
+    /// <returns>
+    /// A durable decision. Missing definitions, missing nodes, non-durable contexts, invalid next targets, and
+    /// unsupported outcomes are returned as <see cref="DurableTaskFlowDecisionKind.Fault"/> decisions.
+    /// </returns>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="flowId"/>, <paramref name="version"/>, or <paramref name="instanceId"/> is empty.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// Caller code should inspect the returned <see cref="DurableTaskFlowDecision{TContext}.Kind"/> instead of relying
+    /// on exceptions for process-level failures. Exceptions are reserved for invalid caller arguments and cancellation.
+    /// </remarks>
     ValueTask<DurableTaskFlowDecision<TContext>> StartAsync(
         string flowId,
         string version,
@@ -27,6 +44,17 @@ public interface IDurableTaskFlowRunner<TContext>
     /// <summary>
     /// Evaluates one node and maps its outcome to a durable orchestration decision.
     /// </summary>
+    /// <param name="step">Current durable flow step.</param>
+    /// <param name="cancellationToken">Token that cancels node execution.</param>
+    /// <returns>
+    /// A durable decision. Missing definitions or nodes, serialization failures, invalid next targets, node faults, and
+    /// unsupported outcomes are returned as <see cref="DurableTaskFlowDecisionKind.Fault"/> decisions.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="step"/> is null.</exception>
+    /// <remarks>
+    /// This method validates the input context before executing the node and validates returned contexts before
+    /// scheduling, waiting, timing out, or completing. Callers must branch on the returned decision kind.
+    /// </remarks>
     ValueTask<DurableTaskFlowDecision<TContext>> RunNodeAsync(
         DurableTaskFlowStep<TContext> step,
         CancellationToken cancellationToken = default);
@@ -34,6 +62,21 @@ public interface IDurableTaskFlowRunner<TContext>
     /// <summary>
     /// Resumes a waiting node if the delivered event matches the event the orchestration was waiting for.
     /// </summary>
+    /// <param name="step">Current durable flow step carrying a resume event.</param>
+    /// <param name="expectedEventName">Event name the orchestration is waiting for.</param>
+    /// <param name="cancellationToken">Token that cancels resumed node execution.</param>
+    /// <returns>
+    /// A durable decision. Missing resume events return a fault decision. Mismatched events return
+    /// <see cref="DurableTaskFlowDecisionKind.IgnoreLateEvent"/> when
+    /// <see cref="AppSurfaceFlowDurableTaskOptions.IgnoreLateResumeEvents"/> is enabled, otherwise they return a fault
+    /// decision.
+    /// </returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="expectedEventName"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="step"/> is null.</exception>
+    /// <remarks>
+    /// Deliver only the event the orchestration is currently waiting for. Late or stale events are represented as
+    /// decisions, so callers should inspect the returned kind before scheduling more work.
+    /// </remarks>
     ValueTask<DurableTaskFlowDecision<TContext>> ResumeAsync(
         DurableTaskFlowStep<TContext> step,
         string expectedEventName,

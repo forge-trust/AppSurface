@@ -10,32 +10,32 @@ public enum DurableTaskFlowDecisionKind
     /// <summary>
     /// Schedule the next node.
     /// </summary>
-    ScheduleNode,
+    ScheduleNode = 0,
 
     /// <summary>
     /// Wait for an external event, optionally with a durable timer.
     /// </summary>
-    WaitForExternalEvent,
+    WaitForExternalEvent = 1,
 
     /// <summary>
     /// Complete the durable flow instance.
     /// </summary>
-    Complete,
+    Complete = 2,
 
     /// <summary>
     /// Fault the durable flow instance.
     /// </summary>
-    Fault,
+    Fault = 3,
 
     /// <summary>
     /// Record that a timeout branch was handled.
     /// </summary>
-    TimedOut,
+    TimedOut = 4,
 
     /// <summary>
     /// Ignore a stale or mismatched external event.
     /// </summary>
-    IgnoreLateEvent,
+    IgnoreLateEvent = 5,
 }
 
 /// <summary>

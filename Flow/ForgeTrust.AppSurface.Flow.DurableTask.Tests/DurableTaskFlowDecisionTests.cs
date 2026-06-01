@@ -51,6 +51,18 @@ public sealed class DurableTaskFlowDecisionTests
     }
 
     [Fact]
+    public void Complete_CapturesContext()
+    {
+        var decision = DurableTaskFlowDecision<TestState>.Complete(
+            "review",
+            new TestState("complete"));
+
+        Assert.Equal(DurableTaskFlowDecisionKind.Complete, decision.Kind);
+        Assert.Equal("review", decision.NodeId);
+        Assert.Equal(new TestState("complete"), decision.Context);
+    }
+
+    [Fact]
     public void Faulted_CapturesDiagnostic()
     {
         var fault = new FlowFault("approval.failed", "Approval failed.");
