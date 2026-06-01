@@ -478,6 +478,25 @@ public class ConfigAuditModelsTests
                             Message = "Discovered diagnostic."
                         }
                     ]
+                },
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Discovered.Complex",
+                    Classification = ConfigAuditDiscoveredKeyClassification.Known,
+                    DisplayValue = "should-not-render",
+                    ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.OmittedComplex
+                },
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Discovered.KnownUnavailable",
+                    Classification = ConfigAuditDiscoveredKeyClassification.Known,
+                    ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.OmittedInventory
+                },
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Discovered.InvalidInventory",
+                    Classification = (ConfigAuditDiscoveredKeyClassification)99,
+                    ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.OmittedInventory
                 }
             ],
             Entries =
@@ -544,6 +563,16 @@ public class ConfigAuditModelsTests
         Assert.Contains("Provider", rendered, StringComparison.Ordinal);
         Assert.Contains("Discovered keys:", rendered, StringComparison.Ordinal);
         Assert.Contains("Discovered.Fallback [99] = value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Discovered.Complex [Known]", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("should-not-render", rendered, StringComparison.Ordinal);
+        Assert.Contains(
+            "Discovered.KnownUnavailable [Known] (value omitted: scalar display value is unavailable)",
+            rendered,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Discovered.InvalidInventory [99] (value omitted: inventory key is not an exact audit entry)",
+            rendered,
+            StringComparison.Ordinal);
         Assert.Contains("Diagnostic: [Warning] discovered-warning: Discovered diagnostic.", rendered, StringComparison.Ordinal);
     }
 
