@@ -1221,7 +1221,9 @@ public class DocAggregator
 
         return diagnostics.FirstOrDefault(static diagnostic => diagnostic.Code is
             DocHarvestDiagnosticCodes.JavaScriptFileTooLarge
+            or DocHarvestDiagnosticCodes.JavaScriptMissingInclude
             or DocHarvestDiagnosticCodes.JavaScriptParseFailed
+            or DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped
             or DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape
             or DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);
     }
