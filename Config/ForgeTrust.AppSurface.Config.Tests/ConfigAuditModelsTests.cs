@@ -548,6 +548,35 @@ public class ConfigAuditModelsTests
     }
 
     [Fact]
+    public void ConfigAuditDiscoveredKey_ValueDisplayState_SerializesAsNumericEnumByDefault()
+    {
+        var report = new ConfigAuditReport
+        {
+            Environment = "Production",
+            GeneratedAt = DateTimeOffset.UnixEpoch,
+            Redaction = new ConfigAuditRedaction
+            {
+                Enabled = true,
+                Placeholder = "[redacted]"
+            },
+            DiscoveredKeys =
+            [
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Application.Name",
+                    Classification = ConfigAuditDiscoveredKeyClassification.Unknown,
+                    ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.OmittedInventory
+                }
+            ]
+        };
+
+        var serialized = JsonSerializer.Serialize(report);
+
+        Assert.Contains("\"ValueDisplayState\":4", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"OmittedInventory\"", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PublicEnums_KeepStableOrdinals()
     {
         Assert.Equal(0, (int)ConfigAuditEntryState.Resolved);
@@ -559,6 +588,12 @@ public class ConfigAuditModelsTests
         Assert.Equal(0, (int)ConfigAuditDiscoveredKeyClassification.Known);
         Assert.Equal(1, (int)ConfigAuditDiscoveredKeyClassification.KnownDescendant);
         Assert.Equal(2, (int)ConfigAuditDiscoveredKeyClassification.Unknown);
+
+        Assert.Equal(0, (int)ConfigAuditDiscoveredValueDisplayState.Unspecified);
+        Assert.Equal(1, (int)ConfigAuditDiscoveredValueDisplayState.Shown);
+        Assert.Equal(2, (int)ConfigAuditDiscoveredValueDisplayState.Redacted);
+        Assert.Equal(3, (int)ConfigAuditDiscoveredValueDisplayState.OmittedComplex);
+        Assert.Equal(4, (int)ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
 
         Assert.Equal(0, (int)ConfigAuditElementKind.ArrayItem);
         Assert.Equal(1, (int)ConfigAuditElementKind.ListItem);
