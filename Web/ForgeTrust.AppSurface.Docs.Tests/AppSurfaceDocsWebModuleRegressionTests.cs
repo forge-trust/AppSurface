@@ -2127,7 +2127,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
             throw new InvalidOperationException("Release manifest file name must not be rooted.");
         }
 
-        var manifestPath = Path.Combine(root, manifestFileName);
+        var manifestPath = Path.GetFullPath(Path.Join(root, manifestFileName));
         File.WriteAllText(
             manifestPath,
             JsonSerializer.Serialize(

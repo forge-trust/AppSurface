@@ -440,7 +440,7 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
             .OrderBy(entry => entry.path, StringComparer.Ordinal)
             .ToArray();
         var manifestFileName = Path.GetFileName(AppSurfaceDocsReleaseArchiveVerifier.FileName);
-        var manifestPath = Path.Combine(root, manifestFileName);
+        var manifestPath = Path.GetFullPath(Path.Join(root, manifestFileName));
         File.WriteAllText(
             manifestPath,
             JsonSerializer.Serialize(
