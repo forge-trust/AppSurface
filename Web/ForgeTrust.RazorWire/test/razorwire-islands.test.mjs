@@ -209,13 +209,16 @@ async function waitForAttributeValue(element, name, value) {
 }
 
 async function waitForCondition(predicate) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  const maxAttempts = 20;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (predicate()) {
       return;
     }
 
     await flushHydration();
   }
+
+  assert.fail(`waitForCondition timed out after ${maxAttempts} attempts`);
 }
 
 function moduleWithMount(body) {

@@ -111,6 +111,19 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     {
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> for tests or internal composition with a custom
+    /// file reader and configured AppSurface Docs options.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read Markdown bodies and metadata sidecars.</param>
+    /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
+    /// <remarks>
+    /// This overload supplies the default TextMate-based code highlighter and default harvest path policy. Prefer it when
+    /// a test needs custom options but does not need to observe code-highlighting behavior or path-policy decisions.
+    /// Use the overload that accepts <see cref="IAppSurfaceDocsCodeHighlighter"/> and
+    /// <see cref="AppSurfaceDocsHarvestPathPolicy"/> when either dependency must be controlled explicitly.
+    /// </remarks>
     internal MarkdownHarvester(
         ILogger<MarkdownHarvester> logger,
         Func<string, CancellationToken, Task<string>> readAllTextAsync,
@@ -158,6 +171,19 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     {
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> for tests or internal composition with custom file
+    /// reading, code highlighting, and harvest path policy.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read Markdown bodies and metadata sidecars.</param>
+    /// <param name="codeHighlighter">Highlighter used when Markdown fenced code blocks are rendered to HTML.</param>
+    /// <param name="pathPolicy">Shared harvest path policy used to decide which Markdown candidates publish.</param>
+    /// <remarks>
+    /// This overload supplies default AppSurface Docs options, including default Markdown byte limits. Prefer it when a
+    /// test needs explicit highlighting or path-policy behavior but should keep production defaults for resource guards.
+    /// Use the most explicit overload when custom resource limits and custom collaborators are both required.
+    /// </remarks>
     internal MarkdownHarvester(
         ILogger<MarkdownHarvester> logger,
         Func<string, CancellationToken, Task<string>> readAllTextAsync,
@@ -167,6 +193,20 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     {
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> for tests or internal composition with all core
+    /// collaborators supplied explicitly.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read Markdown bodies and metadata sidecars.</param>
+    /// <param name="codeHighlighter">Highlighter used when Markdown fenced code blocks are rendered to HTML.</param>
+    /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
+    /// <param name="pathPolicy">Shared harvest path policy used to decide which Markdown candidates publish.</param>
+    /// <remarks>
+    /// This overload is the internal test seam for combining custom readers, highlighters, options, and path policy.
+    /// Simpler overloads should be preferred when their defaults match the scenario because they keep tests focused on
+    /// one dependency at a time.
+    /// </remarks>
     internal MarkdownHarvester(
         ILogger<MarkdownHarvester> logger,
         Func<string, CancellationToken, Task<string>> readAllTextAsync,
@@ -386,14 +426,20 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 
         var sidecarPath = existingSidecars[0];
         var relativeSidecarPath = $"{relativeMarkdownPath}{Path.GetExtension(sidecarPath)}";
-        var markdownOptions = _options.Harvest?.Markdown ?? new AppSurfaceDocsMarkdownHarvestOptions();
-        if (ShouldIgnoreOversizedMetadataSidecar(sidecarPath, relativeMarkdownPath, relativeSidecarPath, markdownOptions, harvestDiagnostics))
-        {
-            return null;
-        }
 
         try
         {
+            var markdownOptions = _options.Harvest?.Markdown ?? new AppSurfaceDocsMarkdownHarvestOptions();
+            if (ShouldIgnoreOversizedMetadataSidecar(
+                    sidecarPath,
+                    relativeMarkdownPath,
+                    relativeSidecarPath,
+                    markdownOptions,
+                    harvestDiagnostics))
+            {
+                return null;
+            }
+
             var yaml = await _readAllTextAsync(sidecarPath, cancellationToken);
             var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics(yaml);
             ReportMetadataDiagnostics(
