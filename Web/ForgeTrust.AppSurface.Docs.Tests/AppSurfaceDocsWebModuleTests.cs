@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Core;
@@ -1223,17 +1224,19 @@ public class AppSurfaceDocsWebModuleTests
             File.WriteAllText(Path.Join(treePath, "search-client.js"), "window.__searchClientLoaded = true;");
             File.WriteAllText(Path.Join(treePath, "outline-client.js"), "window.__outlineClientLoaded = true;");
             File.WriteAllText(Path.Join(treePath, "minisearch.min.js"), "window.MiniSearch = window.MiniSearch || {};");
+            var releaseManifestSha256 = WriteReleaseManifest(treePath);
 
             var catalogPath = Path.Join(tempDirectory, "catalog.json");
             File.WriteAllText(
                 catalogPath,
-                """
+                $$"""
                 {
                   "recommendedVersion": "1.2.3",
                   "versions": [
                     {
                       "version": "1.2.3",
                       "exactTreePath": "1.2.3",
+                      "releaseManifestSha256": "{{releaseManifestSha256}}",
                       "supportState": "Current",
                       "visibility": "Public",
                       "advisoryState": "None"
@@ -1796,6 +1799,37 @@ public class AppSurfaceDocsWebModuleTests
         var rootModuleFake = A.Fake<IAppSurfaceHostModule>();
         var envFake = A.Fake<IEnvironmentProvider>();
         return new StartupContext(Array.Empty<string>(), rootModuleFake, "TestApp", envFake);
+    }
+
+    private static string WriteReleaseManifest(string root)
+    {
+        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(Path.GetFileName(path), AppSurfaceDocsReleaseArchiveVerifier.FileName, StringComparison.Ordinal))
+            .Select(
+                path => new
+                {
+                    path = Path.GetRelativePath(root, path)
+                        .Replace(Path.DirectorySeparatorChar, '/')
+                        .Replace(Path.AltDirectorySeparatorChar, '/'),
+                    length = new FileInfo(path).Length,
+                    contentType = (string?)null,
+                    hashAlgorithm = "sha256",
+                    sha256 = ComputeFileSha256(path)
+                })
+            .OrderBy(entry => entry.path, StringComparer.Ordinal)
+            .ToArray();
+        var manifestPath = Path.Join(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(
+                new { schema = AppSurfaceDocsReleaseArchiveVerifier.Schema, files },
+                new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        return ComputeFileSha256(manifestPath);
+    }
+
+    private static string ComputeFileSha256(string path)
+    {
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
     }
 
     private sealed class TestWebHostEnvironment : IWebHostEnvironment

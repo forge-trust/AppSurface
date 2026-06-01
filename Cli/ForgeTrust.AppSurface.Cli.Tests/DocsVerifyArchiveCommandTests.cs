@@ -28,15 +28,16 @@ public sealed class DocsVerifyArchiveCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_ShouldFail_WhenCatalogEntryIsLegacyUnverified()
+    public void Execute_ShouldFail_WhenCatalogEntryIsMissingReleaseManifestPin()
     {
-        var tree = CreateExactTree("legacy");
+        var tree = CreateExactTree("missing-pin");
         var catalogPath = WriteCatalog(tree, releaseManifestSha256: null);
         var command = CreateCommand(catalogPath, "1.2.3");
 
         var exception = Assert.Throws<CommandException>(command.Execute);
 
-        Assert.Contains("AvailableUnverifiedLegacy", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Unavailable", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("verification is required", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

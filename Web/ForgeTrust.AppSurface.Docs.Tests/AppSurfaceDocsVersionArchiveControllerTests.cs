@@ -397,8 +397,60 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
     private string WriteCatalog(AppSurfaceDocsVersionCatalog catalog)
     {
         var path = Path.Combine(_tempDirectory, "catalog.json");
+        PinReleaseManifestDigests(catalog);
         File.WriteAllText(path, JsonSerializer.Serialize(catalog));
         return path;
+    }
+
+    private void PinReleaseManifestDigests(AppSurfaceDocsVersionCatalog catalog)
+    {
+        foreach (var version in catalog.Versions)
+        {
+            if (!string.IsNullOrWhiteSpace(version.ReleaseManifestSha256)
+                || string.IsNullOrWhiteSpace(version.ExactTreePath)
+                || Path.IsPathFullyQualified(version.ExactTreePath))
+            {
+                continue;
+            }
+
+            var candidatePath = Path.GetFullPath(Path.Combine(_tempDirectory, version.ExactTreePath.Trim()));
+            if (Directory.Exists(candidatePath)
+                && candidatePath.StartsWith(_tempDirectory, StringComparison.Ordinal))
+            {
+                version.ReleaseManifestSha256 = WriteReleaseManifest(candidatePath);
+            }
+        }
+    }
+
+    private static string WriteReleaseManifest(string root)
+    {
+        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(Path.GetFileName(path), AppSurfaceDocsReleaseArchiveVerifier.FileName, StringComparison.Ordinal))
+            .Select(
+                path => new
+                {
+                    path = Path.GetRelativePath(root, path)
+                        .Replace(Path.DirectorySeparatorChar, '/')
+                        .Replace(Path.AltDirectorySeparatorChar, '/'),
+                    length = new FileInfo(path).Length,
+                    contentType = (string?)null,
+                    hashAlgorithm = "sha256",
+                    sha256 = ComputeFileSha256(path)
+                })
+            .OrderBy(entry => entry.path, StringComparer.Ordinal)
+            .ToArray();
+        var manifestPath = Path.Combine(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(
+                new { schema = AppSurfaceDocsReleaseArchiveVerifier.Schema, files },
+                new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        return ComputeFileSha256(manifestPath);
+    }
+
+    private static string ComputeFileSha256(string path)
+    {
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
     }
 
     private sealed class PassthroughSanitizer : IAppSurfaceDocsHtmlSanitizer

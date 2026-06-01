@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -25,6 +26,8 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
 {
     private const string MaxRewrittenFileSizeKey = "AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes";
     private const string RewriteLimitDocsAnchor = "AppSurface Docs README section 'Published tree rewrite limit'";
+    private const string HtmlContentSecurityPolicy = "sandbox allow-same-origin; default-src 'self'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self' 'unsafe-inline'";
+    private const string SvgContentSecurityPolicy = "sandbox; default-src 'none'; script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
     private readonly IReadOnlyList<AppSurfaceDocsPublishedTreeMount> _mounts;
@@ -421,13 +424,13 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         string relativeFilePath,
         IFileInfo fileInfo)
     {
-        var isSvg = IsSvgPath(relativeFilePath);
+        var requiresVerifiedBytes = RequiresVerifiedArchiveBytes(relativeFilePath);
         if (mount.ArchiveVerificationState != AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified)
         {
-            if (isSvg)
+            if (requiresVerifiedBytes)
             {
                 _logger.LogWarning(
-                    "ASDOCSARCHIVE010: Denying active SVG asset {ArchivePath} because the published AppSurface Docs archive mounted at {MountRootPath} is not verified.",
+                    "ASDOCSARCHIVE010: Denying active published AppSurface Docs archive file {ArchivePath} because the archive mounted at {MountRootPath} is not verified.",
                     relativeFilePath,
                     mount.MountRootPath);
                 return false;
@@ -446,10 +449,12 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             return false;
         }
 
-        if (isSvg && !AppSurfaceDocsReleaseArchiveVerifier.FileMatches(fileInfo, verifiedFile))
+        if (requiresVerifiedBytes
+            && !ShouldVerifyBytesAfterRewrite(relativeFilePath)
+            && !AppSurfaceDocsReleaseArchiveVerifier.FileMatches(fileInfo, verifiedFile))
         {
             _logger.LogWarning(
-                "ASDOCSARCHIVE010: Denying active SVG asset {ArchivePath} because its bytes no longer match the verified release manifest for mount {MountRootPath}.",
+                "ASDOCSARCHIVE010: Denying active published AppSurface Docs archive file {ArchivePath} because its bytes no longer match the verified release manifest for mount {MountRootPath}.",
                 relativeFilePath,
                 mount.MountRootPath);
             return false;
@@ -461,6 +466,21 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     private static bool IsSvgPath(string relativeFilePath)
     {
         return Path.GetExtension(relativeFilePath).Equals(".svg", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool RequiresVerifiedArchiveBytes(string relativeFilePath)
+    {
+        var extension = Path.GetExtension(relativeFilePath);
+        return extension.Equals(".html", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".js", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".css", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".svg", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(relativeFilePath, "search-index.json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldVerifyBytesAfterRewrite(string relativeFilePath)
+    {
+        return ShouldRewriteHtml(relativeFilePath) || ShouldRewriteSearchIndex(relativeFilePath);
     }
 
     private static bool HasHiddenPathSegment(string path)
@@ -493,6 +513,11 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 return;
             }
 
+            if (!CanServeRewrittenFileBytes(httpContext, mount, relativeFilePath, readResult, "HTML"))
+            {
+                return;
+            }
+
             var rewrittenHtml = AppSurfaceDocsPublishedTreeContentRewriter.RewriteHtml(
                 readResult.Text!,
                 mount.MountRootPath,
@@ -501,7 +526,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 httpContext.Request.PathBase.Value,
                 mount.CanonicalRootPath,
                 publicOrigin);
-            SetSuccessHeaders(httpContext, contentType, fileInfo);
+            SetSuccessHeaders(httpContext, contentType, fileInfo, relativeFilePath);
             await WriteUtf8TextAsync(httpContext, rewrittenHtml, contentType);
             return;
         }
@@ -519,18 +544,23 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 return;
             }
 
+            if (!CanServeRewrittenFileBytes(httpContext, mount, relativeFilePath, readResult, "search-index.json"))
+            {
+                return;
+            }
+
             var rewrittenJson = AppSurfaceDocsPublishedTreeContentRewriter.RewriteSearchIndexJson(
                 readResult.Text!,
                 mount.MountRootPath,
                 previewRootPath,
                 routeRootPath,
                 httpContext.Request.PathBase.Value);
-            SetSuccessHeaders(httpContext, "application/json; charset=utf-8", fileInfo);
+            SetSuccessHeaders(httpContext, "application/json; charset=utf-8", fileInfo, relativeFilePath);
             await WriteUtf8TextAsync(httpContext, rewrittenJson, "application/json; charset=utf-8");
             return;
         }
 
-        SetSuccessHeaders(httpContext, ResolveContentType(relativeFilePath), fileInfo);
+        SetSuccessHeaders(httpContext, ResolveContentType(relativeFilePath), fileInfo, relativeFilePath);
         httpContext.Response.ContentLength = fileInfo.Length;
         if (HttpMethods.IsHead(httpContext.Request.Method))
         {
@@ -557,7 +587,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             : "application/octet-stream";
     }
 
-    private static void SetSuccessHeaders(HttpContext httpContext, string contentType, IFileInfo fileInfo)
+    private static void SetSuccessHeaders(HttpContext httpContext, string contentType, IFileInfo fileInfo, string relativeFilePath)
     {
         httpContext.Response.StatusCode = StatusCodes.Status200OK;
         httpContext.Response.ContentType = contentType;
@@ -565,6 +595,17 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         httpContext.Response.Headers.LastModified = fileInfo.LastModified.ToUniversalTime().ToString(
             "R",
             CultureInfo.InvariantCulture);
+        httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        httpContext.Response.Headers["Referrer-Policy"] = "no-referrer";
+
+        if (ShouldRewriteHtml(relativeFilePath))
+        {
+            httpContext.Response.Headers["Content-Security-Policy"] = HtmlContentSecurityPolicy;
+        }
+        else if (IsSvgPath(relativeFilePath))
+        {
+            httpContext.Response.Headers["Content-Security-Policy"] = SvgContentSecurityPolicy;
+        }
     }
 
     private async Task<RewrittenFileReadResult> ReadRewrittenFileAsync(
@@ -639,20 +680,52 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         await httpContext.Response.Body.WriteAsync(payload, httpContext.RequestAborted);
     }
 
-    private readonly record struct RewrittenFileReadResult(bool Allowed, string? Text, long ObservedBytes, string? Reason)
+    private bool CanServeRewrittenFileBytes(
+        HttpContext httpContext,
+        AppSurfaceDocsPublishedTreeMount mount,
+        string relativeFilePath,
+        RewrittenFileReadResult readResult,
+        string artifactType)
     {
-        public static RewrittenFileReadResult Success(string text)
+        if (mount.ArchiveVerificationState != AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified)
         {
-            return new RewrittenFileReadResult(true, text, 0, null);
+            return true;
+        }
+
+        if (mount.VerifiedReleaseArchive is not null
+            && mount.VerifiedReleaseArchive.TryGetFile(relativeFilePath, out var verifiedFile)
+            && readResult.ObservedBytes == verifiedFile.Length
+            && string.Equals(readResult.Sha256, verifiedFile.Sha256, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+        httpContext.Response.ContentLength = 0;
+        _logger.LogWarning(
+            "ASDOCSARCHIVE010: Denying published AppSurface Docs archive {ArtifactType} {ArchivePath} because the bytes read for rewrite no longer match the verified release manifest for mount {MountRootPath}.",
+            artifactType,
+            relativeFilePath,
+            mount.MountRootPath);
+        return false;
+    }
+
+    private readonly record struct RewrittenFileReadResult(bool Allowed, string? Text, long ObservedBytes, string? Sha256, string? Reason)
+    {
+        public static RewrittenFileReadResult Success(RewrittenFileContent content)
+        {
+            return new RewrittenFileReadResult(true, content.Text, content.ObservedBytes, content.Sha256, null);
         }
 
         public static RewrittenFileReadResult Rejected(long ObservedBytes, string Reason)
         {
-            return new RewrittenFileReadResult(false, null, ObservedBytes, Reason);
+            return new RewrittenFileReadResult(false, null, ObservedBytes, null, Reason);
         }
     }
 
-    private static async Task<string> ReadUtf8TextWithLimitAsync(
+    private readonly record struct RewrittenFileContent(string Text, long ObservedBytes, string Sha256);
+
+    private static async Task<RewrittenFileContent> ReadUtf8TextWithLimitAsync(
         IFileInfo fileInfo,
         long limitBytes,
         CancellationToken cancellationToken)
@@ -682,7 +755,10 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
 
         buffer.Position = 0;
         using var reader = new StreamReader(buffer, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        return await reader.ReadToEndAsync(cancellationToken);
+        var text = await reader.ReadToEndAsync(cancellationToken);
+        var payload = buffer.ToArray();
+        var digest = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
+        return new RewrittenFileContent(text, payload.Length, digest);
     }
 
     private sealed class RewrittenFileSizeLimitExceededException(long observedBytes, long configuredLimitBytes)

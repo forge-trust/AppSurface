@@ -1399,9 +1399,9 @@ The version catalog is the release-level source of truth for version routing and
   - Values such as `./releases/1.2.3` are valid after normalization. Rooted paths and paths containing `..` are unavailable and are never mounted.
   - AppSurface Docs can mount that same artifact at `RouteRootPath` for the recommended alias and at `{RouteRootPath}/v/{version}` for the exact release surface.
 - `versions[].releaseManifestSha256`
-  - Optional SHA-256 digest of `.appsurface-docs-release-manifest.json` for this exact tree.
+  - Required SHA-256 digest of `.appsurface-docs-release-manifest.json` for public exact trees.
   - When present, AppSurface Docs verifies the manifest digest, manifest schema, listed file lengths, listed file digests, and handler-servable file coverage before mounting the release.
-  - When absent, a shape-valid legacy tree can still mount ordinary docs content, but archive SVG is denied because the archive is not catalog-verified.
+  - When absent, the public version is unavailable and is not mounted because mounted archive HTML, JavaScript, CSS, SVG, and the root `search-index.json` must be proven against a catalog trust anchor.
   - A manifest inside an archive is not trusted by itself; the catalog-pinned digest is the trust anchor.
 - `versions[].supportState`
   - Archive posture badge. Supported values are `Current`, `Maintained`, `Deprecated`, and `Archived`.
@@ -1417,7 +1417,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `.appsurface-docs-route-manifest.json` at the tree root for new exports
   - The hidden manifest freezes the docs-root-relative canonical route and alias graph that existed when the release was exported.
   - It stores route identity only. It does not store `PublicOrigin`, PathBase, `RouteRootPath`, exact-version mount roots, or absolute URLs.
-  - Missing manifests are supported for legacy archives; malformed legacy manifests disable archive alias recovery for that release without disabling normal file serving.
+  - Missing route manifests are tolerated for older pinned archives, but archive alias recovery is unavailable for that release.
   - Verified archives parse this manifest from bytes covered by `.appsurface-docs-release-manifest.json`; malformed pinned route manifests keep the release unavailable because redirects are behavior-affecting archive content.
 - `.appsurface-docs-release-manifest.json` at the tree root for new exports
   - The hidden release manifest lists the final exported files, byte lengths, content types when known, SHA-256 algorithm names, and lowercase SHA-256 digests.
@@ -1439,7 +1439,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `minisearch.min.js` at the tree root
 - any section, detail, partial, and asset routes that belong to the exported docs surface for that release
 
-AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. Exported `.html` files and the root `search-index.json` must stay under the published tree rewrite limit in `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`. Oversized rewritten artifacts fail closed instead of streaming unrewritten content; other static assets continue to stream normally. The mount contract has two roots: `MountRootPath` controls normal serving, links, assets, search config, search-index payloads, and redirects; `CanonicalRootPath` controls only `<link rel="canonical">` metadata. Exact mounts self-canonicalize. Recommended alias mounts use the route-family root as `MountRootPath` and the matching exact-version root as `CanonicalRootPath`, so `/docs` remains friendly while crawlers see `/docs/v/{version}` as the durable duplicate URL.
+AppSurface Docs does not regenerate these trees at request time. It resolves extensionless requests back to the exported `.html` files and rewrites stable-root HTML plus `search-index.json` payloads so the same artifact can serve both the recommended alias and `{RouteRootPath}/v/{version}` honestly, including custom roots such as `/foo/bar`. Exported `.html` files and the root `search-index.json` must stay under the published tree rewrite limit in `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`. Oversized rewritten artifacts fail closed instead of streaming unrewritten content; other static assets continue to stream normally. Mounted active archive files are checked at request time against the verified release manifest: rewritten `.html` and root `search-index.json` are compared against the exact bytes read for rewrite, while `.js`, `.css`, and `.svg` are rehashed before streaming. Mounted responses include `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`; mounted HTML also receives a sandboxed no-script CSP, and mounted SVG receives a script-blocking CSP. The mount contract has two roots: `MountRootPath` controls normal serving, links, assets, search config, search-index payloads, and redirects; `CanonicalRootPath` controls only `<link rel="canonical">` metadata. Exact mounts self-canonicalize. Recommended alias mounts use the route-family root as `MountRootPath` and the matching exact-version root as `CanonicalRootPath`, so `/docs` remains friendly while crawlers see `/docs/v/{version}` as the durable duplicate URL.
 
 ### Published tree rewrite limit
 
@@ -1461,11 +1461,11 @@ When the hidden frozen route manifest is present, mounted archives also use it b
 - A missing, invalid, or unsafe `TrustedReleaseRootPath` is catalog-level configuration failure. The archive shows a sanitized availability message, logs retain operator details, and no published exact tree is mounted.
 - A public version with a valid `releaseManifestSha256` pin mounts only after archive verification succeeds.
 - A public version with a `releaseManifestSha256` pin whose manifest is missing, mismatched, malformed, incomplete, or inconsistent is unavailable and does not mount.
-- A public version without `releaseManifestSha256` is treated as a legacy unverified archive: normal docs HTML, search, image, font, and runtime assets continue when the tree shape is valid, but archive SVG is denied with `ASDOCSARCHIVE010`.
+- A public version without `releaseManifestSha256` is unavailable and does not mount. Generate a fresh export and copy the printed digest into the catalog.
 - Healthy published versions and the live preview surface continue to load.
 - If the configured `recommendedVersion` is hidden, missing, or unavailable, AppSurface Docs does not mount it at the route root; that entry route falls back to the archive-style recovery surface with a link to the live preview.
 
-Archive verification diagnostics use stable `ASDOCSARCHIVE###` codes in structured logs. Common branches include `ASDOCSARCHIVE001` for a missing manifest, `ASDOCSARCHIVE002` for a catalog digest mismatch, `ASDOCSARCHIVE003` for unsupported schema or invalid payload, `ASDOCSARCHIVE004` for duplicate manifest paths, `ASDOCSARCHIVE005` for unsafe paths, `ASDOCSARCHIVE006` for missing listed files, `ASDOCSARCHIVE007` for length mismatch, `ASDOCSARCHIVE008` for digest mismatch, `ASDOCSARCHIVE009` for handler-servable files not listed in the manifest, and `ASDOCSARCHIVE010` for denied active SVG. Public archive messages stay sanitized and do not expose absolute filesystem paths.
+Archive verification diagnostics use stable `ASDOCSARCHIVE###` codes in structured logs. Common branches include `ASDOCSARCHIVE001` for a missing manifest, `ASDOCSARCHIVE002` for a catalog digest mismatch, `ASDOCSARCHIVE003` for unsupported schema or invalid payload, `ASDOCSARCHIVE004` for duplicate manifest paths, `ASDOCSARCHIVE005` for unsafe paths, `ASDOCSARCHIVE006` for missing listed files, `ASDOCSARCHIVE007` for length mismatch, `ASDOCSARCHIVE008` for digest mismatch, `ASDOCSARCHIVE009` for handler-servable files not listed in the manifest, and `ASDOCSARCHIVE010` for denied active archive files whose bytes are unverified or changed after startup. Public archive messages stay sanitized and do not expose absolute filesystem paths.
 
 ### Migrating absolute exactTreePath values
 
@@ -1525,6 +1525,7 @@ After:
 - Do not set `AppSurfaceDocs:Routing:DocsRootPath` to the same value as `RouteRootPath` when versioning is enabled. That collides with the stable published-release alias.
 - Do not configure only `DocsRootPath=/foo/bar/next` and expect archive routes to move to `/foo/bar`; set `RouteRootPath=/foo/bar` explicitly.
 - Do not point `recommendedVersion` at a hidden or broken release tree.
+- Do not omit `versions[].releaseManifestSha256` for public versions. Unpinned exact trees are unavailable and are not mounted.
 - Do not put absolute paths in `versions[].exactTreePath`. Configure `TrustedReleaseRootPath` once, then keep catalog paths relative to that release store.
 - Do not put the trusted release root, exact release trees, frozen route manifests, or served child assets behind symlinks, junctions, or other reparse points. AppSurface Docs denies them because published trees are public static-file roots.
 - Do not expect the recommended alias to rewrite ordinary links to the exact-version route. Only canonical metadata moves from the alias root to the exact root.

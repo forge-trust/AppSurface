@@ -26,7 +26,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     public async Task TryHandleAsync_ShouldIgnoreNonGetAndHeadRequests()
     {
         var tree = CreatePublishedTree("release");
-        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var handler = CreateLegacyHandler(tree, "/docs/v/1.2.3");
         var httpContext = CreateContext(HttpMethods.Post, "/docs/v/1.2.3");
 
         var handled = await handler.TryHandleAsync(httpContext);
@@ -138,6 +138,11 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
         Assert.True(await handler.TryHandleAsync(request));
         Assert.Equal("text/html", request.Response.ContentType);
+        Assert.Equal("nosniff", request.Response.Headers["X-Content-Type-Options"]);
+        Assert.Equal("no-referrer", request.Response.Headers["Referrer-Policy"]);
+        var csp = request.Response.Headers["Content-Security-Policy"].ToString();
+        Assert.Contains("sandbox allow-same-origin", csp);
+        Assert.Contains("script-src 'none'", csp);
         Assert.Contains("guide page", ReadBody(request));
     }
 
@@ -146,8 +151,20 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var tree = CreatePublishedTree("legacy-svg");
         File.WriteAllText(TestPathUtils.PathUnder(tree, "logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
-        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var handler = CreateLegacyHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/logo.svg");
+
+        var handled = await handler.TryHandleAsync(request);
+
+        Assert.False(handled);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldDenyHtml_ForLegacyUnverifiedArchives()
+    {
+        var tree = CreatePublishedTree("legacy-html");
+        var handler = CreateLegacyHandler(tree, "/docs/v/1.2.3");
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3");
 
         var handled = await handler.TryHandleAsync(request);
 
@@ -166,6 +183,9 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
         Assert.True(await handler.TryHandleAsync(request));
         Assert.Equal("image/svg+xml", request.Response.ContentType);
+        Assert.Equal("nosniff", request.Response.Headers["X-Content-Type-Options"]);
+        Assert.Equal("no-referrer", request.Response.Headers["Referrer-Policy"]);
+        Assert.Contains("script-src 'none'", request.Response.Headers["Content-Security-Policy"].ToString());
         Assert.Contains("<title>Logo</title>", ReadBody(request));
     }
 
@@ -182,6 +202,36 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         var handled = await handler.TryHandleAsync(request);
 
         Assert.False(handled);
+    }
+
+    [Theory]
+    [InlineData("index.html", "/docs/v/1.2.3")]
+    [InlineData("search.css", "/docs/v/1.2.3/search.css")]
+    [InlineData("search-index.json", "/docs/v/1.2.3/search-index.json")]
+    [InlineData("outline-client.js", "/docs/v/1.2.3/outline-client.js")]
+    public async Task TryHandleAsync_ShouldDenyActiveFiles_WhenVerifiedArchiveChangesAfterStartup(
+        string relativePath,
+        string requestPath)
+    {
+        var tree = CreatePublishedTree($"tampered-active-{relativePath.Replace('.', '-')}");
+        var filePath = TestPathUtils.PathUnder(tree, relativePath);
+        var handler = CreateVerifiedHandler(tree, "/docs/v/1.2.3");
+        File.WriteAllText(filePath, "tampered");
+        var request = CreateContext(HttpMethods.Get, requestPath);
+
+        var handled = await handler.TryHandleAsync(request);
+
+        if (relativePath.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(relativePath, "search-index.json", StringComparison.OrdinalIgnoreCase))
+        {
+            Assert.True(handled);
+            Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+            Assert.Equal(0, request.Response.ContentLength);
+        }
+        else
+        {
+            Assert.False(handled);
+        }
     }
 
     [Fact]
@@ -429,7 +479,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
               ]
             }
             """);
-        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var handler = CreateLegacyHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/.drafts/guide.md");
 
         Assert.False(await handler.TryHandleAsync(request));
@@ -454,7 +504,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
               ]
             }
             """);
-        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var handler = CreateLegacyHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/legacy//guide");
 
         Assert.False(await handler.TryHandleAsync(request));
@@ -480,12 +530,10 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
               ]
             }
             """);
-        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var handler = CreateLegacyHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/legacy");
 
-        Assert.True(await handler.TryHandleAsync(request));
-        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
-        Assert.Contains("legacy page", ReadBody(request));
+        Assert.False(await handler.TryHandleAsync(request));
     }
 
     [Fact]
@@ -514,12 +562,10 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
               ]
             }
             """);
-        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var handler = CreateLegacyHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/legacy");
 
-        Assert.True(await handler.TryHandleAsync(request));
-        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
-        Assert.Contains("legacy page", ReadBody(request));
+        Assert.False(await handler.TryHandleAsync(request));
     }
 
     [Fact]
@@ -529,18 +575,15 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         Directory.CreateDirectory(Path.Join(tree, "packages"));
         File.WriteAllText(Path.Join(tree, "packages", "README.md.html"), "<!DOCTYPE html><html><body>legacy artifact</body></html>");
         WriteFrozenManifest(tree, "{");
-        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var handler = CreateLegacyHandler(tree, "/docs/v/1.2.3");
         var aliasRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md");
         var manifestRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/.appsurface-docs-route-manifest.json");
 
-        Assert.True(await handler.TryHandleAsync(aliasRequest));
-        Assert.Equal(StatusCodes.Status200OK, aliasRequest.Response.StatusCode);
-        Assert.Contains("legacy artifact", ReadBody(aliasRequest));
+        Assert.False(await handler.TryHandleAsync(aliasRequest));
         Assert.False(await handler.TryHandleAsync(manifestRequest));
 
         var fileFallbackRequest = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/packages/README.md.html");
-        Assert.True(await handler.TryHandleAsync(fileFallbackRequest));
-        Assert.Contains("legacy artifact", ReadBody(fileFallbackRequest));
+        Assert.False(await handler.TryHandleAsync(fileFallbackRequest));
     }
 
     [Fact]
@@ -683,7 +726,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
             }
             """);
         File.CreateSymbolicLink(Path.Join(tree, ".appsurface-docs-route-manifest.json"), targetPath);
-        var handler = CreateHandler(tree, "/docs/v/1.2.3");
+        var handler = CreateLegacyHandler(tree, "/docs/v/1.2.3");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/old-guide");
 
         Assert.False(await handler.TryHandleAsync(request));
@@ -721,7 +764,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
             streamFactory: () => throw new InvalidOperationException("Oversized rewritten files must not be opened."));
         var provider = new TestFileProvider((relativeFilePath, fileInfo));
         var handler = CreateHandler(
-            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            [CreateVerifiedTestMount("/docs/v/1.2.3", provider, CreateArchiveFile(relativeFilePath, 9))],
             maxRewrittenFileSizeBytes: 8);
         var request = CreateContext(HttpMethods.Get, $"/docs/v/1.2.3/{relativeFilePath}");
 
@@ -742,7 +785,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
             streamFactory: () => throw new InvalidOperationException("Unknown-length rewritten files must not be opened."));
         var provider = new TestFileProvider(("unknown.html", fileInfo));
         var handler = CreateHandler(
-            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            [CreateVerifiedTestMount("/docs/v/1.2.3", provider, CreateArchiveFile("unknown.html", -1))],
             maxRewrittenFileSizeBytes: 8);
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/unknown.html");
 
@@ -760,7 +803,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
             streamFactory: () => new MemoryStream(Encoding.UTF8.GetBytes("<html>123</html>")));
         var provider = new TestFileProvider(("race.html", fileInfo));
         var handler = CreateHandler(
-            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            [CreateVerifiedTestMount("/docs/v/1.2.3", provider, CreateArchiveFile("race.html", 8))],
             maxRewrittenFileSizeBytes: 8);
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/race.html");
 
@@ -780,7 +823,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
             streamFactory: () => new MemoryStream(Encoding.UTF8.GetBytes(html)));
         var provider = new TestFileProvider(("at-limit.html", fileInfo));
         var handler = CreateHandler(
-            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            [CreateVerifiedTestMount("/docs/v/1.2.3", provider, CreateArchiveFileFromText("at-limit.html", html))],
             maxRewrittenFileSizeBytes: Encoding.UTF8.GetByteCount(html));
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/at-limit.html");
 
@@ -795,11 +838,11 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var fileInfo = new TestFileInfo(
             "search.css",
-            length: 64,
+            length: Encoding.UTF8.GetByteCount("body { color: #fff; }"),
             streamFactory: () => new MemoryStream(Encoding.UTF8.GetBytes("body { color: #fff; }")));
         var provider = new TestFileProvider(("search.css", fileInfo));
         var handler = CreateHandler(
-            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            [CreateVerifiedTestMount("/docs/v/1.2.3", provider, CreateArchiveFileFromText("search.css", "body { color: #fff; }"))],
             maxRewrittenFileSizeBytes: 8);
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
 
@@ -817,7 +860,13 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         var provider = new TestFileProvider(("first.html", firstFile), ("second.html", secondFile));
         var logger = new RecordingLogger<AppSurfaceDocsPublishedTreeHandler>();
         var handler = CreateHandler(
-            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            [
+                CreateVerifiedTestMount(
+                    "/docs/v/1.2.3",
+                    provider,
+                    CreateArchiveFile("first.html", 9),
+                    CreateArchiveFile("second.html", 10))
+            ],
             maxRewrittenFileSizeBytes: 8,
             logger: logger);
 
@@ -1012,13 +1061,11 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         var versionedTree = CreatePublishedTree("versioned");
         File.WriteAllText(Path.Join(stableTree, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Join(versionedTree, "search.css"), "body { color: #0ea5e9; }");
-        using var stableProvider = new PhysicalFileProvider(stableTree);
-        using var versionedProvider = new PhysicalFileProvider(versionedTree);
 
         var handler = new AppSurfaceDocsPublishedTreeHandler(
             [
-                new AppSurfaceDocsPublishedTreeMount("/docs", stableProvider),
-                new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", versionedProvider)
+                CreateVerifiedMount(stableTree, "/docs"),
+                CreateVerifiedMount(versionedTree, "/docs/v/1.2.3")
             ],
             "/docs/next");
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
@@ -1193,12 +1240,10 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         WriteCanonicalPage(aliasTree, "/docs/guide.html");
         File.WriteAllText(Path.Join(aliasTree, "search.css"), "body { color: #111; }");
         File.WriteAllText(Path.Join(exactTree, "search.css"), "body { color: #0ea5e9; }");
-        using var aliasProvider = new PhysicalFileProvider(aliasTree);
-        using var exactProvider = new PhysicalFileProvider(exactTree);
         var handler = CreateHandler(
             [
-                new AppSurfaceDocsPublishedTreeMount("/", aliasProvider, canonicalRootPath: "/v/1.2.3"),
-                new AppSurfaceDocsPublishedTreeMount("/v/1.2.3", exactProvider)
+                CreateVerifiedMount(aliasTree, "/", canonicalRootPath: "/v/1.2.3"),
+                CreateVerifiedMount(exactTree, "/v/1.2.3")
             ],
             previewRootPath: "/next",
             routeRootPath: "/");
@@ -1342,13 +1387,11 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         var versionedTree = CreatePublishedTree("versioned-overlap");
         File.WriteAllText(Path.Join(stableTree, "search.css"), "body { color: #fff; }");
         File.WriteAllText(Path.Join(versionedTree, "search.css"), "body { color: #0ea5e9; }");
-        using var stableProvider = new PhysicalFileProvider(stableTree);
-        using var versionedProvider = new PhysicalFileProvider(versionedTree);
 
         var handler = CreateHandler(
             [
-                new AppSurfaceDocsPublishedTreeMount("/docs", stableProvider),
-                new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", versionedProvider)
+                CreateVerifiedMount(stableTree, "/docs"),
+                CreateVerifiedMount(versionedTree, "/docs/v/1.2.3")
             ]);
         var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
 
@@ -1379,6 +1422,40 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         string? canonicalRootPath = null,
         string? publicOrigin = null)
     {
+        var manifestDigest = WriteReleaseManifest(treePath);
+        Assert.True(AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
+            treePath,
+            manifestDigest,
+            out var archive,
+            out var failure), failure?.Detail);
+
+        var provider = new PhysicalFileProvider(treePath, ExclusionFilters.None);
+        _disposables.Add(provider);
+
+        return CreateHandler(
+            [
+                new AppSurfaceDocsPublishedTreeMount(
+                    mountRootPath,
+                    provider,
+                    treePath,
+                    new AppSurfaceDocsFrozenRouteManifestCache(archive!.FrozenRouteManifest, treePath),
+                    AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+                    archive,
+                    canonicalRootPath)
+            ],
+            previewRootPath,
+            routeRootPath,
+            publicOrigin);
+    }
+
+    private AppSurfaceDocsPublishedTreeHandler CreateLegacyHandler(
+        string treePath,
+        string mountRootPath,
+        string previewRootPath = "/docs/next",
+        string routeRootPath = DocsUrlBuilder.DocsEntryPath,
+        string? canonicalRootPath = null,
+        string? publicOrigin = null)
+    {
         var provider = new PhysicalFileProvider(treePath, ExclusionFilters.None);
         _disposables.Add(provider);
 
@@ -1398,6 +1475,11 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
     private AppSurfaceDocsPublishedTreeHandler CreateVerifiedHandler(string treePath, string mountRootPath)
     {
+        return CreateHandler(treePath, mountRootPath);
+    }
+
+    private AppSurfaceDocsPublishedTreeMount CreateVerifiedMount(string treePath, string mountRootPath, string? canonicalRootPath = null)
+    {
         var manifestDigest = WriteReleaseManifest(treePath);
         Assert.True(AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
             treePath,
@@ -1407,17 +1489,30 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
 
         var provider = new PhysicalFileProvider(treePath, ExclusionFilters.None);
         _disposables.Add(provider);
+        return new AppSurfaceDocsPublishedTreeMount(
+            mountRootPath,
+            provider,
+            treePath,
+            new AppSurfaceDocsFrozenRouteManifestCache(archive!.FrozenRouteManifest, treePath),
+            AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+            archive,
+            canonicalRootPath);
+    }
 
-        return CreateHandler(
-            [
-                new AppSurfaceDocsPublishedTreeMount(
-                    mountRootPath,
-                    provider,
-                    treePath,
-                    new AppSurfaceDocsFrozenRouteManifestCache(archive!.FrozenRouteManifest, treePath),
-                    AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
-                    archive)
-            ]);
+    private static AppSurfaceDocsPublishedTreeMount CreateVerifiedTestMount(
+        string mountRootPath,
+        IFileProvider provider,
+        params AppSurfaceDocsReleaseArchiveFile[] files)
+    {
+        var archive = new AppSurfaceDocsVerifiedReleaseArchive(
+            files.ToDictionary(file => file.Path, StringComparer.Ordinal),
+            AppSurfaceDocsFrozenRouteManifest.Empty);
+
+        return new AppSurfaceDocsPublishedTreeMount(
+            mountRootPath,
+            provider,
+            archiveVerificationState: AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+            verifiedReleaseArchive: archive);
     }
 
     private AppSurfaceDocsPublishedTreeHandler CreateHandler(
@@ -1528,6 +1623,7 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     {
         var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
             .Where(path => !string.Equals(Path.GetFileName(path), AppSurfaceDocsReleaseArchiveVerifier.FileName, StringComparison.Ordinal))
+            .Where(path => ShouldIncludeReleaseManifestFile(root, path))
             .Select(
                 path => new
                 {
@@ -1548,6 +1644,25 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         return ComputeFileSha256(manifestPath);
     }
 
+    private static bool ShouldIncludeReleaseManifestFile(string root, string path)
+    {
+        var relativePath = NormalizeManifestPath(root, path);
+        if (AppSurfaceDocsPublishedTreeHandler.IsHandlerServeableFilePath(relativePath, allowSvg: true))
+        {
+            return true;
+        }
+
+        if (!string.Equals(relativePath, AppSurfaceDocsFrozenRouteManifest.FileName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return AppSurfaceDocsFrozenRouteManifest.TryLoadVerified(
+            File.ReadAllBytes(path),
+            out _,
+            out _);
+    }
+
     private static string NormalizeManifestPath(string root, string path)
     {
         return Path.GetRelativePath(root, path)
@@ -1558,6 +1673,21 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     private static string ComputeFileSha256(string path)
     {
         return Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
+    }
+
+    private static AppSurfaceDocsReleaseArchiveFile CreateArchiveFile(string path, long length)
+    {
+        return new AppSurfaceDocsReleaseArchiveFile(path, length, null, new string('0', 64));
+    }
+
+    private static AppSurfaceDocsReleaseArchiveFile CreateArchiveFileFromText(string path, string content)
+    {
+        var bytes = Encoding.UTF8.GetBytes(content);
+        return new AppSurfaceDocsReleaseArchiveFile(
+            path,
+            bytes.Length,
+            null,
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
     }
 
     private static DefaultHttpContext CreateContext(string method, string requestPath, string? pathBase = null)
