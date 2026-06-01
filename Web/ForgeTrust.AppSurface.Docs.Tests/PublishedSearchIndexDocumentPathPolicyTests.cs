@@ -76,18 +76,18 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
         Assert.StartsWith("<redacted:", result.RedactedValue);
     }
 
-    [Fact]
-    public void ValidateArchivePath_ShouldRejectRawControlCharacters()
+    [Theory]
+    [InlineData("/docs/guide.html\r\n")]
+    [InlineData("/docs/guide.html\u0085")]
+    [InlineData("/docs/%C2%85")]
+    public void ValidateArchivePath_ShouldRejectRawControlCharacters(string path)
     {
-        foreach (var path in new[] { "/docs/guide.html\r\n", "/docs/guide.html\u0085", "/docs/%C2%85" })
-        {
-            var result = PublishedSearchIndexDocumentPathPolicy.ValidateArchivePath(
-                path,
-                new PublishedSearchIndexArchivePathContext("1.2.3"));
+        var result = PublishedSearchIndexDocumentPathPolicy.ValidateArchivePath(
+            path,
+            new PublishedSearchIndexArchivePathContext("1.2.3"));
 
-            Assert.False(result.IsValid);
-            Assert.Equal(PublishedSearchIndexPathRejectionReason.ControlCharacter, result.Reason);
-        }
+        Assert.False(result.IsValid);
+        Assert.Equal(PublishedSearchIndexPathRejectionReason.ControlCharacter, result.Reason);
     }
 
     [Theory]
