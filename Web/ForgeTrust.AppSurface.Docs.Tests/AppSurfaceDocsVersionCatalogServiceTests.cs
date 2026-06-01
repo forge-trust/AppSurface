@@ -579,6 +579,43 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     }
 
     [Fact]
+    public void GetCatalog_ShouldMarkVersionUnavailable_WhenSearchIndexPayloadExceedsRewriteLimitBeforeParse()
+    {
+        var brokenTree = CreateExactTree("oversized-search-index");
+        File.WriteAllText(Path.Join(brokenTree, "search-index.json"), "{\"documents\":[]}");
+        var catalogPath = WriteCatalog(
+            new AppSurfaceDocsVersionCatalog
+            {
+                RecommendedVersion = "1.2.0",
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.2.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, brokenTree),
+                        SupportState = AppSurfaceDocsVersionSupportState.Current
+                    }
+                ]
+            });
+        var logger = A.Fake<ILogger<AppSurfaceDocsVersionCatalogService>>();
+        var service = CreateCatalogService(
+            catalogPath,
+            logger: logger,
+            maxRewrittenFileSizeBytes: 8);
+
+        var catalog = service.GetCatalog();
+
+        Assert.Null(catalog.RecommendedVersion);
+        var brokenVersion = Assert.Single(catalog.PublicVersions);
+        Assert.False(brokenVersion.IsAvailable);
+        Assert.Contains("search-index.json", brokenVersion.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes", brokenVersion.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_tempDirectory, brokenVersion.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        AssertWarningLogged(logger, "observed");
+        AssertWarningLogged(logger, "AppSurface Docs README section 'Published tree rewrite limit'");
+    }
+
+    [Fact]
     public void GetCatalog_ShouldMarkVersionUnavailable_WhenSearchIndexPayloadOmitsDocumentsArray()
     {
         var brokenTree = CreateExactTree("broken-search-shape");
@@ -1283,7 +1320,8 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         string routeRootPath = "/docs",
         string docsRootPath = "/docs/next",
         string? trustedReleaseRootPath = null,
-        ILogger<AppSurfaceDocsVersionCatalogService>? logger = null)
+        ILogger<AppSurfaceDocsVersionCatalogService>? logger = null,
+        long maxRewrittenFileSizeBytes = AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes)
     {
         var options = new AppSurfaceDocsOptions
         {
@@ -1296,7 +1334,8 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
             {
                 Enabled = versioningEnabled,
                 CatalogPath = catalogPath,
-                TrustedReleaseRootPath = trustedReleaseRootPath
+                TrustedReleaseRootPath = trustedReleaseRootPath,
+                MaxRewrittenFileSizeBytes = maxRewrittenFileSizeBytes
             }
         };
 

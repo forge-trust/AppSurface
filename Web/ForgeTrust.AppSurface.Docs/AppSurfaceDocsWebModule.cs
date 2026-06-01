@@ -166,6 +166,7 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             docsUrlBuilder.CurrentDocsRootPath,
             docsUrlBuilder.RouteRootPath,
             docsUrlBuilder.PublicOrigin,
+            options.Versioning.MaxRewrittenFileSizeBytes,
             app.ApplicationServices.GetService<ILogger<AppSurfaceDocsPublishedTreeHandler>>());
         app.Use(
             async (httpContext, next) =>

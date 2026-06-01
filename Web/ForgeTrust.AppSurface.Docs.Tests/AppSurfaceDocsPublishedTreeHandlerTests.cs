@@ -5,6 +5,9 @@ using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.FileProviders.Physical;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Primitives;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -707,6 +710,137 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         Assert.NotNull(headRequest.Response.ContentLength);
     }
 
+    [Theory]
+    [InlineData("oversized.html", "text/html")]
+    [InlineData("search-index.json", "application/json")]
+    public async Task TryHandleAsync_ShouldRejectOversizedRewrittenFilesBeforeOpeningStream(string relativeFilePath, string expectedContentTypePrefix)
+    {
+        var fileInfo = new TestFileInfo(
+            relativeFilePath,
+            length: 9,
+            streamFactory: () => throw new InvalidOperationException("Oversized rewritten files must not be opened."));
+        var provider = new TestFileProvider((relativeFilePath, fileInfo));
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, $"/docs/v/1.2.3/{relativeFilePath}");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(0, request.Response.ContentLength);
+        Assert.Null(request.Response.ContentType);
+        Assert.Equal(0, fileInfo.OpenCount);
+        Assert.DoesNotContain(expectedContentTypePrefix, request.Response.Headers.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRejectUnknownLengthRewrittenFilesBeforeOpeningStream()
+    {
+        var fileInfo = new TestFileInfo(
+            "unknown.html",
+            length: -1,
+            streamFactory: () => throw new InvalidOperationException("Unknown-length rewritten files must not be opened."));
+        var provider = new TestFileProvider(("unknown.html", fileInfo));
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/unknown.html");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(0, fileInfo.OpenCount);
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldRejectRewrittenFilesThatGrowPastLimitWhileReading()
+    {
+        var fileInfo = new TestFileInfo(
+            "race.html",
+            length: 8,
+            streamFactory: () => new MemoryStream(Encoding.UTF8.GetBytes("<html>123</html>")));
+        var provider = new TestFileProvider(("race.html", fileInfo));
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/race.html");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(1, fileInfo.OpenCount);
+        Assert.Equal(string.Empty, ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldAllowRewrittenFilesAtConfiguredLimit()
+    {
+        var html = "<p>1</p>";
+        var fileInfo = new TestFileInfo(
+            "at-limit.html",
+            length: Encoding.UTF8.GetByteCount(html),
+            streamFactory: () => new MemoryStream(Encoding.UTF8.GetBytes(html)));
+        var provider = new TestFileProvider(("at-limit.html", fileInfo));
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: Encoding.UTF8.GetByteCount(html));
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/at-limit.html");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
+        Assert.Equal("text/html", request.Response.ContentType);
+        Assert.Contains("<p>1</p>", ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldNotApplyRewriteLimitToStaticAssets()
+    {
+        var fileInfo = new TestFileInfo(
+            "search.css",
+            length: 64,
+            streamFactory: () => new MemoryStream(Encoding.UTF8.GetBytes("body { color: #fff; }")));
+        var provider = new TestFileProvider(("search.css", fileInfo));
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
+        Assert.Equal("text/css", request.Response.ContentType);
+        Assert.Contains("body { color: #fff; }", ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldLogOnlyFirstOversizedRewriteWarningPerHandler()
+    {
+        var firstFile = new TestFileInfo("first.html", length: 9, streamFactory: () => Stream.Null);
+        var secondFile = new TestFileInfo("second.html", length: 10, streamFactory: () => Stream.Null);
+        var provider = new TestFileProvider(("first.html", firstFile), ("second.html", secondFile));
+        var logger = new RecordingLogger<AppSurfaceDocsPublishedTreeHandler>();
+        var handler = CreateHandler(
+            [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", provider)],
+            maxRewrittenFileSizeBytes: 8,
+            logger: logger);
+
+        Assert.True(await handler.TryHandleAsync(CreateContext(HttpMethods.Get, "/docs/v/1.2.3/first.html")));
+        Assert.True(await handler.TryHandleAsync(CreateContext(HttpMethods.Get, "/docs/v/1.2.3/second.html")));
+
+        var warning = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        Assert.Contains("AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("404", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("Published tree rewrite limit", warning.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(33_554_433)]
+    public void Ctor_ShouldRejectUnsupportedRewriteLimits(long maxRewrittenFileSizeBytes)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => CreateHandler(
+                [new AppSurfaceDocsPublishedTreeMount("/docs/v/1.2.3", new TestFileProvider())],
+                maxRewrittenFileSizeBytes: maxRewrittenFileSizeBytes));
+    }
+
     [Fact]
     public async Task TryHandleAsync_ShouldBypassStableAliasForPreviewArchiveAndReservedVersionPaths()
     {
@@ -1290,9 +1424,17 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         IReadOnlyList<AppSurfaceDocsPublishedTreeMount> mounts,
         string previewRootPath = "/docs/next",
         string routeRootPath = DocsUrlBuilder.DocsEntryPath,
-        string? publicOrigin = null)
+        string? publicOrigin = null,
+        long maxRewrittenFileSizeBytes = AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes,
+        ILogger<AppSurfaceDocsPublishedTreeHandler>? logger = null)
     {
-        return new AppSurfaceDocsPublishedTreeHandler(mounts, previewRootPath, routeRootPath, publicOrigin);
+        return new AppSurfaceDocsPublishedTreeHandler(
+            mounts,
+            previewRootPath,
+            routeRootPath,
+            publicOrigin,
+            maxRewrittenFileSizeBytes,
+            logger);
     }
 
     private string CreatePublishedTree(string name)
@@ -1437,5 +1579,95 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         httpContext.Response.Body.Position = 0;
         using var reader = new StreamReader(httpContext.Response.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
         return reader.ReadToEnd();
+    }
+
+    private sealed class TestFileProvider(params (string Path, TestFileInfo FileInfo)[] files) : IFileProvider
+    {
+        private readonly Dictionary<string, TestFileInfo> _files = files.ToDictionary(
+            file => file.Path,
+            file => file.FileInfo,
+            StringComparer.OrdinalIgnoreCase);
+
+        public IFileInfo GetFileInfo(string subpath)
+        {
+            return _files.TryGetValue(subpath.TrimStart('/'), out var fileInfo)
+                ? fileInfo
+                : new NotFoundFileInfo(subpath);
+        }
+
+        public IDirectoryContents GetDirectoryContents(string subpath)
+        {
+            return NotFoundDirectoryContents.Singleton;
+        }
+
+        public IChangeToken Watch(string filter)
+        {
+            return NullChangeToken.Singleton;
+        }
+    }
+
+    private sealed class TestFileInfo(
+        string name,
+        long length,
+        Func<Stream> streamFactory) : IFileInfo
+    {
+        public bool Exists => true;
+
+        public long Length => length;
+
+        public string? PhysicalPath => null;
+
+        public string Name => name;
+
+        public DateTimeOffset LastModified { get; } = DateTimeOffset.UtcNow;
+
+        public bool IsDirectory => false;
+
+        public int OpenCount { get; private set; }
+
+        public Stream CreateReadStream()
+        {
+            OpenCount++;
+            return streamFactory();
+        }
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        private readonly List<LogEntry> _entries = [];
+
+        public IReadOnlyList<LogEntry> Entries => _entries;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return NullScope.Instance;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            _entries.Add(new LogEntry(logLevel, formatter(state, exception), exception));
+        }
+
+        public sealed record LogEntry(LogLevel Level, string Message, Exception? Exception);
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+
+            public void Dispose()
+            {
+            }
+        }
     }
 }

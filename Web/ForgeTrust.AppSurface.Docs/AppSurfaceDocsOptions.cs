@@ -778,6 +778,21 @@ public sealed class AppSurfaceDocsRoutingOptions
 public sealed class AppSurfaceDocsVersioningOptions
 {
     /// <summary>
+    /// Gets the default maximum rewritten published-tree input size in bytes.
+    /// </summary>
+    public const long DefaultMaxRewrittenFileSizeBytes = 2L * 1024L * 1024L;
+
+    /// <summary>
+    /// Gets the smallest supported rewritten published-tree input size in bytes.
+    /// </summary>
+    public const long MinMaxRewrittenFileSizeBytes = 1;
+
+    /// <summary>
+    /// Gets the largest supported rewritten published-tree input size in bytes.
+    /// </summary>
+    public const long MaxMaxRewrittenFileSizeBytes = 32L * 1024L * 1024L;
+
+    /// <summary>
     /// Gets or sets a value indicating whether release-tree versioning is enabled.
     /// </summary>
     public bool Enabled { get; set; }
@@ -812,6 +827,18 @@ public sealed class AppSurfaceDocsVersioningOptions
     /// directory and make each catalog entry relative when migrating older catalogs.
     /// </remarks>
     public string? TrustedReleaseRootPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum input size, in bytes, for request-time rewrites of published-tree HTML and search-index files.
+    /// </summary>
+    /// <remarks>
+    /// The default is <see cref="DefaultMaxRewrittenFileSizeBytes"/> bytes. The value must be between
+    /// <see cref="MinMaxRewrittenFileSizeBytes"/> and <see cref="MaxMaxRewrittenFileSizeBytes"/>. This limit applies
+    /// only to exported <c>.html</c> files and the root <c>search-index.json</c> file when a published release tree is
+    /// mounted through AppSurface Docs versioning. Static assets such as CSS, JavaScript, images, and fonts continue to
+    /// stream normally and are not capped by this option.
+    /// </remarks>
+    public long MaxRewrittenFileSizeBytes { get; set; } = DefaultMaxRewrittenFileSizeBytes;
 }
 
 /// <summary>
@@ -1289,6 +1316,12 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
         if (versioning is null)
         {
             failures.Add("AppSurfaceDocs:Versioning must not be null.");
+        }
+        else if (versioning.MaxRewrittenFileSizeBytes < AppSurfaceDocsVersioningOptions.MinMaxRewrittenFileSizeBytes
+                 || versioning.MaxRewrittenFileSizeBytes > AppSurfaceDocsVersioningOptions.MaxMaxRewrittenFileSizeBytes)
+        {
+            failures.Add(
+                $"AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes must be between {AppSurfaceDocsVersioningOptions.MinMaxRewrittenFileSizeBytes} and {AppSurfaceDocsVersioningOptions.MaxMaxRewrittenFileSizeBytes} bytes.");
         }
 
         ValidateLocalization(localization, failures);
