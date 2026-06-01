@@ -34,6 +34,18 @@ public class RazorWireFormTagHelper : TagHelper
     [HtmlAttributeName("rw-target")]
     public string? TargetFrame { get; set; }
 
+    /// <summary>
+    /// Gets or sets the anti-forgery behavior assertion for this form.
+    /// </summary>
+    /// <remarks>
+    /// Supported values are <c>lazy</c> and <c>off</c>. <c>lazy</c> emits <c>data-rw-antiforgery="lazy"</c>, asserting
+    /// that the runtime should fetch a fresh anti-forgery token before the form is submitted. <c>off</c> emits
+    /// <c>data-rw-antiforgery="off"</c>, an explicit opt-out that the exporter treats as unsafe if a static token is
+    /// still present. When this property is unset, normal server-rendered forms keep their default ASP.NET Core
+    /// anti-forgery behavior, and hybrid export can still convert RazorWire-owned static token forms to lazy refresh.
+    /// </remarks>
+    [HtmlAttributeName("rw-antiforgery")]
+    public string? Antiforgery { get; set; }
 
     /// <summary>
     /// Processes a form tag by removing attributes that start with "rw-" and configuring Turbo attributes based on the tag helper's properties.
@@ -64,7 +76,29 @@ public class RazorWireFormTagHelper : TagHelper
             output.Attributes.SetAttribute("data-turbo-frame", TargetFrame);
         }
 
+        ApplyAntiforgeryConvention(output);
+
         ApplyFormFailureConvention(output);
+    }
+
+    private void ApplyAntiforgeryConvention(TagHelperOutput output)
+    {
+        if (string.IsNullOrWhiteSpace(Antiforgery))
+        {
+            return;
+        }
+
+        if (string.Equals(Antiforgery, "lazy", StringComparison.OrdinalIgnoreCase))
+        {
+            output.Attributes.SetAttribute("data-rw-antiforgery", "lazy");
+            output.Attributes.SetAttribute("data-rw-form", "true");
+            return;
+        }
+
+        if (string.Equals(Antiforgery, "off", StringComparison.OrdinalIgnoreCase))
+        {
+            output.Attributes.SetAttribute("data-rw-antiforgery", "off");
+        }
     }
 
     private void ApplyFormFailureConvention(TagHelperOutput output)

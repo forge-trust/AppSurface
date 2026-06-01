@@ -1,5 +1,6 @@
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.Razor.TagHelpers;
@@ -45,6 +46,20 @@ public class RazorWireScriptsTagHelper : TagHelper
     /// </summary>
     /// <param name="context">The current tag helper context.</param>
     /// <param name="output">The tag helper output that will be modified to contain the script elements and have no wrapper tag.</param>
+    /// <remarks>
+    /// The generated runtime script includes data attributes for form failure UX, development diagnostics, split-origin
+    /// live origin, hybrid credential behavior, and the lazy anti-forgery token endpoint. The helper normalizes
+    /// <see cref="RazorWireOptions.Hybrid"/>.<see cref="RazorWireHybridOptions.LiveOrigin"/> before emitting it so the
+    /// browser receives only an origin, never a path-bearing URL. The anti-forgery endpoint is emitted relative to the
+    /// current request path base so applications mounted under a virtual directory refresh tokens from the live app path.
+    /// Use
+    /// <see cref="RazorWireHybridCredentialsMode.Auto"/> to include credentials automatically when a live origin is
+    /// configured; use explicit include or omit only when the live endpoint contract requires it.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <see cref="RazorWireOptions.Hybrid"/>.<see cref="RazorWireHybridOptions.LiveOrigin"/> is not an
+    /// absolute HTTP(S) origin or includes a path, query string, fragment, or userinfo.
+    /// </exception>
     public override void Process(TagHelperContext context, TagHelperOutput output)
     {
         output.TagName = null; // No wrapper tag
@@ -66,13 +81,52 @@ public class RazorWireScriptsTagHelper : TagHelper
             : "off";
         var failureUxEnabled = _options.Forms.EnableFailureUx.ToString().ToLowerInvariant();
         var defaultFailureMessage = HtmlEncoder.Default.Encode(_options.Forms.DefaultFailureMessage);
+        var normalizedLiveOrigin = NormalizeOriginOrThrow(
+            _options.Hybrid.LiveOrigin,
+            "RazorWireOptions.Hybrid.LiveOrigin");
+        var liveOrigin = HtmlEncoder.Default.Encode(normalizedLiveOrigin ?? string.Empty);
+        var credentialsMode = ResolveHybridCredentialsAttribute(_options, normalizedLiveOrigin);
+        var antiforgeryEndpoint = HtmlEncoder.Default.Encode(
+            pathBase.Add(new PathString(_options.Forms.Antiforgery.TokenEndpointPath)).Value!);
 
         // This includes Turbo.js and the custom RazorWire island loader.
         output.Content.SetHtmlContent(
             $@"
 <script src=""https://cdn.jsdelivr.net/npm/@hotwired/turbo@8.0.12/dist/turbo.es2017-umd.js"" integrity=""sha256-1evN/OxCRDJtuVCzQ3gklVq8LzN6qhCm7x/sbawknOk="" crossorigin=""anonymous""></script>
-<script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}""></script>
+<script src=""{razorwireJs}"" data-rw-development-diagnostics=""{diagnosticsEnabled.ToString().ToLowerInvariant()}"" data-rw-form-failure-enabled=""{failureUxEnabled}"" data-rw-form-failure-mode=""{failureMode}"" data-rw-default-failure-message=""{defaultFailureMessage}"" data-rw-live-origin=""{liveOrigin}"" data-rw-hybrid-credentials=""{credentialsMode}"" data-rw-antiforgery-endpoint=""{antiforgeryEndpoint}""></script>
 <script src=""{islandsJs}""></script>
 ");
+    }
+
+    private static string ResolveHybridCredentialsAttribute(RazorWireOptions options, string? normalizedLiveOrigin)
+    {
+        return options.Hybrid.CredentialsMode is RazorWireHybridCredentialsMode.Include
+               || (options.Hybrid.CredentialsMode is RazorWireHybridCredentialsMode.Auto
+                   && !string.IsNullOrWhiteSpace(normalizedLiveOrigin))
+            ? "include"
+            : "omit";
+    }
+
+    private static string? NormalizeOriginOrThrow(string? origin, string optionName)
+    {
+        if (string.IsNullOrWhiteSpace(origin))
+        {
+            return null;
+        }
+
+        var trimmedOrigin = origin.Trim();
+        if (!Uri.TryCreate(trimmedOrigin, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment)
+            || uri.AbsolutePath.Trim('/') is { Length: > 0 })
+        {
+            throw new InvalidOperationException(
+                $"{optionName} must be an absolute http or https origin such as 'https://api.example.com'. " +
+                "Configure only the origin; paths, query strings, fragments, userinfo, and unsupported schemes are not supported.");
+        }
+
+        return uri.GetLeftPart(UriPartial.Authority);
     }
 }

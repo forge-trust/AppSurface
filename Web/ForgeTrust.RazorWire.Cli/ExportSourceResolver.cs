@@ -101,7 +101,31 @@ public sealed class ExportSourceResolver
         return new CommandExecutor(loggerFactory.CreateLogger<CommandExecutor>());
     }
 
-    internal async Task<ResolvedExportSource> ResolveAsync(
+    /// <summary>
+    /// Resolves a validated source request into a crawlable base URL, launching the target app when needed.
+    /// </summary>
+    /// <param name="request">The validated source request to resolve.</param>
+    /// <param name="cancellationToken">Cancellation token for publish, launch, and readiness probing.</param>
+    /// <returns>A resolved source that owns any launched process for the lifetime of the export.</returns>
+    /// <remarks>
+    /// URL sources are probed for readiness and returned without starting a process. Project sources are published first
+    /// unless <see cref="ExportSourceRequest.NoBuild"/> is set, then launched with an ephemeral loopback binding when no
+    /// explicit URL argument is present. DLL sources are launched directly. The returned
+    /// <see cref="ResolvedExportSource"/> must be disposed by the caller so any process launched for the export is
+    /// stopped after crawling. If the resolver cannot observe a listening URL or the app does not become reachable
+    /// before the configured timeouts, any launched process is disposed before the exception is rethrown.
+    /// </remarks>
+    /// <exception cref="CommandException">
+    /// Thrown when a direct URL source is not reachable, times out, or a project launch cannot be prepared.
+    /// </exception>
+    /// <exception cref="TimeoutException">
+    /// Thrown when a launched project or DLL does not publish a listening URL within
+    /// <see cref="ListeningUrlTimeout"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when a launched process exits before becoming crawlable or reports an unusable startup state.
+    /// </exception>
+    public async Task<ResolvedExportSource> ResolveAsync(
         ExportSourceRequest request,
         CancellationToken cancellationToken = default)
     {
