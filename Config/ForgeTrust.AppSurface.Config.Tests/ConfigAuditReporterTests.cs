@@ -2818,6 +2818,8 @@ public class ConfigAuditReporterTests
             services.AddConfigAuditKey<AppSettings>("App");
             services.AddConfigAuditKey<string>("App.Mode");
             services.AddConfigAuditKey<string>("Application.Reviewed");
+            services.AddSingleton<IConfigProvider>(
+                new SourceSensitiveKeyEnumeratorProvider("SourceSensitive.Leaf", "source-sensitive-value"));
 
             var provider = services.BuildServiceProvider();
             var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Staging");
@@ -2931,6 +2933,13 @@ public class ConfigAuditReporterTests
                 ConfigAuditDiscoveredKeyClassification.Known,
                 "display-me",
                 ConfigAuditDiscoveredValueDisplayState.Shown);
+            var sourceSensitive = AssertDiscovered(
+                report,
+                "SourceSensitive.Leaf",
+                ConfigAuditDiscoveredKeyClassification.Unknown,
+                "[redacted]",
+                ConfigAuditDiscoveredValueDisplayState.Redacted);
+            Assert.True(sourceSensitive.IsRedacted);
             Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "App.NullValue");
             Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "UnknownNull");
             Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "OtherEnvironmentNull");
@@ -2970,6 +2979,7 @@ public class ConfigAuditReporterTests
             Assert.DoesNotContain("nearest-visible", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("9223372036854775807", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("1E+100", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("source-sensitive-value", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("super-secret", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("secret-one", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("provider-only-secret", rendered, StringComparison.Ordinal);
@@ -2982,6 +2992,7 @@ public class ConfigAuditReporterTests
             Assert.DoesNotContain("lookalike", serialized, StringComparison.Ordinal);
             Assert.DoesNotContain("nearest-visible", serialized, StringComparison.Ordinal);
             Assert.DoesNotContain("9223372036854775807", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("source-sensitive-value", serialized, StringComparison.Ordinal);
             Assert.DoesNotContain("provider-only-secret", serialized, StringComparison.Ordinal);
             Assert.DoesNotContain("descendant-secret", serialized, StringComparison.Ordinal);
         }
@@ -3497,6 +3508,46 @@ public class ConfigAuditReporterTests
 
         public IReadOnlyList<ConfigAuditProviderDiscoveredKey> EnumerateKeys(string environment) =>
             throw new InvalidOperationException("super-secret enumeration failure");
+    }
+
+    private sealed class SourceSensitiveKeyEnumeratorProvider : IConfigProvider, IConfigAuditKeyEnumerator
+    {
+        private readonly string _key;
+        private readonly object _value;
+
+        public SourceSensitiveKeyEnumeratorProvider(string key, object value)
+        {
+            _key = key;
+            _value = value;
+        }
+
+        public int Priority => 10;
+
+        public string Name => nameof(SourceSensitiveKeyEnumeratorProvider);
+
+        public T? GetValue<T>(string environment, string key) => default;
+
+        public IReadOnlyList<ConfigAuditProviderDiscoveredKey> EnumerateKeys(string environment) =>
+        [
+            new ConfigAuditProviderDiscoveredKey(
+                _key,
+                _value,
+                ConfigAuditDiscoveredValueKind.Scalar,
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.File,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        FilePath = "/app/appsettings.Staging.json",
+                        ConfigPath = _key,
+                        AppliedToPath = _key,
+                        Role = ConfigAuditSourceRole.Base,
+                        Sensitivity = ConfigAuditSensitivity.Sensitive
+                    }
+                ],
+                [])
+        ];
     }
 
     private sealed class DictionaryConfigProvider : IConfigProvider, IConfigDiagnosticProvider
