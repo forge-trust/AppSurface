@@ -1,6 +1,7 @@
 using System.Text;
 using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -46,6 +47,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(2, (int)DocHarvesterHealthStatus.Failed);
         Assert.Equal(3, (int)DocHarvesterHealthStatus.TimedOut);
         Assert.Equal(4, (int)DocHarvesterHealthStatus.Canceled);
+        Assert.Equal(0, (int)AppSurfaceDocsReleaseArchiveVerificationState.Unavailable);
+        Assert.Equal(1, (int)AppSurfaceDocsReleaseArchiveVerificationState.AvailableUnverifiedLegacy);
+        Assert.Equal(2, (int)AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified);
         Assert.Equal(0, (int)DocHarvestDiagnosticSeverity.Information);
         Assert.Equal(1, (int)DocHarvestDiagnosticSeverity.Warning);
         Assert.Equal(2, (int)DocHarvestDiagnosticSeverity.Error);

@@ -20,10 +20,13 @@ public class ExportCommandTests
     [Fact]
     public async Task ExecuteAsync_Should_Export_When_Url_Source_Is_Provided()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-command-").FullName;
         try
         {
+            var wellKnownDir = TestPathUtils.PathUnder(tempDir, ".well-known");
+            var securityTxtPath = TestPathUtils.PathUnder(wellKnownDir, "security.txt");
+            Directory.CreateDirectory(wellKnownDir);
+            await File.WriteAllTextAsync(securityTxtPath, "Contact: mailto:security@example.com");
             var logger = A.Fake<ILogger<ExportCommand>>();
             var engineLogger = A.Fake<ILogger<ExportEngine>>();
             var requestFactory = new ExportSourceRequestFactory();
@@ -43,7 +46,47 @@ public class ExportCommandTests
 
             await command.ExecuteAsync(A.Fake<IConsole>());
 
-            Assert.True(File.Exists(Path.Combine(tempDir, "index.html")));
+            Assert.True(File.Exists(TestPathUtils.PathUnder(tempDir, "index.html")));
+            Assert.True(File.Exists(securityTxtPath));
+            var manifestPath = TestPathUtils.PathUnder(tempDir, ".appsurface-docs-release-manifest.json");
+            Assert.False(File.Exists(manifestPath));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    public static IEnumerable<object[]> UnsupportedArchivePaths()
+    {
+        yield return [".nojekyll", "/.nojekyll"];
+        if (!OperatingSystem.IsWindows())
+        {
+            yield return ["asset:name.svg", "/asset:name.svg"];
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(UnsupportedArchivePaths))]
+    public async Task ReleaseArchiveManifestWriter_ShouldFail_WhenOutputContainsUnsupportedArchivePath(
+        string unsafePath,
+        string expectedRoute)
+    {
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-release-manifest-").FullName;
+        try
+        {
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(tempDir, "index.html"), "<!DOCTYPE html><html></html>");
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(tempDir, unsafePath), string.Empty);
+
+            var exception = await Assert.ThrowsAsync<ExportValidationException>(
+                () => ReleaseArchiveManifestWriter.WriteAsync(tempDir, CancellationToken.None));
+
+            var diagnostic = Assert.Single(exception.Diagnostics);
+            Assert.Equal("ASDOCSARCHIVE005", diagnostic.Code);
+            Assert.Equal(expectedRoute, diagnostic.Route);
         }
         finally
         {
@@ -102,8 +145,7 @@ public class ExportCommandTests
     [Fact]
     public async Task ExecuteAsync_WithToken_Should_Respect_Cancellation()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-command-").FullName;
         try
         {
             var command = CreateCommand("http://localhost:5001", null, null, tempDir);
@@ -125,7 +167,7 @@ public class ExportCommandTests
     [Fact]
     public async Task ExecuteAsync_Should_Use_SeedRoutesPath()
     {
-        var missingSeedFile = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName(), "seeds.txt");
+        var missingSeedFile = TestPathUtils.PathUnder(Path.GetTempPath(), Path.GetRandomFileName(), "seeds.txt");
         var command = CreateCommand(
             "http://localhost:5001",
             null,
@@ -141,8 +183,7 @@ public class ExportCommandTests
     [Fact]
     public async Task ExecuteAsync_Should_Translate_Cdn_Validation_Failures_To_CommandException()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(tempDir);
+        var tempDir = Directory.CreateTempSubdirectory("razorwire-export-command-").FullName;
         try
         {
             var command = CreateCommand(

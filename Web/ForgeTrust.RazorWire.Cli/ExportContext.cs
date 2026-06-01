@@ -141,6 +141,39 @@ public class ExportContext
     internal List<ExportRedirectArtifact> RedirectArtifacts { get; } = [];
 
     /// <summary>
+    /// Gets the release archive manifest summary written after export materialization completes.
+    /// </summary>
+    /// <remarks>
+    /// The summary is populated by <see cref="ExportEngine"/> after final static files have been written when
+    /// <see cref="ReleaseArchiveManifestEnabled"/> is <see langword="true"/>. Command surfaces use it to print the
+    /// catalog digest operators should pin with <c>releaseManifestSha256</c>.
+    /// </remarks>
+    public ReleaseArchiveManifestSummary? ReleaseArchiveManifest { get; internal set; }
+
+    /// <summary>
+    /// Gets a value indicating whether this export should emit an AppSurface Docs release archive manifest.
+    /// </summary>
+    /// <remarks>
+    /// Generic RazorWire exports leave this disabled because arbitrary static sites may need valid hidden web paths such
+    /// as <c>.well-known</c>. AppSurface Docs exact-release export enables it after writing the frozen route manifest so
+    /// operators receive a catalog-pinned integrity digest for that release archive.
+    /// </remarks>
+    public bool ReleaseArchiveManifestEnabled { get; private set; }
+
+    /// <summary>
+    /// Enables generation of the AppSurface Docs release archive manifest after final export materialization.
+    /// </summary>
+    /// <remarks>
+    /// Host integrations should call this only when the output tree is intended to satisfy the AppSurface Docs exact
+    /// release archive contract. The exporter then writes <c>.appsurface-docs-release-manifest.json</c> and populates
+    /// <see cref="ReleaseArchiveManifest"/> with the digest that should be pinned in trusted catalog configuration.
+    /// </remarks>
+    public void EnableReleaseArchiveManifest()
+    {
+        ReleaseArchiveManifestEnabled = true;
+    }
+
+    /// <summary>
     /// Registers a route alias that should redirect to an already-exported canonical route.
     /// </summary>
     /// <param name="aliasRoute">Root-relative alias route that should redirect.</param>

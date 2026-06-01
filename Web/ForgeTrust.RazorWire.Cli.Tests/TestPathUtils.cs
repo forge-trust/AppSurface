@@ -1,4 +1,4 @@
-namespace ForgeTrust.AppSurface.Docs.Tests;
+namespace ForgeTrust.RazorWire.Cli.Tests;
 
 /// <summary>
 /// Provides path helpers for tests that need deterministic containment under a known root.
@@ -116,27 +116,5 @@ internal static class TestPathUtils
             ? basePath
             : basePath + Path.DirectorySeparatorChar;
         return candidatePath.StartsWith(basePrefix, comparison);
-    }
-
-    /// <summary>
-    /// Finds the repository root by walking upward from a start path until the solution file is found.
-    /// </summary>
-    /// <param name="startPath">Directory or file path to begin searching from.</param>
-    /// <returns>The repository root directory.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the solution file cannot be found in any ancestor.</exception>
-    public static string FindRepoRoot(string startPath)
-    {
-        var current = new DirectoryInfo(startPath);
-        while (current != null)
-        {
-            if (File.Exists(PathUnder(current.FullName, "ForgeTrust.AppSurface.slnx")))
-            {
-                return current.FullName;
-            }
-
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException("Could not locate repository root.");
     }
 }

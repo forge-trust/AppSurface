@@ -14,6 +14,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Narrative release note: [Upcoming release note](./releases/unreleased.md)
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
+- AppSurface Docs exact release archives now emit catalog-pinned release manifests, and runtime archive serving verifies those manifests before allowing active archive SVG.
 - Behavior change: AppSurface Docs `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` continues to expose harvest health routes outside Development, but live harvest progress streaming now also requires a custom host-owned `IRazorWireChannelAuthorizer`.
 - AppSurface Docs version catalogs now require trusted-root-relative `exactTreePath` values under `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; migrate old absolute tree paths by moving the parent into the trusted root setting and keeping catalog entries relative.
 - RazorWire stream endpoints now reject malformed channels with `400`, deny unauthorized channels with `403`, and return `429` when per-process live-channel or subscription admission limits are exhausted before hub subscriber state is allocated.
