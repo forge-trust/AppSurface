@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Linq;
 
 namespace ForgeTrust.AppSurface.Flow;
 
@@ -111,15 +112,12 @@ public sealed class FlowDefinition<TContext>
 
         foreach (var descriptor in copy.Values)
         {
-            foreach (var target in descriptor.NextNodeIds)
+            foreach (var target in descriptor.NextNodeIds.Where(target => !copy.ContainsKey(target)))
             {
-                if (!copy.ContainsKey(target))
-                {
-                    throw new FlowDefinitionException(
-                        string.Create(
-                            CultureInfo.InvariantCulture,
-                            $"Flow '{flowId}' version '{version}' node '{descriptor.NodeId}' targets missing node '{target}'."));
-                }
+                throw new FlowDefinitionException(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"Flow '{flowId}' version '{version}' node '{descriptor.NodeId}' targets missing node '{target}'."));
             }
         }
 

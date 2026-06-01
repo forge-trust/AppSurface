@@ -25,6 +25,31 @@ public sealed class FlowContextSerializationValidatorTests
         Assert.Contains("round-trip", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void SystemTextJsonSerializer_RoundTripsSerializableRecord()
+    {
+        var serializer = new SystemTextJsonFlowContextSerializer();
+
+        var payload = serializer.Serialize(new TestState("ready"));
+        var result = serializer.Deserialize<TestState>(payload);
+
+        Assert.Equal(new TestState("ready"), result);
+    }
+
+    [Fact]
+    public void SystemTextJsonSerializer_WithNullOptions_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new SystemTextJsonFlowContextSerializer(null!));
+    }
+
+    [Fact]
+    public void SystemTextJsonSerializer_WhenPayloadIsNull_ThrowsJsonException()
+    {
+        var serializer = new SystemTextJsonFlowContextSerializer();
+
+        Assert.Throws<System.Text.Json.JsonException>(() => serializer.Deserialize<TestState>("null"));
+    }
+
     private sealed record TestState(string Value);
 
     private sealed class ThrowingSerializer : IFlowContextSerializer

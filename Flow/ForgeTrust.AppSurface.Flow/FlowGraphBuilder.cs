@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Linq;
 
 namespace ForgeTrust.AppSurface.Flow;
 
@@ -106,15 +107,12 @@ public sealed class FlowGraphBuilder<TContext>
 
         foreach (var descriptor in _nodes.Values)
         {
-            foreach (var target in descriptor.NextNodeIds)
+            foreach (var target in descriptor.NextNodeIds.Where(target => !_nodes.ContainsKey(target)))
             {
-                if (!_nodes.ContainsKey(target))
-                {
-                    throw new FlowDefinitionException(
-                        string.Create(
-                            CultureInfo.InvariantCulture,
-                            $"Flow '{_flowId}' version '{_version}' node '{descriptor.NodeId}' targets missing node '{target}'."));
-                }
+                throw new FlowDefinitionException(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"Flow '{_flowId}' version '{_version}' node '{descriptor.NodeId}' targets missing node '{target}'."));
             }
         }
 
