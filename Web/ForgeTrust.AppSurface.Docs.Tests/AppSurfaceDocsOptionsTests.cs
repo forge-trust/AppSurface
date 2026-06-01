@@ -407,6 +407,17 @@ public sealed class AppSurfaceDocsOptionsTests
     }
 
     [Fact]
+    public void AppSurfaceDocsOptions_ShouldDefaultVersioningRewriteLimitToTwoMiB()
+    {
+        var options = new AppSurfaceDocsOptions();
+
+        Assert.Equal(2_097_152, options.Versioning.MaxRewrittenFileSizeBytes);
+        Assert.Equal(2_097_152, AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes);
+        Assert.Equal(1, AppSurfaceDocsVersioningOptions.MinMaxRewrittenFileSizeBytes);
+        Assert.Equal(33_554_432, AppSurfaceDocsVersioningOptions.MaxMaxRewrittenFileSizeBytes);
+    }
+
+    [Fact]
     public void AppSurfaceDocsOptions_ShouldDefaultHarvestFailOnFailureToFalse()
     {
         var options = new AppSurfaceDocsOptions();
@@ -1115,6 +1126,27 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Equal("/docs", options.Routing.RouteRootPath);
         Assert.Equal("/docs/next", options.Routing.DocsRootPath);
+    }
+
+    [Fact]
+    public void AddAppSurfaceDocs_ShouldBindConfiguredVersioningRewriteLimit()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes"] = "4194304"
+                    })
+                .Build());
+
+        services.AddAppSurfaceDocs();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<AppSurfaceDocsOptions>>().Value;
+
+        Assert.Equal(4_194_304, options.Versioning.MaxRewrittenFileSizeBytes);
     }
 
     [Fact]
@@ -2653,6 +2685,49 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(
             result.Failures,
             failure => failure.Contains("requires AppSurfaceDocs:Versioning:CatalogPath", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(33_554_433)]
+    public void Validator_ShouldRejectInvalidVersioningRewriteLimit(long maxRewrittenFileSizeBytes)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Versioning = new AppSurfaceDocsVersioningOptions
+            {
+                MaxRewrittenFileSizeBytes = maxRewrittenFileSizeBytes
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes", StringComparison.OrdinalIgnoreCase)
+                       && failure.Contains("33554432", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(33_554_432)]
+    public void Validator_ShouldAllowBoundaryVersioningRewriteLimits(long maxRewrittenFileSizeBytes)
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Versioning = new AppSurfaceDocsVersioningOptions
+            {
+                MaxRewrittenFileSizeBytes = maxRewrittenFileSizeBytes
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.False(result.Failed);
     }
 
     [Fact]
