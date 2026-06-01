@@ -1243,6 +1243,22 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         try
         {
             File.SetUnixFileMode(filePath, UnixFileMode.None);
+            var fileReadDenied = false;
+            try
+            {
+                using var probe = File.OpenRead(filePath);
+                _ = probe.Length;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                fileReadDenied = true;
+            }
+
+            if (!fileReadDenied)
+            {
+                return;
+            }
+
             var harvester = CreateHarvester(CreateEnabledOptions("src/unreadable.js"));
 
             var docs = await harvester.HarvestAsync(_testRoot);
