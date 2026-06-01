@@ -36,5 +36,51 @@ public sealed class FlowOutcomeTests
         Assert.Throws<ArgumentException>(() => new FlowFault(" ", "message"));
     }
 
+    [Fact]
+    public void Fault_WithEmptyMessage_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(() => new FlowFault("approval.failed", " "));
+    }
+
+    [Theory]
+    [InlineData("next-node")]
+    [InlineData("wait-event")]
+    [InlineData("timed-out-event")]
+    public void Factories_WithEmptyRequiredText_ThrowArgumentException(string scenario)
+    {
+        var state = new TestState("ready");
+
+        Assert.Throws<ArgumentException>(() => scenario switch
+        {
+            "next-node" => FlowNodeOutcome<TestState>.Next(" ", state),
+            "wait-event" => FlowNodeOutcome<TestState>.Wait(" ", state),
+            "timed-out-event" => FlowNodeOutcome<TestState>.TimedOut(" ", state),
+            _ => throw new InvalidOperationException("Unknown scenario."),
+        });
+    }
+
+    [Theory]
+    [InlineData("next")]
+    [InlineData("wait")]
+    [InlineData("timed-out")]
+    [InlineData("complete")]
+    public void Factories_WithNullContext_ThrowArgumentNullException(string scenario)
+    {
+        Assert.Throws<ArgumentNullException>(() => scenario switch
+        {
+            "next" => FlowNodeOutcome<TestState>.Next("next", null!),
+            "wait" => FlowNodeOutcome<TestState>.Wait("approved", null!),
+            "timed-out" => FlowNodeOutcome<TestState>.TimedOut("approved", null!),
+            "complete" => FlowNodeOutcome<TestState>.Complete(null!),
+            _ => throw new InvalidOperationException("Unknown scenario."),
+        });
+    }
+
+    [Fact]
+    public void FaultOutcome_WithNullFault_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new FlowFaultOutcome<TestState>(null!));
+    }
+
     private sealed record TestState(string Value);
 }

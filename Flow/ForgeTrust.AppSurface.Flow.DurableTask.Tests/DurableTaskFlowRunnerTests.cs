@@ -6,6 +6,43 @@ namespace ForgeTrust.AppSurface.Flow.DurableTask.Tests;
 public sealed class DurableTaskFlowRunnerTests
 {
     [Fact]
+    public void Constructor_WithNullRegistry_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new DurableTaskFlowRunner<TestState>(
+                null!,
+                new FlowContextSerializationValidator(new SystemTextJsonFlowContextSerializer()),
+                Options.Create(new AppSurfaceFlowDurableTaskOptions())));
+    }
+
+    [Fact]
+    public void Constructor_WithNullSerializationValidator_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new DurableTaskFlowRunner<TestState>(
+                new FlowDefinitionRegistry(),
+                null!,
+                Options.Create(new AppSurfaceFlowDurableTaskOptions())));
+    }
+
+    [Fact]
+    public void Constructor_WithNullOptions_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new DurableTaskFlowRunner<TestState>(
+                new FlowDefinitionRegistry(),
+                new FlowContextSerializationValidator(new SystemTextJsonFlowContextSerializer()),
+                null!));
+    }
+
+    [Fact]
+    public async Task StartAsync_WithEmptyInstanceId_ThrowsArgumentException()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await Runner().StartAsync("approval", "1", " ", new TestState("created")));
+    }
+
+    [Fact]
     public async Task StartAsync_WithMissingDefinition_ReturnsFaultDecision()
     {
         var decision = await Runner().StartAsync("missing", "1", "instance-1", new TestState("created"));
@@ -116,6 +153,17 @@ public sealed class DurableTaskFlowRunnerTests
     }
 
     [Fact]
+    public async Task RunNodeAsync_WhenNodeReturnsNull_ThrowsArgumentNullException()
+    {
+        var registry = new FlowDefinitionRegistry();
+        registry.Register(Definition(new NullOutcomeNode(), "review"));
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await Runner(registry).RunNodeAsync(
+                new DurableTaskFlowStep<TestState>("approval", "1", "instance-1", "review", new TestState("created"))));
+    }
+
+    [Fact]
     public async Task RunNodeAsync_MapsCompleteFaultAndTimeoutOutcomes()
     {
         await AssertDecision(new CompleteNode(), DurableTaskFlowDecisionKind.Complete, null);
@@ -139,6 +187,44 @@ public sealed class DurableTaskFlowRunnerTests
 
         Assert.Equal(DurableTaskFlowDecisionKind.Fault, decision.Kind);
         Assert.Equal("flow.next-node-invalid", decision.Fault?.Code);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithNullStep_ThrowsArgumentNullException()
+    {
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await Runner().ResumeAsync(null!, "approved"));
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithEmptyExpectedEventName_ThrowsArgumentException()
+    {
+        var step = new DurableTaskFlowStep<TestState>(
+            "approval",
+            "1",
+            "instance-1",
+            "review",
+            new TestState("waiting"),
+            new FlowResumeEvent("approved"));
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await Runner().ResumeAsync(step, " "));
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithoutResumeEvent_ReturnsFaultDecision()
+    {
+        var step = new DurableTaskFlowStep<TestState>(
+            "approval",
+            "1",
+            "instance-1",
+            "review",
+            new TestState("waiting"));
+
+        var decision = await Runner().ResumeAsync(step, "approved");
+
+        Assert.Equal(DurableTaskFlowDecisionKind.Fault, decision.Kind);
+        Assert.Equal("flow.resume-event-missing", decision.Fault?.Code);
     }
 
     [Fact]
@@ -340,6 +426,14 @@ public sealed class DurableTaskFlowRunnerTests
             FlowExecutionContext<TestState> context,
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult<FlowNodeOutcome<TestState>>(FlowNodeOutcome<TestState>.TimedOut("approved", new TestState("timeout")));
+    }
+
+    private sealed class NullOutcomeNode : IFlowNode<TestState>
+    {
+        public ValueTask<FlowNodeOutcome<TestState>> ExecuteAsync(
+            FlowExecutionContext<TestState> context,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<FlowNodeOutcome<TestState>>(null!);
     }
 
     private sealed class NonDurableOutcomeNode : IFlowNode<TestState>

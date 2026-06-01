@@ -5,6 +5,32 @@ namespace ForgeTrust.AppSurface.Flow.Tests;
 public sealed class InMemoryFlowRunnerTests
 {
     [Fact]
+    public void Constructor_WithNullOptions_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new InMemoryFlowRunner<TestState>(null!));
+    }
+
+    [Fact]
+    public async Task RunAsync_WithNullDefinition_ThrowsArgumentNullException()
+    {
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await Runner().RunAsync(null!, new TestState(0, "created")));
+    }
+
+    [Fact]
+    public async Task RunAsync_WithNullContext_ThrowsArgumentNullException()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new CompleteNode())
+            .StartAt("start")
+            .Build();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await Runner().RunAsync(definition, null!));
+    }
+
+    [Fact]
     public async Task RunAsync_FollowsNextUntilComplete()
     {
         var definition = FlowGraphBuilder<TestState>
@@ -89,6 +115,34 @@ public sealed class InMemoryFlowRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_WithCanceledToken_ThrowsOperationCanceledException()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new CompleteNode())
+            .StartAt("start")
+            .Build();
+        using var source = new CancellationTokenSource();
+        await source.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await Runner().RunAsync(definition, new TestState(0, "created"), source.Token));
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenNodeReturnsNull_ThrowsArgumentNullException()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new NullOutcomeNode())
+            .StartAt("start")
+            .Build();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await Runner().RunAsync(definition, new TestState(0, "created")));
+    }
+
+    [Fact]
     public async Task RunAsync_WithUndeclaredNextTarget_ThrowsFlowDefinitionException()
     {
         var definition = FlowGraphBuilder<TestState>
@@ -102,6 +156,54 @@ public sealed class InMemoryFlowRunnerTests
             await Runner().RunAsync(definition, new TestState(0, "created")));
 
         Assert.Contains("undeclared target", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithNullDefinition_ThrowsArgumentNullException()
+    {
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await Runner().ResumeAsync(null!, "start", new TestState(0, "waiting"), new FlowResumeEvent("approved")));
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithNullResumeEvent_ThrowsArgumentNullException()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new CompleteNode())
+            .StartAt("start")
+            .Build();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await Runner().ResumeAsync(definition, "start", new TestState(0, "waiting"), null!));
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithEmptyNodeId_ThrowsArgumentException()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new CompleteNode())
+            .StartAt("start")
+            .Build();
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await Runner().ResumeAsync(definition, " ", new TestState(0, "waiting"), new FlowResumeEvent("approved")));
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithMissingNode_ThrowsFlowDefinitionException()
+    {
+        var definition = FlowGraphBuilder<TestState>
+            .Create("approval")
+            .AddNode("start", new CompleteNode())
+            .StartAt("start")
+            .Build();
+
+        var exception = await Assert.ThrowsAsync<FlowDefinitionException>(async () =>
+            await Runner().ResumeAsync(definition, "missing", new TestState(0, "waiting"), new FlowResumeEvent("approved")));
+
+        Assert.Contains("does not contain node 'missing'", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -206,5 +308,13 @@ public sealed class InMemoryFlowRunnerTests
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult<FlowNodeOutcome<TestState>>(
                 FlowNodeOutcome<TestState>.Fault("approval.failed", "Approval failed."));
+    }
+
+    private sealed class NullOutcomeNode : IFlowNode<TestState>
+    {
+        public ValueTask<FlowNodeOutcome<TestState>> ExecuteAsync(
+            FlowExecutionContext<TestState> context,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<FlowNodeOutcome<TestState>>(null!);
     }
 }
