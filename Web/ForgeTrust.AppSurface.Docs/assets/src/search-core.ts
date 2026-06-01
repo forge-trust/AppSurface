@@ -252,7 +252,7 @@ function findFirstSuffixIndex(value: string) {
 }
 
 function hasControlCharacter(value: string) {
-  return /[\u0000-\u001f\u007f]/.test(value);
+  return /[\u0000-\u001f\u007f-\u009f]/.test(value);
 }
 
 function isAbsoluteHttpUrl(value: string) {

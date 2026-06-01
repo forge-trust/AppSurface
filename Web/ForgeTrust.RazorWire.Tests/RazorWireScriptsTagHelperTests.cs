@@ -196,6 +196,84 @@ public class RazorWireScriptsTagHelperTests
         Assert.Contains("data-rw-default-failure-message=\"Custom failure\"", content);
     }
 
+    [Fact]
+    public void Process_WhenHybridOptionsConfigured_EmitsRuntimeHybridConfig()
+    {
+        // Arrange
+        var options = new RazorWireOptions();
+        options.Hybrid.LiveOrigin = "https://api.example.com";
+        options.Hybrid.CredentialsMode = RazorWireHybridCredentialsMode.Include;
+        options.Forms.Antiforgery.TokenEndpointPath = "/tokens/antiforgery";
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options)
+        {
+            ViewContext = _viewContext
+        };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+
+        // Act
+        helper.Process(_context, _output);
+
+        // Assert
+        var content = _output.Content.GetContent();
+        Assert.Contains("data-rw-live-origin=\"https://api.example.com\"", content);
+        Assert.Contains("data-rw-hybrid-credentials=\"include\"", content);
+        Assert.Contains("data-rw-antiforgery-endpoint=\"/my-app/tokens/antiforgery\"", content);
+    }
+
+    [Fact]
+    public void Process_WhenHybridCredentialsAutoAndLiveOriginConfigured_EmitsIncludeRuntimeMode()
+    {
+        // Arrange
+        var options = new RazorWireOptions();
+        options.Hybrid.LiveOrigin = " https://api.example.com/ ";
+        options.Hybrid.CredentialsMode = RazorWireHybridCredentialsMode.Auto;
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options)
+        {
+            ViewContext = _viewContext
+        };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+
+        // Act
+        helper.Process(_context, _output);
+
+        // Assert
+        var content = _output.Content.GetContent();
+        Assert.Contains("data-rw-live-origin=\"https://api.example.com\"", content);
+        Assert.Contains("data-rw-hybrid-credentials=\"include\"", content);
+    }
+
+    [Theory]
+    [InlineData("https://api.example.com/path")]
+    [InlineData("https://api.example.com?tenant=forge")]
+    [InlineData("https://api.example.com#forms")]
+    [InlineData("https://user:pass@api.example.com")]
+    [InlineData("ftp://api.example.com")]
+    [InlineData("not-url")]
+    public void Process_WhenHybridLiveOriginIsNotAnOrigin_ThrowsInvalidOperationException(string liveOrigin)
+    {
+        // Arrange
+        var options = new RazorWireOptions();
+        options.Hybrid.LiveOrigin = liveOrigin;
+        var helper = new RazorWireScriptsTagHelper(_fileVersionProvider, options)
+        {
+            ViewContext = _viewContext
+        };
+
+        A.CallTo(() => _fileVersionProvider.AddFileVersionToPath(A<PathString>._, A<string>._))
+            .ReturnsLazily(call => call.GetArgument<string>(1)!);
+
+        // Act
+        var exception = Assert.Throws<InvalidOperationException>(() => helper.Process(_context, _output));
+
+        // Assert
+        Assert.Contains("RazorWireOptions.Hybrid.LiveOrigin", exception.Message);
+        Assert.Contains("absolute http or https origin", exception.Message);
+    }
+
     private sealed class TestWebHostEnvironment : IWebHostEnvironment
     {
         public string EnvironmentName { get; set; } = Environments.Production;

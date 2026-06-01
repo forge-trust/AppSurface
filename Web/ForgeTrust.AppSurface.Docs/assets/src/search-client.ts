@@ -477,7 +477,7 @@ declare global {
   }
 
   function formatQueryForStatus(value) {
-    return normalizeQuery(value).replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ');
+    return normalizeQuery(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ');
   }
 
   function getErrorMessage(err) {

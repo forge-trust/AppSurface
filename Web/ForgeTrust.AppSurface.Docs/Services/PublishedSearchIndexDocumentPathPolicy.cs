@@ -37,7 +37,18 @@ internal static class PublishedSearchIndexDocumentPathPolicy
     /// </summary>
     /// <param name="value">The candidate <c>documents[*].path</c> value.</param>
     /// <param name="context">The immutable archive validation context.</param>
-    /// <returns>A structured validation result with a stable rejection reason.</returns>
+    /// <returns>
+    /// A structured validation result whose <see cref="PublishedSearchIndexPathValidationResult.Reason"/> identifies the
+    /// first rejected condition, or <see cref="PublishedSearchIndexPathRejectionReason.None"/> when the archive value is
+    /// safe to store.
+    /// </returns>
+    /// <remarks>
+    /// Archive validation is intentionally stricter than served-link validation: stored paths must use canonical
+    /// <c>/docs/...</c> forms and must not include request path bases, custom route roots, origins, or deployment aliases.
+    /// The checks run from syntax and URL-shape hazards toward docs-root and version-family hazards. When several
+    /// rejection reasons apply, callers should log or surface only the returned first reason plus
+    /// <see cref="PublishedSearchIndexPathValidationResult.RedactedValue"/>; do not log the original value.
+    /// </remarks>
     internal static PublishedSearchIndexPathValidationResult ValidateArchivePath(
         string? value,
         PublishedSearchIndexArchivePathContext context)
@@ -84,7 +95,16 @@ internal static class PublishedSearchIndexDocumentPathPolicy
     /// </summary>
     /// <param name="value">The candidate browser-visible path.</param>
     /// <param name="context">The served docs surface context.</param>
-    /// <returns>A structured validation result with a stable rejection reason.</returns>
+    /// <returns>
+    /// A structured validation result whose <see cref="PublishedSearchIndexPathValidationResult.NormalizedPath"/> is safe
+    /// to use as a browser-visible link only when <see cref="PublishedSearchIndexPathValidationResult.IsValid"/> is
+    /// <see langword="true"/>.
+    /// </returns>
+    /// <remarks>
+    /// Served validation accepts the active docs root and optional archive root after route rewriting has already happened.
+    /// It still rejects executable schemes, off-root links, traversal, encoded separators, controls, and reserved docs
+    /// endpoints before the value can enter client-side result rendering.
+    /// </remarks>
     internal static PublishedSearchIndexPathValidationResult ValidateServedPath(
         string? value,
         PublishedSearchIndexServedPathContext context)
@@ -120,6 +140,20 @@ internal static class PublishedSearchIndexDocumentPathPolicy
             : common;
     }
 
+    /// <summary>
+    /// Converts a rejection reason to the stable lower-kebab diagnostic code used in logs, telemetry, and tests.
+    /// </summary>
+    /// <param name="reason">The structured validation reason returned by the policy.</param>
+    /// <returns>
+    /// One of <c>none</c>, <c>missing</c>, <c>whitespace</c>, <c>not-root-relative</c>, <c>scheme-url</c>,
+    /// <c>absolute-url</c>, <c>protocol-relative</c>, <c>backslash</c>, <c>control-character</c>,
+    /// <c>malformed-percent-encoding</c>, <c>encoded-separator</c>, <c>encoded-traversal</c>,
+    /// <c>outside-docs-root</c>, <c>reserved-route</c>, <c>wrong-version</c>, or <c>unknown</c> for future enum values.
+    /// </returns>
+    /// <remarks>
+    /// Use <see cref="PublishedSearchIndexPathRejectionReason"/> for code branching and this string only for stable
+    /// diagnostics that may cross process, log, or test boundaries.
+    /// </remarks>
     internal static string ToDiagnosticCode(PublishedSearchIndexPathRejectionReason reason)
     {
         return reason switch
@@ -208,6 +242,11 @@ internal static class PublishedSearchIndexDocumentPathPolicy
         }
 
         var decodedPath = Uri.UnescapeDataString(path);
+        if (ContainsControlCharacter(decodedPath))
+        {
+            return Reject(PublishedSearchIndexPathRejectionReason.ControlCharacter, value);
+        }
+
         if (ContainsDotSegment(path) || ContainsDotSegment(decodedPath))
         {
             return Reject(PublishedSearchIndexPathRejectionReason.EncodedTraversal, value);
@@ -457,20 +496,41 @@ internal sealed record PublishedSearchIndexServedPathContext(string DocsRootPath
 /// Structured result for a published search-index document path validation attempt.
 /// </summary>
 /// <param name="IsValid">Whether the candidate path is safe for the target context.</param>
-/// <param name="Reason">The stable rejection category, or <see cref="PublishedSearchIndexPathRejectionReason.None"/> when valid.</param>
-/// <param name="NormalizedPath">The validated path portion without query string or fragment when valid.</param>
-/// <param name="RedactedValue">A non-sensitive description of the rejected input for diagnostics.</param>
+/// <param name="Reason">
+/// The stable branch-friendly rejection category, or <see cref="PublishedSearchIndexPathRejectionReason.None"/> when valid.
+/// Use <see cref="PublishedSearchIndexDocumentPathPolicy.ToDiagnosticCode(PublishedSearchIndexPathRejectionReason)"/> when
+/// a lower-kebab telemetry or log value is required.
+/// </param>
+/// <param name="NormalizedPath">
+/// The validated path portion without query string or fragment when valid. This value is safe to log and to use for
+/// docs-root matching because unsafe suffixes and rejected inputs never appear here.
+/// </param>
+/// <param name="RedactedValue">
+/// A non-sensitive description of the rejected input for diagnostics. This is the only rejected-value field callers
+/// should include in operator-visible logs or reader-facing availability messages.
+/// </param>
 internal sealed record PublishedSearchIndexPathValidationResult(
     bool IsValid,
     PublishedSearchIndexPathRejectionReason Reason,
     string? NormalizedPath,
     string RedactedValue)
 {
+    /// <summary>
+    /// Creates a successful validation result for a normalized path-only value.
+    /// </summary>
+    /// <param name="normalizedPath">The safe-to-log path portion with any query string or fragment removed.</param>
+    /// <returns>A valid result with <see cref="PublishedSearchIndexPathRejectionReason.None"/>.</returns>
     public static PublishedSearchIndexPathValidationResult Valid(string normalizedPath)
     {
         return new(true, PublishedSearchIndexPathRejectionReason.None, normalizedPath, string.Empty);
     }
 
+    /// <summary>
+    /// Creates a rejected validation result with a stable reason and redacted original value.
+    /// </summary>
+    /// <param name="reason">The first rejection reason observed by the policy's ordered checks.</param>
+    /// <param name="redactedValue">A length-only or otherwise non-sensitive substitute for the rejected value.</param>
+    /// <returns>An invalid result whose <see cref="NormalizedPath"/> is <see langword="null"/>.</returns>
     public static PublishedSearchIndexPathValidationResult Invalid(
         PublishedSearchIndexPathRejectionReason reason,
         string redactedValue)
@@ -482,21 +542,86 @@ internal sealed record PublishedSearchIndexPathValidationResult(
 /// <summary>
 /// Stable rejection categories for published search-index document path validation.
 /// </summary>
+/// <remarks>
+/// Use enum members for local control flow and
+/// <see cref="PublishedSearchIndexDocumentPathPolicy.ToDiagnosticCode(PublishedSearchIndexPathRejectionReason)"/> for
+/// telemetry, log fields, and persisted diagnostics. The policy returns the first matching category in its ordered checks,
+/// so a value that is both off-root and reserved reports the earlier root or syntax failure.
+/// </remarks>
 internal enum PublishedSearchIndexPathRejectionReason
 {
+    /// <summary>
+    /// The path is valid for the requested validation context.
+    /// </summary>
     None,
+
+    /// <summary>
+    /// The value is null, empty, or whitespace-only.
+    /// </summary>
     Missing,
+
+    /// <summary>
+    /// The value contains leading or trailing whitespace even though it is otherwise non-empty.
+    /// </summary>
     Whitespace,
+
+    /// <summary>
+    /// The value is not root-relative, for example <c>docs/guide.html</c>.
+    /// </summary>
     NotRootRelative,
+
+    /// <summary>
+    /// The value uses a non-HTTP absolute scheme such as <c>javascript:</c> or <c>data:</c>.
+    /// </summary>
     SchemeUrl,
+
+    /// <summary>
+    /// The value is an absolute HTTP(S) URL instead of a docs-root-relative path.
+    /// </summary>
     AbsoluteUrl,
+
+    /// <summary>
+    /// The value is protocol-relative, for example <c>//example.test/docs/guide.html</c>.
+    /// </summary>
     ProtocolRelative,
+
+    /// <summary>
+    /// The value contains a backslash in the path or suffix, which could be interpreted as a separator by some consumers.
+    /// </summary>
     Backslash,
+
+    /// <summary>
+    /// The value contains a Unicode control character, including C0, DEL, and C1 controls.
+    /// </summary>
     ControlCharacter,
+
+    /// <summary>
+    /// The value contains a percent sign that is not followed by two hexadecimal digits.
+    /// </summary>
     MalformedPercentEncoding,
+
+    /// <summary>
+    /// A percent-encoded or double-encoded slash or backslash appears in the path portion.
+    /// </summary>
     EncodedSeparator,
+
+    /// <summary>
+    /// A raw, percent-encoded, or double-encoded dot segment could traverse out of the docs root.
+    /// </summary>
     EncodedTraversal,
+
+    /// <summary>
+    /// The path is syntactically safe but does not live under the expected archive or served docs root.
+    /// </summary>
     OutsideDocsRoot,
+
+    /// <summary>
+    /// The path targets a docs operational route, runtime asset, version-list endpoint, or reserved version-family child.
+    /// </summary>
     ReservedRoute,
+
+    /// <summary>
+    /// An exact-version or archive-version path targets a different catalog version than the tree being validated.
+    /// </summary>
     WrongVersion
 }

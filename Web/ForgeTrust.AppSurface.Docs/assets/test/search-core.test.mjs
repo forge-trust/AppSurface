@@ -175,6 +175,8 @@ test('validateSearchResultPath rejects executable, off-root, reserved, and encod
     ['/docs/%5cadmin', 'encoded-separator'],
     ['/docs/guide.html\\evil', 'backslash'],
     ['/docs/%', 'malformed-percent-encoding'],
+    ['/docs/guide.html\u0085', 'control-character'],
+    ['/docs/%C2%85', 'control-character'],
     ['/docs/%0a', 'control-character'],
     ['/docs/guide.html?q=%0a', 'control-character'],
     ['/docs/guide.html?q=%250a', 'control-character']

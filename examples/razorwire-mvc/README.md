@@ -113,7 +113,21 @@ The sample also demonstrates live multi-client updates.
 
 RazorWire stream subscriptions are denied by default. This sample explicitly sets `RazorWireOptions.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll` in `RazorWireExampleModule.ConfigureServices` because the `reactivity` channel is a public demo channel. Production apps should register `IRazorWireChannelAuthorizer` when channels depend on the current user, tenant, or workflow state.
 
-When you intentionally expose public/demo streams, keep channel names validated and namespaced instead of accepting arbitrary request values. Live subscriber tracking is released after disconnect, and replay buffers are bounded to 25 messages per channel while inactive replay channels are pruned after the in-memory hub retains more than 256 replay channels, but public endpoints should still avoid unbounded channel cardinality from user input.
+When you intentionally expose public/demo streams, keep channel names finite and namespaced instead of accepting arbitrary request values. RazorWire now admits public streams through per-process guardrails: channel names must be segment-safe, invalid channels return `400`, authorization denials return `403`, and capacity denials return `429` before the stream hub allocates subscriber state. A browser may surface a rejected native `EventSource` only as a stream error, so use the Network tab, `razorwire:stream:error`, server log event `13700 StreamSubscriptionDenied` for authorization denials, and `13701 StreamAdmissionRejected` for validation or capacity rejections while debugging.
+
+For a public demo, keep the limits visible near the `AllowAll` decision:
+
+```csharp
+services.AddRazorWire(options =>
+{
+    options.Streams.AuthorizationMode = RazorWireStreamAuthorizationMode.AllowAll;
+    options.Streams.MaxLiveChannels = 8;
+    options.Streams.MaxLiveSubscriptions = 100;
+    options.Streams.MaxLiveSubscriptionsPerChannel = 25;
+});
+```
+
+The limits above apply to one ASP.NET Core process. Raise them for intentional high-fanout demos, but use ASP.NET Core rate limiting, proxy limits, SignalR, or managed pub/sub when you need per-client fairness, cross-node fanout, groups, or durable delivery.
 
 ### Registration and Message Publishing
 

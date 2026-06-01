@@ -22,6 +22,12 @@ public static class RazorWireServiceCollectionExtensions
     /// <see cref="RazorWireStreamAuthorizationMode.DenyAll"/> is the default authorization mode.
     /// </param>
     /// <remarks>
+    /// This method also calls <see cref="LoggingServiceCollectionExtensions.AddLogging(IServiceCollection)"/> and
+    /// <see cref="AntiforgeryServiceCollectionExtensions.AddAntiforgery(IServiceCollection)"/> because RazorWire live
+    /// streams log denied subscriptions and RazorWire forms use ASP.NET Core anti-forgery services for lazy token
+    /// refresh. If the host has already configured logging or anti-forgery, the normal ASP.NET Core options pipeline
+    /// composes with those registrations.
+    ///
     /// If no custom <see cref="IRazorWireChannelAuthorizer"/> is registered, RazorWire resolves a built-in authorizer
     /// from <see cref="RazorWireOptions.Streams"/>.<see cref="RazorWireStreamOptions.AuthorizationMode"/>.
     /// <see cref="RazorWireStreamAuthorizationMode.DenyAll"/> selects
@@ -37,14 +43,19 @@ public static class RazorWireServiceCollectionExtensions
         this IServiceCollection services,
         Action<RazorWireOptions>? configure = null)
     {
-        services.AddOptions<RazorWireOptions>();
+        services.AddOptions<RazorWireOptions>()
+            .ValidateOnStart();
 
         services.Configure(configure ?? (_ => { }));
+        services.AddLogging();
+        services.AddAntiforgery();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<RazorWireOptions>, RazorWireOptionsValidator>());
 
         services.AddSingleton(sp =>
             sp.GetRequiredService<IOptions<RazorWireOptions>>().Value);
 
         services.TryAddSingleton<IRazorWireStreamHub, InMemoryRazorWireStreamHub>();
+        services.TryAddSingleton<RazorWireStreamAdmissionController>();
         services.TryAddSingleton<DenyAllRazorWireChannelAuthorizer>();
         services.TryAddSingleton<AllowAllRazorWireChannelAuthorizer>();
         services.TryAddSingleton<IRazorWireChannelAuthorizer>(sp =>

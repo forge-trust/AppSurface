@@ -5,6 +5,7 @@ using ForgeTrust.AppSurface.Web;
 using ForgeTrust.RazorWire.Bridge;
 using ForgeTrust.RazorWire.Forms;
 using ForgeTrust.RazorWire.Streams;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -111,6 +112,7 @@ public class RazorWireWebModuleTests
         // Assert
         Assert.NotNull(provider.GetService<IRazorWireStreamHub>());
         Assert.NotNull(provider.GetService<IRazorWireChannelAuthorizer>());
+        Assert.NotNull(provider.GetService<IAntiforgery>());
         Assert.NotNull(provider.GetService<IOptions<RazorWireOptions>>());
         Assert.NotNull(provider.GetService<IOptions<OutputCacheOptions>>());
         Assert.Contains(services, descriptor => descriptor.ServiceType == typeof(IRazorPartialRenderer));

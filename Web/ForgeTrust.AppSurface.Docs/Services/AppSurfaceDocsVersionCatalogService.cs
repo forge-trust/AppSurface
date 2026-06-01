@@ -16,6 +16,9 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// </remarks>
 public sealed class AppSurfaceDocsVersionCatalogService
 {
+    private const string MaxRewrittenFileSizeKey = "AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes";
+    private const string RewriteLimitDocsAnchor = "AppSurface Docs README section 'Published tree rewrite limit'";
+
     private readonly record struct AvailabilityFailure(string PublicMessage, string InternalDetail);
 
     private static readonly string[] RequiredExactTreeFiles =
@@ -443,7 +446,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
         }
         else
         {
-            availabilityFailure = ValidateExactTree(trustedReleaseRootPath, exactTreePath!, normalizedVersion);
+            availabilityFailure = ValidateExactTree(
+                trustedReleaseRootPath,
+                exactTreePath!,
+                normalizedVersion,
+                _options.Versioning.MaxRewrittenFileSizeBytes);
         }
 
         if (availabilityFailure is not null && isPublic)
@@ -517,7 +524,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
         return AppSurfaceDocsTrustedReleasePathGuard.ResolveContentRootRelativePath(_environment.ContentRootPath, path);
     }
 
-    private static AvailabilityFailure? ValidateExactTree(string trustedReleaseRootPath, string exactTreePath, string version)
+    private static AvailabilityFailure? ValidateExactTree(
+        string trustedReleaseRootPath,
+        string exactTreePath,
+        string version,
+        long maxRewrittenFileSizeBytes)
     {
         if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
                 exactTreePath,
@@ -560,7 +571,8 @@ public sealed class AppSurfaceDocsVersionCatalogService
 
         var searchIndexValidationIssue = ValidateSearchIndexPayload(
             Path.Join(exactTreePath, "search-index.json"),
-            new PublishedSearchIndexArchivePathContext(version));
+            new PublishedSearchIndexArchivePathContext(version),
+            maxRewrittenFileSizeBytes);
         if (searchIndexValidationIssue is not null)
         {
             return searchIndexValidationIssue;
@@ -571,10 +583,19 @@ public sealed class AppSurfaceDocsVersionCatalogService
 
     private static AvailabilityFailure? ValidateSearchIndexPayload(
         string searchIndexPath,
-        PublishedSearchIndexArchivePathContext pathContext)
+        PublishedSearchIndexArchivePathContext pathContext,
+        long maxRewrittenFileSizeBytes)
     {
         try
         {
+            var searchIndexInfo = new FileInfo(searchIndexPath);
+            if (searchIndexInfo.Length > maxRewrittenFileSizeBytes)
+            {
+                return new AvailabilityFailure(
+                    PublicMessage: $"Published release tree has a search-index.json payload larger than {MaxRewrittenFileSizeKey}.",
+                    InternalDetail: $"ExactTreePath '{Path.GetDirectoryName(searchIndexPath)}' has a search-index.json payload with observed size {searchIndexInfo.Length} bytes, which exceeds the configured limit of {maxRewrittenFileSizeBytes} bytes from {MaxRewrittenFileSizeKey}. The release was skipped; shrink or re-export the artifact, or raise {MaxRewrittenFileSizeKey} within the supported range. See {RewriteLimitDocsAnchor}.");
+            }
+
             using var stream = File.OpenRead(searchIndexPath);
             using var document = JsonDocument.Parse(stream);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
