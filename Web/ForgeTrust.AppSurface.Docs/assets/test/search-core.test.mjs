@@ -114,3 +114,83 @@ test('createMiniSearchConfiguration includes all searchable and stored fields', 
   assert.ok(config.storeFields.includes('language'));
   assert.ok(config.storeFields.includes('languageLabel'));
 });
+
+test('validateSearchResultPath accepts docs-local browser paths under the active docs root', async () => {
+  const { isSafeSearchResultPath, validateSearchResultPath } = await loadSearchCore();
+
+  for (const path of [
+    '/docs/guide.html',
+    '/docs/packages/README.md.html',
+    '/docs/guide.html?q=term#section',
+    '/some-base/docs/v/1.2.3/guide.html',
+    '/some-base/docs/versions/1.2.3/guide.html',
+    '/foo/bar/versions/1.2.3/guide.html',
+    '/versions/1.2.3/guide.html'
+  ]) {
+    const options = path.startsWith('/some-base')
+      ? { docsRootPath: '/some-base/docs/v/1.2.3', docsArchiveRootPath: '/some-base/docs/versions' }
+      : path.startsWith('/foo/bar')
+        ? { docsRootPath: '/foo/bar/v/1.2.3', docsArchiveRootPath: '/foo/bar/versions' }
+        : path.startsWith('/versions')
+          ? { docsRootPath: '/v/1.2.3', docsArchiveRootPath: '/versions' }
+          : { docsRootPath: '/docs', docsArchiveRootPath: '/docs/versions' };
+    assert.equal(isSafeSearchResultPath(path, options), true, path);
+    assert.equal(validateSearchResultPath(path, options).reason, 'none', path);
+  }
+});
+
+test('validateSearchResultPath does not infer archive roots from version-like docs roots', async () => {
+  const { validateSearchResultPath } = await loadSearchCore();
+
+  assert.equal(
+    validateSearchResultPath('/api/versions/docs/guide.html', { docsRootPath: '/api/v/docs' }).reason,
+    'outside-docs-root'
+  );
+});
+
+test('validateSearchResultPath rejects executable, off-root, reserved, and encoded traversal paths', async () => {
+  const { validateSearchResultPath } = await loadSearchCore();
+  const cases = [
+    ['javascript:alert(1)', 'scheme-url'],
+    ['data:text/html,hi', 'scheme-url'],
+    ['https://evil.example/docs/guide.html', 'absolute-url'],
+    ['//evil.example/docs/guide.html', 'protocol-relative'],
+    ['/admin', 'outside-docs-root'],
+    ['/tenant/docs/guide.html', 'outside-docs-root'],
+    ['/docs/search', 'reserved-route'],
+    ['/docs/search-index.json', 'reserved-route'],
+    ['/docs/search-client.js', 'reserved-route'],
+    ['/docs/_search-index/refresh', 'reserved-route'],
+    ['/docs/v/9.9.9/guide.html', 'reserved-route'],
+    ['/docs/versions/1.2.3/guide.html', 'reserved-route'],
+    ['/docs/versions/search', 'reserved-route'],
+    ['/docs/versions/_health', 'reserved-route'],
+    ['/docs/versions/_search-index/refresh', 'reserved-route'],
+    ['/docs/versions/1.2.3/_search-index/refresh', 'reserved-route'],
+    ['/docs/../admin', 'encoded-traversal'],
+    ['/docs/%2e%2e/admin', 'encoded-traversal'],
+    ['/docs/%252e%252e/admin', 'encoded-traversal'],
+    ['/docs/%2fadmin', 'encoded-separator'],
+    ['/docs/%252fadmin', 'encoded-separator'],
+    ['/docs/%5cadmin', 'encoded-separator'],
+    ['/docs/guide.html\\evil', 'backslash'],
+    ['/docs/%', 'malformed-percent-encoding'],
+    ['/docs/guide.html\u0085', 'control-character'],
+    ['/docs/%C2%85', 'control-character'],
+    ['/docs/%0a', 'control-character'],
+    ['/docs/guide.html?q=%0a', 'control-character'],
+    ['/docs/guide.html?q=%250a', 'control-character']
+  ];
+
+  for (const [path, reason] of cases) {
+    const options = [
+      '/docs/versions/search',
+      '/docs/versions/_health',
+      '/docs/versions/_search-index/refresh',
+      '/docs/versions/1.2.3/_search-index/refresh'
+    ].includes(path)
+      ? { docsRootPath: '/docs', docsArchiveRootPath: '/docs/versions' }
+      : { docsRootPath: '/docs' };
+    assert.equal(validateSearchResultPath(path, options).reason, reason, path);
+  }
+});
