@@ -372,6 +372,7 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Configure `AppSurfaceDocs:Localization` and `translation_key` metadata before adding translated files at scale.
 - Verify `/docs`, `/docs/search`, and `/docs/search-index.json`. The search page is server-rendered and should still expose starter query URLs plus browse links before the client index loads; a blocked or missing index must degrade to those links, not to a blank page.
 - For custom docs roots, path bases, or static exports, inspect the generated `search.html` and confirm its search index URL plus fallback anchors point at the mounted root.
+- For published release trees, inspect `search-index.json` before publishing. Stored `documents[].path` values should stay canonical and deployment-independent, such as `/docs/guide.html`; do not include request path bases, custom route roots, origins, executable schemes, traversal, or docs operational routes. AppSurface Docs rewrites valid canonical paths to the mounted root while serving the archive.
 - For static exports with redirect aliases, use the default HTML strategy for GitHub Pages and generic static hosts, or `--mode cdn --redirects netlify` for Netlify-compatible providers. Do not hand-author `_redirects` in the export output.
 - For published version catalogs, keep the version catalog file beside the `releases/` layout when possible and leave `AppSurfaceDocs:Versioning:TrustedReleaseRootPath` unset. If your release store lives elsewhere, configure `TrustedReleaseRootPath` once and keep every catalog `exactTreePath` relative to that directory.
 - For published release stores with unusually large generated pages, check exported `.html` files and root `search-index.json` before upgrading. The default `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` is 2 MiB and applies only to rewritten published-tree HTML/search-index artifacts, not images, CSS, JavaScript, fonts, or source harvesting.
@@ -390,7 +391,7 @@ When validating a host or release artifact:
 - Block or rename `/docs/search-index.json`. The page should show a specific search-index failure message and retry button while keeping the starter and browse links visible.
 - Confirm the failure panel does not contain replacement navigation links. The durable fallback links live in the server-rendered browse section so they stay available before and after client initialization.
 - For custom docs roots or path bases, confirm the search config, starter query URLs, and browse fallback anchors all include the mounted root.
-- For static exports or published release trees, inspect `search.html` and confirm `search-index.json`, starter query URLs, and fallback anchors are rewritten to the exact release root, including any path base.
+- For static exports or published release trees, inspect `search.html` and confirm `search-index.json`, starter query URLs, and fallback anchors are rewritten to the exact release root, including any path base. Keep the stored `search-index.json` document paths canonical (`/docs/...`) so the same archive can be safely mounted under a custom root or virtual directory later.
 
 ## Where to go next
 
