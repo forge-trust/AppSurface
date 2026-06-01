@@ -2,6 +2,10 @@
 
 `ForgeTrust.AppSurface.Flow` provides stable contracts for typed long-running app processes.
 
+## Release Guidance
+
+AppSurface has cut the first coordinated `v0.1.0` release candidate. Before installing this package from a prerelease feed, read the [v0.1.0 RC 1 release note](../../releases/v0.1.0-rc.1.md) for current release risk, migration guidance, and package readiness.
+
 ## What It Includes
 
 - `FlowNodeOutcome<TContext>` and the sealed outcome records `FlowNext<TContext>`, `FlowWait<TContext>`, `FlowTimedOut<TContext>`, `FlowComplete<TContext>`, and `FlowFaultOutcome<TContext>`.
