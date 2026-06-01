@@ -112,6 +112,17 @@ public sealed record DurableTaskFlowDecision<TContext>
     /// <summary>
     /// Creates a schedule-node decision.
     /// </summary>
+    /// <param name="nodeId">Node id to schedule next.</param>
+    /// <param name="context">Context to pass to the scheduled node.</param>
+    /// <param name="retryPolicy">Optional retry policy requested for the scheduled node work.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> is null, empty, or white space.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// Schedule decisions carry the next node id, the context to persist, and optional retry metadata. They do not carry
+    /// event, timeout, fault, or diagnostic details. Inspect <see cref="Kind"/> before reading kind-specific properties.
+    /// </remarks>
     public static DurableTaskFlowDecision<TContext> ScheduleNode(
         string nodeId,
         TContext context,
@@ -129,6 +140,19 @@ public sealed record DurableTaskFlowDecision<TContext>
     /// <summary>
     /// Creates a wait-for-external-event decision.
     /// </summary>
+    /// <param name="nodeId">Node id where the durable flow is waiting.</param>
+    /// <param name="eventName">External event name the orchestration should wait for.</param>
+    /// <param name="context">Context to persist while waiting.</param>
+    /// <param name="timeout">Optional timeout associated with the external event wait.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> or <paramref name="eventName"/> is null, empty, or white space.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// Wait decisions pause durable execution until the named event arrives or the optional timeout expires. The timeout
+    /// may be null for waits without a durable timer. Inspect <see cref="Kind"/> before reading wait-specific
+    /// properties.
+    /// </remarks>
     public static DurableTaskFlowDecision<TContext> WaitForExternalEvent(
         string nodeId,
         string eventName,
@@ -147,6 +171,16 @@ public sealed record DurableTaskFlowDecision<TContext>
     /// <summary>
     /// Creates a complete decision.
     /// </summary>
+    /// <param name="nodeId">Node id that completed the durable flow.</param>
+    /// <param name="context">Final flow context.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> is null, empty, or white space.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// Complete decisions are terminal and do not carry wait, timeout, retry, fault, or diagnostic details. Inspect
+    /// <see cref="Kind"/> before reading kind-specific properties.
+    /// </remarks>
     public static DurableTaskFlowDecision<TContext> Complete(string nodeId, TContext context) =>
         new(
             DurableTaskFlowDecisionKind.Complete,
@@ -161,6 +195,17 @@ public sealed record DurableTaskFlowDecision<TContext>
     /// <summary>
     /// Creates a timeout decision.
     /// </summary>
+    /// <param name="nodeId">Node id that handled the timeout branch.</param>
+    /// <param name="eventName">Event whose wait timed out.</param>
+    /// <param name="context">Context after timeout handling.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> or <paramref name="eventName"/> is null, empty, or white space.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="context"/> is null.</exception>
+    /// <remarks>
+    /// Timed-out decisions mean timeout handling has already run; they are distinct from wait decisions that carry a
+    /// future timeout. Inspect <see cref="Kind"/> before reading timeout-specific properties.
+    /// </remarks>
     public static DurableTaskFlowDecision<TContext> TimedOut(string nodeId, string eventName, TContext context) =>
         new(
             DurableTaskFlowDecisionKind.TimedOut,
@@ -175,6 +220,18 @@ public sealed record DurableTaskFlowDecision<TContext>
     /// <summary>
     /// Creates a fault decision.
     /// </summary>
+    /// <param name="nodeId">Node id associated with the fault.</param>
+    /// <param name="fault">Flow fault details.</param>
+    /// <param name="diagnostic">Optional human-readable diagnostic detail.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/> is null, empty, or white space.
+    /// </exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="fault"/> is null.</exception>
+    /// <remarks>
+    /// Fault decisions do not carry a context. Use <paramref name="fault"/> for stable machine-readable failure details
+    /// and <paramref name="diagnostic"/> only for explanatory text. Inspect <see cref="Kind"/> before reading
+    /// fault-specific properties.
+    /// </remarks>
     public static DurableTaskFlowDecision<TContext> Faulted(string nodeId, FlowFault fault, string? diagnostic = null) =>
         new(
             DurableTaskFlowDecisionKind.Fault,
@@ -189,6 +246,18 @@ public sealed record DurableTaskFlowDecision<TContext>
     /// <summary>
     /// Creates an ignored-late-event decision.
     /// </summary>
+    /// <param name="nodeId">Node id that received the late or mismatched event.</param>
+    /// <param name="eventName">Late or mismatched event name.</param>
+    /// <param name="diagnostic">Human-readable reason the event was ignored.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nodeId"/>, <paramref name="eventName"/>, or <paramref name="diagnostic"/> is null,
+    /// empty, or white space.
+    /// </exception>
+    /// <remarks>
+    /// Ignored-late-event decisions are non-scheduling decisions used when stale external events should not fault the
+    /// durable instance. They do not carry context, timeout, retry, or fault details. Inspect <see cref="Kind"/> before
+    /// reading late-event-specific properties.
+    /// </remarks>
     public static DurableTaskFlowDecision<TContext> IgnoreLateEvent(
         string nodeId,
         string eventName,
