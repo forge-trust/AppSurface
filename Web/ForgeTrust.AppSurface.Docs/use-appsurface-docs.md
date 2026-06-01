@@ -133,7 +133,9 @@ Before pointing AppSurface Docs at a large repository, decide which paths are me
           "README.md",
           "LICENSE",
           "docs/**/*.md"
-        ]
+        ],
+        "MaxFileSizeBytes": 1048576,
+        "MaxMetadataFileSizeBytes": 65536
       },
       "CSharp": {
         "IncludeGlobs": [
@@ -151,6 +153,8 @@ Before pointing AppSurface Docs at a large repository, decide which paths are me
 ```
 
 Use repository-relative globs with `/` separators. AppSurface Docs rejects rooted paths, URI-shaped patterns, query strings, fragments, and `..` segments during startup validation. Empty includes mean the built-in harvester defaults are used; nonempty global includes become the outer boundary for Markdown, C#, and JavaScript.
+
+Markdown resource limits are byte counts. `AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes` defaults to `1048576` and skips oversized Markdown bodies before file read, inline-front-matter parsing, and Markdig parsing. `AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes` defaults to `65536` and ignores oversized paired `.md.yml` or `.md.yaml` sidecars before YAML parsing while leaving the Markdown body eligible. These guards are not parser-complexity, AST-depth, timeout, or cancellation limits. Use `AppSurfaceDocs__Harvest__Markdown__MaxFileSizeBytes` and `AppSurfaceDocs__Harvest__Markdown__MaxMetadataFileSizeBytes` for environment-variable configuration.
 
 The package also keeps protective defaults for build output, hidden directories, test projects, and C# source under `examples`. These defaults prevent common accidental publication without requiring every host to write the same excludes. If a default is too broad, use `DefaultExclusions:AllowGlobs` for narrow exceptions or `DefaultExclusions:DisabledGroups` when the entire group is intentionally public. Use the named group IDs, not numeric enum values; ordinals fail startup validation. Allows are group-aware, so a path inside `.github/bin` needs an allow for both `HiddenDirectories` and `BuildOutput` unless one group is disabled.
 
@@ -185,9 +189,12 @@ If docs disappear after an upgrade, diagnose one repository-relative path first:
 | Generated or bundled docs vanished. | The path matches a repository `.gitignore` rule. | Add a narrow `VcsIgnore:AllowGlobs` entry for the public docs path. |
 | A tracked file vanished even though Git still has it. | The tracked path also matches `.gitignore`. | Keep the ignore rule and add `VcsIgnore:AllowGlobs`, or move the public docs outside the ignored tree. |
 | A restored path still does not harvest. | AppSurface default exclusions or configured `ExcludeGlobs` also match it. | Add the matching default-exclusion allow, disable the intended default group, or change the configured exclude. |
+| A Markdown page is missing but harvest is still Healthy. | `_health.json` contains `appsurfacedocs.markdown.file_too_large` with the file path, actual bytes, and `MaxFileSizeBytes`. | Exclude generated or accidental docs with `Harvest:Markdown:ExcludeGlobs` or `Harvest:Paths:ExcludeGlobs`, or raise `MaxFileSizeBytes` only for intentional authored docs. |
+| A page publishes but its sidecar metadata is missing. | `_health.json` contains `appsurfacedocs.markdown.metadata_file_too_large` for the `.md.yml` or `.md.yaml` sidecar. | Move long prose into Markdown, trim generated metadata, or raise `MaxMetadataFileSizeBytes` only for intentional authored metadata. |
+| A configured JavaScript include reports `appsurfacedocs.javascript.reparse_point_skipped`. | The global or JavaScript include resolves to a symlink, junction, or other reparse point. | Replace the link with a real source file, include the real non-link source path, disable JavaScript harvesting, or use a custom harvester for that source. |
 | The host needs time to migrate. | The repository relied on pre-existing AppSurface behavior. | Temporarily set `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled=false` while moving public docs or adding allow globs. |
 
-Use the harvest health page and JSON endpoint to inspect VCS-ignore counts and sample paths when a source-backed snapshot looks unexpectedly small.
+Use the harvest health page and JSON endpoint to inspect VCS-ignore counts, Markdown resource warnings, and sample paths when a source-backed snapshot looks unexpectedly small. A `Healthy` snapshot can still contain warning diagnostics; check `diagnostics` when release workflows require warning-free docs.
 
 ## Understand first harvest behavior
 
@@ -365,6 +372,7 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Configure `AppSurfaceDocs:Localization` and `translation_key` metadata before adding translated files at scale.
 - Verify `/docs`, `/docs/search`, and `/docs/search-index.json`. The search page is server-rendered and should still expose starter query URLs plus browse links before the client index loads; a blocked or missing index must degrade to those links, not to a blank page.
 - For custom docs roots, path bases, or static exports, inspect the generated `search.html` and confirm its search index URL plus fallback anchors point at the mounted root.
+- For published release trees, inspect `search-index.json` before publishing. Stored `documents[].path` values should stay canonical and deployment-independent, such as `/docs/guide.html`; do not include request path bases, custom route roots, origins, executable schemes, traversal, or docs operational routes. AppSurface Docs rewrites valid canonical paths to the mounted root while serving the archive.
 - For static exports with redirect aliases, use the default HTML strategy for GitHub Pages and generic static hosts, or `--mode cdn --redirects netlify` for Netlify-compatible providers. Do not hand-author `_redirects` in the export output.
 - For published version catalogs, keep the version catalog file beside the `releases/` layout when possible and leave `AppSurfaceDocs:Versioning:TrustedReleaseRootPath` unset. If your release store lives elsewhere, configure `TrustedReleaseRootPath` once and keep every catalog `exactTreePath` relative to that directory.
 - For published release stores with unusually large generated pages, check exported `.html` files and root `search-index.json` before upgrading. The default `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` is 2 MiB and applies only to rewritten published-tree HTML/search-index artifacts, not images, CSS, JavaScript, fonts, or source harvesting.
@@ -383,7 +391,7 @@ When validating a host or release artifact:
 - Block or rename `/docs/search-index.json`. The page should show a specific search-index failure message and retry button while keeping the starter and browse links visible.
 - Confirm the failure panel does not contain replacement navigation links. The durable fallback links live in the server-rendered browse section so they stay available before and after client initialization.
 - For custom docs roots or path bases, confirm the search config, starter query URLs, and browse fallback anchors all include the mounted root.
-- For static exports or published release trees, inspect `search.html` and confirm `search-index.json`, starter query URLs, and fallback anchors are rewritten to the exact release root, including any path base.
+- For static exports or published release trees, inspect `search.html` and confirm `search-index.json`, starter query URLs, and fallback anchors are rewritten to the exact release root, including any path base. Keep the stored `search-index.json` document paths canonical (`/docs/...`) so the same archive can be safely mounted under a custom root or virtual directory later.
 
 ## Where to go next
 
