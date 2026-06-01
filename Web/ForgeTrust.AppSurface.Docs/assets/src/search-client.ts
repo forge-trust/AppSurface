@@ -2,6 +2,7 @@ import {
   createMiniSearchConfiguration,
   createMiniSearchDocument,
   defaultSearchOptions,
+  isSafeSearchResultPath,
   normalizeCodeLanguage,
   normalizePageTypeAlias,
   normalizeSearchDocument
@@ -20,6 +21,7 @@ declare global {
 (() => {
   const rawConfig = window.__appSurfaceDocsConfig || {};
   const docsRootPath = normalizeDocsRootPath(rawConfig.docsRootPath || '/docs');
+  const docsArchiveRootPath = rawConfig.docsArchiveRootPath ? normalizeDocsRootPath(rawConfig.docsArchiveRootPath) : '';
   const docsSearchUrl = rawConfig.docsSearchUrl || joinDocsPath(docsRootPath, 'search');
   const indexUrl = rawConfig.docsSearchIndexUrl || joinDocsPath(docsRootPath, 'search-index.json');
   const miniSearchUrl = rawConfig.miniSearchUrl || joinDocsPath(docsRootPath, 'minisearch.min.js');
@@ -176,6 +178,10 @@ declare global {
     return docsRootPath === '/'
       ? isKnownRootMountedDocsNavigationPath(path)
       : path === docsRootPath || path.startsWith(`${docsRootPath}/`);
+  }
+
+  function isSafeSearchDocumentPath(path) {
+    return isSafeSearchResultPath(path, { docsRootPath, docsArchiveRootPath });
   }
 
   function collectInitialDocsPaths() {
@@ -471,7 +477,7 @@ declare global {
   }
 
   function formatQueryForStatus(value) {
-    return normalizeQuery(value).replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ');
+    return normalizeQuery(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ');
   }
 
   function getErrorMessage(err) {
@@ -1006,6 +1012,10 @@ declare global {
   }
 
   function createSearchResultArticle(doc, queryTokens, options: any = {}) {
+    if (!isSafeSearchDocumentPath(doc.path)) {
+      return null;
+    }
+
     const article = createElement(
       'article',
       options.starter
@@ -1492,7 +1502,9 @@ declare global {
 
     const payload = await response.json();
     const docs = Array.isArray(payload.documents)
-      ? payload.documents.map(normalizeSearchDocument).filter((doc) => doc.id && doc.path && doc.title)
+      ? payload.documents
+        .map(normalizeSearchDocument)
+        .filter((doc) => doc.id && doc.path && doc.title && isSafeSearchDocumentPath(doc.path))
       : [];
 
     const MiniSearch = window.MiniSearch;
@@ -1559,13 +1571,14 @@ declare global {
       return;
     }
 
-    if (!queryResults.length) {
+    const safeQueryResults = queryResults.filter((item) => isSafeSearchDocumentPath(item.path));
+    if (!safeQueryResults.length) {
       renderSidebarMessage(sidebar, 'No matching docs found.');
       return;
     }
 
     results.classList.remove('hidden');
-    results.innerHTML = queryResults.map((item, index) => {
+    results.innerHTML = safeQueryResults.map((item, index) => {
       const selected = index === activeIndex ? 'true' : 'false';
       const pageTypeBadge = renderPageTypeBadge(item);
       const navigationAttributes = getDocsNavigationAttributes(item.path);
@@ -1580,7 +1593,7 @@ declare global {
       </li>`;
     }).join('');
 
-    setStatus(status, `${queryResults.length} result(s).`);
+    setStatus(status, `${safeQueryResults.length} result(s).`);
     if (activeIndex >= 0 && input) {
       input.setAttribute('aria-activedescendant', `docs-search-option-${activeIndex}`);
     }
@@ -1849,6 +1862,10 @@ declare global {
     const list = createElement('div', 'docs-search-page-starter-list');
     for (const starter of view.starterDocs) {
       const article = createSearchResultArticle(starter.doc, [], { starter: true });
+      if (!article) {
+        continue;
+      }
+
       article.dataset.rwStarterPageType = starter.group.key;
       list.append(article);
     }
@@ -1883,7 +1900,10 @@ declare global {
 
     const fragment = document.createDocumentFragment();
     view.resultDocs.forEach((doc) => {
-      fragment.append(createSearchResultArticle(doc, queryTokens));
+      const article = createSearchResultArticle(doc, queryTokens);
+      if (article) {
+        fragment.append(article);
+      }
     });
 
     page.resultsMeta.hidden = false;

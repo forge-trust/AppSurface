@@ -194,26 +194,23 @@ Supported normalized languages render highlighted output when the bundled TextMa
 ```csharp
 var health = await docAggregator.GetHarvestHealthAsync(ct);
 
-if (health.Status is DocHarvestHealthStatus.Failed or DocHarvestHealthStatus.Degraded)
+foreach (var diagnostic in health.Diagnostics)
 {
-    foreach (var diagnostic in health.Diagnostics)
+    var logLevel = diagnostic.Severity switch
     {
-        var logLevel = diagnostic.Severity switch
-        {
-            DocHarvestDiagnosticSeverity.Information => LogLevel.Information,
-            DocHarvestDiagnosticSeverity.Warning => LogLevel.Warning,
-            DocHarvestDiagnosticSeverity.Error => LogLevel.Error,
-            DocHarvestDiagnosticSeverity.Critical => LogLevel.Critical,
-            _ => LogLevel.Warning
-        };
+        DocHarvestDiagnosticSeverity.Information => LogLevel.Information,
+        DocHarvestDiagnosticSeverity.Warning => LogLevel.Warning,
+        DocHarvestDiagnosticSeverity.Error => LogLevel.Error,
+        DocHarvestDiagnosticSeverity.Critical => LogLevel.Critical,
+        _ => LogLevel.Warning
+    };
 
-        logger.Log(
-            logLevel,
-            "AppSurface Docs harvest diagnostic {Code}: {Problem} {Fix}",
-            diagnostic.Code,
-            diagnostic.Problem,
-            diagnostic.Fix);
-    }
+    logger.Log(
+        logLevel,
+        "AppSurface Docs harvest diagnostic {Code}: {Problem} {Fix}",
+        diagnostic.Code,
+        diagnostic.Problem,
+        diagnostic.Fix);
 }
 ```
 
@@ -225,7 +222,7 @@ The returned `DocHarvestHealthSnapshot` includes:
 - `TotalHarvesters`, `SuccessfulHarvesters`, and `FailedHarvesters`: counts for active harvesters that participated in strict aggregate health. Disabled optional harvesters, such as the JavaScript harvester when `AppSurfaceDocs:Harvest:JavaScript:Enabled=false`, are omitted. Default broad JavaScript discovery can still appear in `Harvesters` and diagnostics while staying out of these strict totals unless `StrictHealth=true` or JavaScript `IncludeGlobs` are configured.
 - `TotalDocs`: the number of documentation nodes in the final cached docs snapshot after AppSurface Docs post-processing.
 - `Harvesters`: one `DocHarvesterHealth` entry per active harvester, including its concrete type name, `DocHarvesterHealthStatus`, raw returned doc count, and optional diagnostic.
-- `Diagnostics`: structured `DocHarvestDiagnostic` entries for harvester-level and aggregate states. AppSurface Docs-created snapshots never expose raw exception messages in diagnostics; exception details stay in host logs.
+- `Diagnostics`: structured `DocHarvestDiagnostic` entries for harvester-level, warning, and aggregate states. AppSurface Docs-created snapshots never expose raw exception messages in diagnostics; exception details stay in host logs.
 
 ### Status Contract
 
@@ -246,6 +243,8 @@ The returned `DocHarvestHealthSnapshot` includes:
 
 The public enum numeric values are stable compatibility contracts for consumers that persist, serialize, bind, or compare them. New members may be added later, but existing values must not be reordered or renumbered.
 
+`Healthy` means the strict harvesters completed; it does not mean the snapshot has no warnings. For example, oversized Markdown files and oversized Markdown metadata sidecars emit warning diagnostics while `/docs/_health.json` still returns HTTP `200` with `verification.ok=true` when the remaining docs corpus is otherwise healthy. Consumers that require warning-free docs should inspect `Diagnostics` in addition to the aggregate status.
+
 ### Diagnostics
 
 Each `DocHarvestDiagnostic` has a stable `Code`, `Severity`, optional `HarvesterType`, operator-facing `Problem`, likely `Cause`, and suggested `Fix`. Use diagnostic codes for tests, dashboards, and host UI branching instead of parsing log messages.
@@ -258,6 +257,8 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.NoHarvesters` (`appsurfacedocs.harvest.no_harvesters`)
 - `DocHarvestDiagnosticCodes.AllFailed` (`appsurfacedocs.harvest.all_failed`)
 - `DocHarvestDiagnosticCodes.MetadataUnsafeTrustMigrationHref` (`appsurfacedocs.metadata.unsafe_trust_migration_href`)
+- `DocHarvestDiagnosticCodes.MarkdownFileTooLarge` (`appsurfacedocs.markdown.file_too_large`)
+- `DocHarvestDiagnosticCodes.MarkdownMetadataFileTooLarge` (`appsurfacedocs.markdown.metadata_file_too_large`)
 - `DocHarvestDiagnosticCodes.DocReservedRouteCollision` (`appsurfacedocs.routes.reserved_collision`)
 - `DocHarvestDiagnosticCodes.DocRouteCollision` (`appsurfacedocs.routes.doc_collision`)
 - `DocHarvestDiagnosticCodes.DocRedirectAliasCollision` (`appsurfacedocs.routes.redirect_alias_collision`)
@@ -1118,6 +1119,14 @@ static web assets.
 - `AppSurfaceDocs:Harvest:Markdown:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Defaults mirror the global path option shape, but apply only to Markdown candidates and the root `LICENSE` candidate.
   - Source-specific includes are evaluated after global includes, so they narrow Markdown rather than widening it.
+- `AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes`
+  - Defaults to `1048576` bytes.
+  - Markdown files above this limit are skipped before the file is read, before inline front matter is parsed, and before Markdig receives the body. Inline front matter is part of the Markdown body file and is governed by this limit.
+  - Oversized files emit `DocHarvestDiagnosticCodes.MarkdownFileTooLarge` with the repository-relative path, actual bytes, configured limit, and fix guidance in the client-visible health diagnostic.
+- `AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes`
+  - Defaults to `65536` bytes.
+  - Paired metadata sidecars such as `README.md.yml` and `README.md.yaml` above this limit are ignored before YAML parsing, while the Markdown body still publishes when it is within `MaxFileSizeBytes`.
+  - Oversized sidecars emit `DocHarvestDiagnosticCodes.MarkdownMetadataFileTooLarge` with the repository-relative sidecar path, actual bytes, configured limit, and fix guidance in the client-visible health diagnostic.
 - `AppSurfaceDocs:Harvest:CSharp:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Defaults mirror the global path option shape, but apply only to C# API-reference candidates.
   - `CSharpExampleSource` is only a C# default group. Markdown example READMEs stay eligible unless excluded by other policy.
@@ -1153,6 +1162,31 @@ static web assets.
 - `AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes`
   - Defaults to `262144`.
   - Files above this limit are skipped with a structured harvest diagnostic so generated bundles do not dominate docs snapshot time.
+
+Markdown resource limits are byte counts. Configure them in JSON:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Harvest": {
+      "Markdown": {
+        "MaxFileSizeBytes": 1048576,
+        "MaxMetadataFileSizeBytes": 65536
+      }
+    }
+  }
+}
+```
+
+Or through environment variables:
+
+```bash
+AppSurfaceDocs__Harvest__Markdown__MaxFileSizeBytes=1048576
+AppSurfaceDocs__Harvest__Markdown__MaxMetadataFileSizeBytes=65536
+```
+
+These settings are pre-read byte guards. They do not provide Markdig parser-complexity, AST-depth, timeout, or cancellation limits after a Markdown file has been admitted for parsing. Prefer `AppSurfaceDocs:Harvest:Markdown:ExcludeGlobs` or `AppSurfaceDocs:Harvest:Paths:ExcludeGlobs` for generated docs; raise the limits only for intentional authored Markdown and metadata.
+
 - `AppSurfaceDocs:Routing:RouteRootPath`
   - Controls the route-family root for stable entry, archive, and exact-version routes.
   - Defaults to `/docs` when versioning is on.
@@ -1447,7 +1481,9 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 - `search-index.json` at the tree root
   - The payload must remain valid JSON with a top-level `documents` array so version-local search can load safely.
   - Every `documents[]` entry must include non-empty string `path` and `title` properties.
-  - Missing or blank `path`/`title` values cause AppSurface Docs to reject the published release tree during startup validation.
+  - Each `documents[].path` value is archive metadata, not a general URL field. Store canonical, root-relative AppSurface Docs paths such as `/docs/guide.html`, `/docs/packages/README.md.html`, `/docs/v/1.2.3/guide.html` for that same version, or `/docs/guide.html?q=term#section`.
+  - Do not store request `PathBase`, `PublicOrigin`, custom `RouteRootPath`, deployment-specific aliases, protocol-relative URLs, absolute URLs, executable schemes, traversal, encoded separators, or docs operational/assets routes such as `/docs/search`, `/docs/search-index.json`, `/docs/search.css`, `/docs/search-client.js`, `/docs/_health`, `/docs/_routes`, or `/docs/_search-index/refresh`.
+  - Missing or blank `path`/`title` values, malformed payloads, and unsafe `path` values cause AppSurface Docs to reject only the affected published release tree during startup validation.
   - The payload must stay under `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`; oversized payloads are rejected during catalog validation before JSON parsing, so the release is marked unavailable before readers hit broken search.
 - `search.css` at the tree root. The bundled search stylesheet carries search-local fallbacks for the shared style tokens so exact release search controls remain styled even when a historical/static export does not include `site.gen.css`.
 - `search-client.js` at the tree root
@@ -1464,6 +1500,8 @@ AppSurface Docs does not regenerate these trees at request time. It resolves ext
 Use the limit for exported `.html` pages and the root `search-index.json` only. It is not a general docs file-size policy, it does not cap source harvesting, and it does not block images, fonts, CSS, JavaScript, or other streamed assets. When AppSurface Docs rejects an oversized rewritten artifact, diagnostics include the artifact type, observed size, configured limit, `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`, the failure outcome, and this section name. Remediate by shrinking or re-exporting the artifact, or by setting a larger explicit limit within the supported range.
 
 When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, and, for outline-aware exports, `outline-client.js` before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional outline support; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+
+If a strict search-index path failure appears after upgrade, inspect the affected tree's `search-index.json`, find the reported `documents[index]`, and rewrite valid docs pages back to canonical `/docs/...` paths. For example, replace `https://docs.example.com/foo/bar/guide.html`, `/some-base/docs/guide.html`, or `/foo/bar/guide.html` with `/docs/guide.html` before rebuilding or republishing the archive. Do not repair unsafe rows by pointing them at external sites or operational docs endpoints; those entries should be removed or regenerated from a valid docs route.
 
 ### Archive ordering
 
@@ -1546,6 +1584,7 @@ After:
 - Do not expect the recommended alias to rewrite ordinary links to the exact-version route. Only canonical metadata moves from the alias root to the exact root.
 - Do not assume `AppSurfaceDocs:Versioning:Enabled` means the runtime can read request-time bundles. This slice still serves the live preview from source and mounts published releases as static trees.
 - Do not forget `search-index.json` in an exported release tree. A release without it is intentionally marked unavailable.
+- Do not store deployment-specific search-index document paths in an exact tree. The archive stores canonical `/docs/...` paths; AppSurface Docs rewrites them to the recommended alias, exact-version route, custom route root, and request `PathBase` while serving.
 - Do not treat `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` as a cache or total CPU limit. It bounds rewritten input size for published `.html` and root `search-index.json`; under-limit rewritten files can still require request-time parsing and rewriting.
 - Do not raise `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` casually. Larger limits allow larger public request-time reads; prefer shrinking or re-exporting unusually large HTML or search-index artifacts when practical.
 - Do not hand-edit `.appsurface-docs-route-manifest.json` to add aliases. New exports validate duplicate aliases, aliases that collide with canonical routes, and aliases that equal their own canonical route. Runtime ignores ambiguous aliases from hand-edited or legacy manifests and keeps serving normal files.
@@ -2013,6 +2052,7 @@ The CLI prints the docs home after the preview host is listening and attempts to
 - If both `README.md.yml` and `README.md.yaml` exist for the same Markdown file, AppSurface Docs logs a warning and ignores both sidecars until the conflict is removed.
 - If both sidecar metadata and inline front matter define the same field, inline front matter wins and the sidecar acts as fallback metadata only.
 - Invalid sidecar YAML logs a warning and falls back to the inline/default metadata path instead of breaking the page harvest.
+- Oversized sidecars emit `appsurfacedocs.markdown.metadata_file_too_large`, are ignored before YAML parsing, and do not block the Markdown body from publishing. Sidecars use `AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes`; inline front matter stays part of the Markdown body and uses `AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes`.
 - If a featured path is missing, hidden from public navigation, or duplicated, AppSurface Docs skips it and logs a warning.
 - If all featured entries are skipped, AppSurface Docs logs one final warning and falls back instead of rendering broken rows.
 - The old flat `featured_pages` field is ignored and logs a migration warning. If both fields are present, `featured_page_groups` wins.
@@ -2023,6 +2063,7 @@ Diagnostics include the source file, field path when available, problem, cause, 
 
 - Do not create both `.yml` and `.yaml` sidecars for the same Markdown file. AppSurface Docs treats that as an authoring error and ignores both.
 - Do not use a sidecar as a second secret metadata system. It supports the same `DocMetadata` schema as inline front matter, and it is best reserved for files whose Markdown needs to stay portable on other surfaces.
+- Do not put long prose into sidecars to bypass the Markdown body limit. Sidecars are capped separately because they are metadata, not document body content.
 - Do not put `path` or `question` directly under a group. Page fields belong under `pages`.
 - Prefer source-relative paths for authored curation when the docs may be exported or mounted under more than one route. Canonical docs-surface paths are accepted for parity with browser links, but source paths stay easier to review and move with the file.
 - README portability matters most at the repository and package level. In this repo, authored `README.md` files should stay free of inline front matter so GitHub renders them cleanly.

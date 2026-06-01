@@ -1,3 +1,4 @@
+using System.Globalization;
 using ForgeTrust.AppSurface.Docs.Models;
 using Markdig;
 using Markdig.Renderers.Html;
@@ -22,6 +23,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
     private readonly ILogger<MarkdownHarvester> _logger;
     private readonly Func<string, CancellationToken, Task<string>> _readAllTextAsync;
     private readonly AppSurfaceDocsHarvestPathPolicy _pathPolicy;
+    private readonly AppSurfaceDocsOptions _options;
     private IReadOnlyList<DocHarvestDiagnostic> _lastDiagnostics = [];
 
     /// <summary>
@@ -45,6 +47,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             logger,
             File.ReadAllTextAsync,
             CreateDefaultHighlighter(loggerFactory),
+            new AppSurfaceDocsOptions(),
             AppSurfaceDocsHarvestPathPolicy.CreateDefault())
     {
     }
@@ -62,8 +65,30 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         AppSurfaceDocsHarvestPathPolicy pathPolicy)
         : this(
             logger,
+            loggerFactory,
+            new AppSurfaceDocsOptions(),
+            pathPolicy)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> with configurable harvest options, path policy, and
+    /// observable diagnostics for the default code highlighter.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="loggerFactory">Logger factory used to create the TextMate grammar-load and highlighting fallback logger.</param>
+    /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
+    /// <param name="pathPolicy">Shared harvest path policy used to decide which Markdown candidates publish.</param>
+    internal MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        ILoggerFactory loggerFactory,
+        AppSurfaceDocsOptions options,
+        AppSurfaceDocsHarvestPathPolicy pathPolicy)
+        : this(
+            logger,
             File.ReadAllTextAsync,
             CreateDefaultHighlighter(loggerFactory),
+            options,
             pathPolicy)
     {
     }
@@ -81,6 +106,34 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             readAllTextAsync,
             AppSurfaceDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
                 NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance),
+            new AppSurfaceDocsOptions(),
+            AppSurfaceDocsHarvestPathPolicy.CreateDefault())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> for tests or internal composition with a custom
+    /// file reader and configured AppSurface Docs options.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read Markdown bodies and metadata sidecars.</param>
+    /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
+    /// <remarks>
+    /// This overload supplies the default TextMate-based code highlighter and default harvest path policy. Prefer it when
+    /// a test needs custom options but does not need to observe code-highlighting behavior or path-policy decisions.
+    /// Use the overload that accepts <see cref="IAppSurfaceDocsCodeHighlighter"/> and
+    /// <see cref="AppSurfaceDocsHarvestPathPolicy"/> when either dependency must be controlled explicitly.
+    /// </remarks>
+    internal MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        Func<string, CancellationToken, Task<string>> readAllTextAsync,
+        AppSurfaceDocsOptions options)
+        : this(
+            logger,
+            readAllTextAsync,
+            AppSurfaceDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
+                NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance),
+            options,
             AppSurfaceDocsHarvestPathPolicy.CreateDefault())
     {
     }
@@ -94,6 +147,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             readAllTextAsync,
             AppSurfaceDocsCodeBlockMarkdownExtension.CreateDefaultHighlighter(
                 NullLogger<TextMateSharpAppSurfaceDocsCodeHighlighter>.Instance),
+            new AppSurfaceDocsOptions(),
             pathPolicy)
     {
     }
@@ -112,24 +166,64 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
             logger,
             readAllTextAsync,
             codeHighlighter,
+            new AppSurfaceDocsOptions(),
             AppSurfaceDocsHarvestPathPolicy.CreateDefault())
     {
     }
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> for tests or internal composition with custom file
+    /// reading, code highlighting, and harvest path policy.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read Markdown bodies and metadata sidecars.</param>
+    /// <param name="codeHighlighter">Highlighter used when Markdown fenced code blocks are rendered to HTML.</param>
+    /// <param name="pathPolicy">Shared harvest path policy used to decide which Markdown candidates publish.</param>
+    /// <remarks>
+    /// This overload supplies default AppSurface Docs options, including default Markdown byte limits. Prefer it when a
+    /// test needs explicit highlighting or path-policy behavior but should keep production defaults for resource guards.
+    /// Use the most explicit overload when custom resource limits and custom collaborators are both required.
+    /// </remarks>
     internal MarkdownHarvester(
         ILogger<MarkdownHarvester> logger,
         Func<string, CancellationToken, Task<string>> readAllTextAsync,
         IAppSurfaceDocsCodeHighlighter codeHighlighter,
         AppSurfaceDocsHarvestPathPolicy pathPolicy)
+        : this(logger, readAllTextAsync, codeHighlighter, new AppSurfaceDocsOptions(), pathPolicy)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="MarkdownHarvester"/> for tests or internal composition with all core
+    /// collaborators supplied explicitly.
+    /// </summary>
+    /// <param name="logger">Logger used for recording harvesting events and errors.</param>
+    /// <param name="readAllTextAsync">Delegate used to asynchronously read Markdown bodies and metadata sidecars.</param>
+    /// <param name="codeHighlighter">Highlighter used when Markdown fenced code blocks are rendered to HTML.</param>
+    /// <param name="options">AppSurface Docs options that provide Markdown resource limits.</param>
+    /// <param name="pathPolicy">Shared harvest path policy used to decide which Markdown candidates publish.</param>
+    /// <remarks>
+    /// This overload is the internal test seam for combining custom readers, highlighters, options, and path policy.
+    /// Simpler overloads should be preferred when their defaults match the scenario because they keep tests focused on
+    /// one dependency at a time.
+    /// </remarks>
+    internal MarkdownHarvester(
+        ILogger<MarkdownHarvester> logger,
+        Func<string, CancellationToken, Task<string>> readAllTextAsync,
+        IAppSurfaceDocsCodeHighlighter codeHighlighter,
+        AppSurfaceDocsOptions options,
+        AppSurfaceDocsHarvestPathPolicy pathPolicy)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(readAllTextAsync);
         ArgumentNullException.ThrowIfNull(codeHighlighter);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(pathPolicy);
 
         _logger = logger;
         _readAllTextAsync = readAllTextAsync;
         _pathPolicy = pathPolicy;
+        _options = options;
         _pipeline = new MarkdownPipelineBuilder()
             .UseAdvancedExtensions()
             .Use(new AppSurfaceDocsCodeBlockMarkdownExtension(codeHighlighter))
@@ -190,6 +284,7 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         var diagnostics = new List<DocHarvestDiagnostic>();
         try
         {
+            var markdownOptions = _options.Harvest?.Markdown ?? new AppSurfaceDocsMarkdownHarvestOptions();
             foreach (var file in EnumerateMarkdownSourceFiles(rootPath, pathPolicy, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -197,6 +292,11 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 {
                     var relativePath = Path.GetRelativePath(rootPath, file).Replace('\\', '/');
                     if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.Markdown))
+                    {
+                        continue;
+                    }
+
+                    if (ShouldSkipOversizedMarkdownFile(file, relativePath, markdownOptions, diagnostics))
                     {
                         continue;
                     }
@@ -325,13 +425,25 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
         }
 
         var sidecarPath = existingSidecars[0];
+        var relativeSidecarPath = $"{relativeMarkdownPath}{Path.GetExtension(sidecarPath)}";
 
         try
         {
+            var markdownOptions = _options.Harvest?.Markdown ?? new AppSurfaceDocsMarkdownHarvestOptions();
+            if (ShouldIgnoreOversizedMetadataSidecar(
+                    sidecarPath,
+                    relativeMarkdownPath,
+                    relativeSidecarPath,
+                    markdownOptions,
+                    harvestDiagnostics))
+            {
+                return null;
+            }
+
             var yaml = await _readAllTextAsync(sidecarPath, cancellationToken);
             var result = MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics(yaml);
             ReportMetadataDiagnostics(
-                $"{relativeMarkdownPath}{Path.GetExtension(sidecarPath)}",
+                relativeSidecarPath,
                 result.Diagnostics,
                 harvestDiagnostics);
             return result.Metadata;
@@ -358,6 +470,66 @@ public class MarkdownHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
                 relativeMarkdownPath);
             return null;
         }
+    }
+
+    private bool ShouldSkipOversizedMarkdownFile(
+        string filePath,
+        string relativePath,
+        AppSurfaceDocsMarkdownHarvestOptions markdownOptions,
+        ICollection<DocHarvestDiagnostic> harvestDiagnostics)
+    {
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length <= markdownOptions.MaxFileSizeBytes)
+        {
+            return false;
+        }
+
+        var actualBytes = fileInfo.Length.ToString(CultureInfo.InvariantCulture);
+        var configuredLimit = markdownOptions.MaxFileSizeBytes.ToString(CultureInfo.InvariantCulture);
+        harvestDiagnostics.Add(new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.MarkdownFileTooLarge,
+            DocHarvestDiagnosticSeverity.Warning,
+            HarvesterType,
+            $"Skipped Markdown file '{relativePath}' because it is {actualBytes} bytes and exceeds AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes ({configuredLimit} bytes).",
+            "The file matched Markdown harvest policy but was not read, front matter was not parsed, and Markdig did not receive the Markdown body.",
+            $"Exclude generated or accidental large docs with AppSurfaceDocs:Harvest:Markdown:ExcludeGlobs or AppSurfaceDocs:Harvest:Paths:ExcludeGlobs, or raise AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes above {actualBytes} bytes only for intentional authored Markdown pages."));
+        _logger.LogWarning(
+            "Skipped Markdown file {MarkdownPath} because it is {ActualBytes} bytes and AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes is {ConfiguredLimit} bytes.",
+            relativePath,
+            fileInfo.Length,
+            markdownOptions.MaxFileSizeBytes);
+        return true;
+    }
+
+    private bool ShouldIgnoreOversizedMetadataSidecar(
+        string sidecarPath,
+        string relativeMarkdownPath,
+        string relativeSidecarPath,
+        AppSurfaceDocsMarkdownHarvestOptions markdownOptions,
+        ICollection<DocHarvestDiagnostic>? harvestDiagnostics)
+    {
+        var fileInfo = new FileInfo(sidecarPath);
+        if (fileInfo.Length <= markdownOptions.MaxMetadataFileSizeBytes)
+        {
+            return false;
+        }
+
+        var actualBytes = fileInfo.Length.ToString(CultureInfo.InvariantCulture);
+        var configuredLimit = markdownOptions.MaxMetadataFileSizeBytes.ToString(CultureInfo.InvariantCulture);
+        harvestDiagnostics?.Add(new DocHarvestDiagnostic(
+            DocHarvestDiagnosticCodes.MarkdownMetadataFileTooLarge,
+            DocHarvestDiagnosticSeverity.Warning,
+            HarvesterType,
+            $"Ignored Markdown metadata sidecar '{relativeSidecarPath}' for '{relativeMarkdownPath}' because it is {actualBytes} bytes and exceeds AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes ({configuredLimit} bytes).",
+            "The sidecar matched the paired metadata naming contract but was not read or parsed as YAML. The Markdown body can still publish when it is within AppSurfaceDocs:Harvest:Markdown:MaxFileSizeBytes.",
+            $"Move large prose into the Markdown body, exclude generated sidecars, or raise AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes above {actualBytes} bytes only for intentional authored metadata."));
+        _logger.LogWarning(
+            "Ignored Markdown metadata sidecar {SidecarPath} for {MarkdownPath} because it is {ActualBytes} bytes and AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes is {ConfiguredLimit} bytes.",
+            relativeSidecarPath,
+            relativeMarkdownPath,
+            fileInfo.Length,
+            markdownOptions.MaxMetadataFileSizeBytes);
+        return true;
     }
 
     IReadOnlyList<DocHarvestDiagnostic> IDocHarvesterDiagnosticProvider.GetHarvestDiagnostics()
