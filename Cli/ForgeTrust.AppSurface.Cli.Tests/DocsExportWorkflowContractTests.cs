@@ -52,6 +52,7 @@ public sealed class DocsExportWorkflowContractTests
         Assert.Contains("AppSurfaceDocs__Contributor__EditUrlTemplate", ScalarKeys(exportEnv));
         Assert.Contains("AppSurfaceDocs__Contributor__LastUpdatedMode", ScalarKeys(exportEnv));
         Assert.Equal("branding", GetScalar(exportEnv, "AppSurfaceDocs__Identity__BrandingAssets__DirectoryPath"));
+        Assert.Equal("true", GetScalar(exportEnv, "AppSurfaceDocs__Identity__BrandingAssets__AllowSvgAssets"));
         Assert.DoesNotContain("AppSurfaceDocs__Identity__BrandingAssets__RequestPath", ScalarKeys(exportEnv));
         Assert.Equal(
             "/branding/appsurface-site-icon.svg",

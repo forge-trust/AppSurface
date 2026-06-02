@@ -156,6 +156,7 @@ jobs:
           AppSurfaceDocs__Identity__Wordmark__HighlightText: Surface
           AppSurfaceDocs__Identity__Wordmark__HighlightColor: "#3b82f6"
           AppSurfaceDocs__Identity__BrandingAssets__DirectoryPath: branding
+          AppSurfaceDocs__Identity__BrandingAssets__AllowSvgAssets: "true"
           AppSurfaceDocs__Identity__Logo__Path: /branding/appsurface-site-icon.svg
           AppSurfaceDocs__Identity__Favicon__SvgPath: /branding/appsurface-site-icon.svg
           AppSurfaceDocs__Harvest__JavaScript__IncludeGlobs__0: Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js

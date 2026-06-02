@@ -478,6 +478,25 @@ public class ConfigAuditModelsTests
                             Message = "Discovered diagnostic."
                         }
                     ]
+                },
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Discovered.Complex",
+                    Classification = ConfigAuditDiscoveredKeyClassification.Known,
+                    DisplayValue = "should-not-render",
+                    ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.OmittedComplex
+                },
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Discovered.KnownUnavailable",
+                    Classification = ConfigAuditDiscoveredKeyClassification.Known,
+                    ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.OmittedInventory
+                },
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Discovered.InvalidInventory",
+                    Classification = (ConfigAuditDiscoveredKeyClassification)99,
+                    ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.OmittedInventory
                 }
             ],
             Entries =
@@ -544,7 +563,46 @@ public class ConfigAuditModelsTests
         Assert.Contains("Provider", rendered, StringComparison.Ordinal);
         Assert.Contains("Discovered keys:", rendered, StringComparison.Ordinal);
         Assert.Contains("Discovered.Fallback [99] = value", rendered, StringComparison.Ordinal);
+        Assert.Contains("Discovered.Complex [Known]", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("should-not-render", rendered, StringComparison.Ordinal);
+        Assert.Contains(
+            "Discovered.KnownUnavailable [Known] (value omitted: scalar display value is unavailable)",
+            rendered,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Discovered.InvalidInventory [99] (value omitted: inventory key is not an exact audit entry)",
+            rendered,
+            StringComparison.Ordinal);
         Assert.Contains("Diagnostic: [Warning] discovered-warning: Discovered diagnostic.", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConfigAuditDiscoveredKey_ValueDisplayState_SerializesAsNumericEnumByDefault()
+    {
+        var report = new ConfigAuditReport
+        {
+            Environment = "Production",
+            GeneratedAt = DateTimeOffset.UnixEpoch,
+            Redaction = new ConfigAuditRedaction
+            {
+                Enabled = true,
+                Placeholder = "[redacted]"
+            },
+            DiscoveredKeys =
+            [
+                new ConfigAuditDiscoveredKey
+                {
+                    Key = "Application.Name",
+                    Classification = ConfigAuditDiscoveredKeyClassification.Unknown,
+                    ValueDisplayState = ConfigAuditDiscoveredValueDisplayState.OmittedInventory
+                }
+            ]
+        };
+
+        var serialized = JsonSerializer.Serialize(report);
+
+        Assert.Contains("\"ValueDisplayState\":4", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"OmittedInventory\"", serialized, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -559,6 +617,12 @@ public class ConfigAuditModelsTests
         Assert.Equal(0, (int)ConfigAuditDiscoveredKeyClassification.Known);
         Assert.Equal(1, (int)ConfigAuditDiscoveredKeyClassification.KnownDescendant);
         Assert.Equal(2, (int)ConfigAuditDiscoveredKeyClassification.Unknown);
+
+        Assert.Equal(0, (int)ConfigAuditDiscoveredValueDisplayState.Unspecified);
+        Assert.Equal(1, (int)ConfigAuditDiscoveredValueDisplayState.Shown);
+        Assert.Equal(2, (int)ConfigAuditDiscoveredValueDisplayState.Redacted);
+        Assert.Equal(3, (int)ConfigAuditDiscoveredValueDisplayState.OmittedComplex);
+        Assert.Equal(4, (int)ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
 
         Assert.Equal(0, (int)ConfigAuditElementKind.ArrayItem);
         Assert.Equal(1, (int)ConfigAuditElementKind.ListItem);
