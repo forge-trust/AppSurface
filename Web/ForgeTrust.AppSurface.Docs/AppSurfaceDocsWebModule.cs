@@ -900,6 +900,27 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// <summary>
     /// Resolves a route-captured branding asset path only when it stays relative and points at an allowed image asset.
     /// </summary>
+    /// <param name="routeValue">The route-captured asset path to validate and decode.</param>
+    /// <param name="allowSvgAssets">
+    /// <see langword="true" /> to allow <c>.svg</c> files for a trusted branding directory; otherwise SVG files are
+    /// denied by default and only bitmap/icon extensions are accepted.
+    /// </param>
+    /// <param name="assetPath">
+    /// The decoded relative asset path when validation succeeds, or an empty string when validation fails.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// This method accepts only relative browser paths that decode cleanly, do not contain rooted paths, backslashes,
+    /// control characters, or traversal segments, and end with an allowed branding image extension. It rejects
+    /// <c>.svg</c> unless <paramref name="allowSvgAssets" /> is <see langword="true" />.
+    /// </para>
+    /// <para>
+    /// Callers should pass the raw route value before filesystem joining or other path normalization. Do not pass
+    /// already-normalized absolute paths, rely on the filename alone, or treat a successful result as content-level
+    /// sanitization. Enabling SVG serving expands the attack surface because SVG is active document content; this helper
+    /// only enforces path and extension safety and does not optimize or sanitize SVG bytes.
+    /// </para>
+    /// </remarks>
     internal static bool TryResolveSafeBrandingAssetPath(object? routeValue, bool allowSvgAssets, out string assetPath)
     {
         assetPath = string.Empty;

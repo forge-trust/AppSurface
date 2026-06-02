@@ -182,8 +182,9 @@ public sealed class AppSurfaceDocsIdentityOptions
 /// <para>
 /// Logo and favicon paths are browser URL paths, not filesystem paths, and are not joined with
 /// <see cref="DirectoryPath" />. When <see cref="DirectoryPath" /> is <c>branding</c> and
-/// <see cref="RequestPath" /> uses its default <c>/branding</c>, a file at <c>branding/logo.svg</c> is referenced as
-/// <c>/branding/logo.svg</c>.
+/// <see cref="RequestPath" /> uses its default <c>/branding</c>, a file at <c>branding/logo.png</c> is referenced as
+/// <c>/branding/logo.png</c>. SVG files use the same URL mapping only after <see cref="AllowSvgAssets" /> is enabled
+/// for a trusted branding directory.
 /// </para>
 /// <para>
 /// Relative directory paths resolve against <see cref="AppSurfaceDocsSourceOptions.RepositoryRoot" /> when configured;
