@@ -1955,6 +1955,8 @@ public class DocsControllerTests : IDisposable
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
+        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "Search");
+        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Href == "/docs/search");
         Assert.Collection(
             model.FailureFallbackLinks,
             link =>
@@ -2007,6 +2009,8 @@ public class DocsControllerTests : IDisposable
 
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
+        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Title == "Search");
+        Assert.DoesNotContain(model.FailureFallbackLinks, link => link.Href == "/docs/search");
         Assert.Collection(
             model.FailureFallbackLinks,
             link =>

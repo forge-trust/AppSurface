@@ -647,6 +647,14 @@ public class ExportEngineTests
             Assert.True(File.Exists(Path.Join(tempDir, "about.html")));
             Assert.False(File.Exists(Path.Join(tempDir, "docs", "sections", "start-here.html")));
             Assert.False(File.Exists(Path.Join(tempDir, "docs", "sections", "packages.html")));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/docs/sections/start-here", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/docs/sections/packages", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/401", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/401.html", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/403", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/403.html", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/404", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(handler.RequestPaths, path => path.Equals("/404.html", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
