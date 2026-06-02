@@ -190,7 +190,8 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 continue;
             }
 
-            if (IsKnownDescendantKey(key, knownEntry.Key)
+            var isDescendant = IsKnownDescendantKey(key, knownEntry.Key);
+            if (isDescendant
                 && normalizedSensitivity != ConfigAuditSensitivity.Unknown
                 && knownEntry.Key.Length > nearestSpecifiedParentLength)
             {
@@ -198,8 +199,7 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                 nearestSpecifiedParentLength = knownEntry.Key.Length;
             }
 
-            if (IsKnownDescendantKey(key, knownEntry.Key)
-                && normalizedSensitivity == ConfigAuditSensitivity.Sensitive)
+            if (isDescendant && normalizedSensitivity == ConfigAuditSensitivity.Sensitive)
             {
                 hasSensitiveEntryOrAncestor = true;
             }
@@ -1117,6 +1117,20 @@ internal sealed record ConfigAuditProviderDiscoveredKey(
     IReadOnlyList<ConfigAuditSourceRecord> Sources,
     IReadOnlyList<ConfigAuditDiagnostic> Diagnostics);
 
+/// <summary>
+/// Carries the discovered-value display decision used while projecting provider-discovered keys.
+/// </summary>
+/// <remarks>
+/// This helper keeps the formatted value, redaction flag, and
+/// <see cref="ConfigAuditDiscoveredValueDisplayState"/> synchronized before they enter
+/// <see cref="ConfigAuditDiscoveredKey"/>. <see cref="DisplayValue"/> may be <see langword="null"/> for omitted
+/// states, so callers must branch on <see cref="DisplayState"/> instead of inferring intent from nullability.
+/// Pitfall: a null display value is not an error, and renderers or logs must preserve the redaction and display-state
+/// decision ordering rather than recomputing value visibility.
+/// </remarks>
+/// <param name="DisplayValue">The formatted scalar value, or <see langword="null"/> when the value is omitted.</param>
+/// <param name="IsRedacted">Whether the formatted value came from a redaction decision.</param>
+/// <param name="DisplayState">Why the value is shown, redacted, or omitted.</param>
 internal sealed record DiscoveredValueDisplay(
     string? DisplayValue,
     bool IsRedacted,
