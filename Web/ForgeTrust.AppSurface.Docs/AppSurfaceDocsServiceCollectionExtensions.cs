@@ -325,6 +325,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.AddSingleton(new CSharpDocHarvesterRegistrationMarker());
         services.AddSingleton<IDocHarvester>(
             sp => new CSharpDocHarvester(
+                sp.GetRequiredService<AppSurfaceDocsOptions>(),
                 sp.GetRequiredService<ILogger<CSharpDocHarvester>>(),
                 sp.GetRequiredService<AppSurfaceDocsHarvestPathPolicy>()));
     }
