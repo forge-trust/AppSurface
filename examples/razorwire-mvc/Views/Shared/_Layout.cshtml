@@ -15,14 +15,14 @@
     <script src="~/js/site.js" data-turbo-eval="false"></script>
 </head>
 <body class="h-full flex flex-col font-outfit text-slate-900 overflow-x-hidden">
-<header class="bg-white/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-200">
+<header class="bg-white/80 backdrop-blur-md sticky top-0 z-[70] border-b border-slate-200">
     <nav class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between h-16 items-center">
             <div class="flex items-center gap-8">
                 <a class="text-xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent" asp-area="" asp-controller="Home" asp-action="Index">
                     RazorWire
                 </a>
-                <div class="hidden sm:flex gap-4">
+                <div class="hidden lg:flex gap-4">
                     <a class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors" asp-area="" asp-controller="Home" asp-action="Index">Home</a>
                     <a class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors" asp-area="" asp-controller="Reactivity" asp-action="Index">Reactivity</a>
                     <a class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors" asp-area="" asp-controller="Reactivity" asp-action="FormFailures">Form Failures</a>
@@ -30,11 +30,28 @@
                     <a class="text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors" asp-area="" asp-controller="Navigation" asp-action="PageNavigation">Page Nav</a>
                 </div>
             </div>
+            <details class="group relative">
+                <summary class="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-indigo-50 [&::-webkit-details-marker]:hidden">
+                    <span class="sr-only">Site navigation</span>
+                    <span class="grid gap-1.5" aria-hidden="true">
+                        <span class="block h-0.5 w-5 rounded-full bg-current transition-transform group-open:translate-y-2 group-open:rotate-45"></span>
+                        <span class="block h-0.5 w-5 rounded-full bg-current transition-opacity group-open:opacity-0"></span>
+                        <span class="block h-0.5 w-5 rounded-full bg-current transition-transform group-open:-translate-y-2 group-open:-rotate-45"></span>
+                    </span>
+                </summary>
+                <div class="absolute right-0 top-12 z-[80] w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-900/10">
+                    <a class="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700" asp-area="" asp-controller="Home" asp-action="Index">Home</a>
+                    <a class="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700" asp-area="" asp-controller="Reactivity" asp-action="Index">Reactivity</a>
+                    <a class="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700" asp-area="" asp-controller="Reactivity" asp-action="FormFailures">Form Failures</a>
+                    <a class="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700" asp-area="" asp-controller="Navigation" asp-action="Index">Navigation</a>
+                    <a class="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700" asp-area="" asp-controller="Navigation" asp-action="PageNavigation">Page Nav</a>
+                </div>
+            </details>
         </div>
     </nav>
 </header>
 
-<main role="main" class="flex-grow py-8 overflow-y-auto">
+<main role="main" class="flex-grow py-8">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         @RenderBody()
     </div>

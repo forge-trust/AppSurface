@@ -21,6 +21,8 @@ interface PageNavigationEntry {
     target: HTMLElement;
 }
 
+type PageNavigationScrollRoot = Window | Element;
+
 (function () {
     if (window.RazorWirePageNavigationInitialized) return;
     window.RazorWirePageNavigationInitialized = true;
@@ -100,11 +102,17 @@ interface PageNavigationEntry {
     }
 
     class PageNavigationController {
+        private static readonly activationOffset = 64;
+        private static readonly hashBoundaryBefore = 16;
+        private static readonly hashBoundaryAfter = 160;
+
         entries: PageNavigationEntry[] = [];
         activeLink: Element | null = null;
+        scrollRoot: PageNavigationScrollRoot | null = null;
+        activeLinkAnimationFrame = 0;
         rootClickListener = (event: Event) => this.handleRootClick(event);
         toggleClickListener = (event: Event) => this.handleToggleClick(event);
-        scrollListener = () => this.refreshActiveFromViewport();
+        scrollListener = () => this.scheduleActiveRefresh();
 
         constructor(
             private readonly root: Element,
@@ -116,16 +124,14 @@ interface PageNavigationEntry {
             this.refresh();
             this.root.addEventListener?.('click', this.rootClickListener);
             this.root.addEventListener?.('click', this.toggleClickListener);
-            window.addEventListener?.('scroll', this.scrollListener, { passive: true });
-            document.addEventListener?.('scroll', this.scrollListener, { passive: true, capture: true });
         }
 
         disconnect() {
             this.root.removeAttribute('data-rw-page-nav-enhanced');
             this.root.removeEventListener?.('click', this.rootClickListener);
             this.root.removeEventListener?.('click', this.toggleClickListener);
-            window.removeEventListener?.('scroll', this.scrollListener);
-            document.removeEventListener?.('scroll', this.scrollListener, { capture: true });
+            this.unbindScrollRoot();
+            this.cancelActiveRefresh();
         }
 
         refresh() {
@@ -133,6 +139,7 @@ interface PageNavigationEntry {
                 .filter(link => link.tagName === 'A')
                 .map(link => ({ link, target: this.resolveTarget(link) }))
                 .filter((entry): entry is PageNavigationEntry => entry.target !== null);
+            this.bindScrollRoot();
             this.syncPanelState();
             this.refreshActiveFromHash() || this.refreshActiveFromViewport();
         }
@@ -151,17 +158,21 @@ interface PageNavigationEntry {
             }
 
             const hashEntry = this.getActiveEntryFromHash();
-            if (hashEntry && this.activeLink === hashEntry.link) {
+            if (hashEntry) {
                 const hashRect = hashEntry.target.getBoundingClientRect?.();
-                if (hashRect && hashRect.top >= 0 && hashRect.top <= window.innerHeight) return;
-                const firstRect = this.entries[0].target.getBoundingClientRect?.();
-                if (firstRect && firstRect.top >= 0) return;
+                const rootTop = this.getScrollRootTop();
+                const hashBoundaryAfter = Math.max(PageNavigationController.hashBoundaryAfter, this.getActivationOffset() + PageNavigationController.hashBoundaryBefore);
+                if (hashRect && hashRect.top >= rootTop - PageNavigationController.hashBoundaryBefore && hashRect.top <= rootTop + hashBoundaryAfter) {
+                    this.setActiveLink(hashEntry.link);
+                    return;
+                }
             }
 
             let active = this.entries[0];
+            const activationTop = this.getScrollRootTop() + this.getActivationOffset();
             for (const entry of this.entries) {
                 const rect = entry.target.getBoundingClientRect?.();
-                if (!rect || rect.top > 96) break;
+                if (!rect || rect.top > activationTop) break;
                 active = entry;
             }
 
@@ -217,9 +228,98 @@ interface PageNavigationEntry {
             }
 
             const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
-            entry.target.scrollIntoView?.({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
+            this.scrollEntryIntoView(entry, reduceMotion ? 'auto' : 'smooth');
             this.setActiveLink(link);
             this.setPanelOpen(false);
+        }
+
+        scheduleActiveRefresh() {
+            if (this.activeLinkAnimationFrame !== 0) return;
+            const requestFrame = window.requestAnimationFrame?.bind(window)
+                ?? ((callback: FrameRequestCallback) => window.setTimeout?.(() => callback(Date.now()), 16) ?? setTimeout(() => callback(Date.now()), 16));
+            this.activeLinkAnimationFrame = requestFrame(() => {
+                this.activeLinkAnimationFrame = 0;
+                this.refreshActiveFromViewport();
+            });
+        }
+
+        cancelActiveRefresh() {
+            if (this.activeLinkAnimationFrame === 0) return;
+            const cancelFrame = window.cancelAnimationFrame?.bind(window) ?? window.clearTimeout?.bind(window) ?? clearTimeout;
+            cancelFrame(this.activeLinkAnimationFrame);
+            this.activeLinkAnimationFrame = 0;
+        }
+
+        bindScrollRoot() {
+            const nextRoot = this.resolveScrollRoot();
+            if (this.scrollRoot === nextRoot) return;
+            this.unbindScrollRoot();
+            nextRoot.addEventListener?.('scroll', this.scrollListener, { passive: true });
+            this.scrollRoot = nextRoot;
+        }
+
+        unbindScrollRoot() {
+            this.scrollRoot?.removeEventListener?.('scroll', this.scrollListener);
+            this.scrollRoot = null;
+        }
+
+        resolveScrollRoot(): PageNavigationScrollRoot {
+            const target = this.entries[0]?.target;
+            let current = target?.parentElement ?? null;
+            while (current && current !== document.body && current !== document.documentElement) {
+                const style = typeof window.getComputedStyle === 'function' ? window.getComputedStyle(current) : null;
+                const overflowY = style?.overflowY ?? '';
+                if (/(auto|scroll|overlay)/.test(overflowY) && current.scrollHeight > current.clientHeight) {
+                    return current;
+                }
+
+                current = current.parentElement;
+            }
+
+            return window;
+        }
+
+        getScrollRootTop() {
+            if (this.scrollRoot && this.scrollRoot !== window) {
+                return (this.scrollRoot as Element).getBoundingClientRect?.().top ?? 0;
+            }
+
+            return 0;
+        }
+
+        scrollEntryIntoView(entry: PageNavigationEntry, behavior: ScrollBehavior) {
+            if (!this.scrollRoot || this.scrollRoot === window) {
+                entry.target.scrollIntoView?.({ block: 'start', behavior });
+                return;
+            }
+
+            const root = this.scrollRoot as Element & {
+                clientHeight?: number;
+                scrollHeight?: number;
+                scrollTo?: (options: ScrollToOptions) => void;
+                scrollTop?: number;
+            };
+            const rootTop = root.getBoundingClientRect?.().top ?? 0;
+            const targetTop = entry.target.getBoundingClientRect?.().top ?? rootTop;
+            const currentTop = root.scrollTop ?? 0;
+            const maxTop = Math.max(0, (root.scrollHeight ?? 0) - (root.clientHeight ?? 0));
+            const top = Math.min(maxTop, Math.max(0, currentTop + targetTop - rootTop - this.getActivationOffset()));
+
+            if (typeof root.scrollTo === 'function') {
+                root.scrollTo({ top, behavior });
+            } else {
+                root.scrollTop = top;
+            }
+        }
+
+        getActivationOffset() {
+            const target = this.entries[0]?.target;
+            const style = target && typeof window.getComputedStyle === 'function' ? window.getComputedStyle(target) : null;
+            const scrollMarginTop = Number.parseFloat(style?.scrollMarginTop ?? '');
+
+            return Number.isFinite(scrollMarginTop) && scrollMarginTop > 0
+                ? Math.max(PageNavigationController.activationOffset, scrollMarginTop)
+                : PageNavigationController.activationOffset;
         }
 
         handleToggleClick(event: Event) {

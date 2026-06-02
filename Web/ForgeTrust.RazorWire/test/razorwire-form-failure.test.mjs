@@ -1043,6 +1043,72 @@ test('page navigation falls back to viewport state when hash no longer resolves'
   assert.equal(pricingLink.hasAttribute('aria-current'), false);
 });
 
+test('page navigation does not keep a hash active outside the boundary window', () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, overview, pricing, overviewLink, pricingLink } = createPageNavigationFixture(document);
+  overview.rectTop = 24;
+  pricing.rectTop = 800;
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+
+  const controller = context.window.RazorWire.pageNavigationManager.controllers.get(nav);
+  controller.refreshActiveFromViewport();
+
+  assert.equal(overviewLink.getAttribute('aria-current'), 'location');
+  assert.equal(pricingLink.hasAttribute('aria-current'), false);
+});
+
+test('page navigation keeps an initial hash active at the host scroll margin', () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#pricing', pageNavigation: true });
+  const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
+  overview.rectTop = -600;
+  overview.computedStyle = { overflowY: 'visible', scrollMarginTop: '160px' };
+  pricing.rectTop = 176;
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  const controller = context.window.RazorWire.pageNavigationManager.controllers.get(nav);
+  controller.refreshActiveFromViewport();
+
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+});
+
+test('page navigation aligns active boundaries with section scroll margin', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
+  overview.rectTop = -500;
+  overview.computedStyle = { overflowY: 'visible', scrollMarginTop: '96px' };
+  pricing.rectTop = 88;
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+});
+
+test('page navigation scrolls the nearest scrollable section root', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
+  const scroller = new FakeElement('div');
+  scroller.rectTop = 100;
+  scroller.clientHeight = 400;
+  scroller.scrollHeight = 1200;
+  scroller.computedStyle = { overflowY: 'auto' };
+  scroller.scrollTop = 0;
+  overview.rectTop = 100;
+  pricing.rectTop = 500;
+  scroller.append(overview, pricing);
+  document.body.append(scroller, nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  nav.dispatchEvent(clickEvent(pricingLink));
+
+  assert.equal(pricing.lastScrollIntoViewOptions, null);
+  assert.equal(scroller.lastScrollToOptions.top, 336);
+  assert.equal(scroller.lastScrollToOptions.behavior, 'smooth');
+});
+
 test('page navigation honors reduced motion when scrolling to a target', () => {
   const { context, document } = loadRuntime({
     pageNavigation: true,
@@ -1148,6 +1214,7 @@ function loadRuntime(runtimeOptions = {}) {
       }
     },
     matchMedia: runtimeOptions.matchMedia ?? (() => ({ matches: false })),
+    getComputedStyle: element => element.computedStyle ?? { overflowY: 'visible' },
     addEventListener: () => {},
     removeEventListener: () => {}
   };
@@ -1325,6 +1392,12 @@ class FakeElement {
     this.type = '';
     this.value = '';
     this.rectTop = 0;
+    this.clientHeight = 100;
+    this.scrollHeight = 100;
+    this.scrollTop = 0;
+    this.computedStyle = { overflowY: 'visible' };
+    this.lastScrollIntoViewOptions = null;
+    this.lastScrollToOptions = null;
   }
 
   get isConnected() {
@@ -1377,6 +1450,11 @@ class FakeElement {
 
   scrollIntoView(options) {
     this.lastScrollIntoViewOptions = options;
+  }
+
+  scrollTo(options) {
+    this.lastScrollToOptions = options;
+    if (typeof options.top === 'number') this.scrollTop = options.top;
   }
 
   getBoundingClientRect() {
