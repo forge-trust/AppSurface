@@ -84,6 +84,34 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     }
 
     [Fact]
+    public void GetCatalog_ShouldMarkPublicVersionUnavailable_WhenReleaseManifestPinIsMissing()
+    {
+        var stableTree = CreateExactTree("missing-release-manifest-pin");
+        var catalogPath = WriteRawCatalogJson(
+            $$"""
+            {
+              "recommendedVersion": "1.2.3",
+              "versions": [
+                {
+                  "version": "1.2.3",
+                  "exactTreePath": "{{EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree))}}"
+                }
+              ]
+            }
+            """);
+        var service = CreateCatalogService(catalogPath);
+
+        var catalog = service.GetCatalog();
+
+        Assert.Null(catalog.RecommendedVersion);
+        var version = Assert.Single(catalog.PublicVersions);
+        Assert.False(version.IsAvailable);
+        Assert.Equal(AppSurfaceDocsReleaseArchiveVerificationState.Unavailable, version.ArchiveVerificationState);
+        Assert.Contains("verification is required", version.AvailabilityIssue, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(version.VerifiedReleaseArchive);
+    }
+
+    [Fact]
     public void GetCatalog_ShouldResolveExactTreePathFromTrustedReleaseRoot()
     {
         var releaseStore = Path.Join(_tempDirectory, "release-store");
@@ -98,7 +126,8 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
                     new AppSurfaceDocsPublishedVersion
                     {
                         Version = "1.2.3",
-                        ExactTreePath = "1.2.3"
+                        ExactTreePath = "1.2.3",
+                        ReleaseManifestSha256 = WriteReleaseManifest(stableTree)
                     }
                 ]
             });
@@ -815,6 +844,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldParseDocumentedStringEnumValues()
     {
         var stableTree = CreateExactTree("stable");
+        var releaseManifestSha256 = WriteReleaseManifest(stableTree);
         var catalogPath = WriteRawCatalogJson(
             $$"""
             {
@@ -824,6 +854,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
                   "version": "1.2.3",
                   "label": "1.2.3 (Current)",
                   "exactTreePath": "{{EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree))}}",
+                  "releaseManifestSha256": "{{releaseManifestSha256}}",
                   "supportState": "Current",
                   "visibility": "Public",
                   "advisoryState": "SecurityRisk"
@@ -880,6 +911,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldSkipNullVersionEntries_AndContinueResolvingHealthyVersions()
     {
         var stableTree = CreateExactTree("null-entry-stable");
+        var releaseManifestSha256 = WriteReleaseManifest(stableTree);
         var catalogPath = WriteRawCatalogJson(
             $$"""
             {
@@ -889,6 +921,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
                 {
                   "version": "1.2.3",
                   "exactTreePath": "{{EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree))}}",
+                  "releaseManifestSha256": "{{releaseManifestSha256}}",
                   "supportState": "Current"
                 }
               ]
@@ -908,6 +941,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldSkipEntriesWithInvalidEnumValues_AndContinueResolvingHealthyVersions()
     {
         var stableTree = CreateExactTree("invalid-enum-stable");
+        var releaseManifestSha256 = WriteReleaseManifest(stableTree);
         var catalogPath = WriteRawCatalogJson(
             $$"""
             {
@@ -921,6 +955,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
                 {
                   "version": "1.2.3",
                   "exactTreePath": "{{EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree))}}",
+                  "releaseManifestSha256": "{{releaseManifestSha256}}",
                   "supportState": "Current",
                   "visibility": "Public",
                   "advisoryState": "None"
@@ -1290,6 +1325,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     public void GetCatalog_ShouldIgnoreInvalidRecommendedVersionMetadata_AndSkipNonObjectEntries()
     {
         var stableTree = CreateExactTree("stable-invalid-recommended");
+        var releaseManifestSha256 = WriteReleaseManifest(stableTree);
         var catalogPath = WriteRawCatalogJson(
             $$"""
             {
@@ -1298,7 +1334,8 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
                 "not-an-entry",
                 {
                   "version": "1.2.3",
-                  "exactTreePath": "{{EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree))}}"
+                  "exactTreePath": "{{EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree))}}",
+                  "releaseManifestSha256": "{{releaseManifestSha256}}"
                 }
               ]
             }
@@ -1324,6 +1361,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     {
         var stableTree = CreateExactTree("stable-invalid-optional");
         var relativeTree = EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree));
+        var releaseManifestSha256 = WriteReleaseManifest(stableTree);
         var catalogPath = WriteRawCatalogJson(
             $$"""
             {
@@ -1336,7 +1374,8 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
                 },
                 {
                   "version": "1.2.3",
-                  "exactTreePath": "{{relativeTree}}"
+                  "exactTreePath": "{{relativeTree}}",
+                  "releaseManifestSha256": "{{releaseManifestSha256}}"
                 }
               ]
             }
@@ -1356,6 +1395,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     {
         var stableTree = CreateExactTree("stable-invalid-exact-tree-path");
         var relativeTree = EscapeJson(Path.GetRelativePath(_tempDirectory, stableTree));
+        var releaseManifestSha256 = WriteReleaseManifest(stableTree);
         var catalogPath = WriteRawCatalogJson(
             $$"""
             {
@@ -1367,7 +1407,8 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
                 },
                 {
                   "version": "1.2.3",
-                  "exactTreePath": "{{relativeTree}}"
+                  "exactTreePath": "{{relativeTree}}",
+                  "releaseManifestSha256": "{{releaseManifestSha256}}"
                 }
               ]
             }
@@ -1521,8 +1562,87 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     private string WriteCatalog(AppSurfaceDocsVersionCatalog catalog)
     {
         var path = Path.Join(_tempDirectory, "catalog.json");
+        PinReleaseManifestDigests(catalog);
         File.WriteAllText(path, JsonSerializer.Serialize(catalog));
         return path;
+    }
+
+    private void PinReleaseManifestDigests(AppSurfaceDocsVersionCatalog catalog)
+    {
+        var basePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_tempDirectory));
+        foreach (var version in catalog.Versions)
+        {
+            if (!string.IsNullOrWhiteSpace(version.ReleaseManifestSha256)
+                || string.IsNullOrWhiteSpace(version.ExactTreePath)
+                || Path.IsPathFullyQualified(version.ExactTreePath))
+            {
+                continue;
+            }
+
+            string candidatePath;
+            try
+            {
+                candidatePath = Path.GetFullPath(Path.Join(basePath, version.ExactTreePath.Trim()));
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+
+            if (!Directory.Exists(candidatePath)
+                || !IsPathUnderOrEqual(basePath, candidatePath))
+            {
+                continue;
+            }
+
+            version.ReleaseManifestSha256 = WriteReleaseManifest(candidatePath);
+        }
+    }
+
+    private static bool IsPathUnderOrEqual(string basePath, string candidatePath)
+    {
+        var relativePath = Path.GetRelativePath(basePath, candidatePath);
+        return string.Equals(relativePath, ".", StringComparison.Ordinal)
+               || (!Path.IsPathRooted(relativePath)
+                   && !string.Equals(relativePath, "..", StringComparison.Ordinal)
+                   && !relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                   && !relativePath.StartsWith("../", StringComparison.Ordinal));
+    }
+
+    private static string WriteReleaseManifest(string root)
+    {
+        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(path => !string.Equals(Path.GetFileName(path), AppSurfaceDocsReleaseArchiveVerifier.FileName, StringComparison.Ordinal))
+            .Select(
+                path => new
+                {
+                    path = NormalizeManifestPath(root, path),
+                    length = new FileInfo(path).Length,
+                    contentType = (string?)null,
+                    hashAlgorithm = "sha256",
+                    sha256 = ComputeFileSha256(path)
+                })
+            .OrderBy(entry => entry.path, StringComparer.Ordinal)
+            .ToArray();
+        var manifestPath = Path.Join(root, AppSurfaceDocsReleaseArchiveVerifier.FileName);
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(
+                new { schema = AppSurfaceDocsReleaseArchiveVerifier.Schema, files },
+                new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        return ComputeFileSha256(manifestPath);
+    }
+
+    private static string NormalizeManifestPath(string root, string path)
+    {
+        return Path.GetRelativePath(root, path)
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+    }
+
+    private static string ComputeFileSha256(string path)
+    {
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
     }
 
     private string WriteRawCatalogJson(string json)

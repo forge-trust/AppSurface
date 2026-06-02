@@ -2,9 +2,13 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using FakeItEasy;
+using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.AppSurface.Docs.Services;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -87,6 +91,194 @@ public class CSharpDocHarvesterTests : IDisposable
         Assert.Contains(results, n => n.Title == "PublicService" && n.ParentPath == "Namespaces/Product.Public");
         Assert.DoesNotContain(results, n => n.Title == "InternalService");
         Assert.DoesNotContain(results, n => n.Path == "Namespaces/Product.Internal");
+    }
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(0, true)]
+    [InlineData(-1, false)]
+    public async Task HarvestAsync_ShouldApplyCSharpParserInputByteBudget(
+        int limitAdjustment,
+        bool shouldHarvest)
+    {
+        var source = CreateDocumentedClassSource("BudgetedService");
+        var sourceBytes = Encoding.UTF8.GetBytes(source);
+        var options = CreateOptionsWithCSharpMaxFileSize(sourceBytes.Length + limitAdjustment);
+        var harvester = CreateHarvester(options);
+        await WriteUtf8Async(CombineUnder(_testRoot, "BudgetedService.cs"), source);
+
+        var results = await harvester.HarvestAsync(_testRoot);
+        var diagnostics = GetDiagnostics(harvester);
+
+        if (shouldHarvest)
+        {
+            Assert.Contains(results, doc => doc.Title == "BudgetedService");
+            Assert.Empty(diagnostics);
+        }
+        else
+        {
+            Assert.DoesNotContain(results, doc => doc.Title == "BudgetedService");
+            var diagnostic = Assert.Single(diagnostics);
+            Assert.Equal(DocHarvestDiagnosticCodes.CSharpFileTooLarge, diagnostic.Code);
+            Assert.Equal(nameof(CSharpDocHarvester), diagnostic.HarvesterType);
+            Assert.Equal(DocHarvestDiagnosticSeverity.Warning, diagnostic.Severity);
+            Assert.Contains("BudgetedService.cs", diagnostic.Problem, StringComparison.Ordinal);
+            Assert.Contains("AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes", diagnostic.Cause, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldCountUtf8BytesBeforeDecodingMultibyteCSharpSource()
+    {
+        var source = CreateDocumentedClassSource("UnicodeService", "Résumé 測試 public API.");
+        var sourceBytes = Encoding.UTF8.GetBytes(source);
+        var options = CreateOptionsWithCSharpMaxFileSize(sourceBytes.Length - 1);
+        var harvester = CreateHarvester(options);
+        await WriteUtf8Async(CombineUnder(_testRoot, "UnicodeService.cs"), source);
+
+        var results = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+        Assert.DoesNotContain(results, doc => doc.Title == "UnicodeService");
+        Assert.Equal(DocHarvestDiagnosticCodes.CSharpFileTooLarge, diagnostic.Code);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_WhenOversizedCSharpFileIsSeekableReportsFullByteLength()
+    {
+        const int maxFileSizeBytes = 128;
+        var source = CreateDocumentedClassSource("LargeService", new string('x', 512));
+        var sourceBytes = Encoding.UTF8.GetBytes(source);
+        var harvester = CreateHarvester(CreateOptionsWithCSharpMaxFileSize(maxFileSizeBytes));
+        await WriteUtf8Async(CombineUnder(_testRoot, "LargeService.cs"), source);
+
+        _ = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+        Assert.Contains($"observed source size is {sourceBytes.Length} bytes", diagnostic.Cause, StringComparison.Ordinal);
+        Assert.Contains($"MaxFileSizeBytes is {maxFileSizeBytes}", diagnostic.Cause, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldIncludeUtf8BomInCSharpParserInputByteBudget()
+    {
+        var source = CreateDocumentedClassSource("BomService");
+        var sourceBytes = Encoding.UTF8.GetPreamble().Length + Encoding.UTF8.GetByteCount(source);
+        var options = CreateOptionsWithCSharpMaxFileSize(sourceBytes);
+        var harvester = CreateHarvester(options);
+        await WriteUtf8Async(CombineUnder(_testRoot, "BomService.cs"), source, emitBom: true);
+
+        var results = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(results, doc => doc.Title == "BomService");
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldSkipOversizedCSharpFileAndContinueHarvestingSibling()
+    {
+        var options = CreateOptionsWithCSharpMaxFileSize(128);
+        var harvester = CreateHarvester(options);
+        await WriteUtf8Async(
+            CombineUnder(_testRoot, "OversizedService.cs"),
+            CreateDocumentedClassSource("OversizedService", new string('x', 512)));
+        await WriteUtf8Async(
+            CombineUnder(_testRoot, "SiblingService.cs"),
+            CreateDocumentedClassSource("SiblingService"));
+
+        var results = await harvester.HarvestAsync(_testRoot);
+        var diagnostic = Assert.Single(GetDiagnostics(harvester));
+
+        Assert.DoesNotContain(results, doc => doc.Title == "OversizedService");
+        Assert.Contains(results, doc => doc.Title == "SiblingService");
+        Assert.Equal(DocHarvestDiagnosticCodes.CSharpFileTooLarge, diagnostic.Code);
+    }
+
+    [Fact]
+    public async Task GetHarvestHealthAsync_ShouldIncludeCSharpFileTooLargeWithoutStrictBlockingByDefault()
+    {
+        var options = CreateOptionsWithCSharpMaxFileSize(128);
+        options.Source.RepositoryRoot = _testRoot;
+        options.Contributor.Enabled = false;
+        var harvester = CreateHarvester(options);
+        await WriteUtf8Async(
+            CombineUnder(_testRoot, "OversizedHealthService.cs"),
+            CreateDocumentedClassSource("OversizedHealthService", new string('x', 512)));
+        await WriteUtf8Async(
+            CombineUnder(_testRoot, "HealthyService.cs"),
+            CreateDocumentedClassSource("HealthyService"));
+        var aggregator = new DocAggregator(
+            [harvester],
+            options,
+            new TestWebHostEnvironment(_testRoot),
+            new Memo(new MemoryCache(new MemoryCacheOptions())),
+            new AppSurfaceDocsHtmlSanitizer(),
+            NullLogger<DocAggregator>.Instance);
+
+        var health = await aggregator.GetHarvestHealthAsync();
+
+        Assert.Equal(DocHarvestHealthStatus.Healthy, health.Status);
+        Assert.Equal(1, health.SuccessfulHarvesters);
+        Assert.Equal(0, health.FailedHarvesters);
+        Assert.Contains(health.Diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.CSharpFileTooLarge);
+    }
+
+    [Fact]
+    public async Task HarvestAsync_ShouldResetCSharpParserInputDiagnosticsAfterCleanRun()
+    {
+        var oversizedSource = CreateDocumentedClassSource("ResetService", new string('x', 512));
+        var cleanSource = CreateDocumentedClassSource("ResetService");
+        var harvester = CreateHarvester(CreateOptionsWithCSharpMaxFileSize(128));
+        var file = CombineUnder(_testRoot, "ResetService.cs");
+        await WriteUtf8Async(file, oversizedSource);
+        _ = await harvester.HarvestAsync(_testRoot);
+        Assert.Single(GetDiagnostics(harvester));
+
+        await WriteUtf8Async(file, cleanSource);
+        var results = await harvester.HarvestAsync(_testRoot);
+
+        Assert.Contains(results, doc => doc.Title == "ResetService");
+        Assert.Empty(GetDiagnostics(harvester));
+    }
+
+    [Fact]
+    public async Task ReadUtf8SourceAsync_WhenMaxFileSizeBytesIsNotPositiveThrows()
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => AppSurfaceDocsParserInputBudget.ReadUtf8SourceAsync(
+                "Missing.cs",
+                "Missing.cs",
+                0,
+                "AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes",
+                DocHarvestDiagnosticCodes.CSharpFileTooLarge,
+                nameof(CSharpDocHarvester),
+                "C#",
+                "Exclude generated C# source.",
+                CancellationToken.None));
+
+        Assert.Equal("maxFileSizeBytes", ex.ParamName);
+    }
+
+    [Fact]
+    public async Task ReadUtf8SourceAsync_WhenMaxFileSizeBytesIsLongMaxValueReadsSource()
+    {
+        var source = CreateDocumentedClassSource("UnboundedService");
+        await WriteUtf8Async(CombineUnder(_testRoot, "UnboundedService.cs"), source);
+
+        var result = await AppSurfaceDocsParserInputBudget.ReadUtf8SourceAsync(
+            CombineUnder(_testRoot, "UnboundedService.cs"),
+            "UnboundedService.cs",
+            long.MaxValue,
+            "AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes",
+            DocHarvestDiagnosticCodes.CSharpFileTooLarge,
+            nameof(CSharpDocHarvester),
+            "C#",
+            "Exclude generated C# source.",
+            CancellationToken.None);
+
+        Assert.True(result.Included);
+        Assert.Equal(source, result.Source);
+        Assert.Null(result.Diagnostic);
     }
 
     [Fact]
@@ -1110,6 +1302,54 @@ public class GlobalType {}
             NullLogger<AppSurfaceDocsHarvestPathPolicy>.Instance);
     }
 
+    private static CSharpDocHarvester CreateHarvester(AppSurfaceDocsOptions options)
+    {
+        return new CSharpDocHarvester(
+            options,
+            A.Fake<ILogger<CSharpDocHarvester>>(),
+            new AppSurfaceDocsHarvestPathPolicy(
+                options,
+                NullLogger<AppSurfaceDocsHarvestPathPolicy>.Instance));
+    }
+
+    private static AppSurfaceDocsOptions CreateOptionsWithCSharpMaxFileSize(long maxFileSizeBytes)
+    {
+        var options = new AppSurfaceDocsOptions();
+        options.Harvest.CSharp.MaxFileSizeBytes = maxFileSizeBytes;
+        return options;
+    }
+
+    private static IReadOnlyList<DocHarvestDiagnostic> GetDiagnostics(CSharpDocHarvester harvester)
+    {
+        return ((IDocHarvesterDiagnosticProvider)harvester).GetHarvestDiagnostics();
+    }
+
+    private static async Task WriteUtf8Async(
+        string path,
+        string source,
+        bool emitBom = false)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var sourceBytes = Encoding.UTF8.GetBytes(source);
+        var bytes = emitBom
+            ? Encoding.UTF8.GetPreamble().Concat(sourceBytes).ToArray()
+            : sourceBytes;
+
+        await File.WriteAllBytesAsync(path, bytes);
+    }
+
+    private static string CreateDocumentedClassSource(
+        string className,
+        string summary = "Public API docs.")
+    {
+        return $$"""
+        namespace Product.Api;
+
+        /// <summary>{{summary}}</summary>
+        public sealed class {{className}} { }
+        """;
+    }
+
     private DocHarvestContext CreateContextWithDefaultPolicy()
     {
         var configuredPolicy = AppSurfaceDocsHarvestPathPolicy.CreateDefault();
@@ -1219,6 +1459,29 @@ public class GlobalType {}
             PublicHarvestCalled = true;
             return Task.FromResult(Result);
         }
+    }
+
+    private sealed class TestWebHostEnvironment : IWebHostEnvironment
+    {
+        public TestWebHostEnvironment(string contentRootPath)
+        {
+            ContentRootPath = contentRootPath;
+            ContentRootFileProvider = new PhysicalFileProvider(contentRootPath);
+            WebRootPath = contentRootPath;
+            WebRootFileProvider = new PhysicalFileProvider(contentRootPath);
+        }
+
+        public string ApplicationName { get; set; } = "CSharpDocHarvesterTests";
+
+        public IFileProvider ContentRootFileProvider { get; set; }
+
+        public string ContentRootPath { get; set; }
+
+        public string EnvironmentName { get; set; } = "Development";
+
+        public string WebRootPath { get; set; }
+
+        public IFileProvider WebRootFileProvider { get; set; }
     }
 
     public void Dispose()
