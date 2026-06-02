@@ -3039,7 +3039,7 @@ public class ExportEngineTests
             <link rel="stylesheet" href="/styles/site.css">
             <link rel="icon" href="/favicon.ico">
             <link rel="modulepreload" href="/assets/module.js">
-            <link rel="preload" as="script" href="/assets/app">
+            <link rel=" preload " as=" script " href="/assets/app">
             <link rel="prefetch" href="/assets/app.js">
             <link rel="prefetch" href="/next-page">
             <link rel="preload" as="fetch" href="/api/bootstrap">
@@ -3052,7 +3052,9 @@ public class ExportEngineTests
         Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/styles/site.css").Role);
         Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/favicon.ico").Role);
         Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/assets/module.js").Role);
-        Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/assets/app").Role);
+        var preloadReference = Assert.Single(references, reference => reference.Path == "/assets/app");
+        Assert.Equal(ExportReferenceRole.StaticAsset, preloadReference.Role);
+        Assert.Equal("rel 'preload', as 'script'", preloadReference.LinkMetadata?.Display);
         Assert.Equal(ExportReferenceRole.StaticAsset, Assert.Single(references, reference => reference.Path == "/assets/app.js").Role);
         Assert.Equal(ExportReferenceRole.PageRoute, Assert.Single(references, reference => reference.Path == "/next-page").Role);
         Assert.Equal(ExportReferenceRole.PageRoute, Assert.Single(references, reference => reference.Path == "/api/bootstrap").Role);
