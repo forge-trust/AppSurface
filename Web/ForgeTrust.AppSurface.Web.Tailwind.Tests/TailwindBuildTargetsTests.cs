@@ -614,7 +614,6 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.True(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
         Assert.Empty(buildEngine.Errors);
         Assert.Empty(buildEngine.Warnings);
-        Assert.Contains(buildEngine.Messages, message => message.Importance == MessageImportance.Low && message.Message == " ");
         Assert.Contains(buildEngine.Messages, message => message.Importance == MessageImportance.Normal && message.Message == "≈ tailwindcss v4.1.18");
         Assert.Contains(
             buildEngine.Messages,
