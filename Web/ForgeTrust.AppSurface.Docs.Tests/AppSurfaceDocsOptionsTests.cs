@@ -203,7 +203,8 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Identity:Favicon:IcoPath"] = "  ~/favicon.ico  ",
                         ["AppSurfaceDocs:Identity:Favicon:PngPath"] = "  /brand/favicon.png  ",
                         ["AppSurfaceDocs:Identity:BrandingAssets:DirectoryPath"] = "  branding  ",
-                        ["AppSurfaceDocs:Identity:BrandingAssets:RequestPath"] = "  ~/brand  "
+                        ["AppSurfaceDocs:Identity:BrandingAssets:RequestPath"] = "  ~/brand  ",
+                        ["AppSurfaceDocs:Identity:BrandingAssets:AllowSvgAssets"] = "true"
                     })
                 .Build());
 
@@ -223,6 +224,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("/brand/favicon.png", options.Identity.Favicon.PngPath);
         Assert.Equal("branding", options.Identity.BrandingAssets.DirectoryPath);
         Assert.Equal("~/brand", options.Identity.BrandingAssets.RequestPath);
+        Assert.True(options.Identity.BrandingAssets.AllowSvgAssets);
     }
 
     [Fact]
@@ -245,6 +247,7 @@ public sealed class AppSurfaceDocsOptionsTests
 
         Assert.Equal("branding", options.Identity.BrandingAssets.DirectoryPath);
         Assert.Equal(AppSurfaceDocsBrandingAssetsOptions.DefaultRequestPath, options.Identity.BrandingAssets.RequestPath);
+        Assert.False(options.Identity.BrandingAssets.AllowSvgAssets);
     }
 
     [Fact]
