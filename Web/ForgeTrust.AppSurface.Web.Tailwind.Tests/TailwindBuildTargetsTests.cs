@@ -614,11 +614,8 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.True(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
         Assert.Empty(buildEngine.Errors);
         Assert.Empty(buildEngine.Warnings);
-        Assert.Contains(buildEngine.Messages, message => message.Importance == MessageImportance.Low && message.Message == " ");
         Assert.Contains(buildEngine.Messages, message => message.Importance == MessageImportance.Normal && message.Message == "≈ tailwindcss v4.1.18");
-        Assert.Contains(
-            buildEngine.Messages,
-            message => message.Message?.Contains(Path.GetFileName(runtimePath), StringComparison.Ordinal) is true);
+        Assert.Equal(runtimePath, await File.ReadAllTextAsync(GetRuntimeSelectionMarkerPath(runtimePath)));
     }
 
     [Fact]
@@ -664,9 +661,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.True(File.Exists(Path.Join(task.ProjectDirectory, "wwwroot", "css", "site.gen.css")));
         Assert.Empty(buildEngine.Errors);
         Assert.Empty(buildEngine.Warnings);
-        Assert.Contains(
-            buildEngine.Messages,
-            message => message.Message?.Contains(Path.GetFileName(runtimePath), StringComparison.Ordinal) is true);
+        Assert.Equal(runtimePath, await File.ReadAllTextAsync(GetRuntimeSelectionMarkerPath(runtimePath)));
     }
 
     [Fact]
@@ -968,6 +963,7 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(runtimePath)!);
+        var markerPath = GetRuntimeSelectionMarkerPath(runtimePath);
         await File.WriteAllTextAsync(
             runtimePath,
             $@"#!/bin/sh
@@ -975,11 +971,12 @@ mkdir -p ""{Path.Join(projectDirectory, "wwwroot", "css")}""
 cat <<'EOF' > ""{Path.Join(projectDirectory, "wwwroot", "css", "site.gen.css")}""
 .generated{{color:red;}}
 EOF
+printf '%s' ""{runtimePath}"" > ""{markerPath}""
 printf ' \n' >&2
 printf '≈ tailwindcss v4.1.18\n' >&2
 printf '%s\n' ""{runtimePath}""
 exit 0
-	");
+		");
 
         const UnixFileMode executableMode =
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
@@ -987,6 +984,11 @@ exit 0
             UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
         File.SetUnixFileMode(runtimePath, executableMode);
         return runtimePath;
+    }
+
+    private static string GetRuntimeSelectionMarkerPath(string runtimePath)
+    {
+        return Path.ChangeExtension(runtimePath, ".selected");
     }
 
     private static async Task<string> CreateTailwindCliStubAsync(

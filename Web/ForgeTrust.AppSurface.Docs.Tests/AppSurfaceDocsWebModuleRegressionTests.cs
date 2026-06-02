@@ -1361,14 +1361,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
         var tempDirectory = Path.Join(Path.GetTempPath(), Path.GetFileName(tempDirectoryName));
         var brandingDirectory = Path.Join(tempDirectory, "branding");
         Directory.CreateDirectory(brandingDirectory);
-        File.WriteAllText(
-            Path.Join(brandingDirectory, "favicon.svg"),
-            """
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-              <title>Default branding path favicon</title>
-              <rect width="16" height="16" fill="#123456" />
-            </svg>
-            """);
+        File.WriteAllText(Path.Join(brandingDirectory, "favicon.png"), "Default branding path favicon");
+        File.WriteAllText(Path.Join(brandingDirectory, "favicon.svg"), "<svg><title>Denied favicon</title></svg>");
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = tempDirectory });
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -1401,10 +1395,13 @@ public class AppSurfaceDocsWebModuleRegressionTests
                 BaseAddress = new Uri(baseAddress)
             };
 
-            using var response = await client.GetAsync("/branding/favicon.svg");
+            using var response = await client.GetAsync("/branding/favicon.png");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
+            Assert.Equal("image/png", response.Content.Headers.ContentType?.MediaType);
             Assert.Contains("Default branding path favicon", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+            using var svgResponse = await client.GetAsync("/branding/favicon.svg");
+            Assert.Equal(HttpStatusCode.NotFound, svgResponse.StatusCode);
         }
         finally
         {
@@ -1514,16 +1511,10 @@ public class AppSurfaceDocsWebModuleRegressionTests
         var tempDirectory = Path.Join(Path.GetTempPath(), Path.GetFileName(tempDirectoryName));
         var brandingDirectory = Path.Join(tempDirectory, "branding");
         Directory.CreateDirectory(brandingDirectory);
-        File.WriteAllText(
-            Path.Join(brandingDirectory, "favicon.svg"),
-            """
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-              <title>Consumer favicon</title>
-              <rect width="16" height="16" fill="#123456" />
-            </svg>
-            """);
+        File.WriteAllText(Path.Join(brandingDirectory, "favicon.png"), "Consumer favicon");
+        File.WriteAllText(Path.Join(brandingDirectory, "favicon.svg"), "<svg><title>Denied consumer favicon</title></svg>");
         File.WriteAllText(Path.Join(brandingDirectory, "notes.txt"), "not a public brand asset");
-        File.WriteAllText(Path.Join(tempDirectory, "secret.svg"), "<svg><title>Secret</title></svg>");
+        File.WriteAllText(Path.Join(tempDirectory, "secret.png"), "Secret");
 
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -1544,7 +1535,7 @@ public class AppSurfaceDocsWebModuleRegressionTests
                     },
                     Favicon = new AppSurfaceDocsFaviconOptions
                     {
-                        SvgPath = "/brand/favicon.svg"
+                        PngPath = "/brand/favicon.png"
                     }
                 }
             });
@@ -1565,18 +1556,21 @@ public class AppSurfaceDocsWebModuleRegressionTests
                 BaseAddress = new Uri(baseAddress)
             };
 
-            using var response = await client.GetAsync("/brand/favicon.svg");
+            using var response = await client.GetAsync("/brand/favicon.png");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
+            Assert.Equal("image/png", response.Content.Headers.ContentType?.MediaType);
             Assert.Contains("Consumer favicon", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
-            using var headRequest = new HttpRequestMessage(HttpMethod.Head, "/brand/favicon.svg");
+            using var headRequest = new HttpRequestMessage(HttpMethod.Head, "/brand/favicon.png");
             using var headResponse = await client.SendAsync(headRequest);
             Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
-            Assert.Equal("image/svg+xml", headResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Equal("image/png", headResponse.Content.Headers.ContentType?.MediaType);
             Assert.True(headResponse.Content.Headers.ContentLength > 0);
 
-            using var traversalResponse = await client.GetAsync("/brand/%2e%2e/secret.svg");
+            using var svgResponse = await client.GetAsync("/brand/favicon.svg");
+            Assert.Equal(HttpStatusCode.NotFound, svgResponse.StatusCode);
+
+            using var traversalResponse = await client.GetAsync("/brand/%2e%2e/secret.png");
             Assert.Equal(HttpStatusCode.NotFound, traversalResponse.StatusCode);
 
             using var unsupportedFileResponse = await client.GetAsync("/brand/notes.txt");
@@ -1585,14 +1579,82 @@ public class AppSurfaceDocsWebModuleRegressionTests
             using var emptyAssetResponse = await client.GetAsync("/brand/");
             Assert.Equal(HttpStatusCode.NotFound, emptyAssetResponse.StatusCode);
 
-            using var backslashAssetResponse = await client.GetAsync("/brand/%5Csecret.svg");
+            using var backslashAssetResponse = await client.GetAsync("/brand/%5Csecret.png");
             Assert.Equal(HttpStatusCode.NotFound, backslashAssetResponse.StatusCode);
 
-            using var rootedAssetResponse = await client.GetAsync("/brand/%2Fsecret.svg");
+            using var rootedAssetResponse = await client.GetAsync("/brand/%2Fsecret.png");
             Assert.Equal(HttpStatusCode.NotFound, rootedAssetResponse.StatusCode);
 
-            using var controlCharacterAssetResponse = await client.GetAsync("/brand/%01secret.svg");
+            using var controlCharacterAssetResponse = await client.GetAsync("/brand/%01secret.png");
             Assert.Equal(HttpStatusCode.NotFound, controlCharacterAssetResponse.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync();
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureEndpoints_ShouldServeConfiguredSvgBrandingAssets_WhenExplicitlyAllowed()
+    {
+        var module = new AppSurfaceDocsWebModule();
+        var context = new StartupContext([], module);
+        var tempDirectoryName = $"{nameof(ConfigureEndpoints_ShouldServeConfiguredSvgBrandingAssets_WhenExplicitlyAllowed)}-{Guid.NewGuid():N}";
+        var tempDirectory = Path.Join(Path.GetTempPath(), Path.GetFileName(tempDirectoryName));
+        var brandingDirectory = Path.Join(tempDirectory, "branding");
+        Directory.CreateDirectory(brandingDirectory);
+        File.WriteAllText(
+            Path.Join(brandingDirectory, "favicon.svg"),
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+              <title>Trusted consumer favicon</title>
+              <rect width="16" height="16" fill="#123456" />
+            </svg>
+            """);
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        builder.Services.AddSingleton(
+            new AppSurfaceDocsOptions
+            {
+                Identity = new AppSurfaceDocsIdentityOptions
+                {
+                    BrandingAssets = new AppSurfaceDocsBrandingAssetsOptions
+                    {
+                        DirectoryPath = brandingDirectory,
+                        AllowSvgAssets = true
+                    }
+                }
+            });
+
+        using var app = builder.Build();
+
+        try
+        {
+            module.ConfigureEndpoints(context, app);
+            await app.StartAsync();
+
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var baseAddress = Assert.Single(addresses!.Addresses);
+
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                BaseAddress = new Uri(baseAddress)
+            };
+
+            using var response = await client.GetAsync("/branding/favicon.svg");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("image/svg+xml", response.Content.Headers.ContentType?.MediaType);
+            Assert.Contains("Trusted consumer favicon", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+            using var headRequest = new HttpRequestMessage(HttpMethod.Head, "/branding/favicon.svg");
+            using var headResponse = await client.SendAsync(headRequest);
+            Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
+            Assert.Equal("image/svg+xml", headResponse.Content.Headers.ContentType?.MediaType);
+            Assert.True(headResponse.Content.Headers.ContentLength > 0);
         }
         finally
         {
@@ -1605,31 +1667,35 @@ public class AppSurfaceDocsWebModuleRegressionTests
     [MemberData(nameof(BrandingAssetPathCases))]
     public void TryResolveSafeBrandingAssetPath_ShouldAcceptOnlyRelativeBrandImageAssets(
         object? routeValue,
+        bool allowSvgAssets,
         bool expectedResult,
         string expectedAssetPath)
     {
-        var result = AppSurfaceDocsWebModule.TryResolveSafeBrandingAssetPath(routeValue, out var assetPath);
+        var result = AppSurfaceDocsWebModule.TryResolveSafeBrandingAssetPath(routeValue, allowSvgAssets, out var assetPath);
 
         Assert.Equal(expectedResult, result);
         Assert.Equal(expectedAssetPath, assetPath);
     }
 
-    public static TheoryData<object?, bool, string> BrandingAssetPathCases()
+    public static TheoryData<object?, bool, bool, string> BrandingAssetPathCases()
     {
-        return new TheoryData<object?, bool, string>
+        return new TheoryData<object?, bool, bool, string>
         {
-            { null, false, string.Empty },
-            { string.Empty, false, string.Empty },
-            { "/secret.svg", false, string.Empty },
-            { "nested\\secret.svg", false, string.Empty },
-            { "bad%zz.svg", false, string.Empty },
-            { "bad%.svg", false, string.Empty },
-            { "bad\u0001.svg", false, string.Empty },
-            { "../secret.svg", false, string.Empty },
-            { "notes.txt", false, string.Empty },
-            { "literal%25.svg", true, "literal%.svg" },
-            { "favicon.SVG", true, "favicon.SVG" },
-            { "nested/favicon.svg", true, "nested/favicon.svg" }
+            { null, false, false, string.Empty },
+            { string.Empty, false, false, string.Empty },
+            { "/secret.png", false, false, string.Empty },
+            { "nested\\secret.png", false, false, string.Empty },
+            { "bad%zz.png", false, false, string.Empty },
+            { "bad%.png", false, false, string.Empty },
+            { "bad\u0001.png", false, false, string.Empty },
+            { "../secret.png", false, false, string.Empty },
+            { "notes.txt", false, false, string.Empty },
+            { "literal%25.png", false, true, "literal%.png" },
+            { "favicon.png", false, true, "favicon.png" },
+            { "favicon.SVG", false, false, string.Empty },
+            { "favicon.SVG", true, true, "favicon.SVG" },
+            { "nested/favicon.svg", false, false, string.Empty },
+            { "nested/favicon.svg", true, true, "nested/favicon.svg" }
         };
     }
 

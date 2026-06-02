@@ -74,11 +74,11 @@ Add identity settings when the consuming repository should own the visible docs 
         "HighlightColor": "#38bdf8"
       },
       "Logo": {
-        "Path": "/branding/docs-logo.svg",
+        "Path": "/branding/docs-logo.png",
         "AltText": "Acme"
       },
       "Favicon": {
-        "SvgPath": "/branding/favicon.svg",
+        "PngPath": "/branding/favicon.png",
         "IcoPath": "/branding/favicon.ico"
       },
       "BrandingAssets": {
@@ -94,10 +94,10 @@ The configured `Identity:Logo:Path` is used by both the built-in docs chrome and
 
 There are two branding asset use cases:
 
-1. AppSurface Docs serves the files. Set `Identity:BrandingAssets:DirectoryPath` to a filesystem directory, usually `branding`, and point `Logo:Path` plus `Favicon:*Path` at browser URLs under `/branding`. With the default request prefix, `branding/docs-logo.svg` is referenced as `/branding/docs-logo.svg`.
+1. AppSurface Docs serves the files. Set `Identity:BrandingAssets:DirectoryPath` to a filesystem directory, usually `branding`, and point `Logo:Path` plus `Favicon:*Path` at browser URLs under `/branding`. With the default request prefix, `branding/docs-logo.png` is referenced as `/branding/docs-logo.png`.
 2. The owning application already serves the files. Leave `Identity:BrandingAssets:DirectoryPath` blank and point `Logo:Path` plus `Favicon:*Path` at the host-owned browser URLs, such as `/assets/docs-logo.svg`.
 
-`Identity:BrandingAssets:DirectoryPath` is a filesystem path, not a browser path. Relative values resolve against `AppSurfaceDocs:Source:RepositoryRoot` when that root is configured, then fall back to the host content root. `Logo:Path` and `Favicon:*Path` are browser URL paths, not filenames relative to `DirectoryPath`; AppSurface Docs does not join those values with the directory. Keep `DirectoryPath` pointed at a dedicated public branding directory; AppSurface Docs serves only `.avif`, `.gif`, `.ico`, `.jpg`, `.jpeg`, `.png`, `.svg`, and `.webp` files from that directory. Override `Identity:BrandingAssets:RequestPath` only when the default `/branding` URL prefix conflicts with an owning application route.
+`Identity:BrandingAssets:DirectoryPath` is a filesystem path, not a browser path. Relative values resolve against `AppSurfaceDocs:Source:RepositoryRoot` when that root is configured, then fall back to the host content root. `Logo:Path` and `Favicon:*Path` are browser URL paths, not filenames relative to `DirectoryPath`; AppSurface Docs does not join those values with the directory. Keep `DirectoryPath` pointed at a dedicated public branding directory; AppSurface Docs serves only `.avif`, `.gif`, `.ico`, `.jpg`, `.jpeg`, `.png`, and `.webp` files from that directory by default. Set `Identity:BrandingAssets:AllowSvgAssets=true` only for operator-owned and reviewed SVG branding files; standard SVG optimization does not make arbitrary SVG safe. Override `Identity:BrandingAssets:RequestPath` only when the default `/branding` URL prefix conflicts with an owning application route.
 
 When `Identity:Favicon` is empty, the built-in layout links the packaged AppSurface Docs document-layers SVG mark.
 Standalone AppSurface Docs hosts also serve that mark at `/favicon.ico` for the browser's conventional favicon probe.
