@@ -155,6 +155,11 @@ providers, shadowed lower-priority file values, or every raw key a custom provid
 relative to the AppSurface audit registry: `Unknown` means unknown to `Config<T>` wrappers and
 `AddConfigAuditKey<T>()`, not globally unused.
 
+Discovered scalar values display only when the discovered key exactly matches an audit entry or when redaction replaces
+the value with `[redacted]`. Unknown keys and descendants under a broad registered root are inventory by default: the
+report shows the key and provenance, but omits the raw value. Register each display-safe scalar leaf explicitly with
+`AddConfigAuditKey<T>("Exact.Path")` after reviewing whether the value belongs in support output.
+
 For example, this file-backed configuration:
 
 ```json
@@ -183,9 +188,27 @@ Discovered file keys:
   Billing.Password [Under known entry] = [redacted]
     Redacted: true
     Source: FileBasedConfigProvider appsettings.Staging.json :: Billing.Password
-  BillingEndpiont [Unknown to AppSurface audit registry] = https://typo.example
+  BillingEndpiont [Unknown to AppSurface audit registry] (value omitted: inventory key is not an exact audit entry; register this exact key with AddConfigAuditKey<T>() after reviewing sensitivity)
     Source: FileBasedConfigProvider appsettings.Staging.json :: BillingEndpiont
 ```
+
+The structured shape carries the same decision in `ValueDisplayState`:
+
+```json
+{
+  "Key": "BillingEndpiont",
+  "Classification": 2,
+  "DisplayValue": null,
+  "IsRedacted": false,
+  "ValueDisplayState": 4
+}
+```
+
+Default `System.Text.Json` options serialize enum values numerically. Enable a string-enum converter if you want names
+such as `OmittedInventory` in exported support data. Do not treat `DisplayValue == null` as meaning only "complex
+parent": use `ValueDisplayState` to distinguish omitted inventory from omitted object or array parents. Value omission
+does not make a report public-safe. Key names, provider names, file names, config paths, environment variable names, and
+the existence of redacted values can still be operationally sensitive.
 
 ### Audit Hello World
 
@@ -566,6 +589,12 @@ Adding `Sensitivity = ConfigAuditSensitivity.Sensitive` is additive API surface,
 broader. New built-in fragments can redact values that previously rendered, and `NonSensitive` is not an opt-out. Review
 release notes for fragment changes when audit output shape matters to operators.
 
+Discovered-key scalar display is intentionally narrower: unknown keys and non-redacted descendants under broad
+registrations now omit raw values. Text parsers should not assume every scalar-looking discovered key includes
+` = value`. JSON consumers should branch on `ConfigAuditDiscoveredKey.ValueDisplayState`; `DisplayValue == null` can
+mean omitted inventory as well as an omitted object or array parent. Add exact leaf registrations for display-safe
+provider-only values that should continue appearing in reports.
+
 ### Audit Pitfalls
 
 - Known audit entries cover AppSurface-registered keys. `DiscoveredKeys` adds the effective merged file-backed keys
@@ -574,6 +603,9 @@ release notes for fragment changes when audit output shape matters to operators.
 - `Unknown to AppSurface audit registry` means the key is outside known `Config<T>` wrappers and
   `AddConfigAuditKey<T>()` registrations. It can be a typo, stale setting, or a value consumed outside AppSurface; it
   is not proof that the key is globally unused.
+- `Under known entry` uses dotted-path segment matching. A broad root registration helps classify the key and inherit
+  sensitivity, but it does not make descendant scalar values display-safe. Register the exact leaf key when the value
+  should appear.
 - Environment variables, secret providers, source-metadata redaction modes, shadowed raw file inventory, and strict
   drift gates are outside the first discovered-key surface.
 - Collection display values are intentionally omitted rather than summarized or serialized; opt into element traversal

@@ -527,8 +527,12 @@ public enum AppSurfaceDocsReleaseArchiveVerificationState
     Unavailable = 0,
 
     /// <summary>
-    /// The exact tree is shape-valid but has no catalog-pinned release manifest digest, so active archive SVG is denied.
+    /// The exact tree has not been proven against a catalog-pinned release manifest digest.
     /// </summary>
+    /// <remarks>
+    /// Public version-catalog entries without a pin are unavailable before they reach the published-tree handler. This
+    /// state remains for custom in-process mounts and compatibility paths, where active archive files are denied.
+    /// </remarks>
     AvailableUnverifiedLegacy = 1,
 
     /// <summary>

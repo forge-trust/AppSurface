@@ -145,12 +145,14 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
                     providerKey.RawValue,
                     providerKey.Sources,
                     entrySensitivity);
+                var display = ResolveDiscoveredValueDisplay(providerKey, classification, redacted);
                 discoveredKeys.Add(new ConfigAuditDiscoveredKey
                 {
                     Key = providerKey.Key,
                     Classification = classification,
-                    DisplayValue = redacted.DisplayValue,
-                    IsRedacted = redacted.IsRedacted,
+                    DisplayValue = display.DisplayValue,
+                    IsRedacted = display.IsRedacted,
+                    ValueDisplayState = display.DisplayState,
                     Sources = providerKey.Sources,
                     Diagnostics = providerKey.Diagnostics
                 });
@@ -168,32 +170,84 @@ internal sealed class ConfigAuditReporter : IConfigAuditReporter
         ConfigAuditSensitivity? exactSensitivity = null;
         ConfigAuditSensitivity? nearestSpecifiedParentSensitivity = null;
         var nearestSpecifiedParentLength = -1;
+        var hasSensitiveEntryOrAncestor = false;
         foreach (var knownEntry in _knownEntries)
         {
             var sensitivity = knownEntry.OptionsSnapshot.Sensitivity;
+            var normalizedSensitivity = ConfigAuditEntryOptions.NormalizeSensitivity(sensitivity);
             if (string.Equals(knownEntry.Key, key, StringComparison.OrdinalIgnoreCase))
             {
-                if (ConfigAuditEntryOptions.NormalizeSensitivity(sensitivity) != ConfigAuditSensitivity.Unknown)
+                if (normalizedSensitivity == ConfigAuditSensitivity.Sensitive)
                 {
-                    return sensitivity;
+                    hasSensitiveEntryOrAncestor = true;
                 }
 
-                exactSensitivity = sensitivity;
+                if (normalizedSensitivity != ConfigAuditSensitivity.Unknown)
+                {
+                    exactSensitivity = normalizedSensitivity;
+                }
+
                 continue;
             }
 
-            if (IsKnownDescendantKey(key, knownEntry.Key)
-                && ConfigAuditEntryOptions.NormalizeSensitivity(sensitivity) != ConfigAuditSensitivity.Unknown
+            var isDescendant = IsKnownDescendantKey(key, knownEntry.Key);
+            if (isDescendant
+                && normalizedSensitivity != ConfigAuditSensitivity.Unknown
                 && knownEntry.Key.Length > nearestSpecifiedParentLength)
             {
-                nearestSpecifiedParentSensitivity = sensitivity;
+                nearestSpecifiedParentSensitivity = normalizedSensitivity;
                 nearestSpecifiedParentLength = knownEntry.Key.Length;
             }
+
+            if (isDescendant && normalizedSensitivity == ConfigAuditSensitivity.Sensitive)
+            {
+                hasSensitiveEntryOrAncestor = true;
+            }
+        }
+
+        if (hasSensitiveEntryOrAncestor)
+        {
+            return ConfigAuditSensitivity.Sensitive;
         }
 
         return nearestSpecifiedParentSensitivity
             ?? exactSensitivity
             ?? ConfigAuditSensitivity.Unknown;
+    }
+
+    private static DiscoveredValueDisplay ResolveDiscoveredValueDisplay(
+        ConfigAuditProviderDiscoveredKey providerKey,
+        ConfigAuditDiscoveredKeyClassification classification,
+        RedactedValue redacted)
+    {
+        if (redacted.IsRedacted)
+        {
+            return new DiscoveredValueDisplay(
+                redacted.DisplayValue,
+                IsRedacted: true,
+                ConfigAuditDiscoveredValueDisplayState.Redacted);
+        }
+
+        if (providerKey.ValueKind != ConfigAuditDiscoveredValueKind.Scalar)
+        {
+            return new DiscoveredValueDisplay(
+                DisplayValue: null,
+                IsRedacted: false,
+                ConfigAuditDiscoveredValueDisplayState.OmittedComplex);
+        }
+
+        if (classification == ConfigAuditDiscoveredKeyClassification.Known && redacted.DisplayValue != null)
+        {
+            return new DiscoveredValueDisplay(
+                redacted.DisplayValue,
+                IsRedacted: false,
+                ConfigAuditDiscoveredValueDisplayState.Shown);
+        }
+
+        return new DiscoveredValueDisplay(
+            DisplayValue: null,
+            IsRedacted: false,
+            ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
     }
 
     private ConfigAuditDiscoveredKeyClassification ClassifyDiscoveredKey(string key)
@@ -1062,6 +1116,25 @@ internal sealed record ConfigAuditProviderDiscoveredKey(
     ConfigAuditDiscoveredValueKind ValueKind,
     IReadOnlyList<ConfigAuditSourceRecord> Sources,
     IReadOnlyList<ConfigAuditDiagnostic> Diagnostics);
+
+/// <summary>
+/// Carries the discovered-value display decision used while projecting provider-discovered keys.
+/// </summary>
+/// <remarks>
+/// This helper keeps the formatted value, redaction flag, and
+/// <see cref="ConfigAuditDiscoveredValueDisplayState"/> synchronized before they enter
+/// <see cref="ConfigAuditDiscoveredKey"/>. <see cref="DisplayValue"/> may be <see langword="null"/> for omitted
+/// states, so callers must branch on <see cref="DisplayState"/> instead of inferring intent from nullability.
+/// Pitfall: a null display value is not an error, and renderers or logs must preserve the redaction and display-state
+/// decision ordering rather than recomputing value visibility.
+/// </remarks>
+/// <param name="DisplayValue">The formatted scalar value, or <see langword="null"/> when the value is omitted.</param>
+/// <param name="IsRedacted">Whether the formatted value came from a redaction decision.</param>
+/// <param name="DisplayState">Why the value is shown, redacted, or omitted.</param>
+internal sealed record DiscoveredValueDisplay(
+    string? DisplayValue,
+    bool IsRedacted,
+    ConfigAuditDiscoveredValueDisplayState DisplayState);
 
 /// <summary>
 /// Identifies the provider value shape used while building discovered-key reports.

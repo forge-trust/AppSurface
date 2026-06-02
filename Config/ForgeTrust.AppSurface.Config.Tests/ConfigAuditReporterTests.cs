@@ -2780,7 +2780,8 @@ public class ConfigAuditReporterTests
                     "NullValue": null
                   },
                   "Application": {
-                    "Name": "lookalike"
+                    "Name": "lookalike",
+                    "Reviewed": "display-me"
                   },
                   "UnknownNull": null
                 }
@@ -2816,65 +2817,129 @@ public class ConfigAuditReporterTests
             services.AddConfigAuditKey<Dictionary<string, string>>("SensitiveUnknownTree.Branch");
             services.AddConfigAuditKey<AppSettings>("App");
             services.AddConfigAuditKey<string>("App.Mode");
+            services.AddConfigAuditKey<string>("Application.Reviewed");
+            services.AddSingleton<IConfigProvider>(
+                new SourceSensitiveKeyEnumeratorProvider("SourceSensitive.Leaf", "source-sensitive-value"));
 
             var provider = services.BuildServiceProvider();
             var report = provider.GetRequiredService<IConfigAuditReporter>().GetReport("Staging");
 
-            AssertDiscovered(report, "KnownExact", ConfigAuditDiscoveredKeyClassification.Known, "registered");
+            AssertDiscovered(
+                report,
+                "KnownExact",
+                ConfigAuditDiscoveredKeyClassification.Known,
+                "registered",
+                ConfigAuditDiscoveredValueDisplayState.Shown);
             var sensitiveExact = AssertDiscovered(
                 report,
                 "SensitiveExact",
                 ConfigAuditDiscoveredKeyClassification.Known,
-                "[redacted]");
+                "[redacted]",
+                ConfigAuditDiscoveredValueDisplayState.Redacted);
             Assert.True(sensitiveExact.IsRedacted);
             var sensitiveChild = AssertDiscovered(
                 report,
                 "SensitiveTree.Child",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
-                "[redacted]");
+                "[redacted]",
+                ConfigAuditDiscoveredValueDisplayState.Redacted);
             Assert.True(sensitiveChild.IsRedacted);
             var nearestParentChild = AssertDiscovered(
                 report,
                 "NestedTree.Branch.Leaf",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
-                "nearest-visible");
-            Assert.False(nearestParentChild.IsRedacted);
+                "[redacted]",
+                ConfigAuditDiscoveredValueDisplayState.Redacted);
+            Assert.True(nearestParentChild.IsRedacted);
             var unknownChildInherited = AssertDiscovered(
                 report,
                 "SensitiveUnknownTree.Branch.Leaf",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
-                "[redacted]");
+                "[redacted]",
+                ConfigAuditDiscoveredValueDisplayState.Redacted);
             Assert.True(unknownChildInherited.IsRedacted);
-            AssertDiscovered(report, "App", ConfigAuditDiscoveredKeyClassification.Known, null);
-            AssertDiscovered(report, "App.Mode", ConfigAuditDiscoveredKeyClassification.Known, "file");
-            AssertDiscovered(report, "App.Enabled", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "True");
-            AssertDiscovered(report, "App.RetryCount", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "3");
-            AssertDiscovered(report, "App.Ratio", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "42.5");
+            AssertDiscovered(
+                report,
+                "App",
+                ConfigAuditDiscoveredKeyClassification.Known,
+                null,
+                ConfigAuditDiscoveredValueDisplayState.OmittedComplex);
+            AssertDiscovered(
+                report,
+                "App.Mode",
+                ConfigAuditDiscoveredKeyClassification.Known,
+                "file",
+                ConfigAuditDiscoveredValueDisplayState.Shown);
+            AssertDiscovered(
+                report,
+                "App.Enabled",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                null,
+                ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
+            AssertDiscovered(
+                report,
+                "App.RetryCount",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                null,
+                ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
+            AssertDiscovered(
+                report,
+                "App.Ratio",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                null,
+                ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
             AssertDiscovered(
                 report,
                 "App.LongValue",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
-                "9223372036854775807");
-            AssertDiscovered(report, "App.HugeValue", ConfigAuditDiscoveredKeyClassification.KnownDescendant, "1E+100");
+                null,
+                ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
+            AssertDiscovered(
+                report,
+                "App.HugeValue",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                null,
+                ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
             var password = AssertDiscovered(
                 report,
                 "App.Password",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
-                "[redacted]");
+                "[redacted]",
+                ConfigAuditDiscoveredValueDisplayState.Redacted);
             Assert.True(password.IsRedacted);
-            var items = AssertDiscovered(report, "App.Items", ConfigAuditDiscoveredKeyClassification.KnownDescendant, null);
+            var items = AssertDiscovered(
+                report,
+                "App.Items",
+                ConfigAuditDiscoveredKeyClassification.KnownDescendant,
+                null,
+                ConfigAuditDiscoveredValueDisplayState.OmittedComplex);
             Assert.False(items.IsRedacted);
             var tokenList = AssertDiscovered(
                 report,
                 "App.TokenList",
                 ConfigAuditDiscoveredKeyClassification.KnownDescendant,
-                "[redacted]");
+                "[redacted]",
+                ConfigAuditDiscoveredValueDisplayState.Redacted);
             Assert.True(tokenList.IsRedacted);
             AssertDiscovered(
                 report,
                 "Application.Name",
                 ConfigAuditDiscoveredKeyClassification.Unknown,
-                "lookalike");
+                null,
+                ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
+            AssertDiscovered(
+                report,
+                "Application.Reviewed",
+                ConfigAuditDiscoveredKeyClassification.Known,
+                "display-me",
+                ConfigAuditDiscoveredValueDisplayState.Shown);
+            var sourceSensitive = AssertDiscovered(
+                report,
+                "SourceSensitive.Leaf",
+                ConfigAuditDiscoveredKeyClassification.Unknown,
+                "[redacted]",
+                ConfigAuditDiscoveredValueDisplayState.Redacted);
+            Assert.True(sourceSensitive.IsRedacted);
             Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "App.NullValue");
             Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "UnknownNull");
             Assert.DoesNotContain(report.DiscoveredKeys, key => key.Key == "OtherEnvironmentNull");
@@ -2901,15 +2966,33 @@ public class ConfigAuditReporterTests
             Assert.Contains("KnownExact [Known] = registered", rendered, StringComparison.Ordinal);
             Assert.Contains("App.Mode [Known] = file", rendered, StringComparison.Ordinal);
             Assert.Contains(
-                "Application.Name [Unknown to AppSurface audit registry] = lookalike",
+                "Application.Name [Unknown to AppSurface audit registry] (value omitted: inventory key is not an exact audit entry; register this exact key with AddConfigAuditKey<T>() after reviewing sensitivity)",
                 rendered,
                 StringComparison.Ordinal);
+            Assert.Contains(
+                "App.Enabled [Under known entry] (value omitted: descendant is not an exact audit entry; register this exact key with AddConfigAuditKey<T>() after reviewing sensitivity)",
+                rendered,
+                StringComparison.Ordinal);
+            Assert.Contains("Application.Reviewed [Known] = display-me", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("Unused", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("lookalike", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("nearest-visible", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("9223372036854775807", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("1E+100", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("source-sensitive-value", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("super-secret", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("secret-one", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("provider-only-secret", rendered, StringComparison.Ordinal);
             Assert.DoesNotContain("descendant-secret", rendered, StringComparison.Ordinal);
             var serialized = JsonSerializer.Serialize(report);
+            Assert.Contains("\"ValueDisplayState\":1", serialized, StringComparison.Ordinal);
+            Assert.Contains("\"ValueDisplayState\":2", serialized, StringComparison.Ordinal);
+            Assert.Contains("\"ValueDisplayState\":3", serialized, StringComparison.Ordinal);
+            Assert.Contains("\"ValueDisplayState\":4", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("lookalike", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("nearest-visible", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("9223372036854775807", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("source-sensitive-value", serialized, StringComparison.Ordinal);
             Assert.DoesNotContain("provider-only-secret", serialized, StringComparison.Ordinal);
             Assert.DoesNotContain("descendant-secret", serialized, StringComparison.Ordinal);
         }
@@ -2965,7 +3048,8 @@ public class ConfigAuditReporterTests
                 report,
                 "Composite.Base",
                 ConfigAuditDiscoveredKeyClassification.Unknown,
-                "from-base");
+                null,
+                ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
             Assert.Contains(
                 baseChild.Sources,
                 source => source.FilePath?.EndsWith("appsettings.Staging.json", StringComparison.Ordinal) == true);
@@ -2973,7 +3057,8 @@ public class ConfigAuditReporterTests
                 report,
                 "Composite.Override",
                 ConfigAuditDiscoveredKeyClassification.Unknown,
-                "from-override");
+                null,
+                ConfigAuditDiscoveredValueDisplayState.OmittedInventory);
             Assert.Contains(
                 overrideChild.Sources,
                 source => source.FilePath?.EndsWith("config_Override.Staging.json", StringComparison.Ordinal) == true);
@@ -3296,11 +3381,17 @@ public class ConfigAuditReporterTests
         ConfigAuditReport report,
         string key,
         ConfigAuditDiscoveredKeyClassification classification,
-        string? displayValue)
+        string? displayValue,
+        ConfigAuditDiscoveredValueDisplayState? displayState = null)
     {
         var discoveredKey = Assert.Single(report.DiscoveredKeys, discoveredKey => discoveredKey.Key == key);
         Assert.Equal(classification, discoveredKey.Classification);
         Assert.Equal(displayValue, discoveredKey.DisplayValue);
+        if (displayState != null)
+        {
+            Assert.Equal(displayState, discoveredKey.ValueDisplayState);
+        }
+
         return discoveredKey;
     }
 
@@ -3417,6 +3508,46 @@ public class ConfigAuditReporterTests
 
         public IReadOnlyList<ConfigAuditProviderDiscoveredKey> EnumerateKeys(string environment) =>
             throw new InvalidOperationException("super-secret enumeration failure");
+    }
+
+    private sealed class SourceSensitiveKeyEnumeratorProvider : IConfigProvider, IConfigAuditKeyEnumerator
+    {
+        private readonly string _key;
+        private readonly object _value;
+
+        public SourceSensitiveKeyEnumeratorProvider(string key, object value)
+        {
+            _key = key;
+            _value = value;
+        }
+
+        public int Priority => 10;
+
+        public string Name => nameof(SourceSensitiveKeyEnumeratorProvider);
+
+        public T? GetValue<T>(string environment, string key) => default;
+
+        public IReadOnlyList<ConfigAuditProviderDiscoveredKey> EnumerateKeys(string environment) =>
+        [
+            new ConfigAuditProviderDiscoveredKey(
+                _key,
+                _value,
+                ConfigAuditDiscoveredValueKind.Scalar,
+                [
+                    new ConfigAuditSourceRecord
+                    {
+                        Kind = ConfigAuditSourceKind.File,
+                        ProviderName = Name,
+                        ProviderPriority = Priority,
+                        FilePath = "/app/appsettings.Staging.json",
+                        ConfigPath = _key,
+                        AppliedToPath = _key,
+                        Role = ConfigAuditSourceRole.Base,
+                        Sensitivity = ConfigAuditSensitivity.Sensitive
+                    }
+                ],
+                [])
+        ];
     }
 
     private sealed class DictionaryConfigProvider : IConfigProvider, IConfigDiagnosticProvider
