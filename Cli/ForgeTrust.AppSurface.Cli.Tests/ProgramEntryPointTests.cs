@@ -49,6 +49,7 @@ public sealed class ProgramEntryPointTests
     [Theory]
     [InlineData("0.1.0", "0.1.0")]
     [InlineData("0.1.0-rc.1", "0.1.0-rc.1")]
+    [InlineData("0.1.0-rc-1", "0.1.0-rc-1")]
     [InlineData("v0.1.0", "0.1.0")]
     [InlineData("V0.1.0-rc.1", "0.1.0-rc.1")]
     [InlineData("0.1.0+abc123", "0.1.0")]
