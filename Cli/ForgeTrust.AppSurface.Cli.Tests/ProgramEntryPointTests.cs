@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Reflection;
+using System.Reflection.Emit;
 using System.Text.Json;
 
 using CliFx.Infrastructure;
@@ -69,10 +71,25 @@ public sealed class ProgramEntryPointTests
     [InlineData("v+sha")]
     [InlineData("vNext")]
     [InlineData("0.1")]
+    [InlineData("0..1")]
+    [InlineData("0.1.x")]
     [InlineData("0.1.0-")]
+    [InlineData("0.1.0-rc_1")]
     public void AppSurfaceCliVersion_UsesTruthfulFallbackWhenPackageMetadataIsUnavailable(string? rawVersion)
     {
         var version = AppSurfaceCliVersion.NormalizeDisplayVersion(rawVersion);
+
+        Assert.Equal("unknown (package version metadata unavailable)", version);
+    }
+
+    [Fact]
+    public void AppSurfaceCliVersion_UsesTruthfulFallbackWhenAssemblyLacksPackageMetadata()
+    {
+        var assembly = AssemblyBuilder.DefineDynamicAssembly(
+            new AssemblyName("AppSurfaceCliVersionTests_NoMetadata"),
+            AssemblyBuilderAccess.Run);
+
+        var version = AppSurfaceCliVersion.ResolveDisplayVersion(assembly);
 
         Assert.Equal("unknown (package version metadata unavailable)", version);
     }
