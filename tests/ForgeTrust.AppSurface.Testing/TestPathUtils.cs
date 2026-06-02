@@ -1,4 +1,4 @@
-namespace ForgeTrust.AppSurface.Docs.Tests;
+namespace ForgeTrust.AppSurface.Testing;
 
 /// <summary>
 /// Provides path helpers for tests that need deterministic containment under a known root.
@@ -8,14 +8,15 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 /// whose rooted later segments can discard earlier arguments. They normalize syntactic separators and full paths, but
 /// they do not resolve symlink targets; use them for test fixture construction, not as a production filesystem sandbox.
 /// </remarks>
-internal static class TestPathUtils
+public static class TestPathUtils
 {
     /// <summary>
     /// Resolves an absolute path that is the same as or a descendant of <paramref name="basePath" />.
     /// </summary>
     /// <param name="basePath">The non-empty root directory that bounds the returned path.</param>
     /// <param name="relativeSegments">
-    /// One or more relative path segments. Each segment must be non-empty after separator trimming, non-null, and not rooted.
+    /// One or more relative path segments. Each segment must be non-empty after separator trimming, non-null, not
+    /// rooted, and must not contain a parent traversal segment.
     /// </param>
     /// <returns>A full path under <paramref name="basePath" /> using the current platform's path normalization.</returns>
     /// <exception cref="ArgumentException">
@@ -23,8 +24,8 @@ internal static class TestPathUtils
     /// escapes <paramref name="basePath" /> after normalization.
     /// </exception>
     /// <remarks>
-    /// Containment is checked by <see cref="IsSameOrDescendant" /> after <see cref="RelativePath" /> trims segment
-    /// separators. Comparison is case-insensitive on Windows and case-sensitive elsewhere.
+    /// Containment is checked by <see cref="IsSameOrDescendant" /> after <see cref="RelativePath" /> validates and trims
+    /// segment separators. Comparison is case-insensitive on Windows and case-sensitive elsewhere.
     /// </remarks>
     public static string PathUnder(string basePath, params string[] relativeSegments)
     {
@@ -47,12 +48,13 @@ internal static class TestPathUtils
     /// <returns>The segments joined with <see cref="Path.DirectorySeparatorChar" />.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="segments" /> is <see langword="null" />.</exception>
     /// <exception cref="ArgumentException">
-    /// Thrown when no segments are supplied, a segment is <see langword="null" />, blank, rooted, or trims to empty after
-    /// removing directory separators.
+    /// Thrown when no segments are supplied, a segment is <see langword="null" />, blank, rooted, absolute-looking on
+    /// Windows, contains parent traversal, or trims to empty after removing directory separators.
     /// </exception>
     /// <remarks>
-    /// This helper trims leading and trailing platform directory separators from each segment. It intentionally rejects
-    /// rooted segments before joining so callers cannot accidentally reset the path base.
+    /// This helper is safe relative formatting only. It intentionally rejects rooted, Windows absolute-looking, and
+    /// parent traversal segments so callers cannot accidentally make a relative path that resets or escapes a later
+    /// base. Use <see cref="PathUnder(string, string[])" /> when constructing a full filesystem path under a base.
     /// </remarks>
     public static string RelativePath(params string[] segments)
     {
@@ -72,7 +74,7 @@ internal static class TestPathUtils
                 throw new ArgumentException("Relative path segments cannot be empty.", nameof(segments));
             }
 
-            if (Path.IsPathRooted(segment))
+            if (IsRootedOrAbsoluteLooking(segment))
             {
                 throw new ArgumentException("Relative path segments cannot be rooted.", nameof(segments));
             }
@@ -83,10 +85,40 @@ internal static class TestPathUtils
                 throw new ArgumentException("Relative path segments cannot be empty.", nameof(segments));
             }
 
+            if (ContainsParentTraversalSegment(normalizedSegment))
+            {
+                throw new ArgumentException("Relative path segments cannot contain parent traversal.", nameof(segments));
+            }
+
             normalizedSegments[index] = normalizedSegment;
         }
 
         return string.Join(Path.DirectorySeparatorChar, normalizedSegments);
+    }
+
+    /// <summary>
+    /// Finds the repository root by walking upward from a start path until the solution file is found.
+    /// </summary>
+    /// <param name="startPath">Directory or file path to begin searching from.</param>
+    /// <returns>The repository root directory.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="startPath" /> is blank.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the solution file cannot be found in any ancestor.</exception>
+    public static string FindRepoRoot(string startPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(startPath);
+
+        var current = ResolveStartDirectory(startPath);
+        while (current != null)
+        {
+            if (File.Exists(PathUnder(current.FullName, "ForgeTrust.AppSurface.slnx")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new InvalidOperationException("Could not locate repository root.");
     }
 
     /// <summary>
@@ -118,25 +150,43 @@ internal static class TestPathUtils
         return candidatePath.StartsWith(basePrefix, comparison);
     }
 
-    /// <summary>
-    /// Finds the repository root by walking upward from a start path until the solution file is found.
-    /// </summary>
-    /// <param name="startPath">Directory or file path to begin searching from.</param>
-    /// <returns>The repository root directory.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the solution file cannot be found in any ancestor.</exception>
-    public static string FindRepoRoot(string startPath)
+    private static DirectoryInfo ResolveStartDirectory(string startPath)
     {
-        var current = new DirectoryInfo(startPath);
-        while (current != null)
+        if (File.Exists(startPath))
         {
-            if (File.Exists(PathUnder(current.FullName, "ForgeTrust.AppSurface.slnx")))
-            {
-                return current.FullName;
-            }
-
-            current = current.Parent;
+            return new FileInfo(startPath).Directory
+                ?? throw new InvalidOperationException($"Could not resolve parent directory for '{startPath}'.");
         }
 
-        throw new InvalidOperationException("Could not locate repository root.");
+        if (Directory.Exists(startPath))
+        {
+            return new DirectoryInfo(startPath);
+        }
+
+        return new DirectoryInfo(startPath);
+    }
+
+    private static bool IsRootedOrAbsoluteLooking(string segment)
+    {
+        if (Path.IsPathRooted(segment))
+        {
+            return true;
+        }
+
+        return (segment.Length >= 2
+                && char.IsAsciiLetter(segment[0])
+                && segment[1] == ':')
+            || segment.StartsWith(@"\", StringComparison.Ordinal)
+            || segment.StartsWith("/", StringComparison.Ordinal)
+            || segment.StartsWith(@"\\", StringComparison.Ordinal)
+            || segment.StartsWith("//", StringComparison.Ordinal);
+    }
+
+    private static bool ContainsParentTraversalSegment(string segment)
+    {
+        return segment
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Any(part => string.Equals(part, "..", StringComparison.Ordinal));
     }
 }

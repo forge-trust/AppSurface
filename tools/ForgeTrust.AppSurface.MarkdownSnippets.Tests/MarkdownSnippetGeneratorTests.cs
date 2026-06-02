@@ -819,7 +819,7 @@ public sealed class MarkdownSnippetGeneratorTests : IDisposable
 
     private async Task WriteFileAsync(string relativePath, string content)
     {
-        var fullPath = Path.Combine(_repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = TestPathUtils.PathUnder(_repositoryRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
     }

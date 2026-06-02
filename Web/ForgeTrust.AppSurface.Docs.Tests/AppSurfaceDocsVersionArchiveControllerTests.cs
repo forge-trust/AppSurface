@@ -414,7 +414,16 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                 continue;
             }
 
-            var candidatePath = Path.GetFullPath(Path.Join(basePath, version.ExactTreePath.Trim()));
+            string candidatePath;
+            try
+            {
+                candidatePath = TestPathUtils.PathUnder(basePath, version.ExactTreePath.Trim());
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+
             if (Directory.Exists(candidatePath)
                 && IsPathUnderOrEqual(basePath, candidatePath))
             {

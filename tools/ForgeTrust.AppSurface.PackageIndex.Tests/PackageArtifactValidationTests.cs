@@ -3066,28 +3066,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     private static string CombineSafeChildPath(string directory, string childPath)
     {
-        if (string.IsNullOrWhiteSpace(childPath))
+        try
         {
-            throw new ArgumentException("Child path must not be empty.", nameof(childPath));
+            return TestPathUtils.PathUnder(directory, childPath);
         }
-
-        if (Path.IsPathRooted(childPath))
+        catch (ArgumentException exception)
         {
-            throw new ArgumentException($"Child path '{childPath}' must not be rooted.", nameof(childPath));
+            throw new ArgumentException($"Child path '{childPath}' escapes '{directory}' or is not relative.", nameof(childPath), exception);
         }
-
-        var fullDirectory = Path.GetFullPath(directory);
-        var fullCandidate = Path.GetFullPath(Path.Join(fullDirectory, childPath));
-        var relativePath = Path.GetRelativePath(fullDirectory, fullCandidate);
-        if (relativePath == ".."
-            || relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-            || relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal)
-            || Path.IsPathRooted(relativePath))
-        {
-            throw new ArgumentException($"Child path '{childPath}' escapes '{directory}'.", nameof(childPath));
-        }
-
-        return fullCandidate;
     }
 
     private PackagePublishPlanResolver CreateResolver(IReadOnlyDictionary<string, PackageProjectMetadata> metadataByProject)
@@ -3116,7 +3102,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
 
     private async Task WriteFileAsync(string relativePath, string content)
     {
-        var fullPath = Path.Combine(_repositoryRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = TestPathUtils.PathUnder(_repositoryRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
     }

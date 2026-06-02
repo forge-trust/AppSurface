@@ -467,6 +467,9 @@
           "ForgeTrust.AppSurface.Docs": "[0.1.0, )"
         }
       },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
+      },
       "forgetrust.appsurface.web": {
         "type": "Project",
         "dependencies": {

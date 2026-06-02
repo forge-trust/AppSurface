@@ -548,7 +548,7 @@ public class TailwindCliManagerTests : IDisposable
     private string GetSampleAppBaseDirectory()
     {
         var relativeBaseDir = Path.Join("examples", "sample-app", "bin", "Debug", "net10.0");
-        return Path.Join(_tempPath, relativeBaseDir);
+        return TestPathUtils.PathUnder(_tempPath, relativeBaseDir);
     }
 
     private string GetDevelopmentRuntimeProjectDirectory(string rid, string? version = null)
@@ -578,7 +578,7 @@ public class TailwindCliManagerTests : IDisposable
                 "net10.0",
                 version);
 
-        return Path.Join(_tempPath, relativePath);
+        return TestPathUtils.PathUnder(_tempPath, relativePath);
     }
 
     private static string EnsureFileName(string value)

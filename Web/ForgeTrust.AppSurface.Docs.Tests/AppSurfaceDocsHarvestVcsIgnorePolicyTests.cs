@@ -804,17 +804,14 @@ public sealed class AppSurfaceDocsHarvestVcsIgnorePolicyTests : IDisposable
 
     private async Task WriteAsync(string relativePath, string content)
     {
-        var localRelativePath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(localRelativePath))
+        string fullPath;
+        try
         {
-            throw new ArgumentException("Fixture paths must be relative.", nameof(relativePath));
+            fullPath = TestPathUtils.PathUnder(_root, relativePath);
         }
-
-        var fullPath = Path.GetFullPath(Path.Join(_root, localRelativePath));
-        var rootPrefix = Path.TrimEndingDirectorySeparator(_root) + Path.DirectorySeparatorChar;
-        if (!fullPath.StartsWith(rootPrefix, StringComparison.Ordinal))
+        catch (ArgumentException exception)
         {
-            throw new ArgumentException("Fixture paths must stay under the test root.", nameof(relativePath));
+            throw new ArgumentException("Fixture paths must be relative and stay under the test root.", nameof(relativePath), exception);
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);

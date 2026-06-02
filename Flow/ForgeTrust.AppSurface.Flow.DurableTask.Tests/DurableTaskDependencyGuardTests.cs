@@ -33,23 +33,7 @@ public sealed class DurableTaskDependencyGuardTests
 
     private static XDocument LoadProject(string projectPath)
     {
-        var repositoryRoot = FindRepositoryRoot();
-        return XDocument.Load(Path.Join(repositoryRoot, projectPath.Replace('/', Path.DirectorySeparatorChar)));
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null)
-        {
-            if (File.Exists(Path.Join(current.FullName, "ForgeTrust.AppSurface.slnx")))
-            {
-                return current.FullName;
-            }
-
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException("Could not find repository root.");
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        return XDocument.Load(TestPathUtils.PathUnder(repositoryRoot, projectPath));
     }
 }

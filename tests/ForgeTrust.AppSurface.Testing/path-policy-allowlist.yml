@@ -1,0 +1,11 @@
+# Intentional exceptions for the test fixture path policy.
+#
+# Keep this list empty whenever possible. Entries must include key, category, and reason.
+# The policy test rejects unmatched entries, missing reasons, and expired entries.
+entries:
+  - key: DynamicUnderBasePath|tests/ForgeTrust.AppSurface.Testing/TestPathUtils.cs|35|70|Path.Join|RelativePath(relativeSegments)
+    category: DynamicUnderBasePath
+    reason: TestPathUtils.PathUnder is the shared helper implementation and must join the validated relative path before checking containment.
+  - key: DynamicUnderBasePath|Web/ForgeTrust.RazorWire.IntegrationTests/RazorWireReadmeContractTests.cs|39|66|Path.Combine|pathPart
+    category: DynamicUnderBasePath
+    reason: README link policy intentionally resolves authored relative links with platform path semantics before asserting the result remains under the repository root.

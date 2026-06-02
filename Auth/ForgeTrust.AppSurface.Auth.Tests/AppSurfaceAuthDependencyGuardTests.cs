@@ -70,31 +70,14 @@ public sealed class AppSurfaceAuthDependencyGuardTests
 
     private static XDocument LoadProject(string projectPath)
     {
-        var repositoryRoot = FindRepositoryRoot();
-        var normalizedProjectPath = projectPath.Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(normalizedProjectPath))
+        var repositoryRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        try
         {
-            throw new ArgumentException("Project path must be relative.", nameof(projectPath));
+            return XDocument.Load(TestPathUtils.PathUnder(repositoryRoot, projectPath));
         }
-
-        var fullPath = Path.Join(repositoryRoot, normalizedProjectPath);
-
-        return XDocument.Load(fullPath);
-    }
-
-    private static string FindRepositoryRoot()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null)
+        catch (ArgumentException exception)
         {
-            if (File.Exists(Path.Join(current.FullName, "ForgeTrust.AppSurface.slnx")))
-            {
-                return current.FullName;
-            }
-
-            current = current.Parent;
+            throw new ArgumentException("Project path must be relative and stay under the repository root.", nameof(projectPath), exception);
         }
-
-        throw new InvalidOperationException("Could not find the AppSurface repository root.");
     }
 }

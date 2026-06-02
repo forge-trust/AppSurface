@@ -1014,7 +1014,7 @@ public sealed class RazorWireMvcPlaywrightFixture : IAsyncLifetime
     {
         const string readmeProjectPath = "examples/razorwire-mvc/RazorWireWebExample.csproj";
         var repoRoot = PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
-        var projectPath = Path.Combine(repoRoot, readmeProjectPath.Replace('/', Path.DirectorySeparatorChar));
+        var projectPath = TestPathUtils.PathUnder(repoRoot, readmeProjectPath);
 
         if (!File.Exists(projectPath))
         {

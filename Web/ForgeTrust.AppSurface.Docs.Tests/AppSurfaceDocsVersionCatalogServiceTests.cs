@@ -1582,7 +1582,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
             string candidatePath;
             try
             {
-                candidatePath = Path.GetFullPath(Path.Join(basePath, version.ExactTreePath.Trim()));
+                candidatePath = TestPathUtils.PathUnder(basePath, version.ExactTreePath.Trim());
             }
             catch (ArgumentException)
             {
