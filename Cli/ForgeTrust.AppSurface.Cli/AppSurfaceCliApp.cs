@@ -101,7 +101,8 @@ internal static class AppSurfaceCliApp
             .Select(commandType => (ICommand)serviceProvider.GetRequiredService(commandType))
             .ToArray();
         var suggester = serviceProvider.GetRequiredService<IOptionSuggester>();
-        var commandService = new CommandService(commands, context, suggester, ToolCommandName);
+        var displayVersion = AppSurfaceCliVersion.ResolveDisplayVersion(typeof(AppSurfaceCliApp).Assembly);
+        var commandService = new CommandService(commands, context, suggester, ToolCommandName, displayVersion);
         var previousServiceProvider = CommandService.PrimaryServiceProvider;
 
         try

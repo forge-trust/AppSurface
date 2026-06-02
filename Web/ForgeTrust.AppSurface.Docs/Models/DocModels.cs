@@ -1002,6 +1002,11 @@ public static class DocHarvestDiagnosticCodes
     public const string JavaScriptFileTooLarge = "appsurfacedocs.javascript.file_too_large";
 
     /// <summary>
+    /// A C# source file matched the configured include set but exceeded the configured parse size limit.
+    /// </summary>
+    public const string CSharpFileTooLarge = "appsurfacedocs.csharp.file_too_large";
+
+    /// <summary>
     /// A JavaScript source file could not be parsed and was skipped while other files continued harvesting.
     /// </summary>
     public const string JavaScriptParseFailed = "appsurfacedocs.javascript.parse_failed";

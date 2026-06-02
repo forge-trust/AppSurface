@@ -317,7 +317,7 @@ packages:
     does_not_include: App runtime packages, RazorWire-specific export workflows, or a replacement for project package references.
     start_here_path: Cli/ForgeTrust.AppSurface.Cli/README.md
     start_here_label: AppSurface CLI README
-    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want the `appsurface docs` repository preview command without running from source.
+    recipe_summary: Install `ForgeTrust.AppSurface.Cli` when you want the `appsurface docs` repository preview command without running from source; verify tool installs with `appsurface --version` or `dotnet tool run appsurface --version` for local manifests.
   - project: Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj
     classification: excluded
     publish_decision: do_not_publish
