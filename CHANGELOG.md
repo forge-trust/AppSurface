@@ -23,6 +23,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - AppSurface Docs C# harvesting now applies a parser-input byte budget before UTF-8 decoding and Roslyn parsing, skipping oversized source with `appsurfacedocs.csharp.file_too_large` while healthy sibling API docs continue harvesting.
 - AppSurface Docs JavaScript harvesting now skips symlinks, junctions, and other reparse points before explicit include reads, include-root traversal, and recursive child descent. Configured JavaScript link includes emit `appsurfacedocs.javascript.reparse_point_skipped` with redacted recovery guidance and block strict JavaScript health when JavaScript participates.
 - RazorWire stream endpoints now reject malformed channels with `400`, deny unauthorized channels with `403`, and return `429` when per-process live-channel or subscription admission limits are exhausted before hub subscriber state is allocated.
+- RazorWire and AppSurface hybrid export now fail missing browser-delivered static assets with `RWEXPORT003` while still tolerating live/page routes, frames, forms, streams, islands, canonical metadata, DNS hints, and page-shaped preload or prefetch hints.
 - Config audit discovered-key reports now expose value display state and omit raw unknown or broad-descendant scalar values unless the exact leaf key is registered or the value is redacted.
 
 ## 0.1.0-rc.1 - 2026-05-29
