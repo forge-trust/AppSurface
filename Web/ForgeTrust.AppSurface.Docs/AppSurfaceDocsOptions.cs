@@ -1225,6 +1225,12 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                 }
             }
 
+            if (harvest.CSharp is not null && harvest.CSharp.MaxFileSizeBytes <= 0)
+            {
+                failures.Add(
+                    $"AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes must be a positive byte value. Remove the setting to use the default {AppSurfaceDocsCSharpHarvestOptions.DefaultMaxFileSizeBytes} byte limit, or set a positive value for authored C# source that should be parsed.");
+            }
+
             if (harvest.JavaScript is not null)
             {
                 if (harvest.JavaScript.MaxFileSizeBytes <= 0)

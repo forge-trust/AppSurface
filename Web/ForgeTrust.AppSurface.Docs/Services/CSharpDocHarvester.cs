@@ -1,29 +1,47 @@
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Docs.Models;
 using ForgeTrust.RazorWire;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForgeTrust.AppSurface.Docs.Services;
 
 /// <summary>
 /// Harvester implementation that scans C# source files for XML documentation comments.
 /// </summary>
-public class CSharpDocHarvester : IDocHarvester
+public class CSharpDocHarvester : IDocHarvester, IDocHarvesterDiagnosticProvider
 {
+    private const string HarvesterType = nameof(CSharpDocHarvester);
+    private const string MaxFileSizeConfigurationKey = "AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes";
+
+    private readonly AppSurfaceDocsOptions _options;
     private readonly ILogger<CSharpDocHarvester> _logger;
     private readonly AppSurfaceDocsHarvestPathPolicy _pathPolicy;
+    private IReadOnlyList<DocHarvestDiagnostic> _lastDiagnostics = [];
+
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
 
     /// <summary>
     /// Initializes a new instance of <see cref="CSharpDocHarvester"/> with the provided logger.
     /// </summary>
     public CSharpDocHarvester(ILogger<CSharpDocHarvester> logger)
-        : this(logger, AppSurfaceDocsHarvestPathPolicy.CreateDefault())
+        : this(new AppSurfaceDocsOptions(), logger)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="CSharpDocHarvester"/> with normalized AppSurface Docs options.
+    /// </summary>
+    /// <param name="options">Normalized AppSurface Docs options that contain C# harvest settings.</param>
+    /// <param name="logger">Logger used for non-fatal C# harvest diagnostics.</param>
+    internal CSharpDocHarvester(AppSurfaceDocsOptions options, ILogger<CSharpDocHarvester> logger)
+        : this(options, logger, new AppSurfaceDocsHarvestPathPolicy(options, NullLogger<AppSurfaceDocsHarvestPathPolicy>.Instance))
     {
     }
 
@@ -33,10 +51,26 @@ public class CSharpDocHarvester : IDocHarvester
     internal CSharpDocHarvester(
         ILogger<CSharpDocHarvester> logger,
         AppSurfaceDocsHarvestPathPolicy pathPolicy)
+        : this(new AppSurfaceDocsOptions(), logger, pathPolicy)
     {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="CSharpDocHarvester"/> with normalized options and a shared harvest path policy.
+    /// </summary>
+    /// <param name="options">Normalized AppSurface Docs options that contain C# harvest settings.</param>
+    /// <param name="logger">Logger used for non-fatal C# harvest diagnostics.</param>
+    /// <param name="pathPolicy">Shared harvest path policy used to decide which C# candidates publish.</param>
+    internal CSharpDocHarvester(
+        AppSurfaceDocsOptions options,
+        ILogger<CSharpDocHarvester> logger,
+        AppSurfaceDocsHarvestPathPolicy pathPolicy)
+    {
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(pathPolicy);
 
+        _options = options;
         _logger = logger;
         _pathPolicy = pathPolicy;
     }
@@ -90,115 +124,134 @@ public class CSharpDocHarvester : IDocHarvester
         var nodes = new List<DocNode>();
         var stubNodes = new List<DocNode>();
         var namespacePages = new Dictionary<string, NamespaceDocPage>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in EnumerateEligibleCSharpFiles(rootPath, pathPolicy, cancellationToken))
+        var diagnostics = new List<DocHarvestDiagnostic>();
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var relativePath = Path.GetRelativePath(rootPath, file)
-                .Replace('\\', '/'); // Normalize to forward slashes for URLs
-            if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.CSharp))
+            var csharpOptions = _options.Harvest?.CSharp ?? new AppSurfaceDocsCSharpHarvestOptions();
+            foreach (var file in EnumerateEligibleCSharpFiles(rootPath, pathPolicy, cancellationToken))
             {
-                continue;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
 
-            try
-            {
-                var code = await File.ReadAllTextAsync(file, cancellationToken);
-                var tree = CSharpSyntaxTree.ParseText(code, cancellationToken: cancellationToken);
-                var root = await tree.GetRootAsync(cancellationToken);
-
-                // Capture Classes, Structs, Interfaces, Records
-                var typeDeclarations = root.DescendantNodes().OfType<TypeDeclarationSyntax>().ToList();
-                foreach (var typeDecl in typeDeclarations)
+                var relativePath = Path.GetRelativePath(rootPath, file)
+                    .Replace('\\', '/'); // Normalize to forward slashes for URLs
+                if (!pathPolicy.ShouldIncludeFilePath(relativePath, AppSurfaceDocsHarvestSourceKind.CSharp))
                 {
-                    var doc = ExtractDoc(typeDecl);
-                    var documentedMethods = typeDecl.Members
-                        .OfType<MethodDeclarationSyntax>()
-                        .Select(method => new
-                        {
-                            Method = method,
-                            Doc = ExtractDoc(method)
-                        })
-                        .Where(x => x.Doc != null)
-                        .ToList();
-                    var documentedProperties = typeDecl.Members
-                        .OfType<PropertyDeclarationSyntax>()
-                        .Select(property => new
-                        {
-                            Property = property,
-                            Doc = ExtractDoc(property)
-                        })
-                        .Where(x => x.Doc != null)
-                        .ToList();
+                    continue;
+                }
 
-                    if (doc == null && documentedMethods.Count == 0 && documentedProperties.Count == 0)
+                try
+                {
+                    var readResult = await AppSurfaceDocsParserInputBudget.ReadUtf8SourceAsync(
+                        file,
+                        relativePath,
+                        csharpOptions.MaxFileSizeBytes,
+                        MaxFileSizeConfigurationKey,
+                        DocHarvestDiagnosticCodes.CSharpFileTooLarge,
+                        HarvesterType,
+                        "C#",
+                        "Exclude generated C# with AppSurfaceDocs:Harvest:CSharp:ExcludeGlobs, or raise AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes only for authored source that should be parsed.",
+                        cancellationToken);
+                    if (!readResult.Included)
                     {
+                        diagnostics.Add(readResult.Diagnostic!);
                         continue;
                     }
 
-                    var qualifiedTypeName = GetQualifiedName(typeDecl);
-                    var typeDisplayName = GetDisplayTypeName(typeDecl);
-                    var typeId = StringUtils.ToSafeId(qualifiedTypeName);
-                    var namespacePage = GetOrCreateNamespacePage(namespacePages, GetNamespaceName(typeDecl));
-                    AddOutlineItem(namespacePage, typeDisplayName, typeId, level: 2);
+                    var tree = CSharpSyntaxTree.ParseText(readResult.Source!, cancellationToken: cancellationToken);
+                    var root = await tree.GetRootAsync(cancellationToken);
 
-                    namespacePage.Content.Append(
-                        $@"<section id=""{typeId}"" class=""doc-type"">
+                    // Capture Classes, Structs, Interfaces, Records
+                    var typeDeclarations = root.DescendantNodes().OfType<TypeDeclarationSyntax>().ToList();
+                    foreach (var typeDecl in typeDeclarations)
+                    {
+                        var doc = ExtractDoc(typeDecl);
+                        var documentedMethods = typeDecl.Members
+                            .OfType<MethodDeclarationSyntax>()
+                            .Select(method => new
+                            {
+                                Method = method,
+                                Doc = ExtractDoc(method)
+                            })
+                            .Where(x => x.Doc != null)
+                            .ToList();
+                        var documentedProperties = typeDecl.Members
+                            .OfType<PropertyDeclarationSyntax>()
+                            .Select(property => new
+                            {
+                                Property = property,
+                                Doc = ExtractDoc(property)
+                            })
+                            .Where(x => x.Doc != null)
+                            .ToList();
+
+                        if (doc == null && documentedMethods.Count == 0 && documentedProperties.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        var qualifiedTypeName = GetQualifiedName(typeDecl);
+                        var typeDisplayName = GetDisplayTypeName(typeDecl);
+                        var typeId = StringUtils.ToSafeId(qualifiedTypeName);
+                        var namespacePage = GetOrCreateNamespacePage(namespacePages, GetNamespaceName(typeDecl));
+                        AddOutlineItem(namespacePage, typeDisplayName, typeId, level: 2);
+
+                        namespacePage.Content.Append(
+                            $@"<section id=""{typeId}"" class=""doc-type"">
                         <header class=""doc-type-header"">
                             <span class=""doc-kind"">Type</span>
                             <h2>{WebUtility.HtmlEncode(typeDisplayName)}</h2>
                             {CreateSymbolSourcePlaceholder(typeId)}
                         </header>");
 
-                    AddSymbolSourceProvenance(namespacePage, typeId, relativePath, typeDecl);
+                        AddSymbolSourceProvenance(namespacePage, typeId, relativePath, typeDecl);
 
-                    if (!string.IsNullOrWhiteSpace(doc))
-                    {
-                        namespacePage.Content.Append(
-                            $@"<div class=""doc-body"">
+                        if (!string.IsNullOrWhiteSpace(doc))
+                        {
+                            namespacePage.Content.Append(
+                                $@"<div class=""doc-body"">
                             {doc}
                         </div>");
-                    }
+                        }
 
-                    stubNodes.Add(
-                        new DocNode(
-                            typeDisplayName,
-                            namespacePage.Path + "#" + typeId,
-                            string.Empty,
-                            namespacePage.Path,
-                            Metadata: DocMetadataFactory.CreateApiReferenceMetadata(typeDisplayName, namespacePage.FullNamespace)));
+                        stubNodes.Add(
+                            new DocNode(
+                                typeDisplayName,
+                                namespacePage.Path + "#" + typeId,
+                                string.Empty,
+                                namespacePage.Path,
+                                Metadata: DocMetadataFactory.CreateApiReferenceMetadata(typeDisplayName, namespacePage.FullNamespace)));
 
-                    foreach (var methodGroup in documentedMethods.GroupBy(x => x.Method.Identifier.Text))
-                    {
-                        var overloadCount = methodGroup.Count();
-                        var methodGroupId = GetMethodGroupId(methodGroup.Key, qualifiedTypeName);
-                        AddOutlineItem(namespacePage, methodGroup.Key, methodGroupId, level: 3);
+                        foreach (var methodGroup in documentedMethods.GroupBy(x => x.Method.Identifier.Text))
+                        {
+                            var overloadCount = methodGroup.Count();
+                            var methodGroupId = GetMethodGroupId(methodGroup.Key, qualifiedTypeName);
+                            AddOutlineItem(namespacePage, methodGroup.Key, methodGroupId, level: 3);
 
-                        namespacePage.Content.Append(
-                            $@"<section id=""{methodGroupId}"" class=""doc-method-group"">
+                            namespacePage.Content.Append(
+                                $@"<section id=""{methodGroupId}"" class=""doc-method-group"">
                             <header class=""doc-method-group-header"">
                                 <span class=""doc-kind"">Method</span>
                                 <h3>{WebUtility.HtmlEncode(methodGroup.Key)}</h3>");
 
-                        if (overloadCount > 1)
-                        {
-                            namespacePage.Content.Append(
-                                $@"<span class=""doc-overload-count"">{WebUtility.HtmlEncode($"{overloadCount} overloads")}</span>");
-                        }
+                            if (overloadCount > 1)
+                            {
+                                namespacePage.Content.Append(
+                                    $@"<span class=""doc-overload-count"">{WebUtility.HtmlEncode($"{overloadCount} overloads")}</span>");
+                            }
 
-                        namespacePage.Content.Append("</header>");
+                            namespacePage.Content.Append("</header>");
 
-                        var index = 0;
-                        foreach (var methodItem in methodGroup)
-                        {
-                            var method = methodItem.Method;
-                            var methodDoc = methodItem.Doc!;
-                            var id = GetMethodId(method, qualifiedTypeName);
-                            var highlightedDisplaySignature = GetHighlightedDisplaySignature(method);
-                            var openAttribute = index == 0 ? " open" : string.Empty;
+                            var index = 0;
+                            foreach (var methodItem in methodGroup)
+                            {
+                                var method = methodItem.Method;
+                                var methodDoc = methodItem.Doc!;
+                                var id = GetMethodId(method, qualifiedTypeName);
+                                var highlightedDisplaySignature = GetHighlightedDisplaySignature(method);
+                                var openAttribute = index == 0 ? " open" : string.Empty;
 
-                            namespacePage.Content.Append(
-                                $@"<details id=""{id}"" class=""doc-overload""{openAttribute}>
+                                namespacePage.Content.Append(
+                                    $@"<details id=""{id}"" class=""doc-overload""{openAttribute}>
                                 <summary>
                                     <code class=""doc-signature"">{highlightedDisplaySignature}</code>
                                     {CreateSymbolSourcePlaceholder(id)}
@@ -208,24 +261,24 @@ public class CSharpDocHarvester : IDocHarvester
                                 </div>
                             </details>");
 
-                            AddSymbolSourceProvenance(namespacePage, id, relativePath, method);
+                                AddSymbolSourceProvenance(namespacePage, id, relativePath, method);
 
-                            index++;
+                                index++;
+                            }
+
+                            namespacePage.Content.Append("</section>");
                         }
 
-                        namespacePage.Content.Append("</section>");
-                    }
+                        foreach (var propertyItem in documentedProperties)
+                        {
+                            var property = propertyItem.Property;
+                            var propertyDoc = propertyItem.Doc!;
+                            var id = GetPropertyId(property, qualifiedTypeName);
+                            var highlightedPropertySignature = GetHighlightedPropertySignature(property);
+                            AddOutlineItem(namespacePage, property.Identifier.Text, id, level: 3);
 
-                    foreach (var propertyItem in documentedProperties)
-                    {
-                        var property = propertyItem.Property;
-                        var propertyDoc = propertyItem.Doc!;
-                        var id = GetPropertyId(property, qualifiedTypeName);
-                        var highlightedPropertySignature = GetHighlightedPropertySignature(property);
-                        AddOutlineItem(namespacePage, property.Identifier.Text, id, level: 3);
-
-                        namespacePage.Content.Append(
-                            $@"<section id=""{id}"" class=""doc-method-group"">
+                            namespacePage.Content.Append(
+                                $@"<section id=""{id}"" class=""doc-method-group"">
                             <header class=""doc-method-group-header"">
                                 <span class=""doc-kind"">Property</span>
                                 <h3>{WebUtility.HtmlEncode(property.Identifier.Text)}</h3>
@@ -241,26 +294,26 @@ public class CSharpDocHarvester : IDocHarvester
                             </article>
                         </section>");
 
-                        AddSymbolSourceProvenance(namespacePage, id, relativePath, property);
+                            AddSymbolSourceProvenance(namespacePage, id, relativePath, property);
+                        }
+
+                        namespacePage.Content.Append("</section>");
                     }
 
-                    namespacePage.Content.Append("</section>");
-                }
-
-                // Capture Enums
-                var enumDeclarations = root.DescendantNodes().OfType<EnumDeclarationSyntax>().ToList();
-                foreach (var enumDecl in enumDeclarations)
-                {
-                    var doc = ExtractDoc(enumDecl);
-                    if (doc != null)
+                    // Capture Enums
+                    var enumDeclarations = root.DescendantNodes().OfType<EnumDeclarationSyntax>().ToList();
+                    foreach (var enumDecl in enumDeclarations)
                     {
-                        var namespacePage = GetOrCreateNamespacePage(namespacePages, GetNamespaceName(enumDecl));
-                        var qualifiedName = GetQualifiedName(enumDecl);
-                        var enumId = StringUtils.ToSafeId(qualifiedName);
-                        AddOutlineItem(namespacePage, enumDecl.Identifier.Text, enumId, level: 2);
+                        var doc = ExtractDoc(enumDecl);
+                        if (doc != null)
+                        {
+                            var namespacePage = GetOrCreateNamespacePage(namespacePages, GetNamespaceName(enumDecl));
+                            var qualifiedName = GetQualifiedName(enumDecl);
+                            var enumId = StringUtils.ToSafeId(qualifiedName);
+                            AddOutlineItem(namespacePage, enumDecl.Identifier.Text, enumId, level: 2);
 
-                        namespacePage.Content.Append(
-                            $@"<section id=""{enumId}"" class=""doc-type doc-enum"">
+                            namespacePage.Content.Append(
+                                $@"<section id=""{enumId}"" class=""doc-type doc-enum"">
                             <header class=""doc-type-header"">
                                 <span class=""doc-kind"">Enum</span>
                                 <h2>{WebUtility.HtmlEncode(enumDecl.Identifier.Text)}</h2>
@@ -271,46 +324,74 @@ public class CSharpDocHarvester : IDocHarvester
                             </div>
                         </section>");
 
-                        AddSymbolSourceProvenance(namespacePage, enumId, relativePath, enumDecl);
+                            AddSymbolSourceProvenance(namespacePage, enumId, relativePath, enumDecl);
 
-                        stubNodes.Add(
-                            new DocNode(
-                                enumDecl.Identifier.Text,
-                                namespacePage.Path + "#" + enumId,
-                                string.Empty,
-                                namespacePage.Path,
-                                Metadata: DocMetadataFactory.CreateApiReferenceMetadata(enumDecl.Identifier.Text, namespacePage.FullNamespace)));
+                            stubNodes.Add(
+                                new DocNode(
+                                    enumDecl.Identifier.Text,
+                                    namespacePage.Path + "#" + enumId,
+                                    string.Empty,
+                                    namespacePage.Path,
+                                    Metadata: DocMetadataFactory.CreateApiReferenceMetadata(enumDecl.Identifier.Text, namespacePage.FullNamespace)));
+                        }
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException
+                                           and not StackOverflowException
+                                           and not AccessViolationException
+                                           and not AppDomainUnloadedException
+                                           and not BadImageFormatException
+                                           and not CannotUnloadAppDomainException
+                                           and not ThreadAbortException)
+                {
+                    _logger.LogError(ex, "Failed to parse C# file: {File}", file);
+                }
             }
-            catch (Exception ex)
+
+            EnsureNamespaceHierarchy(namespacePages);
+
+            foreach (var namespacePage in namespacePages.Values.OrderBy(p => p.Path, StringComparer.OrdinalIgnoreCase))
             {
-                _logger.LogError(ex, "Failed to parse C# file: {File}", file);
+                if (namespacePage.Content.Length == 0)
+                {
+                    continue;
+                }
+
+                nodes.Add(
+                    new DocNode(
+                        namespacePage.Title,
+                        namespacePage.Path,
+                        namespacePage.Content.ToString(),
+                        Metadata: namespacePage.Metadata,
+                        Outline: namespacePage.Outline,
+                        SymbolSourceProvenance: namespacePage.SymbolSourceProvenance));
             }
+
+            nodes.AddRange(stubNodes);
+
+            return nodes;
         }
-
-        EnsureNamespaceHierarchy(namespacePages);
-
-        foreach (var namespacePage in namespacePages.Values.OrderBy(p => p.Path, StringComparer.OrdinalIgnoreCase))
+        finally
         {
-            if (namespacePage.Content.Length == 0)
+            _lastDiagnostics = diagnostics.ToArray();
+            foreach (var diagnostic in diagnostics)
             {
-                continue;
+                _logger.Log(
+                    diagnostic.Severity >= DocHarvestDiagnosticSeverity.Error ? LogLevel.Error : LogLevel.Warning,
+                    "AppSurface Docs C# harvest diagnostic {DiagnosticCode}: {Problem}",
+                    diagnostic.Code,
+                    diagnostic.Problem);
             }
-
-            nodes.Add(
-                new DocNode(
-                    namespacePage.Title,
-                    namespacePage.Path,
-                    namespacePage.Content.ToString(),
-                    Metadata: namespacePage.Metadata,
-                    Outline: namespacePage.Outline,
-                    SymbolSourceProvenance: namespacePage.SymbolSourceProvenance));
         }
+    }
 
-        nodes.AddRange(stubNodes);
-
-        return nodes;
+    IReadOnlyList<DocHarvestDiagnostic> IDocHarvesterDiagnosticProvider.GetHarvestDiagnostics()
+    {
+        return GetType() == typeof(CSharpDocHarvester) ? _lastDiagnostics : [];
     }
 
     private IEnumerable<string> EnumerateEligibleCSharpFiles(

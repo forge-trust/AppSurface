@@ -70,6 +70,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal("appsurfacedocs.markdown.file_too_large", DocHarvestDiagnosticCodes.MarkdownFileTooLarge);
         Assert.Equal("appsurfacedocs.markdown.metadata_file_too_large", DocHarvestDiagnosticCodes.MarkdownMetadataFileTooLarge);
         Assert.Equal("appsurfacedocs.javascript.file_too_large", DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
+        Assert.Equal("appsurfacedocs.csharp.file_too_large", DocHarvestDiagnosticCodes.CSharpFileTooLarge);
         Assert.Equal("appsurfacedocs.javascript.parse_failed", DocHarvestDiagnosticCodes.JavaScriptParseFailed);
         Assert.Equal("appsurfacedocs.javascript.missing_include", DocHarvestDiagnosticCodes.JavaScriptMissingInclude);
         Assert.Equal("appsurfacedocs.javascript.reparse_point_skipped", DocHarvestDiagnosticCodes.JavaScriptReparsePointSkipped);
@@ -476,6 +477,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Empty(options.Harvest.CSharp.ExcludeGlobs);
         Assert.Empty(options.Harvest.CSharp.DefaultExclusions.DisabledGroups);
         Assert.Empty(options.Harvest.CSharp.DefaultExclusions.AllowGlobs);
+        Assert.Equal(
+            AppSurfaceDocsCSharpHarvestOptions.DefaultMaxFileSizeBytes,
+            options.Harvest.CSharp.MaxFileSizeBytes);
         Assert.True(options.Harvest.JavaScript.Enabled);
         Assert.Empty(options.Harvest.JavaScript.IncludeGlobs);
         Assert.Equal(["**/*.min.js"], options.Harvest.JavaScript.ExcludeGlobs);
@@ -484,7 +488,9 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Empty(options.Harvest.JavaScript.GroupNameRules);
         Assert.True(options.Harvest.JavaScript.RequirePublicTag);
         Assert.False(options.Harvest.JavaScript.StrictHealth);
-        Assert.Equal(262_144, options.Harvest.JavaScript.MaxFileSizeBytes);
+        Assert.Equal(
+            AppSurfaceDocsJavaScriptHarvestOptions.DefaultMaxFileSizeBytes,
+            options.Harvest.JavaScript.MaxFileSizeBytes);
     }
 
     [Fact]
@@ -596,6 +602,7 @@ public sealed class AppSurfaceDocsOptionsTests
                         ["AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes"] = "512",
                         ["AppSurfaceDocs:Harvest:CSharp:IncludeGlobs:0"] = "src\\**",
                         ["AppSurfaceDocs:Harvest:CSharp:DefaultExclusions:DisabledGroups:0"] = " csharpexamplesource ",
+                        ["AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes"] = "2048",
                         ["AppSurfaceDocs:Harvest:JavaScript:Enabled"] = "true",
                         ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:0"] = " Web\\ForgeTrust.RazorWire\\assets\\contracts\\razorwire-public-contracts.js ",
                         ["AppSurfaceDocs:Harvest:JavaScript:IncludeGlobs:1"] = "Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js",
@@ -631,6 +638,7 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Equal(512, options.Harvest.Markdown.MaxMetadataFileSizeBytes);
         Assert.Equal(["src/**"], options.Harvest.CSharp.IncludeGlobs);
         Assert.Equal(["CSharpExampleSource"], options.Harvest.CSharp.DefaultExclusions.DisabledGroups);
+        Assert.Equal(2048, options.Harvest.CSharp.MaxFileSizeBytes);
         Assert.True(options.Harvest.JavaScript.Enabled);
         Assert.Equal(["Web/ForgeTrust.RazorWire/assets/contracts/razorwire-public-contracts.js"], options.Harvest.JavaScript.IncludeGlobs);
         Assert.Equal(["**/*.min.js", "**/*.generated.js"], options.Harvest.JavaScript.ExcludeGlobs);
@@ -2129,6 +2137,29 @@ public sealed class AppSurfaceDocsOptionsTests
         Assert.Contains(
             result.Failures,
             failure => failure.Contains("AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes must be greater than zero.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validator_ShouldRejectInvalidCSharpMaxFileSize()
+    {
+        var validator = new AppSurfaceDocsOptionsValidator();
+        var options = new AppSurfaceDocsOptions
+        {
+            Harvest = new AppSurfaceDocsHarvestOptions
+            {
+                CSharp = new AppSurfaceDocsCSharpHarvestOptions
+                {
+                    MaxFileSizeBytes = 0
+                }
+            }
+        };
+
+        var result = validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains("AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes must be a positive byte value.", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -1173,7 +1173,12 @@ public sealed class JavaScriptDocHarvesterTests : IDisposable
         var docs = await harvester.HarvestAsync(_testRoot);
         var diagnostics = GetDiagnostics(harvester);
 
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
+        var fileTooLargeDiagnostic = Assert.Single(
+            diagnostics,
+            diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptFileTooLarge);
+        Assert.Equal(nameof(JavaScriptDocHarvester), fileTooLargeDiagnostic.HarvesterType);
+        Assert.Equal(DocHarvestDiagnosticSeverity.Warning, fileTooLargeDiagnostic.Severity);
+        Assert.Contains("AppSurfaceDocs:Harvest:JavaScript:MaxFileSizeBytes", fileTooLargeDiagnostic.Cause, StringComparison.Ordinal);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptParseFailed);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptUnsupportedPublicShape);
         Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DocHarvestDiagnosticCodes.JavaScriptMalformedPublicDoclet);

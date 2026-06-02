@@ -272,6 +272,7 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.LocalizationLocaleFolderConflict` (`appsurfacedocs.localization.locale_folder_conflict`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackDisabledMissingVariant` (`appsurfacedocs.localization.fallback_disabled_missing_variant`)
 - `DocHarvestDiagnosticCodes.LocalizationFallbackConflict` (`appsurfacedocs.localization.fallback_conflict`)
+- `DocHarvestDiagnosticCodes.CSharpFileTooLarge` (`appsurfacedocs.csharp.file_too_large`)
 - `DocHarvestDiagnosticCodes.JavaScriptFileTooLarge` (`appsurfacedocs.javascript.file_too_large`)
 - `DocHarvestDiagnosticCodes.JavaScriptParseFailed` (`appsurfacedocs.javascript.parse_failed`)
 - `DocHarvestDiagnosticCodes.JavaScriptMissingInclude` (`appsurfacedocs.javascript.missing_include`)
@@ -281,6 +282,20 @@ AppSurface Docs currently emits these codes:
 - `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicDoclet` (`appsurfacedocs.javascript.incomplete_public_doclet`)
 - `DocHarvestDiagnosticCodes.JavaScriptIncompletePublicEventDoclet` (`appsurfacedocs.javascript.incomplete_public_event_doclet`)
 - `DocHarvestDiagnosticCodes.JavaScriptDuplicateAnchor` (`appsurfacedocs.javascript.duplicate_anchor`)
+
+### Oversized source diagnostics
+
+The built-in C# and JavaScript harvesters apply parser-input byte budgets before decoding source text. This protects source-backed docs snapshots from generated files and accidental large bundles without changing the public path policy contract.
+
+`DocHarvestDiagnosticCodes.CSharpFileTooLarge` (`appsurfacedocs.csharp.file_too_large`) means a policy-approved `.cs` file was skipped before Roslyn parsing because the harvester read more bytes than `AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes` allows. The default C# limit is `1048576` bytes. It is intentionally larger than the JavaScript default because authored C# API source commonly carries XML documentation and generated JavaScript bundles are noisier in broad discovery.
+
+Recovery order:
+
+1. Prefer excluding generated C# with `AppSurfaceDocs:Harvest:CSharp:ExcludeGlobs`, or by tightening global `AppSurfaceDocs:Harvest:Paths`.
+2. Raise `AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes` only for authored source that should become API reference.
+3. In CI, read `{DocsRootPath}/_health.json` and branch on diagnostic codes. Block release output when `diagnostics[].code` contains `appsurfacedocs.csharp.file_too_large` for a path that should publish, rather than changing aggregate health semantics.
+
+`DocHarvestDiagnosticCodes.JavaScriptFileTooLarge` keeps the existing JavaScript behavior and default `262144` byte limit. JavaScript strictness is still controlled by `AppSurfaceDocs:Harvest:JavaScript:StrictHealth`, nonempty JavaScript `IncludeGlobs`, and the strict public event option.
 
 An all-failed snapshot logs one critical message when that snapshot is generated. Reusing the cached health snapshot does not log again. Calling `InvalidateCache()` and then reading docs or harvest health can generate a new snapshot and, if every harvester still fails, a new critical log entry.
 
@@ -630,6 +645,7 @@ AppSurface Docs harvests from source by default, so every host should be intenti
         "IncludeGlobs": [
           "src/**/*.cs"
         ],
+        "MaxFileSizeBytes": 1048576,
         "DefaultExclusions": {
           "DisabledGroups": [
             "CSharpExampleSource"
@@ -1130,6 +1146,11 @@ static web assets.
 - `AppSurfaceDocs:Harvest:CSharp:IncludeGlobs` / `ExcludeGlobs` / `DefaultExclusions`
   - Defaults mirror the global path option shape, but apply only to C# API-reference candidates.
   - `CSharpExampleSource` is only a C# default group. Markdown example READMEs stay eligible unless excluded by other policy.
+- `AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes`
+  - Defaults to `1048576`.
+  - Must be a positive byte value.
+  - The C# harvester reads at most this value plus one byte before decoding and Roslyn parsing. Files over the limit are skipped with `appsurfacedocs.csharp.file_too_large` and do not block aggregate health by default.
+  - Prefer `AppSurfaceDocs:Harvest:CSharp:ExcludeGlobs` for generated source. Raise this limit only when an authored C# API source file is intentionally larger.
 - `AppSurfaceDocs:Harvest:JavaScript:Enabled`
   - Defaults to `true`.
   - Set to `false` to opt out of JavaScript public API harvesting entirely.
