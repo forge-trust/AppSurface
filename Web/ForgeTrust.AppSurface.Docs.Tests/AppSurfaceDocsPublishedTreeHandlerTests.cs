@@ -879,6 +879,82 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldDenyStaticAsset_WhenVerifiedLengthNoLongerMatches()
+    {
+        const string original = "body { color: #fff; }";
+        TestFileInfo? fileInfo = null;
+        fileInfo = new TestFileInfo(
+            "search.css",
+            length: Encoding.UTF8.GetByteCount(original),
+            streamFactory: () => new MemoryStream(Encoding.UTF8.GetBytes(original)),
+            lengthFactory: () => fileInfo!.OpenCount == 0
+                ? Encoding.UTF8.GetByteCount(original)
+                : Encoding.UTF8.GetByteCount(original) + 1);
+        var provider = new TestFileProvider(("search.css", fileInfo));
+        var handler = CreateHandler(
+            [CreateVerifiedTestMount("/docs/v/1.2.3", provider, CreateArchiveFileFromText("search.css", original))],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(1, fileInfo.OpenCount);
+        Assert.Equal(string.Empty, ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldDenyStaticAsset_WhenVerifiedReadEndsEarly()
+    {
+        const string original = "body { color: #fff; }";
+        var openCount = 0;
+        var fileInfo = new TestFileInfo(
+            "search.css",
+            length: Encoding.UTF8.GetByteCount(original),
+            streamFactory: () =>
+            {
+                openCount++;
+                return new MemoryStream(Encoding.UTF8.GetBytes(openCount == 1 ? original : "body"));
+            });
+        var provider = new TestFileProvider(("search.css", fileInfo));
+        var handler = CreateHandler(
+            [CreateVerifiedTestMount("/docs/v/1.2.3", provider, CreateArchiveFileFromText("search.css", original))],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(2, fileInfo.OpenCount);
+        Assert.Equal(string.Empty, ReadBody(request));
+    }
+
+    [Fact]
+    public async Task TryHandleAsync_ShouldDenyStaticAsset_WhenVerifiedReadFails()
+    {
+        const string original = "body { color: #fff; }";
+        var openCount = 0;
+        var fileInfo = new TestFileInfo(
+            "search.css",
+            length: Encoding.UTF8.GetByteCount(original),
+            streamFactory: () =>
+            {
+                openCount++;
+                return openCount == 1
+                    ? new MemoryStream(Encoding.UTF8.GetBytes(original))
+                    : throw new IOException("The active asset disappeared.");
+            });
+        var provider = new TestFileProvider(("search.css", fileInfo));
+        var handler = CreateHandler(
+            [CreateVerifiedTestMount("/docs/v/1.2.3", provider, CreateArchiveFileFromText("search.css", original))],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(2, fileInfo.OpenCount);
+        Assert.Equal(string.Empty, ReadBody(request));
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldLogOnlyFirstOversizedRewriteWarningPerHandler()
     {
         var firstFile = new TestFileInfo("first.html", length: 9, streamFactory: () => Stream.Null);
@@ -1765,11 +1841,12 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     private sealed class TestFileInfo(
         string name,
         long length,
-        Func<Stream> streamFactory) : IFileInfo
+        Func<Stream> streamFactory,
+        Func<long>? lengthFactory = null) : IFileInfo
     {
         public bool Exists => true;
 
-        public long Length => length;
+        public long Length => lengthFactory?.Invoke() ?? length;
 
         public string? PhysicalPath => null;
 

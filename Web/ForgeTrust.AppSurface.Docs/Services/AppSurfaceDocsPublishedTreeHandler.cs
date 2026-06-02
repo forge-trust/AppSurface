@@ -627,16 +627,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 return null;
             }
 
-            byte[] digestBytes;
-            if (buffer.TryGetBuffer(out var segment))
-            {
-                digestBytes = SHA256.HashData(segment.AsSpan(0, (int)buffer.Length));
-            }
-            else
-            {
-                digestBytes = SHA256.HashData(buffer.ToArray());
-            }
-
+            var digestBytes = SHA256.HashData(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
             var digest = Convert.ToHexString(digestBytes).ToLowerInvariant();
             return string.Equals(digest, verifiedFile.Sha256, StringComparison.Ordinal)
                 ? buffer.ToArray()
@@ -829,16 +820,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         buffer.Position = 0;
         using var reader = new StreamReader(buffer, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         var text = await reader.ReadToEndAsync(cancellationToken);
-        byte[] digestBytes;
-        if (buffer.TryGetBuffer(out var segment))
-        {
-            digestBytes = SHA256.HashData(segment.AsSpan(0, (int)buffer.Length));
-        }
-        else
-        {
-            digestBytes = SHA256.HashData(buffer.ToArray());
-        }
-
+        var digestBytes = SHA256.HashData(buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
         var digest = Convert.ToHexString(digestBytes).ToLowerInvariant();
         return new RewrittenFileContent(text, buffer.Length, digest);
     }
