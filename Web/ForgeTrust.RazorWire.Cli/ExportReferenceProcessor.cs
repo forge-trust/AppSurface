@@ -39,10 +39,70 @@ internal sealed partial class ExportReferenceProcessor
     {
         "stylesheet",
         "icon",
+        "modulepreload",
         "preload",
         "prefetch",
         "dns-prefetch",
         "canonical",
+    };
+
+    private static readonly HashSet<string> StaticAssetLinkRelTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "stylesheet",
+        "icon",
+        "modulepreload",
+    };
+
+    private static readonly HashSet<string> MetadataLinkRelTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "canonical",
+        "dns-prefetch",
+    };
+
+    private static readonly HashSet<string> StaticAssetHintRelTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "preload",
+        "prefetch",
+    };
+
+    private static readonly HashSet<string> StaticAssetHintAsTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "audio",
+        "font",
+        "image",
+        "script",
+        "style",
+        "track",
+        "video",
+        "worker",
+    };
+
+    private static readonly HashSet<string> StaticAssetPathExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".avif",
+        ".css",
+        ".eot",
+        ".gif",
+        ".ico",
+        ".jpeg",
+        ".jpg",
+        ".js",
+        ".json",
+        ".map",
+        ".mjs",
+        ".mp3",
+        ".mp4",
+        ".ogg",
+        ".otf",
+        ".png",
+        ".svg",
+        ".ttf",
+        ".wasm",
+        ".wav",
+        ".webm",
+        ".webp",
+        ".woff",
+        ".woff2",
     };
 
     private readonly HtmlParser _htmlParser = new();
@@ -226,7 +286,16 @@ internal sealed partial class ExportReferenceProcessor
         foreach (var element in document.QuerySelectorAll("link[href]")
             .Where(element => IsSupportedLinkRel(element.GetAttribute("rel") ?? string.Empty)))
         {
-            AddReference(references, element.GetAttribute("href") ?? string.Empty, ExportReferenceKind.LinkHref, currentRoute, CreateHtmlProvenance(element, "href", attributeLookup));
+            var rel = element.GetAttribute("rel") ?? string.Empty;
+            var asValue = element.GetAttribute("as");
+            AddReference(
+                references,
+                element.GetAttribute("href") ?? string.Empty,
+                ExportReferenceKind.LinkHref,
+                currentRoute,
+                CreateHtmlProvenance(element, "href", attributeLookup),
+                path => ClassifyLinkReference(rel, asValue, path),
+                new ExportReferenceLinkMetadata(rel, asValue));
         }
 
         foreach (var element in document.QuerySelectorAll("img[src]"))
@@ -282,9 +351,11 @@ internal sealed partial class ExportReferenceProcessor
         string rawValue,
         ExportReferenceKind kind,
         string currentRoute,
-        ExportReferenceProvenance provenance)
+        ExportReferenceProvenance provenance,
+        Func<string, ExportReferenceRole>? roleSelector = null,
+        ExportReferenceLinkMetadata? linkMetadata = null)
     {
-        var reference = CreateReference(rawValue.Trim(), kind, currentRoute, provenance);
+        var reference = CreateReference(rawValue.Trim(), kind, currentRoute, provenance, roleSelector, linkMetadata);
         if (reference is not null)
         {
             references.Add(reference);
@@ -295,7 +366,9 @@ internal sealed partial class ExportReferenceProcessor
         string rawValue,
         ExportReferenceKind kind,
         string currentRoute,
-        ExportReferenceProvenance provenance)
+        ExportReferenceProvenance provenance,
+        Func<string, ExportReferenceRole>? roleSelector = null,
+        ExportReferenceLinkMetadata? linkMetadata = null)
     {
         if (IsHashOnlyReference(rawValue))
         {
@@ -308,7 +381,8 @@ internal sealed partial class ExportReferenceProcessor
             return null;
         }
 
-        return new ExportReference(currentRoute, kind, rawValue, resolved, path, query, fragment, provenance);
+        var role = roleSelector?.Invoke(path) ?? GetDefaultReferenceRole(kind);
+        return new ExportReference(currentRoute, kind, role, rawValue, resolved, path, query, fragment, provenance, linkMetadata);
     }
 
     private string RewriteHtmlReferences(string html, string currentRoute, Func<ExportReference, string?> resolveArtifactUrl)
@@ -1014,6 +1088,54 @@ internal sealed partial class ExportReferenceProcessor
         var pathEnd = href.IndexOfAny(['?', '#']);
         var pathOnly = pathEnd >= 0 ? href[..pathEnd] : href;
         return SourceNavigationAnchorExtensions.Contains(Path.GetExtension(pathOnly));
+    }
+
+    private static ExportReferenceRole GetDefaultReferenceRole(ExportReferenceKind kind)
+    {
+        return kind switch
+        {
+            ExportReferenceKind.AnchorHref => ExportReferenceRole.PageRoute,
+            ExportReferenceKind.TurboFrameSrc => ExportReferenceRole.LiveRoute,
+            ExportReferenceKind.ScriptSrc => ExportReferenceRole.StaticAsset,
+            ExportReferenceKind.LinkHref => ExportReferenceRole.StaticAsset,
+            ExportReferenceKind.ImgSrc => ExportReferenceRole.StaticAsset,
+            ExportReferenceKind.ImgSrcSet => ExportReferenceRole.StaticAsset,
+            ExportReferenceKind.CssUrl => ExportReferenceRole.StaticAsset,
+            _ => ExportReferenceRole.PageRoute
+        };
+    }
+
+    private static ExportReferenceRole ClassifyLinkReference(string rel, string? asValue, string path)
+    {
+        var relTokens = rel.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (relTokens.Any(StaticAssetLinkRelTokens.Contains))
+        {
+            return ExportReferenceRole.StaticAsset;
+        }
+
+        if (relTokens.Any(StaticAssetHintRelTokens.Contains))
+        {
+            return IsStaticAssetHint(asValue, path)
+                ? ExportReferenceRole.StaticAsset
+                : ExportReferenceRole.PageRoute;
+        }
+
+        if (relTokens.Any(MetadataLinkRelTokens.Contains))
+        {
+            return ExportReferenceRole.Metadata;
+        }
+
+        return ExportReferenceRole.PageRoute;
+    }
+
+    private static bool IsStaticAssetHint(string? asValue, string path)
+    {
+        if (!string.IsNullOrWhiteSpace(asValue) && StaticAssetHintAsTokens.Contains(asValue.Trim()))
+        {
+            return true;
+        }
+
+        return StaticAssetPathExtensions.Contains(Path.GetExtension(path));
     }
 
     private static bool IsSupportedLinkRel(string rel)

@@ -62,6 +62,7 @@ Post-RC1 work is now collected here as deltas from the current release candidate
 - RazorWire stream endpoints now enforce single-process public SSE admission guardrails before allocating hub subscriber state. Channel names are validated before authorization, malformed channels return `400`, authorization denials still return `403`, and live capacity exhaustion returns `429` before SSE headers are written.
 - RazorWire streams can now emit same-origin Turbo Drive visit commands with `RazorWireStreamBuilder.Visit(...)`, giving live subscribers a narrow one-shot navigation primitive while keeping retained replay channels reserved for state snapshots.
 - RazorWire hybrid export can now keep managed streams, islands, and forms live after static publication. Exported pages may point those RazorWire-owned interactions at a configured live origin, choose credential behavior, or preserve same-origin app-owned routes for backend-passthrough hybrid hosts.
+- RazorWire and AppSurface hybrid export now fail missing browser-delivered static assets with `RWEXPORT003` instead of returning success for a folder that would keep serving broken CSS, image, script, stylesheet, module preload, icon, font, or asset-shaped preload/prefetch requests. Existing hybrid exports that previously exited `0` may now fail because the old success could publish broken assets; live/page routes, frames, forms, streams, islands, canonical metadata, DNS hints, and ambiguous page-shaped prefetch/preload hints remain hybrid-tolerated.
 
 ### AppSurface Docs product example
 

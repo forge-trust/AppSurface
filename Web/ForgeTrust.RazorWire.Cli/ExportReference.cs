@@ -14,19 +14,25 @@ namespace ForgeTrust.RazorWire.Cli;
 internal sealed record ExportReference(
     string SourceRoute,
     ExportReferenceKind Kind,
+    ExportReferenceRole Role,
     string RawValue,
     string ResolvedUrl,
     string Path,
     string Query,
     string Fragment,
-    ExportReferenceProvenance? Provenance = null)
+    ExportReferenceProvenance? Provenance = null,
+    ExportReferenceLinkMetadata? LinkMetadata = null)
 {
     /// <summary>
-    /// Gets a value indicating whether the reference points at an asset-like dependency rather than a page route.
+    /// Gets a value indicating whether the reference points at a browser-delivered static asset.
     /// </summary>
-    public bool IsAsset => Kind is ExportReferenceKind.ScriptSrc
-        or ExportReferenceKind.LinkHref
-        or ExportReferenceKind.ImgSrc
-        or ExportReferenceKind.ImgSrcSet
-        or ExportReferenceKind.CssUrl;
+    public bool IsAsset => Role == ExportReferenceRole.StaticAsset;
+
+    /// <summary>
+    /// Determines whether the selected export mode requires this reference to materialize as an exported static asset.
+    /// </summary>
+    /// <param name="mode">The active export mode.</param>
+    /// <returns><see langword="true"/> when missing materialization should fail validation.</returns>
+    public bool RequiresStaticMaterialization(ExportMode mode)
+        => (mode is ExportMode.Cdn or ExportMode.Hybrid) && Role == ExportReferenceRole.StaticAsset;
 }
