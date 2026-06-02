@@ -100,7 +100,7 @@ public sealed class ConfigAuditTextRenderer
 
     private static void RenderDiscoveredKey(StringBuilder builder, ConfigAuditDiscoveredKey discoveredKey)
     {
-        var value = discoveredKey.DisplayValue == null ? string.Empty : $" = {discoveredKey.DisplayValue}";
+        var value = FormatDiscoveredValue(discoveredKey);
         builder.AppendLine(
             $"  {discoveredKey.Key} [{FormatDiscoveredClassification(discoveredKey.Classification)}]{value}");
         if (discoveredKey.IsRedacted)
@@ -118,6 +118,27 @@ public sealed class ConfigAuditTextRenderer
             builder.AppendLine($"    Diagnostic: {FormatDiagnostic(diagnostic)}");
         }
     }
+
+    private static string FormatDiscoveredValue(ConfigAuditDiscoveredKey discoveredKey) =>
+        discoveredKey.ValueDisplayState switch
+        {
+            ConfigAuditDiscoveredValueDisplayState.OmittedInventory =>
+                $" (value omitted: {FormatInventoryOmissionReason(discoveredKey.Classification)})",
+            ConfigAuditDiscoveredValueDisplayState.OmittedComplex => string.Empty,
+            _ => discoveredKey.DisplayValue == null ? string.Empty : $" = {discoveredKey.DisplayValue}"
+        };
+
+    private static string FormatInventoryOmissionReason(ConfigAuditDiscoveredKeyClassification classification) =>
+        classification switch
+        {
+            ConfigAuditDiscoveredKeyClassification.KnownDescendant =>
+                "descendant is not an exact audit entry; register this exact key with AddConfigAuditKey<T>() after reviewing sensitivity",
+            ConfigAuditDiscoveredKeyClassification.Unknown =>
+                "inventory key is not an exact audit entry; register this exact key with AddConfigAuditKey<T>() after reviewing sensitivity",
+            ConfigAuditDiscoveredKeyClassification.Known =>
+                "scalar display value is unavailable",
+            _ => "inventory key is not an exact audit entry"
+        };
 
     private static string FormatDiagnostic(ConfigAuditDiagnostic diagnostic) =>
         $"[{diagnostic.Severity}] {diagnostic.Code}: {diagnostic.Message}";

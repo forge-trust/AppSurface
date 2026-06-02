@@ -182,14 +182,17 @@ public sealed class AppSurfaceDocsIdentityOptions
 /// <para>
 /// Logo and favicon paths are browser URL paths, not filesystem paths, and are not joined with
 /// <see cref="DirectoryPath" />. When <see cref="DirectoryPath" /> is <c>branding</c> and
-/// <see cref="RequestPath" /> uses its default <c>/branding</c>, a file at <c>branding/logo.svg</c> is referenced as
-/// <c>/branding/logo.svg</c>.
+/// <see cref="RequestPath" /> uses its default <c>/branding</c>, a file at <c>branding/logo.png</c> is referenced as
+/// <c>/branding/logo.png</c>. SVG files use the same URL mapping only after <see cref="AllowSvgAssets" /> is enabled
+/// for a trusted branding directory.
 /// </para>
 /// <para>
 /// Relative directory paths resolve against <see cref="AppSurfaceDocsSourceOptions.RepositoryRoot" /> when configured;
 /// otherwise they resolve against the host content root. Absolute directory paths are served as-is. The endpoint only
-/// serves common web image and icon file extensions; keep this directory dedicated to public brand assets. Leave
-/// <see cref="DirectoryPath" /> blank when the owning application serves branding assets itself.
+/// serves common web image and icon file extensions; keep this directory dedicated to public brand assets. SVG files
+/// are denied by default because SVG is active document content; enable <see cref="AllowSvgAssets" /> only for
+/// operator-owned assets that are already trusted. Leave <see cref="DirectoryPath" /> blank when the owning application
+/// serves branding assets itself.
 /// </para>
 /// </remarks>
 public sealed class AppSurfaceDocsBrandingAssetsOptions
@@ -220,6 +223,17 @@ public sealed class AppSurfaceDocsBrandingAssetsOptions
     /// this only when <c>/branding</c> conflicts with an owning application route.
     /// </remarks>
     public string? RequestPath { get; set; } = DefaultRequestPath;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether AppSurface Docs may serve SVG files from <see cref="DirectoryPath"/>.
+    /// </summary>
+    /// <remarks>
+    /// The default is <c>false</c>. SVG is an active document format, not only an optimized image format, and standard
+    /// SVG optimization does not make arbitrary SVG safe to serve under the application origin. Enable this only for
+    /// branding directories whose SVG files are owned and reviewed by trusted operators. Hosts that need SVG sanitization
+    /// should perform that sanitization before files reach the configured branding directory.
+    /// </remarks>
+    public bool AllowSvgAssets { get; set; }
 }
 
 /// <summary>

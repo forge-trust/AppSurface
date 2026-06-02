@@ -1050,7 +1050,7 @@ Pitfalls:
   - Optional filesystem directory that AppSurface Docs serves for consumer-owned logos, favicons, and related brand assets.
   - May be absolute, relative to `AppSurfaceDocs:Source:RepositoryRoot` when configured, or relative to the host content root otherwise.
   - This is a server filesystem path, not a browser URL path.
-  - Serves only common web image and icon extensions: `.avif`, `.gif`, `.ico`, `.jpg`, `.jpeg`, `.png`, `.svg`, and `.webp`.
+  - Serves only common web image and icon extensions by default: `.avif`, `.gif`, `.ico`, `.jpg`, `.jpeg`, `.png`, and `.webp`.
   - Keep this as a dedicated public branding directory, not a broad repository or deployment root.
   - Leave this blank when the owning application serves `Logo:Path` and `Favicon:*Path` itself.
 - `AppSurfaceDocs:Identity:BrandingAssets:RequestPath`
@@ -1058,12 +1058,39 @@ Pitfalls:
   - Defaults to `/branding`.
   - Uses the same app-root or `~/` path rules as the logo and must not be the application root.
   - Override this only when `/branding` conflicts with an owning application route.
+- `AppSurfaceDocs:Identity:BrandingAssets:AllowSvgAssets`
+  - Optional trust opt-in for serving `.svg` files from the configured branding asset directory.
+  - Defaults to `false`.
+  - Enable this only when the SVG files are operator-owned, reviewed, and trusted to run under the docs application origin.
+  - Standard SVG optimization does not make arbitrary SVG safe; optimization is not sanitization.
 
 Use `Identity:BrandingAssets` when AppSurface Docs should serve brand files from a repository-owned or mounted directory.
 For example, with `DirectoryPath` set to `branding` and the default `RequestPath` of `/branding`, the file
-`branding/docs-logo.svg` is rendered with `Logo:Path` set to `/branding/docs-logo.svg`. AppSurface Docs does not join
+`branding/docs-logo.png` is rendered with `Logo:Path` set to `/branding/docs-logo.png`. AppSurface Docs does not join
 `Logo:Path` or `Favicon:*Path` with `DirectoryPath`; those path options are the browser URLs that users and crawlers
 request.
+
+To serve trusted SVG branding assets through AppSurface Docs, opt in explicitly:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Identity": {
+      "Logo": {
+        "Path": "/branding/docs-logo.svg"
+      },
+      "BrandingAssets": {
+        "DirectoryPath": "branding",
+        "AllowSvgAssets": true
+      }
+    }
+  }
+}
+```
+
+Leave `AllowSvgAssets` disabled for tenant-managed, package-provided, user-uploaded, or otherwise less-trusted branding
+directories. If a deployment needs sanitized SVG, sanitize and review those files before they are copied into the branding
+directory; AppSurface Docs does not run an SVG sanitizer in this slice.
 
 Leave `Identity:BrandingAssets:DirectoryPath` blank when the owning application already serves the logo or favicon URL.
 For example, a host that serves `/assets/docs-logo.svg` itself can set `Logo:Path` to `/assets/docs-logo.svg` without
