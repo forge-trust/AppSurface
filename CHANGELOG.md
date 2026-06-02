@@ -15,7 +15,7 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 - AppSurface Flow is now a first-class package family with typed long-running process contracts, local in-memory execution, and a passive Durable Task adapter boundary.
-- AppSurface Docs exact release archives now emit catalog-pinned release manifests, and runtime archive serving verifies those manifests before allowing active archive SVG.
+- AppSurface Docs exact release archives now emit catalog-pinned release manifests, and runtime archive serving requires verified archive bytes before mounting public release HTML, JavaScript, CSS, SVG, and search payloads.
 - Behavior change: AppSurface Docs configured branding directories no longer serve SVG by default; trusted operators must set `AppSurfaceDocs:Identity:BrandingAssets:AllowSvgAssets=true` before AppSurface Docs serves SVG files from that directory.
 - Behavior change: AppSurface Docs `AppSurfaceDocs:Harvest:Health:ExposeRoutes=Always` continues to expose harvest health routes outside Development, but live harvest progress streaming now also requires a custom host-owned `IRazorWireChannelAuthorizer`.
 - AppSurface Docs version catalogs now require trusted-root-relative `exactTreePath` values under `AppSurfaceDocs:Versioning:TrustedReleaseRootPath`; migrate old absolute tree paths by moving the parent into the trusted root setting and keeping catalog entries relative.
