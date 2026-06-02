@@ -1890,11 +1890,12 @@ public class DocsControllerTests : IDisposable
         var viewResult = Assert.IsType<ViewResult>(result);
         var model = Assert.IsType<SearchPageViewModel>(viewResult.Model);
         Assert.Equal("Search Documentation", model.Title);
-        Assert.Equal(4, model.FailureFallbackLinks.Count);
+        Assert.Equal(5, model.FailureFallbackLinks.Count);
         Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Start Here" && link.Href == "/docs/guides/start" && link.UsesDocsFrame);
         Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Examples" && link.UsesDocsFrame);
+        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Packages" && link.Href == "/docs/sections/packages" && link.UsesDocsFrame);
         Assert.Contains(model.FailureFallbackLinks, link => link.Title == "API Reference" && link.UsesDocsFrame);
-        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Documentation index" && link.Href == "/docs" && !link.UsesDocsFrame);
+        Assert.Contains(model.FailureFallbackLinks, link => link.Title == "Docs home" && link.Href == "/docs" && !link.UsesDocsFrame);
     }
 
     [Fact]
@@ -1969,7 +1970,7 @@ public class DocsControllerTests : IDisposable
             link =>
             {
                 Assert.Equal("Packages", link.Title);
-                Assert.Equal("/docs/packages", link.Href);
+                Assert.Equal("/docs/sections/packages", link.Href);
             },
             link =>
             {
@@ -2016,7 +2017,13 @@ public class DocsControllerTests : IDisposable
             },
             link =>
             {
-                Assert.Equal("Documentation index", link.Title);
+                Assert.Equal("Packages", link.Title);
+                Assert.Equal("/docs/sections/packages", link.Href);
+                Assert.True(link.UsesDocsFrame);
+            },
+            link =>
+            {
+                Assert.Equal("Docs home", link.Title);
                 Assert.Equal("/docs", link.Href);
                 Assert.False(link.UsesDocsFrame);
             });

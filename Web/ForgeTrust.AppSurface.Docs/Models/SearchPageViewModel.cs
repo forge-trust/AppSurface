@@ -12,10 +12,11 @@ namespace ForgeTrust.AppSurface.Docs.Models;
 /// <paramref name="SuggestedQueries" /> and <paramref name="FailureFallbackLinks" />.
 /// Suggested queries render as real search-state anchors before JavaScript and may be enhanced by the client runtime.
 /// Fallback links render as the shared server-derived browse navigation used both before the index loads and after an
-/// index-load failure, not as server-side search results. Both lists are displayed in the supplied order, so place the
-/// highest-signal actions first. Avoid relying on client-side mutation of this model after render, and avoid using
-/// external absolute URLs in <see cref="SearchPageFallbackLink.Href" /> because the shell assumes app-relative
-/// navigation semantics.
+/// index-load failure, not as server-side search results. The search surface may combine representative docs selected
+/// from the current snapshot with static route-contract-backed recovery entries such as public section routes and docs
+/// home. Both lists are displayed in the supplied order, so place the highest-signal actions first. Avoid relying on
+/// client-side mutation of this model after render, and avoid using external absolute URLs in
+/// <see cref="SearchPageFallbackLink.Href" /> because the shell assumes app-relative navigation semantics.
 /// </remarks>
 /// <param name="Title">The primary page heading shown above the workspace controls.</param>
 /// <param name="Orientation">A short orientation sentence that explains what users can discover from the workspace.</param>
@@ -37,8 +38,10 @@ public sealed record SearchPageViewModel(
 /// <remarks>
 /// These links are rendered before the client search payload is available and remain useful after index-fetch failure,
 /// so each entry should be complete enough to stand on its own. They are navigation aids, not server-side search
-/// results. <see cref="UsesDocsFrame" /> determines whether the destination should continue navigating inside the docs
-/// content frame or escalate to a top-level page navigation.
+/// results. Some entries may be adapted from neutral harvest-free docs recovery links; search-only representative
+/// document fallback should stay in this type rather than moving into the standalone 404 page.
+/// <see cref="UsesDocsFrame" /> determines whether the destination should continue navigating inside the docs content
+/// frame or escalate to a top-level page navigation.
 /// Keep <see cref="Href" /> app-relative and already URL-safe, and assume the UI will HTML-escape the visible text
 /// in <see cref="Title" /> and <see cref="Description" />. Prefer concise copy that fits comfortably in a compact
 /// recovery card, and do not depend on client search indexing to make the destination discoverable.

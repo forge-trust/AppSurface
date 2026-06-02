@@ -633,6 +633,8 @@ public class ExportEngineTests
             var decodedHtml = Uri.UnescapeDataString(html);
             Assert.Contains("Exported 404 page", html);
             Assert.Contains("href=\"/about.html\"", html);
+            Assert.Contains("href=\"/docs/sections/start-here\" data-rw-export-ignore=\"true\"", html);
+            Assert.Contains("href=\"/docs/sections/packages\" data-rw-export-ignore=\"true\"", html);
             Assert.Contains("src=\"/img/error.png\"", html);
             Assert.DoesNotContain("Diagnostics", html, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("_health", decodedHtml, StringComparison.OrdinalIgnoreCase);
@@ -643,6 +645,8 @@ public class ExportEngineTests
             Assert.False(File.Exists(Path.Join(tempDir, "401.html")));
             Assert.False(File.Exists(Path.Join(tempDir, "403.html")));
             Assert.True(File.Exists(Path.Join(tempDir, "about.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "docs", "sections", "start-here.html")));
+            Assert.False(File.Exists(Path.Join(tempDir, "docs", "sections", "packages.html")));
         }
         finally
         {
@@ -4340,6 +4344,8 @@ public class ExportEngineTests
                             </details>
                             <a href="/about">About</a>
                             <a href="/docs/search">Search documentation</a>
+                            <a href="/docs/sections/start-here" data-rw-export-ignore="true">Start Here</a>
+                            <a href="/docs/sections/packages" data-rw-export-ignore="true">Packages</a>
                             <img src="/img/error.png">
                           </body>
                         </html>

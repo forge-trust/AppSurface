@@ -59,12 +59,13 @@ public static class AppSurfaceDocsServiceCollectionExtensions
     /// <see cref="DocsUrlBuilder.NormalizeDocsRootPath(string?, bool)"/> run.
     /// </para>
     /// <para>
-    /// The method also registers <see cref="DocsUrlBuilder"/>, <see cref="AppSurfaceDocsAssetVersioner"/>, and
-    /// <see cref="AppSurfaceDocsVersionCatalogService"/> as singleton downstream services alongside the standard
-    /// harvesters, memo cache, and <see cref="DocAggregator"/>. <see cref="AppSurfaceDocsAssetVersioner"/> supplies
-    /// content-derived cache keys for AppSurface Docs-owned CSS and JavaScript assets rendered by the package views.
-    /// It also registers RazorWire through <see cref="RazorWireServiceCollectionExtensions"/> and adds harvest
-    /// observability services such as <see cref="AppSurfaceDocsHarvestCoordinator"/>,
+    /// The method also registers <see cref="DocsUrlBuilder"/>, the internal docs recovery-link builder,
+    /// <see cref="AppSurfaceDocsAssetVersioner"/>, and <see cref="AppSurfaceDocsVersionCatalogService"/> as singleton
+    /// downstream services alongside the standard harvesters, memo cache, and <see cref="DocAggregator"/>.
+    /// <see cref="AppSurfaceDocsAssetVersioner"/> supplies content-derived cache keys for AppSurface Docs-owned CSS and
+    /// JavaScript assets rendered by the package views. It also registers RazorWire through
+    /// <see cref="RazorWireServiceCollectionExtensions"/> and adds harvest observability services such as
+    /// <see cref="AppSurfaceDocsHarvestCoordinator"/>,
     /// <see cref="AppSurfaceDocsHarvestProgressReporter"/>, and <see cref="AppSurfaceDocsHarvestPathPolicy"/>.
     /// </para>
     /// <para>
@@ -211,6 +212,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         services.TryAddSingleton(AppSurfaceDocsAssetPathResolver.CreateDefault());
         services.TryAddSingleton<AppSurfaceDocsAssetVersioner>();
         services.TryAddSingleton<DocsUrlBuilder>();
+        services.TryAddSingleton<DocsRecoveryLinkBuilder>();
         services.TryAddSingleton<AppSurfaceDocsIdentityResolver>();
         services.TryAddSingleton<AppSurfaceDocsVersionCatalogService>();
         services.AddMemoryCache();
