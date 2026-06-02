@@ -2671,6 +2671,22 @@ public sealed class PackageArtifactValidationTests : IDisposable
         Assert.Equal(["dotnet restore", "dotnet tool install", "dotnet tool run"], commandRunner.Requests.Select(request => request.OperationName).ToArray());
     }
 
+    [Fact]
+    public async Task PackageSmokeInstallWorkflow_FailsToolSmokeWhenHelpCommandWritesStderr()
+    {
+        var (report, commandRunner) = await RunToolOnlySmokeWorkflowAsync(
+            new ExternalCommandResult(0, "web restored", string.Empty),
+            new ExternalCommandResult(0, "installed", string.Empty),
+            new ExternalCommandResult(0, "USAGE\nappsurface [command]", "lifecycle noise"));
+
+        var toolEntry = Assert.Single(report.Entries, entry => entry.PackageId == "ForgeTrust.AppSurface.Cli");
+        Assert.Equal(PackageSmokeInstallStatus.Failed, toolEntry.Status);
+        Assert.Equal(1, toolEntry.ExitCode);
+        Assert.Contains("completed but also wrote to stderr", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Contains("lifecycle noise", toolEntry.Output, StringComparison.Ordinal);
+        Assert.Equal(["dotnet restore", "dotnet tool install", "dotnet tool run"], commandRunner.Requests.Select(request => request.OperationName).ToArray());
+    }
+
     [Theory]
     [InlineData("v0.0.0-ci.42")]
     [InlineData("0.0.0")]

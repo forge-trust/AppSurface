@@ -703,6 +703,19 @@ internal sealed class PackageSmokeInstallWorkflow
             return combinedHelpResult;
         }
 
+        if (!string.IsNullOrWhiteSpace(helpResult.StandardError))
+        {
+            return CombineCommandResults(
+                installResult,
+                helpResult with
+                {
+                    ExitCode = 1,
+                    StandardError = CombineText(
+                        helpResult.StandardError,
+                        $"Tool command '{entry.ToolCommandName} --help' completed but also wrote to stderr.")
+                });
+        }
+
         var commandOutput = CombineOutput(helpResult);
         if (!ContainsToolCommandUsage(commandOutput, entry.ToolCommandName))
         {
