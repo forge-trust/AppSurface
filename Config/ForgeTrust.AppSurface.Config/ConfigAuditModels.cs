@@ -39,9 +39,9 @@ public sealed class ConfigAuditReport
     /// Discovered keys describe the effective merged configuration visible to AppSurface providers that implement
     /// audit enumeration. They are not a complete raw inventory: providers that cannot enumerate keys are omitted,
     /// shadowed lower-priority file keys are not included, and environment variables or secret providers are not
-    /// enumerated by the built-in v1 surface. <see cref="ConfigAuditDiscoveredKey.DisplayValue"/> is redacted before
-    /// it enters the public report, but source metadata such as file paths, provider names, and config paths may still
-    /// be support-sensitive.
+    /// enumerated by the built-in v1 surface. <see cref="ConfigAuditDiscoveredKey.DisplayValue"/> is redacted or
+    /// omitted before it enters the public report, but source metadata such as file paths, provider names, and config
+    /// paths may still be support-sensitive.
     /// </remarks>
     public IReadOnlyList<ConfigAuditDiscoveredKey> DiscoveredKeys { get; init; } = [];
 
@@ -62,8 +62,9 @@ public sealed class ConfigAuditReport
 /// <remarks>
 /// Classifications are relative to the AppSurface audit registry, not to all application code. An
 /// <see cref="ConfigAuditDiscoveredKeyClassification.Unknown"/> key can be a typo, stale setting, or a value consumed
-/// outside AppSurface's known-entry registry; it is not proof that no code uses the key. Object and array parent values
-/// may omit <see cref="DisplayValue"/> unless the path is sensitive, in which case the redaction placeholder is shown.
+/// outside AppSurface's known-entry registry; it is not proof that no code uses the key. Use
+/// <see cref="ValueDisplayState"/> to distinguish shown, redacted, complex-omitted, and inventory-omitted values. The
+/// display state describes this report's rendering decision only; it is not a sensitivity or secrecy classification.
 /// </remarks>
 public sealed class ConfigAuditDiscoveredKey
 {
@@ -78,14 +79,31 @@ public sealed class ConfigAuditDiscoveredKey
     public required ConfigAuditDiscoveredKeyClassification Classification { get; init; }
 
     /// <summary>
-    /// Gets the display-safe value, or <see langword="null"/> when a non-sensitive complex parent value is omitted.
+    /// Gets the display-safe value, or <see langword="null"/> when a non-sensitive value is omitted.
     /// </summary>
+    /// <remarks>
+    /// Exact registered scalar keys can include a display value. Non-sensitive object and array parent values are
+    /// omitted instead of serialized, and non-sensitive provider-discovered inventory values that are not exact audit
+    /// entries are omitted by default. Use <see cref="ValueDisplayState"/> instead of testing this property for
+    /// <see langword="null"/> when consuming structured reports.
+    /// </remarks>
     public string? DisplayValue { get; init; }
 
     /// <summary>
     /// Gets a value indicating whether <see cref="DisplayValue"/> was replaced by the redaction placeholder.
     /// </summary>
     public bool IsRedacted { get; init; }
+
+    /// <summary>
+    /// Gets the display decision applied to <see cref="DisplayValue"/> for this discovered key.
+    /// </summary>
+    /// <remarks>
+    /// This state explains how the public report rendered the discovered value. It is not a sensitivity label and does
+    /// not prove whether a value is secret or safe outside the current report context. The default
+    /// <see cref="ConfigAuditDiscoveredValueDisplayState.Unspecified"/> preserves compatibility for reports manually
+    /// constructed before this property existed; reporter-produced instances always set an explicit state.
+    /// </remarks>
+    public ConfigAuditDiscoveredValueDisplayState ValueDisplayState { get; init; }
 
     /// <summary>
     /// Gets source records associated with this effective discovered key.
@@ -479,6 +497,32 @@ public enum ConfigAuditDiscoveredKeyClassification
 
     /// <summary>The discovered key is not known to the AppSurface audit registry.</summary>
     Unknown = 2
+}
+
+/// <summary>
+/// Identifies how a provider-discovered value appears in the public audit report.
+/// </summary>
+/// <remarks>
+/// Values are explicit and append-only so serialized reports remain stable across releases. This enum describes report
+/// display state only: it is not a sensitivity or secrecy classification, and source metadata may remain
+/// support-sensitive even when a value is omitted.
+/// </remarks>
+public enum ConfigAuditDiscoveredValueDisplayState
+{
+    /// <summary>The display state was not specified, typically on a manually constructed legacy report object.</summary>
+    Unspecified = 0,
+
+    /// <summary>The discovered scalar value is shown in <see cref="ConfigAuditDiscoveredKey.DisplayValue"/>.</summary>
+    Shown = 1,
+
+    /// <summary>The value was replaced by the audit redaction placeholder.</summary>
+    Redacted = 2,
+
+    /// <summary>The value is an object or array parent omitted instead of serialized as a scalar display value.</summary>
+    OmittedComplex = 3,
+
+    /// <summary>The scalar value was omitted because the discovered key is inventory, not an exact audit entry.</summary>
+    OmittedInventory = 4
 }
 
 /// <summary>
