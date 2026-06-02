@@ -467,7 +467,9 @@ public sealed class AppSurfaceDocsVersionCatalogService
             {
                 if (string.IsNullOrWhiteSpace(releaseManifestSha256))
                 {
-                    archiveVerificationState = AppSurfaceDocsReleaseArchiveVerificationState.AvailableUnverifiedLegacy;
+                    availabilityFailure = new AvailabilityFailure(
+                        PublicMessage: "Published release archive verification is required.",
+                        InternalDetail: $"Catalog entry for version '{normalizedVersion}' is missing releaseManifestSha256, so mounted published HTML would run without a verified release-archive boundary.");
                 }
                 else
                 {

@@ -74,11 +74,11 @@ Add identity settings when the consuming repository should own the visible docs 
         "HighlightColor": "#38bdf8"
       },
       "Logo": {
-        "Path": "/branding/docs-logo.svg",
+        "Path": "/branding/docs-logo.png",
         "AltText": "Acme"
       },
       "Favicon": {
-        "SvgPath": "/branding/favicon.svg",
+        "PngPath": "/branding/favicon.png",
         "IcoPath": "/branding/favicon.ico"
       },
       "BrandingAssets": {
@@ -94,10 +94,10 @@ The configured `Identity:Logo:Path` is used by both the built-in docs chrome and
 
 There are two branding asset use cases:
 
-1. AppSurface Docs serves the files. Set `Identity:BrandingAssets:DirectoryPath` to a filesystem directory, usually `branding`, and point `Logo:Path` plus `Favicon:*Path` at browser URLs under `/branding`. With the default request prefix, `branding/docs-logo.svg` is referenced as `/branding/docs-logo.svg`.
+1. AppSurface Docs serves the files. Set `Identity:BrandingAssets:DirectoryPath` to a filesystem directory, usually `branding`, and point `Logo:Path` plus `Favicon:*Path` at browser URLs under `/branding`. With the default request prefix, `branding/docs-logo.png` is referenced as `/branding/docs-logo.png`.
 2. The owning application already serves the files. Leave `Identity:BrandingAssets:DirectoryPath` blank and point `Logo:Path` plus `Favicon:*Path` at the host-owned browser URLs, such as `/assets/docs-logo.svg`.
 
-`Identity:BrandingAssets:DirectoryPath` is a filesystem path, not a browser path. Relative values resolve against `AppSurfaceDocs:Source:RepositoryRoot` when that root is configured, then fall back to the host content root. `Logo:Path` and `Favicon:*Path` are browser URL paths, not filenames relative to `DirectoryPath`; AppSurface Docs does not join those values with the directory. Keep `DirectoryPath` pointed at a dedicated public branding directory; AppSurface Docs serves only `.avif`, `.gif`, `.ico`, `.jpg`, `.jpeg`, `.png`, `.svg`, and `.webp` files from that directory. Override `Identity:BrandingAssets:RequestPath` only when the default `/branding` URL prefix conflicts with an owning application route.
+`Identity:BrandingAssets:DirectoryPath` is a filesystem path, not a browser path. Relative values resolve against `AppSurfaceDocs:Source:RepositoryRoot` when that root is configured, then fall back to the host content root. `Logo:Path` and `Favicon:*Path` are browser URL paths, not filenames relative to `DirectoryPath`; AppSurface Docs does not join those values with the directory. Keep `DirectoryPath` pointed at a dedicated public branding directory; AppSurface Docs serves only `.avif`, `.gif`, `.ico`, `.jpg`, `.jpeg`, `.png`, and `.webp` files from that directory by default. Set `Identity:BrandingAssets:AllowSvgAssets=true` only for operator-owned and reviewed SVG branding files; standard SVG optimization does not make arbitrary SVG safe. Override `Identity:BrandingAssets:RequestPath` only when the default `/branding` URL prefix conflicts with an owning application route.
 
 When `Identity:Favicon` is empty, the built-in layout links the packaged AppSurface Docs document-layers SVG mark.
 Standalone AppSurface Docs hosts also serve that mark at `/favicon.ico` for the browser's conventional favicon probe.
@@ -192,9 +192,14 @@ If docs disappear after an upgrade, diagnose one repository-relative path first:
 | A Markdown page is missing but harvest is still Healthy. | `_health.json` contains `appsurfacedocs.markdown.file_too_large` with the file path, actual bytes, and `MaxFileSizeBytes`. | Exclude generated or accidental docs with `Harvest:Markdown:ExcludeGlobs` or `Harvest:Paths:ExcludeGlobs`, or raise `MaxFileSizeBytes` only for intentional authored docs. |
 | A page publishes but its sidecar metadata is missing. | `_health.json` contains `appsurfacedocs.markdown.metadata_file_too_large` for the `.md.yml` or `.md.yaml` sidecar. | Move long prose into Markdown, trim generated metadata, or raise `MaxMetadataFileSizeBytes` only for intentional authored metadata. |
 | A configured JavaScript include reports `appsurfacedocs.javascript.reparse_point_skipped`. | The global or JavaScript include resolves to a symlink, junction, or other reparse point. | Replace the link with a real source file, include the real non-link source path, disable JavaScript harvesting, or use a custom harvester for that source. |
+| A C# file reports `appsurfacedocs.csharp.file_too_large`. | A policy-approved `.cs` file exceeded `AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes` before Roslyn parsing. | Exclude generated source with `AppSurfaceDocs:Harvest:CSharp:ExcludeGlobs`, or raise the C# byte limit only for authored API source that should publish. |
 | The host needs time to migrate. | The repository relied on pre-existing AppSurface behavior. | Temporarily set `AppSurfaceDocs:Harvest:Paths:VcsIgnore:Enabled=false` while moving public docs or adding allow globs. |
 
 Use the harvest health page and JSON endpoint to inspect VCS-ignore counts, Markdown resource warnings, and sample paths when a source-backed snapshot looks unexpectedly small. A `Healthy` snapshot can still contain warning diagnostics; check `diagnostics` when release workflows require warning-free docs.
+
+For CI, prefer a diagnostic-code check over a new strict runtime option. Fetch `{DocsRootPath}/_health.json` from the docs host and fail the job when `diagnostics[].code` includes `appsurfacedocs.csharp.file_too_large` for source that should be public. Leave generated files out of the harvest boundary instead of raising the limit globally.
+
+The C# parser-input default is `1048576` bytes. JavaScript remains unchanged at `262144` bytes and still reports `appsurfacedocs.javascript.file_too_large` through the existing JavaScript strict-health rules.
 
 ## Understand first harvest behavior
 
@@ -365,6 +370,7 @@ Phase 1 builds the locale graph, validates configuration, and reports diagnostic
 - Pick a host: embedded AppSurface web module or standalone AppSurface Docs app.
 - Configure `AppSurfaceDocs:Source:RepositoryRoot` for the repository to harvest.
 - Configure `AppSurfaceDocs:Harvest:Paths` so only intentional public source paths are eligible.
+- Exclude generated C# before raising `AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes`; oversized C# reports `appsurfacedocs.csharp.file_too_large` in harvest health.
 - Keep `AppSurfaceDocs:Mode` set to `Source` unless a later bundle-hosting slice changes that contract.
 - If browser runtime contracts matter, add explicit `@public` JavaScript doclets. JavaScript harvesting is enabled by default; use `AppSurfaceDocs:Harvest:JavaScript:Enabled=false` only to opt out, and use `IncludeGlobs` only to narrow scanning.
 - Add sidecar metadata for repository and package README files.

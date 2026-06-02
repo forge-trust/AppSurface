@@ -61,10 +61,10 @@ public sealed class AppSurfaceDocsPublishedVersion
     /// Gets or sets the SHA-256 digest of the release archive manifest that this catalog entry expects.
     /// </summary>
     /// <remarks>
-    /// The value pins the bytes of <c>.appsurface-docs-release-manifest.json</c> in trusted host configuration. When
-    /// present, AppSurface Docs verifies the manifest and every covered file before mounting the exact tree. When absent,
-    /// a shape-valid legacy tree can still mount ordinary docs content, but active archive SVG is denied because the
-    /// archive has not been proven against a catalog pin.
+    /// The value pins the bytes of <c>.appsurface-docs-release-manifest.json</c> in trusted host configuration. AppSurface
+    /// Docs verifies the manifest, required handler-servable file coverage, and every covered file before mounting the
+    /// exact tree. Public catalog entries without this pin are unavailable because mounted archive HTML, scripts,
+    /// stylesheets, SVG, and search payloads must be proven against a catalog trust anchor.
     /// </remarks>
     public string? ReleaseManifestSha256 { get; set; }
 

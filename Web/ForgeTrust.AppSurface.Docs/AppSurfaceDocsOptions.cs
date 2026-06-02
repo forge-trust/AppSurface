@@ -182,14 +182,17 @@ public sealed class AppSurfaceDocsIdentityOptions
 /// <para>
 /// Logo and favicon paths are browser URL paths, not filesystem paths, and are not joined with
 /// <see cref="DirectoryPath" />. When <see cref="DirectoryPath" /> is <c>branding</c> and
-/// <see cref="RequestPath" /> uses its default <c>/branding</c>, a file at <c>branding/logo.svg</c> is referenced as
-/// <c>/branding/logo.svg</c>.
+/// <see cref="RequestPath" /> uses its default <c>/branding</c>, a file at <c>branding/logo.png</c> is referenced as
+/// <c>/branding/logo.png</c>. SVG files use the same URL mapping only after <see cref="AllowSvgAssets" /> is enabled
+/// for a trusted branding directory.
 /// </para>
 /// <para>
 /// Relative directory paths resolve against <see cref="AppSurfaceDocsSourceOptions.RepositoryRoot" /> when configured;
 /// otherwise they resolve against the host content root. Absolute directory paths are served as-is. The endpoint only
-/// serves common web image and icon file extensions; keep this directory dedicated to public brand assets. Leave
-/// <see cref="DirectoryPath" /> blank when the owning application serves branding assets itself.
+/// serves common web image and icon file extensions; keep this directory dedicated to public brand assets. SVG files
+/// are denied by default because SVG is active document content; enable <see cref="AllowSvgAssets" /> only for
+/// operator-owned assets that are already trusted. Leave <see cref="DirectoryPath" /> blank when the owning application
+/// serves branding assets itself.
 /// </para>
 /// </remarks>
 public sealed class AppSurfaceDocsBrandingAssetsOptions
@@ -220,6 +223,17 @@ public sealed class AppSurfaceDocsBrandingAssetsOptions
     /// this only when <c>/branding</c> conflicts with an owning application route.
     /// </remarks>
     public string? RequestPath { get; set; } = DefaultRequestPath;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether AppSurface Docs may serve SVG files from <see cref="DirectoryPath"/>.
+    /// </summary>
+    /// <remarks>
+    /// The default is <c>false</c>. SVG is an active document format, not only an optimized image format, and standard
+    /// SVG optimization does not make arbitrary SVG safe to serve under the application origin. Enable this only for
+    /// branding directories whose SVG files are owned and reviewed by trusted operators. Hosts that need SVG sanitization
+    /// should perform that sanitization before files reach the configured branding directory.
+    /// </remarks>
+    public bool AllowSvgAssets { get; set; }
 }
 
 /// <summary>
@@ -772,8 +786,9 @@ public sealed class AppSurfaceDocsRoutingOptions
 /// The catalog stays file-based in this slice: runtime consumes a JSON manifest plus prebuilt exact release trees and
 /// does not perform Git or bundle resolution at request time. The catalog must describe the recommended version
 /// alias plus one or more exact release trees whose exported contents satisfy the exact-tree contract documented in
-/// the package README. New exact release trees should also pin <c>releaseManifestSha256</c> in the catalog so runtime
-/// verification can prove local archive integrity before serving active archive SVG.
+/// the package README. Public exact release trees must pin <c>releaseManifestSha256</c> in the catalog so runtime
+/// verification can prove local archive integrity before serving mounted archive HTML, scripts, stylesheets, SVG, and
+/// search payloads.
 /// </remarks>
 public sealed class AppSurfaceDocsVersioningOptions
 {
@@ -805,9 +820,9 @@ public sealed class AppSurfaceDocsVersioningOptions
     /// The catalog describes available exact-version trees, the recommended version alias, and release-level status
     /// metadata such as support and advisory state. Relative paths resolve from the app content root.
     /// The JSON payload is expected to contain a top-level recommended version plus a <c>versions</c> array whose
-    /// entries point at exported exact-version trees. Each entry may include <c>releaseManifestSha256</c> to pin the
-    /// digest of that tree's <c>.appsurface-docs-release-manifest.json</c>. Entries without the pin are treated as
-    /// legacy unverified archives and cannot serve archive SVG.
+    /// entries point at exported exact-version trees. Each public entry must include <c>releaseManifestSha256</c> to pin
+    /// the digest of that tree's <c>.appsurface-docs-release-manifest.json</c>. Entries without the pin are unavailable
+    /// and are not mounted.
     /// A missing, unreadable, or malformed catalog does not crash AppSurface Docs, but it leaves all published releases
     /// unavailable until the catalog can be loaded successfully. When <see cref="Enabled"/> is <see langword="true"/>
     /// and this property is blank, startup validation fails before the app begins serving requests.
@@ -1223,6 +1238,12 @@ public sealed class AppSurfaceDocsOptionsValidator : IValidateOptions<AppSurface
                 {
                     failures.Add("AppSurfaceDocs:Harvest:Markdown:MaxMetadataFileSizeBytes must be greater than zero.");
                 }
+            }
+
+            if (harvest.CSharp is not null && harvest.CSharp.MaxFileSizeBytes <= 0)
+            {
+                failures.Add(
+                    $"AppSurfaceDocs:Harvest:CSharp:MaxFileSizeBytes must be a positive byte value. Remove the setting to use the default {AppSurfaceDocsCSharpHarvestOptions.DefaultMaxFileSizeBytes} byte limit, or set a positive value for authored C# source that should be parsed.");
             }
 
             if (harvest.JavaScript is not null)
