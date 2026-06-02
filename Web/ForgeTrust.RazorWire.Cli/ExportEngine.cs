@@ -1015,7 +1015,10 @@ public class ExportEngine
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         ValidateRedirectArtifacts(context, seen);
-        ValidateRequiredStaticAssets(context, seen);
+        if (context.Mode == ExportMode.Hybrid)
+        {
+            ValidateRequiredStaticAssets(context, seen);
+        }
 
         if (context.Mode != ExportMode.Cdn)
         {

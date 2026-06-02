@@ -1101,7 +1101,7 @@ internal sealed partial class ExportReferenceProcessor
             ExportReferenceKind.ImgSrc => ExportReferenceRole.StaticAsset,
             ExportReferenceKind.ImgSrcSet => ExportReferenceRole.StaticAsset,
             ExportReferenceKind.CssUrl => ExportReferenceRole.StaticAsset,
-            _ => ExportReferenceRole.PageRoute
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unhandled export reference kind.")
         };
     }
 

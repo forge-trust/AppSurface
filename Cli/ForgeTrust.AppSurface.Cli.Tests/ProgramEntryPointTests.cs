@@ -2887,9 +2887,9 @@ public sealed class ProgramEntryPointTests
                 .Concat(Enumerable.Range(0, 8).Select(_ => new HttpResponseMessage(HttpStatusCode.NotFound)))
                 .ToList();
             _okResponses = new Queue<HttpResponseMessage>(
-                _responses.Where(response => response.Content.Headers.ContentType?.MediaType == "text/html"));
+                _responses.Where(response => response.Content?.Headers.ContentType?.MediaType == "text/html"));
             _assetResponses = new Queue<HttpResponseMessage>(
-                _responses.Where(response => response.Content.Headers.ContentType?.MediaType == "text/javascript"));
+                _responses.Where(response => response.Content?.Headers.ContentType?.MediaType == "text/javascript"));
             _notFoundResponses = new Queue<HttpResponseMessage>(_responses.Where(response => response.StatusCode == HttpStatusCode.NotFound));
         }
 

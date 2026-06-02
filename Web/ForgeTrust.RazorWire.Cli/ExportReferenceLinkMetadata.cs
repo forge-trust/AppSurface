@@ -11,7 +11,14 @@ internal sealed record ExportReferenceLinkMetadata(string Rel, string? As)
     /// Gets a compact diagnostic description of the classification evidence.
     /// </summary>
     public string Display
-        => string.IsNullOrWhiteSpace(As)
-            ? $"rel '{Rel}'"
-            : $"rel '{Rel}', as '{As}'";
+    {
+        get
+        {
+            var rel = Rel.Trim();
+            var asValue = As?.Trim();
+            return string.IsNullOrWhiteSpace(asValue)
+                ? $"rel '{rel}'"
+                : $"rel '{rel}', as '{asValue}'";
+        }
+    }
 }
