@@ -34,7 +34,7 @@ window.RazorWire = window.RazorWire || {};
  * Page navigation manager for same-page section links, active state, optional collapsible panels, and lifecycle-safe rebinding.
  * @public
  * @namespace RazorWire
- * @manager window.RazorWire.pageNavigationManager
+ * @config window.RazorWire.pageNavigationManager
  * @type {object}
  * @source <rw:scripts page-navigation="true" />
  * @property {Function} scan - Re-scans the document for `[data-rw-page-nav]` roots after custom DOM updates.

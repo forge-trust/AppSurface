@@ -999,6 +999,106 @@ test('page navigation prunes removed roots and records missing panel diagnostics
   assert.equal(context.window.RazorWire.pageNavigationManager.controllers.size, 0);
 });
 
+test('page navigation rescans without duplicating root listeners', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav } = createPageNavigationFixture(document);
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  context.window.RazorWire.pageNavigationManager.scan();
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  assert.equal(context.window.RazorWire.pageNavigationManager.controllers.size, 1);
+  assert.equal(nav.listeners.get('click').length, 2);
+});
+
+test('page navigation promotes the first visible section from viewport state', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, overview, pricing, pricingLink } = createPageNavigationFixture(document);
+  overview.rectTop = -500;
+  pricing.rectTop = 24;
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  assert.equal(pricingLink.getAttribute('aria-current'), 'location');
+  assert.equal(pricingLink.getAttribute('data-rw-page-nav-active'), 'true');
+});
+
+test('page navigation honors reduced motion when scrolling to a target', () => {
+  const { context, document } = loadRuntime({
+    pageNavigation: true,
+    matchMedia: () => ({ matches: true })
+  });
+  const { nav, overview, overviewLink } = createPageNavigationFixture(document);
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  nav.dispatchEvent(clickEvent(overviewLink));
+
+  assert.equal(overview.lastScrollIntoViewOptions.behavior, 'auto');
+  assert.equal(overview.lastScrollIntoViewOptions.block, 'start');
+});
+
+test('page navigation leaves external download target and prehandled clicks alone', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const { nav, panel, overviewLink } = createPageNavigationFixture(document);
+  const external = createPageNavigationLink('https://elsewhere.test/#overview');
+  const download = createPageNavigationLink('#overview');
+  download.setAttribute('download', 'overview.txt');
+  const blank = createPageNavigationLink('#overview');
+  blank.setAttribute('target', '_blank');
+  panel.append(external, download, blank);
+  document.body.appendChild(nav);
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  const prehandled = clickEvent(overviewLink, { defaultPrevented: true });
+  nav.dispatchEvent(prehandled);
+  const externalClick = clickEvent(external);
+  nav.dispatchEvent(externalClick);
+  const downloadClick = clickEvent(download);
+  nav.dispatchEvent(downloadClick);
+  const blankClick = clickEvent(blank);
+  nav.dispatchEvent(blankClick);
+
+  assert.equal(prehandled.defaultPrevented, true);
+  assert.equal(externalClick.defaultPrevented, false);
+  assert.equal(downloadClick.defaultPrevented, false);
+  assert.equal(blankClick.defaultPrevented, false);
+});
+
+test('page navigation tolerates malformed hashes and falls back to viewport state', () => {
+  const { context, document } = loadRuntime({ windowHref: 'https://example.test/#%E0%A4%A', pageNavigation: true });
+  const { nav, overviewLink, pricingLink } = createPageNavigationFixture(document);
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+
+  assert.equal(overviewLink.getAttribute('aria-current'), 'location');
+  assert.equal(pricingLink.hasAttribute('aria-current'), false);
+});
+
+test('page navigation toggles a fallback panel when aria-controls is omitted', () => {
+  const { context, document } = loadRuntime({ pageNavigation: true });
+  const nav = new FakeElement('nav');
+  nav.setAttribute('data-rw-page-nav', 'true');
+  const toggle = new FakeElement('button');
+  toggle.setAttribute('data-rw-page-nav-toggle', 'true');
+  toggle.setAttribute('aria-expanded', 'false');
+  const panel = new FakeElement('div');
+  panel.setAttribute('data-rw-page-nav-panel', 'true');
+  nav.append(toggle, panel);
+  document.body.appendChild(nav);
+
+  context.window.RazorWire.pageNavigationManager.scan();
+  assert.equal(panel.getAttribute('data-rw-page-nav-panel-state'), 'closed');
+
+  nav.dispatchEvent(clickEvent(toggle));
+
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(panel.getAttribute('data-rw-page-nav-panel-state'), 'open');
+});
+
 function loadRuntime(runtimeOptions = {}) {
   const document = new FakeDocument(runtimeOptions);
   const locationUrl = new URL(runtimeOptions.windowHref ?? 'https://example.test/');
@@ -1097,6 +1197,13 @@ function createPageNavigationFixture(document) {
   nav.append(toggle, panel);
 
   return { nav, overview, pricing, overviewLink, pricingLink, toggle, panel };
+}
+
+function createPageNavigationLink(href) {
+  const link = new FakeElement('a');
+  link.setAttribute('href', href);
+  link.setAttribute('data-rw-page-nav-link', 'true');
+  return link;
 }
 
 function clickEvent(target, overrides = {}) {

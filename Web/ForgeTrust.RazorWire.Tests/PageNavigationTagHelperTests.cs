@@ -70,6 +70,31 @@ public sealed class PageNavigationTagHelperTests
         Assert.Equal("existing-panel", output.Attributes["aria-controls"].Value);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("true")]
+    [InlineData("TRUE")]
+    public void Toggle_Process_WhenControlsIsEmptyOrBooleanSentinel_DoesNotEmitAriaControls(string controls)
+    {
+        var output = CreateOutput("button", "rw-page-nav-toggle", controls);
+
+        new PageNavigationToggleTagHelper { Controls = controls }.Process(CreateContext("button"), output);
+
+        Assert.Equal("true", output.Attributes["data-rw-page-nav-toggle"].Value);
+        Assert.False(output.Attributes.ContainsName("aria-controls"));
+    }
+
+    [Fact]
+    public void Link_Process_WhenDisabled_RemovesSourceAttributeWithoutMarker()
+    {
+        var output = CreateOutput("a", "href", "#overview", "rw-page-nav-link", "false");
+
+        new PageNavigationLinkTagHelper { Enabled = false }.Process(CreateContext("a"), output);
+
+        Assert.False(output.Attributes.ContainsName("data-rw-page-nav-link"));
+        Assert.False(output.Attributes.ContainsName("rw-page-nav-link"));
+    }
+
     [Fact]
     public void Panel_Process_EmitsPanelMarker()
     {
@@ -78,6 +103,17 @@ public sealed class PageNavigationTagHelperTests
         new PageNavigationPanelTagHelper().Process(CreateContext("div"), output);
 
         Assert.Equal("true", output.Attributes["data-rw-page-nav-panel"].Value);
+        Assert.False(output.Attributes.ContainsName("rw-page-nav-panel"));
+    }
+
+    [Fact]
+    public void Panel_Process_WhenDisabled_RemovesSourceAttributeWithoutMarker()
+    {
+        var output = CreateOutput("div", "rw-page-nav-panel", "false");
+
+        new PageNavigationPanelTagHelper { Enabled = false }.Process(CreateContext("div"), output);
+
+        Assert.False(output.Attributes.ContainsName("data-rw-page-nav-panel"));
         Assert.False(output.Attributes.ContainsName("rw-page-nav-panel"));
     }
 

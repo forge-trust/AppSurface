@@ -33,6 +33,7 @@ test('public contract manifest includes page navigation hooks', () => {
   const contracts = readFileSync(new URL('assets/contracts/razorwire-public-contracts.js', packageRoot), 'utf8');
 
   assert.match(contracts, /window\.RazorWire\.pageNavigationManager/);
+  assert.doesNotMatch(contracts, /@manager/);
   assert.match(contracts, /razorwire:page-nav:active-change/);
   assert.match(contracts, /data-rw-page-nav/);
   assert.match(contracts, /data-rw-page-nav-link/);
