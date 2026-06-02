@@ -12,6 +12,7 @@ internal class CommandService : CriticalService
 {
     private readonly IEnumerable<ICommand> _commands;
     private readonly StartupContext _context;
+    private readonly string? _displayVersion;
     private readonly string? _executableName;
     private readonly IOptionSuggester _suggester;
 
@@ -39,16 +40,22 @@ internal class CommandService : CriticalService
     /// Optional executable display name used in usage, help, and error output. Leave unset to let CliFx choose its
     /// default executable name.
     /// </param>
+    /// <param name="displayVersion">
+    /// Optional version string returned by CliFx for <c>--version</c>. Leave unset when the caller does not own an
+    /// explicit package identity contract.
+    /// </param>
     internal CommandService(
         IEnumerable<ICommand> commands,
         StartupContext context,
         IOptionSuggester suggester,
-        string? executableName = null) : base(
+        string? executableName = null,
+        string? displayVersion = null) : base(
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CommandService>.Instance,
             new DummyApplicationLifetime())
     {
         _commands = commands;
         _context = context;
+        _displayVersion = displayVersion;
         _executableName = executableName;
         _suggester = suggester;
     }
@@ -80,6 +87,11 @@ internal class CommandService : CriticalService
         if (!string.IsNullOrWhiteSpace(_executableName))
         {
             builder.SetExecutableName(_executableName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_displayVersion))
+        {
+            builder.SetVersion(_displayVersion);
         }
 
         var consoleFromDi = serviceProvider.GetService<IConsole>();

@@ -267,6 +267,42 @@ public partial class CommandServiceTests
     }
 
     [Fact]
+    public async Task RunAsync_GivenDisplayVersion_PrintsConfiguredVersion()
+    {
+        using var console = new FakeInMemoryConsole();
+        var suggester = new LevenshteinOptionSuggester();
+        var commands = new ICommand[] { new RootTestCommand() };
+        var context = new StartupContext(["--version"], new TestModule());
+        var services = new ServiceCollection();
+        services.AddSingleton<IConsole>(console);
+        services.AddTransient<RootTestCommand>();
+        var serviceProvider = services.BuildServiceProvider();
+        var originalExitCode = Environment.ExitCode;
+        CommandService.PrimaryServiceProvider = serviceProvider;
+
+        try
+        {
+            Environment.ExitCode = 0;
+            var commandService = new CommandService(
+                commands,
+                context,
+                suggester,
+                executableName: "appsurface",
+                displayVersion: "0.1.0-rc.1");
+
+            await commandService.RunInternalAsync(CancellationToken.None);
+
+            Assert.Equal(0, Environment.ExitCode);
+            Assert.Equal("0.1.0-rc.1", console.ReadOutputString().Trim());
+        }
+        finally
+        {
+            Environment.ExitCode = originalExitCode;
+            CommandService.PrimaryServiceProvider = null;
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_UnrecognizedCommand_FailsAndChecksUnknownOptions()
     {
         var suggester = new LevenshteinOptionSuggester();

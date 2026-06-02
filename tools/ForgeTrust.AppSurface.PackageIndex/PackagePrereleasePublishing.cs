@@ -687,7 +687,7 @@ internal sealed class PackageSmokeInstallWorkflow
             return installResult;
         }
 
-        var commandResult = await _commandRunner.RunAsync(
+        var helpResult = await _commandRunner.RunAsync(
             new ExternalCommandRequest(
                 ResolveToolShimPath(toolPath, entry.ToolCommandName),
                 ["--help"],
@@ -697,27 +697,83 @@ internal sealed class PackageSmokeInstallWorkflow
                 ToolRunTimeoutMilliseconds,
                 CreateSmokeEnvironment(dotnetHomePath, sharedPackagesPath)),
             cancellationToken);
-        var combinedResult = CombineCommandResults(installResult, commandResult);
-        if (combinedResult.ExitCode != 0)
+        var combinedHelpResult = CombineCommandResults(installResult, helpResult);
+        if (combinedHelpResult.ExitCode != 0)
         {
-            return combinedResult;
+            return combinedHelpResult;
         }
 
-        var commandOutput = CombineOutput(commandResult);
+        if (!string.IsNullOrWhiteSpace(helpResult.StandardError))
+        {
+            return CombineCommandResults(
+                installResult,
+                helpResult with
+                {
+                    ExitCode = 1,
+                    StandardError = CombineText(
+                        helpResult.StandardError,
+                        $"Tool command '{entry.ToolCommandName} --help' completed but also wrote to stderr.")
+                });
+        }
+
+        var commandOutput = CombineOutput(helpResult);
         if (!ContainsToolCommandUsage(commandOutput, entry.ToolCommandName))
         {
             return CombineCommandResults(
                 installResult,
-                commandResult with
+                helpResult with
                 {
                     ExitCode = 1,
                     StandardError = CombineText(
-                        commandResult.StandardError,
+                        helpResult.StandardError,
                         $"Tool command '{entry.ToolCommandName} --help' completed but did not include the command name in help output.")
                 });
         }
 
-        return combinedResult;
+        var versionResult = await _commandRunner.RunAsync(
+            new ExternalCommandRequest(
+                ResolveToolShimPath(toolPath, entry.ToolCommandName),
+                ["--version"],
+                toolWorkDirectory,
+                "dotnet tool run",
+                $"running '{entry.ToolCommandName} --version'",
+                ToolRunTimeoutMilliseconds,
+                CreateSmokeEnvironment(dotnetHomePath, sharedPackagesPath)),
+            cancellationToken);
+        var combinedVersionResult = CombineCommandResults(combinedHelpResult, versionResult);
+        if (combinedVersionResult.ExitCode != 0)
+        {
+            return combinedVersionResult;
+        }
+
+        var actualVersion = versionResult.StandardOutput.Trim();
+        if (!string.Equals(actualVersion, packageVersion, StringComparison.Ordinal))
+        {
+            return CombineCommandResults(
+                combinedHelpResult,
+                versionResult with
+                {
+                    ExitCode = 1,
+                    StandardError = CombineText(
+                        versionResult.StandardError,
+                        $"Tool command '{entry.ToolCommandName} --version' reported '{actualVersion}' but expected installed tool version '{packageVersion}'.")
+                });
+        }
+
+        if (!string.IsNullOrWhiteSpace(versionResult.StandardError))
+        {
+            return CombineCommandResults(
+                combinedHelpResult,
+                versionResult with
+                {
+                    ExitCode = 1,
+                    StandardError = CombineText(
+                        versionResult.StandardError,
+                        $"Tool command '{entry.ToolCommandName} --version' reported the expected installed tool version but also wrote to stderr.")
+                });
+        }
+
+        return combinedVersionResult;
     }
 
     private async Task<ExternalCommandResult> RunWithRetryAsync(
