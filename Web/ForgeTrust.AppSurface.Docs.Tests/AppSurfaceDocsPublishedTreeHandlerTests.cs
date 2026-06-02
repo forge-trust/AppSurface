@@ -853,6 +853,32 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task TryHandleAsync_ShouldDenyStaticAsset_WhenVerifiedBytesChangeBetweenCheckAndServe()
+    {
+        const string original = "body { color: #fff; }";
+        const string tampered = "body { color: #000; }";
+        var openCount = 0;
+        var fileInfo = new TestFileInfo(
+            "search.css",
+            length: Encoding.UTF8.GetByteCount(original),
+            streamFactory: () =>
+            {
+                openCount++;
+                return new MemoryStream(Encoding.UTF8.GetBytes(openCount == 1 ? original : tampered));
+            });
+        var provider = new TestFileProvider(("search.css", fileInfo));
+        var handler = CreateHandler(
+            [CreateVerifiedTestMount("/docs/v/1.2.3", provider, CreateArchiveFileFromText("search.css", original))],
+            maxRewrittenFileSizeBytes: 8);
+        var request = CreateContext(HttpMethods.Get, "/docs/v/1.2.3/search.css");
+
+        Assert.True(await handler.TryHandleAsync(request));
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(2, fileInfo.OpenCount);
+        Assert.Equal(string.Empty, ReadBody(request));
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldLogOnlyFirstOversizedRewriteWarningPerHandler()
     {
         var firstFile = new TestFileInfo("first.html", length: 9, streamFactory: () => Stream.Null);

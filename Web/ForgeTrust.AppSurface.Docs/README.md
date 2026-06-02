@@ -1426,6 +1426,7 @@ The version catalog is the release-level source of truth for version routing and
       "label": "1.1.0",
       "summary": "Supported for teams finishing an upgrade.",
       "exactTreePath": "./releases/1.1.0",
+      "releaseManifestSha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
       "supportState": "Maintained",
       "visibility": "Public",
       "advisoryState": "Vulnerable"

@@ -1569,6 +1569,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
 
     private void PinReleaseManifestDigests(AppSurfaceDocsVersionCatalog catalog)
     {
+        var basePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_tempDirectory));
         foreach (var version in catalog.Versions)
         {
             if (!string.IsNullOrWhiteSpace(version.ReleaseManifestSha256)
@@ -1581,7 +1582,7 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
             string candidatePath;
             try
             {
-                candidatePath = Path.GetFullPath(Path.Join(_tempDirectory, version.ExactTreePath.Trim()));
+                candidatePath = Path.GetFullPath(Path.Join(basePath, version.ExactTreePath.Trim()));
             }
             catch (ArgumentException)
             {
@@ -1589,13 +1590,23 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
             }
 
             if (!Directory.Exists(candidatePath)
-                || !candidatePath.StartsWith(_tempDirectory, StringComparison.Ordinal))
+                || !IsPathUnderOrEqual(basePath, candidatePath))
             {
                 continue;
             }
 
             version.ReleaseManifestSha256 = WriteReleaseManifest(candidatePath);
         }
+    }
+
+    private static bool IsPathUnderOrEqual(string basePath, string candidatePath)
+    {
+        var relativePath = Path.GetRelativePath(basePath, candidatePath);
+        return string.Equals(relativePath, ".", StringComparison.Ordinal)
+               || (!Path.IsPathRooted(relativePath)
+                   && !string.Equals(relativePath, "..", StringComparison.Ordinal)
+                   && !relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                   && !relativePath.StartsWith("../", StringComparison.Ordinal));
     }
 
     private static string WriteReleaseManifest(string root)

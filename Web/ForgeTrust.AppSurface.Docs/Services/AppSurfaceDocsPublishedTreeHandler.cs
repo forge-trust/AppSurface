@@ -560,6 +560,30 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             return;
         }
 
+        if (TryGetVerifiedActiveFile(mount, relativeFilePath, out var verifiedFile))
+        {
+            var verifiedBytes = await ReadVerifiedActiveFileBytesAsync(fileInfo, verifiedFile!, httpContext.RequestAborted);
+            if (verifiedBytes is null)
+            {
+                _logger.LogWarning(
+                    "ASDOCSARCHIVE010: Denying active published AppSurface Docs archive file {ArchivePath} because its bytes no longer match the verified release manifest for mount {MountRootPath}.",
+                    relativeFilePath,
+                    mount.MountRootPath);
+                httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            SetSuccessHeaders(httpContext, ResolveContentType(relativeFilePath), fileInfo, relativeFilePath);
+            httpContext.Response.ContentLength = verifiedBytes.Length;
+            if (HttpMethods.IsHead(httpContext.Request.Method))
+            {
+                return;
+            }
+
+            await httpContext.Response.Body.WriteAsync(verifiedBytes, httpContext.RequestAborted);
+            return;
+        }
+
         SetSuccessHeaders(httpContext, ResolveContentType(relativeFilePath), fileInfo, relativeFilePath);
         httpContext.Response.ContentLength = fileInfo.Length;
         if (HttpMethods.IsHead(httpContext.Request.Method))
@@ -568,6 +592,60 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         }
 
         await httpContext.Response.SendFileAsync(fileInfo, httpContext.RequestAborted);
+    }
+
+    private static bool TryGetVerifiedActiveFile(
+        AppSurfaceDocsPublishedTreeMount mount,
+        string relativeFilePath,
+        out AppSurfaceDocsReleaseArchiveFile? verifiedFile)
+    {
+        verifiedFile = null;
+        return RequiresVerifiedArchiveBytes(relativeFilePath)
+               && !ShouldVerifyBytesAfterRewrite(relativeFilePath)
+               && mount.ArchiveVerificationState == AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified
+               && mount.VerifiedReleaseArchive is not null
+               && mount.VerifiedReleaseArchive.TryGetFile(relativeFilePath, out verifiedFile);
+    }
+
+    private static async Task<byte[]?> ReadVerifiedActiveFileBytesAsync(
+        IFileInfo fileInfo,
+        AppSurfaceDocsReleaseArchiveFile verifiedFile,
+        CancellationToken cancellationToken)
+    {
+        if (!fileInfo.Exists || fileInfo.Length != verifiedFile.Length || verifiedFile.Length > int.MaxValue)
+        {
+            return null;
+        }
+
+        try
+        {
+            await using var stream = fileInfo.CreateReadStream();
+            await using var buffer = new MemoryStream((int)verifiedFile.Length);
+            await stream.CopyToAsync(buffer, cancellationToken);
+            if (buffer.Length != verifiedFile.Length)
+            {
+                return null;
+            }
+
+            byte[] digestBytes;
+            if (buffer.TryGetBuffer(out var segment))
+            {
+                digestBytes = SHA256.HashData(segment.AsSpan(0, (int)buffer.Length));
+            }
+            else
+            {
+                digestBytes = SHA256.HashData(buffer.ToArray());
+            }
+
+            var digest = Convert.ToHexString(digestBytes).ToLowerInvariant();
+            return string.Equals(digest, verifiedFile.Sha256, StringComparison.Ordinal)
+                ? buffer.ToArray()
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     private static bool ShouldRewriteHtml(string relativeFilePath)
@@ -751,9 +829,18 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         buffer.Position = 0;
         using var reader = new StreamReader(buffer, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         var text = await reader.ReadToEndAsync(cancellationToken);
-        var payload = buffer.ToArray();
-        var digest = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
-        return new RewrittenFileContent(text, payload.Length, digest);
+        byte[] digestBytes;
+        if (buffer.TryGetBuffer(out var segment))
+        {
+            digestBytes = SHA256.HashData(segment.AsSpan(0, (int)buffer.Length));
+        }
+        else
+        {
+            digestBytes = SHA256.HashData(buffer.ToArray());
+        }
+
+        var digest = Convert.ToHexString(digestBytes).ToLowerInvariant();
+        return new RewrittenFileContent(text, buffer.Length, digest);
     }
 
     private sealed class RewrittenFileSizeLimitExceededException(long observedBytes, long configuredLimitBytes)
